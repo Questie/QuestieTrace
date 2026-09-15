@@ -567,11 +567,52 @@ body {
   padding: 8px;
 }
 
+/* .position-plot centers its children, so the header needs an explicit
+   width to span the full plot area. */
+.position-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
 .position-info {
   font-family: monospace;
   font-size: 11px;
   color: #888;
-  margin-bottom: 8px;
+}
+
+.position-note {
+  color: #6a6a8a;
+}
+
+.position-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-family: monospace;
+  font-size: 11px;
+  color: #888;
+  cursor: pointer;
+  user-select: none;
+}
+
+.position-toggle input {
+  cursor: pointer;
+  accent-color: #4a4a8e;
+  margin: 0;
+}
+
+.position-toggle:has(input:disabled) {
+  color: #4a4a5e;
+  cursor: not-allowed;
+}
+
+.position-toggle input:disabled {
+  cursor: not-allowed;
 }
 
 .position-plot canvas {
