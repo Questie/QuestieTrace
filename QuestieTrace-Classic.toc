@@ -1,4 +1,4 @@
-## Interface: 11509, 20506, 38002, 40402, 50504
+## Interface: 11509, 20506, 38002, 50504
 ## Title: QuestieTrace
 ## Author: Logon/TheCrux(BreakBB)
 ## Notes: Event Trace + Function Trace
