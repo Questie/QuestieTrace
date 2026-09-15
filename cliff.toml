@@ -1,0 +1,59 @@
+# git-cliff ~ automatic changelog generator
+# https://github.com/orhun/git-cliff
+
+[changelog]
+# Changelog header
+header = ""
+# Changelog body (Tera template) - ordered: Features, Fixes, Docs
+body = """
+{% set grouped = commits | group_by(attribute="group") %}
+{% if grouped["New Features"] %}
+## New Features
+{% for commit in grouped["New Features"] %}
+* {{ commit.message | upper_first }}
+{% endfor %}
+
+{% endif %}
+{% if grouped["General Fixes"] %}
+## General Fixes
+{% for commit in grouped["General Fixes"] %}
+* {{ commit.message | upper_first }}
+{% endfor %}
+
+{% endif %}
+{% if grouped["Documentation"] %}
+## Documentation
+{% for commit in grouped["Documentation"] %}
+* {{ commit.message | upper_first }}
+{% endfor %}
+{% endif %}
+"""
+# Changelog footer
+footer = ""
+# Render the changelog for the given template. [possible values: github, gitlab, gitea]
+remote = "github"
+# Trim leading/trailing whitespace from the changelog
+trim = true
+
+[git]
+# Conventional commit parser
+conventional_commits = true
+# Commit parser configuration
+commit_parsers = [
+  { message = "^feat", group = "New Features" },
+  { message = "^fix", group = "General Fixes" },
+  { message = "^docs", group = "Documentation" },
+  # Skip all other commit types (ci, test, chore, refactor, etc.)
+  { message = ".*", skip = true },
+]
+# Protect breaking changes from being skipped
+protect_breaking_commits = false
+# Parse the commit message as a footer
+parse_trailers = false
+# Filter commits by prefix
+commit_preprocessors = [
+  # Remove issue links from commit messages
+  { pattern = '\(#([0-9]+)\)', replace = "" },
+]
+# Split generators
+split_commits = false

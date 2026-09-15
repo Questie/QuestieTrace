@@ -6,6 +6,8 @@ QuestieTrace_data*
 .shit
 .claude
 
+releases/
+
 Traces/*
 !Traces/human_rogue_1to5_example.lua
 
