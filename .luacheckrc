@@ -10,7 +10,9 @@ exclude_files = {
     "Traces/",
     "Libs/",
     "releases/",
-    "tools/vendor/",
+    "tools/decoder/dependencies/",
+    "tools/decoder/input/",
+    "tools/decoder/output/",
     ".luacheckrc",
     "**/.luarocks/**/", -- Created by the GitHub Action
     "**/.install/**/",  -- Created by the GitHub Action

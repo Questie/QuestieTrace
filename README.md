@@ -57,6 +57,12 @@ Want to check your setup before capturing anything? A sample trace ships with th
 
 ---
 
+## Part 3 — decoder
+
+A small standalone CLI for decoding a QuestieTrace export string back into a plain Lua table, without the analyzer. See [`tools/decoder/README.md`](./tools/decoder/README.md).
+
+---
+
 ## Usage guide
 
 ### 1. Record

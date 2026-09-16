@@ -11,4 +11,9 @@ releases/
 Traces/*
 !Traces/human_rogue_1to5_example.lua
 
+tools/decoder/input/*
+!tools/decoder/input/.gitkeep
+tools/decoder/output/*
+!tools/decoder/output/.gitkeep
+
 tools/trace-analyzer/node_modules/
