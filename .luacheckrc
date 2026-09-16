@@ -10,6 +10,7 @@ exclude_files = {
     "Traces/",
     "Libs/",
     "releases/",
+    "tools/vendor/",
     ".luacheckrc",
     "**/.luarocks/**/", -- Created by the GitHub Action
     "**/.install/**/",  -- Created by the GitHub Action
