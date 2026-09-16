@@ -1,5 +1,6 @@
 ## Interface: 11509, 20506, 38002, 50504
 ## Title: QuestieTrace
+## Version: 1.0.0
 ## Author: Logon/TheCrux(BreakBB)
 ## Notes: Event Trace + Function Trace
 ## Category: Quests
@@ -13,7 +14,6 @@
 ## Category-ruRU: Задания
 ## Category-zhCN: 任务
 ## Category-zhTW: 任務
-## Version: 1.0.0
 ## RequiredDeps:
 ## OptionalDeps:
 ## SavedVariables: QuestieTrace, QuestieTraceDumps
