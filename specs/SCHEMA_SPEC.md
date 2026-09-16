@@ -415,6 +415,12 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `UnitLevel` | scalar (number) | -1 indicates "??" (skull boss); UnitState tracker |
 | `UnitClassification` | scalar (string) | "normal", "elite", "rare", "rareelite", "worldboss"; UnitState tracker |
 
+### Nested parameterized by native arguments (UnitReaction)
+
+| Function key | Shape | Return type | Notes |
+|---|---|---|---|
+| `UnitReaction` | `["player"][token]` | scalar (number) | 1..8 (1=hated, 8=exalted); UnitState tracker; native argument order `UnitReaction("player", token)` |
+
 ### Parameterized by slot index
 
 | Function key | Return type | Notes |

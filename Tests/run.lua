@@ -1395,6 +1395,11 @@ local function TestUnitStateTracker()
     if token == "mouseover" then return "worldboss" end
     return nil
   end
+  env.UnitReaction = function(unit, token)
+    if unit == "player" and token == "target" then return 5 end -- Neutral
+    if unit == "player" and token == "mouseover" then return 8 end -- Exalted
+    return nil
+  end
 
   runtime.core.StartCapture("unitstate test")
   SendEvent(runtime, "PLAYER_TARGET_CHANGED")
@@ -1423,16 +1428,30 @@ local function TestUnitStateTracker()
   assert(#functions.UnitClassification.mouseover >= 1, "UnitClassification[mouseover] must have entry")
   assert(functions.UnitClassification.mouseover[1].v == "worldboss", "UnitClassification[mouseover] must be worldboss")
 
+  -- Verify UnitReaction["player"]["target"] recorded
+  assert(functions.UnitReaction and functions.UnitReaction.player and functions.UnitReaction.player.target,
+    "UnitReaction[player][target] stream must exist")
+  assert(#functions.UnitReaction.player.target >= 1, "UnitReaction[player][target] must have entry")
+  assert(functions.UnitReaction.player.target[1].v == 5, "UnitReaction[player][target] must be 5 (neutral)")
+
+  -- Verify UnitReaction["player"]["mouseover"] recorded
+  assert(functions.UnitReaction and functions.UnitReaction.player and functions.UnitReaction.player.mouseover,
+    "UnitReaction[player][mouseover] stream must exist")
+  assert(#functions.UnitReaction.player.mouseover >= 1, "UnitReaction[player][mouseover] must have entry")
+  assert(functions.UnitReaction.player.mouseover[1].v == 8, "UnitReaction[player][mouseover] must be 8 (exalted)")
+
   -- Verify player units are NOT sampled (guard works)
   env.UnitIsPlayer = function(_token) return true end
   env.UnitLevel = function(_token) return 60 end
   env.UnitClassification = function(_token) return "normal" end
+  env.UnitReaction = function(_unit, _token) return 5 end
 
   SendEvent(runtime, "PLAYER_TARGET_CHANGED")
 
   -- Should NOT have new entries (player guard)
   assert(#functions.UnitLevel.target == 1, "Player target must not be sampled")
   assert(#functions.UnitClassification.target == 1, "Player target must not be sampled")
+  assert(#functions.UnitReaction.player.target == 1, "Player target must not be sampled for reaction")
 end
 
 ---@type { name: string, run: fun() }[]
