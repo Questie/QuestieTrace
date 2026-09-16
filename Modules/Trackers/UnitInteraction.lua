@@ -17,7 +17,7 @@ local DeepCompare = Core.DeepCompare
 ---------------------------------------------------------------------------
 
 ---@type string[]
-local TOKENS = { "target", "npc", "questnpc" }
+local TOKENS = { "target", "npc", "questnpc", "mouseover" }
 
 -- Stream references (set during Init)
 ---@type table<string, FunctionStreamEntry[]>?
@@ -107,6 +107,7 @@ Core.RegisterTracker({
   events = {
     -- player_state (already registered)
     "PLAYER_TARGET_CHANGED",
+    "UPDATE_MOUSEOVER_UNIT",
     -- quest_dialog (already registered)
     "QUEST_DETAIL",
     "QUEST_PROGRESS",
