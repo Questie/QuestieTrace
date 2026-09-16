@@ -6,6 +6,7 @@ local Core = QuestieTraceCore
 ---------------------------------------------------------------------------
 -- UnitLevel(unit)           -> number (or -1 for "??")
 -- UnitClassification(unit)  -> string ("normal", "elite", "rare", "rareelite", "worldboss")
+-- UnitReaction(unit, unit)  -> number 1..8 (or nil)
 ---------------------------------------------------------------------------
 
 ---@type string[]
@@ -16,6 +17,8 @@ local TOKENS = { "target", "mouseover" }
 local levelStreams
 ---@type table<string, FunctionStreamEntry[]>?
 local classificationStreams
+---@type table<string, FunctionStreamEntry[]>?
+local reactionStreams
 
 ---Safely call a function and return the first result.
 ---@param fn function?
@@ -29,11 +32,11 @@ local function SafeScalarCall(fn, ...)
   return true, value
 end
 
----Sample UnitLevel and UnitClassification for all tokens.
+---Sample UnitLevel, UnitClassification, and UnitReaction for all tokens.
 ---@param t number Session-relative GetTime()
 ---@param tp number Session-relative GetTimePreciseSec()
 local function SampleAll(t, tp)
-  if not levelStreams or not classificationStreams then return end
+  if not levelStreams or not classificationStreams or not reactionStreams then return end
 
   for _, token in ipairs(TOKENS) do
     -- Guard: only sample non-player creatures
@@ -61,6 +64,18 @@ local function SampleAll(t, tp)
           classStream[#classStream + 1] = { t = t, tp = tp, v = class }
         end
       end
+
+      -- UnitReaction (scalar number 1..8). Native argument order: UnitReaction("player", token).
+      local reactionOk, reaction = SafeScalarCall(UnitReaction, "player", token)
+      if reactionOk and reaction ~= nil then
+        ---@type FunctionStreamEntry[]
+        local reactionStream = reactionStreams[token]
+        ---@type FunctionStreamEntry?
+        local prevReaction = reactionStream[#reactionStream]
+        if not prevReaction or prevReaction.v ~= reaction then
+          reactionStream[#reactionStream + 1] = { t = t, tp = tp, v = reaction }
+        end
+      end
     end
   end
 end
@@ -77,14 +92,19 @@ Core.RegisterTracker({
     local functions = capture.session.functions
     if not functions["UnitLevel"] then functions["UnitLevel"] = {} end
     if not functions["UnitClassification"] then functions["UnitClassification"] = {} end
+    if not functions["UnitReaction"] then functions["UnitReaction"] = {} end
+    if not functions["UnitReaction"]["player"] then functions["UnitReaction"]["player"] = {} end
 
     levelStreams = {}
     classificationStreams = {}
+    reactionStreams = {}
     for _, token in ipairs(TOKENS) do
       functions["UnitLevel"][token] = {}
       functions["UnitClassification"][token] = {}
+      functions["UnitReaction"]["player"][token] = {}
       levelStreams[token] = functions["UnitLevel"][token]
       classificationStreams[token] = functions["UnitClassification"][token]
+      reactionStreams[token] = functions["UnitReaction"]["player"][token]
     end
 
     -- Initial sample at t=0
