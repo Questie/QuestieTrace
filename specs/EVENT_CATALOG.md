@@ -118,8 +118,8 @@ sampling events).
 ### UnitInteraction tracker
 
 Triggers observed `UnitGUID` and packed observed `UnitName` sampling for
-`"target"`, `"npc"`, and `"questnpc"` tokens. All six streams are sampled on
-every event without synthesizing `UnitName` from `UnitExists`.
+`"target"`, `"npc"`, `"questnpc"`, and `"mouseover"` tokens. All eight streams
+are sampled on every event without synthesizing `UnitName` from `UnitExists`.
 
 Privacy: any of these tokens can resolve to another player character (e.g.
 targeting a party member), not just an NPC. `Core.ParseGUIDKind` classifies
@@ -130,6 +130,7 @@ recorded, since that reflects a state transition rather than PII.
 
 **From `player_state` (shared with other trackers):**
 - `PLAYER_TARGET_CHANGED`
+- `UPDATE_MOUSEOVER_UNIT`
 - `LOOT_OPENED`
 
 **From `quest_dialog` (shared with other trackers):**
@@ -173,6 +174,21 @@ recorded, since that reflects a state transition rather than PII.
 **Login-time sampling:**
 - `PLAYER_ENTERING_WORLD`
 - `SPELLS_CHANGED`
+
+### UnitState tracker
+
+Triggers raw `UnitLevel` (scalar number; `-1` = "??"), `UnitClassification`
+(scalar string), and `UnitReaction("player", token)` (scalar number 1..8)
+sampling for the `"target"` and `"mouseover"` tokens. Streams are keyed by
+API name and literal token; `UnitReaction` is nested in native argument
+order: `functions["UnitReaction"]["player"][token]`.
+
+Privacy: sampling is guarded with `UnitExists(token) and not
+UnitIsPlayer(token)`, so only non-player creatures are sampled. No names,
+GUIDs, or free text are recorded by this tracker.
+
+- `PLAYER_TARGET_CHANGED`
+- `UPDATE_MOUSEOVER_UNIT`
 
 ### GroupState tracker
 
