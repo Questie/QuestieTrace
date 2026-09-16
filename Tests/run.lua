@@ -1210,6 +1210,63 @@ local function TestUnitInteractionMouseover()
     "UnitName[mouseover] value must match mocked name")
 end
 
+local function TestUnitStateTracker()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+
+  -- Mock WoW API for target and mouseover
+  env.UnitExists = function(token) return token == "target" or token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitLevel = function(token)
+    if token == "target" then return 20 end
+    if token == "mouseover" then return -1 end -- "??" skull boss
+    return nil
+  end
+  env.UnitClassification = function(token)
+    if token == "target" then return "elite" end
+    if token == "mouseover" then return "worldboss" end
+    return nil
+  end
+
+  runtime.core.StartCapture("unitstate test")
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify UnitLevel["target"] recorded
+  assert(functions.UnitLevel and functions.UnitLevel.target, "UnitLevel[target] stream must exist")
+  assert(#functions.UnitLevel.target >= 1, "UnitLevel[target] must have entry")
+  assert(functions.UnitLevel.target[1].v == 20, "UnitLevel[target] must be 20")
+
+  -- Verify UnitLevel["mouseover"] recorded (-1 for "??")
+  assert(functions.UnitLevel and functions.UnitLevel.mouseover, "UnitLevel[mouseover] stream must exist")
+  assert(#functions.UnitLevel.mouseover >= 1, "UnitLevel[mouseover] must have entry")
+  assert(functions.UnitLevel.mouseover[1].v == -1, "UnitLevel[mouseover] must be -1")
+
+  -- Verify UnitClassification["target"] recorded
+  assert(functions.UnitClassification and functions.UnitClassification.target, "UnitClassification[target] stream must exist")
+  assert(#functions.UnitClassification.target >= 1, "UnitClassification[target] must have entry")
+  assert(functions.UnitClassification.target[1].v == "elite", "UnitClassification[target] must be elite")
+
+  -- Verify UnitClassification["mouseover"] recorded
+  assert(functions.UnitClassification and functions.UnitClassification.mouseover, "UnitClassification[mouseover] stream must exist")
+  assert(#functions.UnitClassification.mouseover >= 1, "UnitClassification[mouseover] must have entry")
+  assert(functions.UnitClassification.mouseover[1].v == "worldboss", "UnitClassification[mouseover] must be worldboss")
+
+  -- Verify player units are NOT sampled (guard works)
+  env.UnitIsPlayer = function(_token) return true end
+  env.UnitLevel = function(_token) return 60 end
+  env.UnitClassification = function(_token) return "normal" end
+
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+
+  -- Should NOT have new entries (player guard)
+  assert(#functions.UnitLevel.target == 1, "Player target must not be sampled")
+  assert(#functions.UnitClassification.target == 1, "Player target must not be sampled")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -1262,6 +1319,7 @@ local tests = {
   { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
   { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
   { name = "unit interaction mouseover records GUID and name", run = TestUnitInteractionMouseover },
+  { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
 }
 
 local failures = 0

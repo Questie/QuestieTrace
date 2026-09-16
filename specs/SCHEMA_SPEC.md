@@ -390,6 +390,13 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `UnitGUID` | scalar (string) or nil | GUID string; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
 
+### Parameterized by unit token (`"target"`, `"mouseover"`)
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `UnitLevel` | scalar (number) | -1 indicates "??" (skull boss); UnitState tracker |
+| `UnitClassification` | scalar (string) | "normal", "elite", "rare", "rareelite", "worldboss"; UnitState tracker |
+
 ### Parameterized by slot index
 
 | Function key | Return type | Notes |
