@@ -11,6 +11,8 @@ jobs:
     with:
       event_name: ${{ github.event_name }}
       repo_full_name: ${{ github.repository }}
+    secrets:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
   publish:
     runs-on: ubuntu-latest
