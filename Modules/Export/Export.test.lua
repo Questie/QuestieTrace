@@ -5,6 +5,9 @@ local function LoadExportModule(env)
   env._G = env
   env.QuestieTraceCore = { l10n = function(s) return s end }
 
+  -- Mock EncodeExportPayload to return a test string
+  env.QuestieTraceCore.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+
   local chunk = assert(loadfile("Modules/Export/Export.lua"))
   setfenv(chunk, env)
   chunk()
@@ -131,5 +134,24 @@ describe("Export.ScrubFunctions", function()
     assert.has_no.errors(function()
       Core.BuildExportPayload()
     end)
+  end)
+end)
+
+describe("Export.BuildExportString", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+
+  before_each(function()
+    env = {}
+    Core = LoadExportModule(env)
+    SetSessionFunctions(env, {})
+  end)
+
+  it("should have prefix, payload, and suffix in correct order", function()
+    local result = Core.BuildExportString()
+
+    assert.equal("!QuestieTrace:1!ENCODED_PAYLOAD!End:QuestieTrace:1!", result)
   end)
 end)

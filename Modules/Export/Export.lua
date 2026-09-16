@@ -24,6 +24,12 @@ local EXPORT_VERSION = 1
 ---@type string
 local EXPORT_PREFIX = "!QuestieTrace:" .. EXPORT_VERSION .. "!"
 
+--- Human-readable marker appended to every exported string.
+--- Lets users quickly detect if the string got cut off during export or
+--- transmission without having to decode the entire payload.
+---@type string
+local EXPORT_SUFFIX = "!End:QuestieTrace:" .. EXPORT_VERSION .. "!"
+
 --- Recursively copy a value (tables only; scalars are returned as-is).
 ---@param value any
 ---@return any
@@ -160,13 +166,14 @@ end
 
 --- Build the full exportable string for the current character's saved sessions.
 --- The result is always prefixed with EXPORT_PREFIX so the export version is
---- visible without decoding the payload.
+--- visible without decoding the payload, and suffixed with EXPORT_SUFFIX so
+--- users can detect if the string was cut off.
 ---@return string
 function Core.BuildExportString()
   local payload = Core.BuildExportPayload()
   local encoded = Core.EncodeExportPayload(payload)
   if encoded then
-    return EXPORT_PREFIX .. encoded
+    return EXPORT_PREFIX .. encoded .. EXPORT_SUFFIX
   end
   -- Fallback: if codec is missing, return an error message instead of crashing.
   return l10n("ERROR: Client does not have required codec support (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)")
