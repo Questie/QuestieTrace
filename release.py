@@ -22,7 +22,7 @@ The CI publish pipeline (.github/workflows/publish.yml) triggers on pushed
 """
 
 TOC_FILE = "QuestieTrace-Classic.toc"
-VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-b\d+)?$")
+VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-b\d+)?$")
 
 
 def main():
