@@ -29,10 +29,10 @@ jobs:
 
     steps:
       - name: Checkout project
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run Luacheck
-        uses: nebularg/actions-luacheck@v1.1.2
+        uses: nebularg/actions-luacheck@d4137dd840545b28521ed21931e06913d93c0bc1 # v1.1.2
         with:
           files: .
           args: -q
@@ -45,15 +45,15 @@ jobs:
 
     steps:
       - name: Checkout project
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Lua
-        uses: leafo/gh-actions-lua@v13.0.0
+        uses: leafo/gh-actions-lua@6919171ccf181b826f44b9bca76307b577217377 # v13.0.0
         with:
           luaVersion: "5.1"
 
       - name: Install luarocks packages
-        uses: leafo/gh-actions-luarocks@v6.1.0
+        uses: leafo/gh-actions-luarocks@35d062def313a7699a0d513e996bcf4352f05389 # v6.1.0
         with:
           luaRocksVersion: "3.13.0"
 
@@ -75,7 +75,7 @@ jobs:
 
     steps:
       - name: Checkout project
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -95,10 +95,10 @@ jobs:
 
     steps:
       - name: Checkout project
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Send CI failure to Discord
-        uses: nebularg/actions-discord-webhook@v1.0.0
+        uses: nebularg/actions-discord-webhook@633ae6b03882743988dbc992eb147818ca96a93e # v1.0.0
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
           status: failure
