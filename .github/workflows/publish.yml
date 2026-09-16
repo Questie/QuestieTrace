@@ -42,13 +42,6 @@ jobs:
         env:
           OUTPUT: CHANGELOG.md
 
-      - name: Ensure Changelog File
-        run: |
-          if [ ! -f CHANGELOG.md ]; then
-            echo "${{ steps.cliff.outputs.content }}" > CHANGELOG.md
-          fi
-          echo "Changelog content saved to CHANGELOG.md"
-
       - name: Build ZIP
         run: python build.py -r
 
