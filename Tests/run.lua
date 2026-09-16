@@ -33,6 +33,7 @@ local function NewRuntime(trackerFiles)
   env.QuestieTrace = { schemaVersion = 9, settings = { maxSessions = 7, autoStart = false } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
+  env.GetLocale = function() return "enUS" end
   env.GetTime = function() return runtime.now end
   env.GetTimePreciseSec = env.GetTime
   env.C_Timer = {
@@ -445,6 +446,117 @@ local function TestAutoStartDoesNotOverwriteRecoveredSession()
   assert(runtime.core.GetCaptureState() == "stopped_unsaved", "Must remain stopped_unsaved")
 end
 
+---@type string[] Files a share-reminder runtime needs on top of globals.lua.
+local REMINDER_FILES = {
+  "Modules/Localization/l10n.lua",
+  "Modules/Localization/Translations/ExportReminder.lua",
+  "Modules/Export/ExportReminder.lua",
+}
+
+---@param runtime TestRuntime
+---@return string[] messages Captured chat output, appended to as reminders fire.
+local function CaptureChat(runtime)
+  ---@type string[]
+  local messages = {}
+  runtime.env.DEFAULT_CHAT_FRAME = {
+    ---@param _ table
+    ---@param message string
+    AddMessage = function(_, message) messages[#messages + 1] = message end,
+  }
+  return messages
+end
+
+--- Save `count` sessions back to back through the real capture lifecycle.
+---@param runtime TestRuntime
+---@param count number
+local function SaveSessions(runtime, count)
+  for i = 1, count do
+    runtime.core.StartCapture("session " .. i)
+    runtime.core.SaveCapture()
+  end
+end
+
+local function TestShareReminderNotDueWithoutSavedSessions()
+  local runtime = NewRuntime(REMINDER_FILES)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  assert(runtime.core.IsShareDue() == false, "No saved sessions means nothing is shareable yet")
+
+  -- A live, unsaved capture is not in the export payload and must stay silent.
+  runtime.core.StartCapture("live only")
+  assert(runtime.core.IsShareDue() == false, "An unsaved live session must not trigger a reminder")
+end
+
+local function TestShareReminderDueAfterSave()
+  local runtime = NewRuntime(REMINDER_FILES)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SaveSessions(runtime, 1)
+  assert(runtime.core.IsShareDue() == true, "A saved session must make sharing due")
+end
+
+local function TestShareReminderSuppressedAfterExportOpened()
+  local runtime = NewRuntime(REMINDER_FILES)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SaveSessions(runtime, 1)
+  runtime.core.MarkExportOpened()
+  assert(runtime.core.IsShareDue() == false, "Opening the export window must pause reminders")
+end
+
+local function TestShareReminderResumesAfterNewSave()
+  local runtime = NewRuntime(REMINDER_FILES)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SaveSessions(runtime, 1)
+  runtime.core.MarkExportOpened()
+  SaveSessions(runtime, 1)
+  assert(runtime.core.IsShareDue() == true, "New data after an export must re-arm the reminder")
+end
+
+local function TestShareReminderSurvivesSessionPruning()
+  local runtime = NewRuntime(REMINDER_FILES)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  local env = runtime.env
+  ---@type number
+  local maxSessions = env.QuestieTrace.settings.maxSessions
+
+  -- Fill to the prune cap, then acknowledge, then save more. #sessions stops
+  -- growing here, so only the monotonic counter can still detect new data.
+  SaveSessions(runtime, maxSessions)
+  runtime.core.MarkExportOpened()
+  SaveSessions(runtime, 2)
+
+  assert(#env.QuestieTraceCharacter.sessions == maxSessions, "Pruning must still cap the session list")
+  assert(env.QuestieTraceCharacter.savedSessionCounter == maxSessions + 2,
+    "The saved-session counter must keep counting past the prune cap")
+  assert(runtime.core.IsShareDue() == true, "Pruning must not permanently suppress reminders")
+end
+
+local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SaveSessions(runtime, 1)
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+  AdvanceTo(runtime, 9)
+  assert(#messages == 0, "No reminder before the login delay elapses")
+
+  AdvanceTo(runtime, 10)
+  assert(#messages == 1, "The login reminder must fire once the delay elapses")
+  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil,
+    "The reminder must carry the clickable export hyperlink")
+
+  AdvanceTo(runtime, 1810)
+  assert(#messages == 2, "The reminder must repeat 30 minutes later")
+
+  -- Opening the export window silences the next tick, without stopping the loop.
+  runtime.core.MarkExportOpened()
+  AdvanceTo(runtime, 3610)
+  assert(#messages == 2, "An acknowledged reminder must stay silent")
+
+  SaveSessions(runtime, 1)
+  AdvanceTo(runtime, 5410)
+  assert(#messages == 3, "The still-running loop must fire again once new data is saved")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -460,6 +572,12 @@ local tests = {
   { name = "ResetCapture clears currentSession", run = TestResetCaptureClearsCurrentSession },
   { name = "recover currentSession on VARIABLES_LOADED", run = TestRecoverCurrentSessionOnVariablesLoaded },
   { name = "autoStart does not overwrite recovered session", run = TestAutoStartDoesNotOverwriteRecoveredSession },
+  { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
+  { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
+  { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
+  { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
+  { name = "share reminder survives session pruning", run = TestShareReminderSurvivesSessionPruning },
+  { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
 }
 
 local failures = 0

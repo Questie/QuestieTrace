@@ -146,4 +146,8 @@ function Core.ShowExportWindow()
   end
 
   exportFrame:Show()
+
+  -- Pause share reminders until another session is saved. The write itself
+  -- lives in ExportReminder.lua so this file stays free of SavedVariables access.
+  Core.MarkExportOpened()
 end

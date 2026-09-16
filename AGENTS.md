@@ -365,7 +365,7 @@ myFontString:SetText(l10n("Close"))
 **Adding a new translatable string:**
 
 1. Add the English string as a key to the relevant file under `Modules/Localization/Translations/` (one file per feature area, e.g. `ExportUI.lua` for `Export/ExportUI.lua` + `Export/Export.lua` strings). Create a new file if none fits.
-2. Provide an entry for every supported locale: `enUS`, `deDE`, `esES`, `esMX`, `frFR`, `koKR`, `ptBR`, `ruRU`, `zhCN`, `zhTW`. Use `["enUS"] = true` (the key itself is the enUS string).
+2. Provide an entry for every supported locale: `enUS`, `deDE`, `esES`, `esMX`, `frFR`, `itIT`, `koKR`, `ptBR`, `ruRU`, `zhCN`, `zhTW`. Use `["enUS"] = true` (the key itself is the enUS string).
 3. Add the new translation file to all `*.toc` files, after `Modules/Localization/l10n.lua` and before any module that calls `l10n(...)` with those keys.
 4. Call `l10n("Your English string")` wherever the string is displayed. `string.format`-style `%s`/`%d` placeholders are supported via extra args: `l10n("Loaded %d sessions", count)`.
 

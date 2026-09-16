@@ -130,4 +130,77 @@ The checkbox and `/qlt auto` update the same setting.
   box. On show, it calls `Core.BuildExportString()` and populates the edit
   box, focuses it, and highlights all text so the user can immediately
   `Ctrl+A` / `Ctrl+C`. It never touches SavedVariables or session data itself.
-- Triggered by `/qlt export`.
+  On show it calls `Core.MarkExportOpened()` (guarded) so the share reminder can
+  record the visit; the SavedVariables write lives in `ExportReminder.lua`.
+- Triggered by `/qlt export` or by the share-reminder chat link (section 7).
+
+---
+
+## 7) Share reminder
+
+`Export/ExportReminder.lua` prints a chat notification reminding the player to
+share their captured data, with a clickable link that opens the export window.
+
+### Message
+
+```text
+QuestieTrace: It is time to share your trace data. [Click here to open the export window]
+```
+
+The bracketed text is a `|Hquestietrace:export|h` hyperlink, printed via
+`DEFAULT_CHAT_FRAME:AddMessage`. Both strings are localized into all 10 supported
+locales (`Localization/Translations/ExportReminder.lua`).
+
+### Triggers
+
+| Trigger | Timing |
+|---|---|
+| Login | `PLAYER_LOGIN` schedules the first check 10 seconds later, so the message is not buried in login spam |
+| Repeat | Every 1800 seconds (30 minutes) thereafter, for as long as the client stays loaded |
+
+`Core.StartShareReminders()` is called from the `PLAYER_LOGIN` branch of the main
+event handler and is idempotent within one load. The reminder deliberately does
+**not** use `Core.RegisterTracker`: tracker callbacks only fire while a capture is
+active, which would silence the reminder exactly when the player has stopped capturing.
+
+### Eligibility
+
+`Core.IsShareDue()` returns true only when both hold:
+
+1. `#QuestieTraceCharacter.sessions > 0` — only **saved** sessions are exportable
+   (`Core.BuildExportPayload()` never includes the live session), so a player with
+   nothing shareable is never prompted.
+2. `savedSessionCounter > reminder.sessionCounterAtExport` — at least one session
+   has been saved since the export window was last opened.
+
+Each 30-minute tick re-checks eligibility and reschedules regardless of the result,
+so data that becomes shareable mid-session still triggers a reminder.
+
+> **Consequence:** with default settings a capture auto-starts at login and auto-saves
+> only on `PLAYER_LOGOUT`, so a brand-new character has zero saved sessions for their
+> entire first play session and sees no reminder until their second login.
+
+### State
+
+Per-character, on `QuestieTraceCharacter` (shape-checked, not schema-gated, so no
+`SCHEMA_VERSION` bump is required):
+
+| Field | Meaning |
+|---|---|
+| `savedSessionCounter` | Monotonic count of sessions ever saved; incremented in `Core.SaveCapture()` |
+| `reminder.sessionCounterAtExport` | Value of `savedSessionCounter` when the export window was last opened |
+
+`savedSessionCounter` is monotonic on purpose. `#sessions` is capped by
+`PruneSessionsIfNeeded()`, so using it as the watermark would permanently suppress
+reminders for any character sitting at `maxSessions`.
+
+### Hyperlink handling
+
+Clicks on `questietrace:export` route through `SetItemRef`. The handler is installed
+at load time, preferring `LinkUtil.RegisterLinkHandler` (which consumes the click, so
+`ItemRefTooltip` never opens) and falling back to `hooksecurefunc("SetItemRef", ...)`
+on clients without `LinkUtil` — there the stock handler has already opened an empty
+tooltip for the unknown link type, which the handler hides again. `SetItemRef` is
+never replaced, which would risk taint.
+
+There is no opt-out setting or slash command.

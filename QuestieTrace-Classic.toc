@@ -28,6 +28,7 @@ Modules/globals.lua
 
 Modules/Localization/l10n.lua
 Modules/Localization/Translations/ExportUI.lua
+Modules/Localization/Translations/ExportReminder.lua
 
 Modules/Trackers/PlayerIdentity.lua
 Modules/Trackers/UnitLevel.lua
@@ -48,6 +49,7 @@ Modules/Dumps/MapHierarchy.lua
 Modules/Export/Encoding.lua
 Modules/Export/Export.lua
 Modules/Export/ExportUI.lua
+Modules/Export/ExportReminder.lua
 
 QuestieTrace_UI.lua
 QuestieTrace.lua

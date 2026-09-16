@@ -2316,6 +2316,7 @@ globals = {
     "C_NamePlate",
     "C_Map",
     "Item",
+    "LinkUtil",
     "HideUIPanel",
     "ShowUIPanel",
     "StaticPopup_ForEachShownDialog",
