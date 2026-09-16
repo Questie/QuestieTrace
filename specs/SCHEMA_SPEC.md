@@ -401,7 +401,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetActiveTitle` | tuple (n=2) | title, isComplete |
 | `GetAvailableTitle` | scalar (string/nil) | title; stale indices are probed with the actual API when counts shrink |
 
-### Parameterized by unit token (`"target"`, `"npc"`, `"questnpc"`)
+### Parameterized by unit token (`"target"`, `"npc"`, `"questnpc"`, `"mouseover"`)
 
 | Function key | Return type | Notes |
 |---|---|---|

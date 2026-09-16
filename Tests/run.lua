@@ -1345,6 +1345,39 @@ local function TestChatMsgLootDispatchArgsAreSanitized()
   assert(capturedArgs[12] == nil, "Dispatched guid must be scrubbed")
 end
 
+local function TestUnitInteractionMouseover()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local env = runtime.env
+
+  -- Mock WoW API for mouseover unit
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitGUID = function(token)
+    if token == "mouseover" then return "Creature-0-1-1-1-12345-000001" end
+    return nil
+  end
+  env.UnitName = function(token)
+    if token == "mouseover" then return "Test NPC", "Realm" end
+    return nil
+  end
+
+  runtime.core.StartCapture("mouseover test")
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify UnitGUID["mouseover"] was recorded
+  assert(functions.UnitGUID and functions.UnitGUID.mouseover, "UnitGUID[mouseover] stream must exist")
+  assert(#functions.UnitGUID.mouseover >= 1, "UnitGUID[mouseover] must have at least one entry")
+  assert(functions.UnitGUID.mouseover[1].v == "Creature-0-1-1-1-12345-000001", "UnitGUID[mouseover] value must match mocked GUID")
+
+  -- Verify UnitName["mouseover"] was recorded
+  assert(functions.UnitName and functions.UnitName.mouseover, "UnitName[mouseover] stream must exist")
+  assert(#functions.UnitName.mouseover >= 1, "UnitName[mouseover] must have at least one entry")
+  assert(functions.UnitName.mouseover[1].v[1] == "Test NPC" and functions.UnitName.mouseover[1].v[2] == "Realm",
+    "UnitName[mouseover] value must match mocked name")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -1403,6 +1436,7 @@ local tests = {
   { name = "UnitInteraction skips an unrecognized guid kind", run = TestUnitInteractionSkipsUnrecognizedGuidKind },
   { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
   { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
+  { name = "unit interaction mouseover records GUID and name", run = TestUnitInteractionMouseover },
 }
 
 local failures = 0
