@@ -14,6 +14,7 @@ Libs/LibDeflate/LibDeflate.lua        -- Compression library (CBOR + Deflate)
 Modules/globals.lua                   -- Core namespace, utilities, RegisterTracker/RegisterDump APIs
 Modules/Localization/l10n.lua         -- Localization system (Core.l10n)
 Modules/Localization/Translations/ExportUI.lua -- Export/UI translations
+Modules/Localization/Translations/ExportReminder.lua -- Share-reminder translations
 Modules/Trackers/PlayerIdentity.lua   -- UnitRace, UnitClass, UnitClassBase, UnitSex, UnitFactionGroup (t=0 only)
 Modules/Trackers/UnitLevel.lua        -- UnitLevel["player"], GetQuestGreenRange
 Modules/Trackers/Position.lua         -- Zone texts, map ID, player position, instance state
@@ -31,6 +32,7 @@ Modules/Dumps/MapHierarchy.lua        -- Static C_Map hierarchy dump (PLAYER_LOG
 Modules/Export/Encoding.lua           -- CBOR/Deflate encoding for export payloads
 Modules/Export/Export.lua             -- Payload building, privacy scrubbing
 Modules/Export/ExportUI.lua           -- Export window UI
+Modules/Export/ExportReminder.lua     -- Share reminder: chat notification + export hyperlink
 QuestieTrace_UI.lua                   -- Control frame UI
 QuestieTrace.lua                      -- Entry point: session lifecycle, event bus, slash commands
 ```
@@ -39,14 +41,17 @@ QuestieTrace.lua                      -- Entry point: session lifecycle, event b
 
 1. `LibStub.lua` / `LibDeflate.lua` provide the compression codec used by the Export subsystem.
 2. `globals.lua` establishes `QuestieTraceCore`, shared types, utility helpers, tracker registration, and dump registration.
-3. `l10n.lua` + `Translations/ExportUI.lua` initialize the localization system (`Core.l10n`) before any module calls `l10n(...)`.
+3. `l10n.lua` + the `Translations/` files initialize the localization system (`Core.l10n`) before any module calls `l10n(...)`.
 4. Tracker files call `Core.RegisterTracker` at file scope so event routing tables exist before the event frame is created.
 5. Dump files call `Core.RegisterDump` at file scope so dump event/slash routing exists before bootstrap.
 6. `Encoding.lua` provides CBOR/Deflate encoding functions used by `Export.lua`.
 7. `Export.lua` builds and scrubs export payloads (depends on `Encoding.lua` and `Core.l10n`).
 8. `ExportUI.lua` defines the export window (depends on `Core.l10n` and `Export.lua`).
-9. `QuestieTrace_UI.lua` defines optional UI functions used by the main file.
-10. `QuestieTrace.lua` runs last, creates the event frame, registers tracked events, and handles slash commands.
+9. `ExportReminder.lua` installs the chat hyperlink handler at file scope and defines
+   `Core.StartShareReminders()`, which `QuestieTrace.lua` calls on `PLAYER_LOGIN`. It loads after
+   `ExportUI.lua` because the hyperlink opens `Core.ShowExportWindow()`.
+10. `QuestieTrace_UI.lua` defines optional UI functions used by the main file.
+11. `QuestieTrace.lua` runs last, creates the event frame, registers tracked events, and handles slash commands.
 
 ---
 
@@ -123,6 +128,10 @@ QuestieTraceCharacter = {
   lastSavedSession = "2026-02-10_12-34-56", -- set on save only
   currentSession = SessionRecord?,          -- live/stopped-unsaved session, linked by reference
   sessions = { SessionRecord, ... },
+  savedSessionCounter = 0,                  -- monotonic count of sessions ever saved
+  reminder = {
+    sessionCounterAtExport = 0,             -- savedSessionCounter when the export window was last opened
+  },
 }
 ```
 
@@ -138,6 +147,9 @@ session (see Bootstrap sequence).
 - Missing `settings.autoStart` defaults to `true`.
 - `QuestieTraceDumps` and its `dumps` table are ensured.
 - Existing `QuestieTraceCharacter.sessions` data is preserved when it is already a table; otherwise it is initialized to an empty table.
+- Missing `QuestieTraceCharacter.savedSessionCounter` initializes to the current `#sessions`, so existing users start from their current save count.
+- Missing `QuestieTraceCharacter.reminder.sessionCounterAtExport` initializes to `0`, so existing users with saved data are reminded on their next login.
+- These per-character fields are shape-checked rather than schema-gated, so adding them required no `SCHEMA_VERSION` bump (a bump would reset every user's account settings).
 
 ---
 

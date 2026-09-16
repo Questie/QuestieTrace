@@ -32,6 +32,10 @@ QuestieTraceCharacter = {
   lastSavedSession = "2026-02-10_12-34-56",
   currentSession = SessionRecord?,          -- live/stopped-unsaved session, linked by reference
   sessions = { SessionRecord, ... },
+  savedSessionCounter = 0,                  -- monotonic count of sessions ever saved
+  reminder = {
+    sessionCounterAtExport = 0,             -- savedSessionCounter when the export window was last opened
+  },
 }
 ```
 
@@ -42,6 +46,11 @@ session (see Bootstrap sequence).
 
 `lastSavedSession` is only set on explicit save — it is not initialized
 on fresh install or migration.
+
+`savedSessionCounter` increments on every `Core.SaveCapture()` and never decreases.
+`#sessions` is capped by `PruneSessionsIfNeeded()`, so it cannot be used as a
+"has new data been saved?" watermark; the share reminder compares this counter
+against `reminder.sessionCounterAtExport` instead (see `specs/UI_SPEC.md` section 7).
 
 ### Migration
 
