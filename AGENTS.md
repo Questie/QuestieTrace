@@ -76,6 +76,7 @@ Modules/                  - Core modules and tracking systems
         CompletedQuests.lua    - Completed quests tracking
         QuestDialog.lua        - Quest dialog/gossip tracking
         UnitInteraction.lua    - Unit interaction tracking
+        UnitState.lua          - Unit state (level/classification/reaction) tracking
         GroupState.lua         - Group/raid state tracking
         SkillLines.lua         - Skill lines tracking
         SpellBook.lua          - Spell book tracking
