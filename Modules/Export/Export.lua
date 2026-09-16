@@ -135,7 +135,11 @@ local function ScrubFunctions(functions)
   PruneEmptyTokens(nameStream)
 end
 
---- Build a scrubbed, exportable copy of all saved sessions for this character.
+--- Build a scrubbed, exportable copy of all saved sessions for this character,
+--- plus the current unsaved session (if any), so users don't have to Save
+--- before exporting. If there is nothing to export, the payload will have an
+--- empty sessions array and hasExportableData = false, letting the UI display
+--- an appropriate warning.
 ---@return table payload
 function Core.BuildExportPayload()
   ---@type SessionRecord[]
@@ -153,9 +157,18 @@ function Core.BuildExportPayload()
     sessions[#sessions + 1] = session
   end
 
+  ---@type SessionRecord?
+  local currentSession = type(characterDb) == "table" and characterDb.currentSession or nil
+  if type(currentSession) == "table" and type(currentSession.events) == "table" and #currentSession.events > 0 then
+    local session = DeepCopy(currentSession)
+    ScrubFunctions(session.functions)
+    sessions[#sessions + 1] = session
+  end
+
   return {
     exportVersion = EXPORT_VERSION,
     generatedAt = (type(date) == "function") and date("%Y-%m-%d %H:%M:%S") or nil,
+    hasExportableData = #sessions > 0,
     sessions = sessions,
   }
 end

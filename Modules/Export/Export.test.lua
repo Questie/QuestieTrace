@@ -154,4 +154,139 @@ describe("Export.BuildExportString", function()
 
     assert.equal("!QuestieTrace:1!ENCODED_PAYLOAD!End:QuestieTrace:1!", result)
   end)
+
+  it("should still return a formatted string even when there is nothing to export", function()
+    local env2 = {}
+    local Core2 = LoadExportModule(env2)
+    env2.QuestieTraceCharacter = { sessions = {} }
+
+    local result = Core2.BuildExportString()
+
+    assert.matches("^!QuestieTrace:1!.*!End:QuestieTrace:1!$", result)
+  end)
+end)
+
+describe("Export.currentSession inclusion", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+
+  before_each(function()
+    env = {}
+    Core = LoadExportModule(env)
+  end)
+
+  it("should include the current unsaved session when it has events", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = {
+        name = "unsaved",
+        functions = {},
+        events = { { t = 0, e = "PLAYER_LOGIN" } },
+      },
+    }
+
+    local payload = Core.BuildExportPayload()
+
+    assert.equal(1, #payload.sessions)
+    assert.equal("unsaved", payload.sessions[1].name)
+  end)
+
+  it("should include both saved sessions and the current unsaved session", function()
+    env.QuestieTraceCharacter = {
+      sessions = { { name = "saved", functions = {} } },
+      currentSession = {
+        name = "unsaved",
+        functions = {},
+        events = { { t = 0, e = "PLAYER_LOGIN" } },
+      },
+    }
+
+    local payload = Core.BuildExportPayload()
+
+    assert.equal(2, #payload.sessions)
+    assert.equal("saved", payload.sessions[1].name)
+    assert.equal("unsaved", payload.sessions[2].name)
+  end)
+
+  it("should not include the current session if it has no events", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = { name = "unsaved", functions = {}, events = {} },
+    }
+
+    local payload = Core.BuildExportPayload()
+
+    assert.equal(0, #payload.sessions)
+  end)
+
+  it("should not mutate the original currentSession", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = {
+        name = "unsaved",
+        functions = { UnitGUID = { player = { { t = 0, tp = 0, v = "Player-1-000001" } } } },
+        events = { { t = 0, e = "PLAYER_LOGIN" } },
+      },
+    }
+
+    Core.BuildExportPayload()
+
+    assert.is_not_nil(env.QuestieTraceCharacter.currentSession.functions.UnitGUID.player)
+  end)
+end)
+
+describe("Export.BuildExportPayload", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+
+  before_each(function()
+    env = {}
+    Core = LoadExportModule(env)
+  end)
+
+  it("should set hasExportableData to false when there is no data", function()
+    env.QuestieTraceCharacter = { sessions = {} }
+
+    local payload = Core.BuildExportPayload()
+
+    assert.is_false(payload.hasExportableData)
+    assert.equal(0, #payload.sessions)
+  end)
+
+  it("should set hasExportableData to true when there are saved sessions", function()
+    env.QuestieTraceCharacter = { sessions = { { functions = {} } } }
+
+    local payload = Core.BuildExportPayload()
+
+    assert.is_true(payload.hasExportableData)
+    assert.equal(1, #payload.sessions)
+  end)
+
+  it("should set hasExportableData to true when current session has events", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+
+    local payload = Core.BuildExportPayload()
+
+    assert.is_true(payload.hasExportableData)
+    assert.equal(1, #payload.sessions)
+  end)
+
+  it("should set hasExportableData to false when current session has no events", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = { functions = {}, events = {} },
+    }
+
+    local payload = Core.BuildExportPayload()
+
+    assert.is_false(payload.hasExportableData)
+    assert.equal(0, #payload.sessions)
+  end)
 end)

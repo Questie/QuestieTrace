@@ -12,6 +12,10 @@ local l10n = Core.l10n
 
 ---@class ExportFrame : Frame
 ---@field editBox EditBox
+---@field scrollFrame ScrollFrame
+---@field urlEditBox EditBox
+---@field hint FontString
+---@field warningText FontString
 
 ---@type ExportFrame?
 local exportFrame
@@ -86,6 +90,14 @@ local function BuildExportFrame()
   end)
   scrollFrame:SetScrollChild(editBox)
 
+  local warningText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  warningText:SetPoint("CENTER")
+  warningText:SetJustifyH("CENTER")
+  warningText:SetMaxLines(0)
+  warningText:SetWordWrap(true)
+  warningText:SetWidth(456)
+  warningText:Hide()
+
   local closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate") --[[@as Button]]
   closeButton:SetSize(80, 22)
   closeButton:SetPoint("BOTTOM", 0, 12)
@@ -93,21 +105,45 @@ local function BuildExportFrame()
   closeButton:SetScript("OnClick", function() frame:Hide() end)
 
   frame.editBox = editBox
+  frame.scrollFrame = scrollFrame
+  frame.urlEditBox = urlEditBox
+  frame.hint = hint
+  frame.warningText = warningText
   return frame
 end
 
 --- Show the export window, populated with the current export string.
---- Data collection lives entirely in Export/Export.lua; this function only
---- displays whatever Core.BuildExportString() returns.
+--- If there is nothing to export, displays a warning and hides the input elements.
 function Core.ShowExportWindow()
   if (not exportFrame) then
     exportFrame = BuildExportFrame()
   end
 
-  ---@type string
-  local text = Core.BuildExportString()
-  exportFrame.editBox.originalText = text
-  exportFrame.editBox:SetText(text)
+  -- Check if there's actually exportable data by inspecting the payload.
+  local payload = Core.BuildExportPayload()
+  local hasData = payload.hasExportableData
+
+  if hasData then
+    -- Show the export data
+    local text = Core.BuildExportString()
+    exportFrame.editBox.originalText = text
+    exportFrame.editBox:SetText(text)
+
+    -- Show export UI, hide warning
+    exportFrame.urlEditBox:Show()
+    exportFrame.hint:Show()
+    exportFrame.scrollFrame:Show()
+    exportFrame.warningText:Hide()
+    exportFrame.editBox:SetFocus()
+  else
+    -- Show warning, hide export data
+    exportFrame.warningText:SetText(l10n("Nothing to export yet. Start a capture first."))
+    exportFrame.warningText:Show()
+
+    exportFrame.urlEditBox:Hide()
+    exportFrame.hint:Hide()
+    exportFrame.scrollFrame:Hide()
+  end
+
   exportFrame:Show()
-  exportFrame.editBox:SetFocus()
 end

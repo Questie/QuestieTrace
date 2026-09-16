@@ -41,6 +41,18 @@ local exportUILocales = {
     ["zhCN"] = "关闭",
     ["zhTW"] = "關閉",
   },
+  ["Nothing to export yet. Start a capture first."] = {
+    ["enUS"] = true,
+    ["deDE"] = "Es gibt noch nichts zu exportieren. Starte zuerst eine Aufzeichnung.",
+    ["esES"] = "Todavía no hay nada que exportar. Inicia primero una captura.",
+    ["esMX"] = "Todavía no hay nada que exportar. Inicia primero una captura.",
+    ["frFR"] = "Rien à exporter pour le moment. Démarrez d'abord une capture.",
+    ["koKR"] = "아직 내보낼 데이터가 없습니다. 먼저 캡처를 시작하세요.",
+    ["ptBR"] = "Ainda não há nada para exportar. Inicie uma captura primeiro.",
+    ["ruRU"] = "Пока нечего экспортировать. Сначала начните запись.",
+    ["zhCN"] = "目前没有可导出的内容。请先开始捕获。",
+    ["zhTW"] = "目前沒有可匯出的內容。請先開始擷取。",
+  },
   ["ERROR: Client does not have required codec support (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)"] = {
     ["enUS"] = true,
     ["deDE"] = "FEHLER: Der Client verfügt nicht über die erforderliche Codec-Unterstützung (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)",
