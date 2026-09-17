@@ -560,6 +560,7 @@ local function PrintHelp()
   print("/qlt auto - Toggle auto-start on login")
   print("/qlt debug - Toggle debug prints")
   print("/qlt export - Show the export window")
+  print("/qlt export all - Re-show the export window including previously exported sessions (e.g. if a submission failed)")
   if Core.GetDumpHelpLines then
     local dumpHelpLines = Core.GetDumpHelpLines()
     for i = 1, #dumpHelpLines do
@@ -594,7 +595,11 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
     QuestieTrace.settings.debug = not QuestieTrace.settings.debug
     print(ADDON_NAME, "Debug prints:", QuestieTrace.settings.debug and "enabled" or "disabled")
   elseif action == "export" then
-    Core.ShowExportWindow()
+    if string.lower(Trim(argument)) == "all" then
+      Core.ShowExportWindow(true)
+    else
+      Core.ShowExportWindow()
+    end
   elseif Core.RunDumpBySlash(action, argument) then
     -- handled by dump provider
   elseif action == "ui" then
