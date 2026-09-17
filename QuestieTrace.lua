@@ -287,12 +287,8 @@ local function EnsureSavedVariables()
   end
 
   -- Recover an unsaved session left over from a previous load (e.g. /reload
-  -- or logout without explicit Save/Reset). The session is mutated in place
-  -- by trackers, so a single reference assignment at StartCapture keeps both
-  -- names pointing at the same table. On load, if currentSession exists,
-  -- restore it into the in-memory capture.session, force it into a stopped
-  -- state (fill stoppedAt/duration if missing) since tracking cannot safely
-  -- resume across a reload.
+  -- or logout without explicit Save). Auto-finalize it into sessions[]
+  -- immediately so the normal PLAYER_LOGIN flow starts fresh.
   if QuestieTraceCharacter.currentSession then
     capture.session = QuestieTraceCharacter.currentSession
     if (not capture.session.stoppedAt) then
@@ -301,7 +297,8 @@ local function EnsureSavedVariables()
       capture.session.duration = capture.session.stoppedAt - capture.session.startedAt
       capture.session.durationPrecise = capture.session.stoppedAtPrecise - capture.session.startedAtPrecise
     end
-    capture.active = false
+    -- Finalize it into sessions[] right away
+    Core.SaveCapture()
   end
 end
 
@@ -389,7 +386,6 @@ end
 ---@param sessionName string? Optional name for the session
 function Core.StartCapture(sessionName)
   if capture.active then
-    print(ADDON_NAME, "Capture already running.")
     return
   end
 
@@ -423,17 +419,11 @@ function Core.StartCapture(sessionName)
       tracker.Init(capture)
     end
   end
-
-  print(ADDON_NAME, "Capture started.")
-  if Core.UpdateControlFrameStatus then
-    Core.UpdateControlFrameStatus()
-  end
 end
 
 --- Stop the active capture session.
 function Core.StopCapture()
   if not capture.active or not capture.session then
-    print(ADDON_NAME, "No active capture to stop.")
     return
   end
 
@@ -451,25 +441,6 @@ function Core.StopCapture()
       tracker.OnCaptureStopped(capture)
     end
   end
-
-  print(ADDON_NAME, "Capture stopped.")
-  if Core.UpdateControlFrameStatus then
-    Core.UpdateControlFrameStatus()
-  end
-end
-
---- Discard the current unsaved session.
-function Core.ResetCapture()
-  if capture.active then
-    print(ADDON_NAME, "Cannot reset while capture is running.")
-    return
-  end
-  capture.session = nil
-  QuestieTraceCharacter.currentSession = nil
-  print(ADDON_NAME, "Session discarded.")
-  if Core.UpdateControlFrameStatus then
-    Core.UpdateControlFrameStatus()
-  end
 end
 
 --- Save the current capture session to SavedVariables.
@@ -480,7 +451,6 @@ function Core.SaveCapture(nameOverride)
   end
 
   if not capture.session then
-    print(ADDON_NAME, "Nothing to save. Start a capture first.")
     return
   end
 
@@ -505,14 +475,19 @@ function Core.SaveCapture(nameOverride)
 
   PruneSessionsIfNeeded()
 
-  ---@type number
-  local eventCount = #session.events
   capture.session = nil
   QuestieTraceCharacter.currentSession = nil
+end
 
-  print(ADDON_NAME, "Saved session:", session.name, "events:", eventCount)
-  if Core.UpdateControlFrameStatus then
-    Core.UpdateControlFrameStatus()
+--- Finalize and restart a live session if it was just exported.
+--- Called after an export to save the just-exported session and immediately
+--- start a fresh one, so new events don't get added to an already-exported record.
+function Core.FinalizeLiveSessionIfExported()
+  if capture.session and capture.session.exportedAt then
+    Core.SaveCapture()
+    if QuestieTrace.settings.autoStart then
+      Core.StartCapture()
+    end
   end
 end
 
@@ -566,12 +541,8 @@ end
 
 --- Print the available slash commands to chat.
 local function PrintHelp()
-  print("/qlt start [name] - Start capture")
-  print("/qlt stop - Stop active capture")
-  print("/qlt save [name] - Save current capture")
-  print("/qlt reset - Discard unsaved capture")
   print("/qlt status - Show capture status")
-  print("/qlt auto - Toggle auto-start on login")
+  print("/qlt tracking - Toggle data collection on login")
   print("/qlt debug - Toggle debug prints")
   print("/qlt export - Show the export window")
   print("/qlt export all - Re-show the export window including previously exported sessions (e.g. if a submission failed)")
@@ -581,7 +552,6 @@ local function PrintHelp()
       print(dumpHelpLines[i])
     end
   end
-  print("/qlt ui - Toggle control frame")
 end
 
 ---@param msg string? The slash command arguments
@@ -592,19 +562,24 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
 
   if action == "" or action == "help" then
     PrintHelp()
-  elseif action == "start" then
-    Core.StartCapture(argument)
-  elseif action == "stop" then
-    Core.StopCapture()
-  elseif action == "save" then
-    Core.SaveCapture(argument)
-  elseif action == "reset" then
-    Core.ResetCapture()
   elseif action == "status" then
     PrintStatus()
-  elseif action == "auto" then
+  elseif action == "tracking" then
     QuestieTrace.settings.autoStart = not QuestieTrace.settings.autoStart
-    print(ADDON_NAME, "Auto-start on login:", QuestieTrace.settings.autoStart and "enabled" or "disabled")
+    print(ADDON_NAME, "Tracking:", QuestieTrace.settings.autoStart and "enabled" or "disabled")
+
+    -- Apply toggle immediately
+    if QuestieTrace.settings.autoStart then
+      -- Enable tracking: start a new capture if none is running
+      if not capture.active and not capture.session then
+        Core.StartCapture()
+      end
+    else
+      -- Disable tracking: save and stop any active capture
+      if capture.active or capture.session then
+        Core.SaveCapture()
+      end
+    end
   elseif action == "debug" then
     QuestieTrace.settings.debug = not QuestieTrace.settings.debug
     print(ADDON_NAME, "Debug prints:", QuestieTrace.settings.debug and "enabled" or "disabled")
@@ -616,8 +591,6 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
     end
   elseif Core.RunDumpBySlash(action, argument) then
     -- handled by dump provider
-  elseif action == "ui" then
-    Core.ToggleControlFrame()
   else
     print(ADDON_NAME, "Unknown command:", action)
     PrintHelp()
@@ -639,9 +612,6 @@ local function OnEvent(_, event, ...)
   -- 1. Initialization (unchanged)
   if event == "VARIABLES_LOADED" then
     EnsureSavedVariables()
-    if Core.UpdateControlFrameStatus then
-      Core.UpdateControlFrameStatus()
-    end
     return
   end
 

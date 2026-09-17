@@ -144,6 +144,10 @@ function Core.ShowExportWindow(includeAlreadyExported)
 
     -- Don't bundle these sessions again next time the window is opened.
     Core.MarkSessionsExported(sourceSessions)
+
+    -- Finalize and restart the live session (if it was exported) so new events
+    -- don't get added to an already-exported record.
+    Core.FinalizeLiveSessionIfExported()
   else
     -- Show warning, hide export data
     exportFrame.warningText:SetText(l10n("Nothing new to share yet. Keep playing and check back later."))

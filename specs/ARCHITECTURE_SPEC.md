@@ -33,7 +33,6 @@ Modules/Export/Encoding.lua           -- CBOR/Deflate encoding for export payloa
 Modules/Export/Export.lua             -- Payload building, privacy scrubbing
 Modules/Export/ExportUI.lua           -- Export window UI
 Modules/Export/ExportReminder.lua     -- Share reminder: chat notification + export hyperlink
-QuestieTrace_UI.lua                   -- Control frame UI
 QuestieTrace.lua                      -- Entry point: session lifecycle, event bus, slash commands
 ```
 
@@ -50,8 +49,7 @@ QuestieTrace.lua                      -- Entry point: session lifecycle, event b
 9. `ExportReminder.lua` installs the chat hyperlink handler at file scope and defines
    `Core.StartShareReminders()`, which `QuestieTrace.lua` calls on `PLAYER_LOGIN`. It loads after
    `ExportUI.lua` because the hyperlink opens `Core.ShowExportWindow()`.
-10. `QuestieTrace_UI.lua` defines optional UI functions used by the main file.
-11. `QuestieTrace.lua` runs last, creates the event frame, registers tracked events, and handles slash commands.
+10. `QuestieTrace.lua` runs last, creates the event frame, registers tracked events, and handles slash commands.
 
 ---
 
@@ -60,12 +58,8 @@ QuestieTrace.lua                      -- Entry point: session lifecycle, event b
 On `VARIABLES_LOADED`:
 
 1. `EnsureSavedVariables()` validates/initializes saved data and settings.
-   - If `QuestieTraceCharacter.currentSession` exists (leftover from a `/reload` or logout without explicit Save/Reset), it is restored into the in-memory
-     `capture.session`, forced into a stopped state (filling `stoppedAt`/`duration` if missing, since tracking cannot safely resume across reload), and
-     `capture.active` is set to `false`. This makes `Core.GetCaptureState()` report `"stopped_unsaved"` automatically; the existing Save/Reset buttons in
-     `QuestieTrace_UI.lua` work without changes.
-2. `Core.BuildControlFrame()` creates the optional control frame.
-3. `Core.UpdateControlFrameStatus()` sets initial UI state.
+   - If `QuestieTraceCharacter.currentSession` exists (leftover from a `/reload` or logout), it is recovered: stop timestamps are filled if missing, then the session is immediately finalized via `Core.SaveCapture()` into `sessions[]`. This clears `capture.session` and `capture.active = false`, so no lingering unsaved state remains.
+2. After bootstrap, when `PLAYER_LOGIN` fires, the auto-start logic checks `(not capture.active) and (not capture.session)`. Since recovery finalized the leftover session, this condition is true, and a fresh capture starts automatically.
 
 `VARIABLES_LOADED` is consumed by bootstrap and is not recorded as a normal trace event.
 
@@ -126,7 +120,7 @@ QuestieTraceDumps = {
 ```lua
 QuestieTraceCharacter = {
   lastSavedSession = "2026-02-10_12-34-56", -- set on save only
-  currentSession = SessionRecord?,          -- live/stopped-unsaved session, linked by reference
+  currentSession = SessionRecord?,          -- live session, linked by reference; never leftover across loads
   sessions = { SessionRecord, ... },
   savedSessionCounter = 0,                  -- monotonic count of sessions ever saved
   reminder = {
@@ -135,14 +129,9 @@ QuestieTraceCharacter = {
 }
 ```
 
-`currentSession` is a direct reference to the in-memory `capture.session` table established by `Core.StartCapture()`. Since trackers mutate the table in place,
-no periodic sync is needed — the reference remains valid for the session's lifetime. It is cleared by `Core.SaveCapture()` (session moved to `sessions[]`) and
-`Core.ResetCapture()` (session explicitly discarded). On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is recovered as a stopped-unsaved
-session (see Bootstrap sequence).
+`currentSession` is a direct reference to the in-memory `capture.session` table established by `Core.StartCapture()`. Since trackers mutate the table in place, no periodic sync is needed — the reference remains valid for the session's lifetime. It is cleared by `Core.SaveCapture()` (session moved to `sessions[]`). On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is automatically finalized into `sessions[]` immediately, so no lingering unsaved state ever remains.
 
-Each `SessionRecord` (saved or live) may also carry `exportedAt`, set once it has actually been shown in the export window — see "Export dedup" in
-`specs/SCHEMA_SPEC.md`. This is separate from `reminder.sessionCounterAtExport`, which only gates the chat reminder; `exportedAt` is what prevents the same
-session's data from being bundled into the export payload twice.
+Each `SessionRecord` (saved or live) may also carry `exportedAt`, set once it has actually been shown in the export window — see "Export dedup" in `specs/SCHEMA_SPEC.md`. This prevents the same session's data from being bundled into the export payload twice.
 
 ### Migration behavior
 
@@ -165,20 +154,21 @@ never-exported ones — see "Session pruning" in `specs/SCHEMA_SPEC.md`. If no n
 
 ---
 
-## 6) Auto-start and control surface
+## 6) Tracking toggle and lifecycle
 
-`QuestieTrace.settings.autoStart` controls login capture. It defaults to `true` and can be toggled by `/qlt auto` or the control-frame checkbox.
+`QuestieTrace.settings.autoStart` controls whether the addon captures at login. It defaults to `true`.
+
+- **When ON**: Capture starts automatically at `PLAYER_LOGIN` (and immediately if toggled on via `/qlt tracking` while logged in).
+- **When OFF**: No capture runs; toggling off mid-capture immediately finalizes and saves the running session.
+
+This is the sole user-facing control for the data collection lifecycle. All other capture state transitions (finalization on logout, finalization on export) happen automatically and silently.
 
 Slash command aliases are `/questietrace` and `/qlt`:
 
 | Command | Purpose |
 |---|---|
-| `/qlt start [name]` | Start a capture session |
-| `/qlt stop` | Stop the active capture session |
-| `/qlt save [name]` | Save the current capture, auto-stopping first if needed |
-| `/qlt reset` | Discard an unsaved stopped session |
 | `/qlt status` | Print capture status |
-| `/qlt auto` | Toggle auto-start on login |
+| `/qlt tracking` | Toggle data collection on/off, effective immediately |
 | `/qlt export` | Show the export window (never-exported sessions only) |
 | `/qlt export all` | Show the export window, forcing already-exported sessions back in (e.g. to resend after a failed submission) |
 | `/qlt dumpmap` | Run the map hierarchy dump provider |

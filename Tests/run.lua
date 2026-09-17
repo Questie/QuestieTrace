@@ -352,6 +352,40 @@ local function TestExportPayloadLiveSessionExportedOnce()
   assert(#thirdPayload.sessions == 0, "A saved session that was already exported while live must stay excluded")
 end
 
+local function TestExportFinalizesAndRestartsLiveSession()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  runtime.env.QuestieTrace.settings.autoStart = true
+
+  -- Start a capture and add events
+  runtime.core.StartCapture("test session")
+  local oldSession = Session(runtime)
+  oldSession.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
+
+  -- Export it (marks it exported)
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 1, "Live session with events should be in export payload")
+  runtime.core.MarkSessionsExported(sourceSessions)
+
+  -- Finalize it (what happens after ShowExportWindow marks sessions exported)
+  runtime.core.FinalizeLiveSessionIfExported()
+
+  -- The old session should now be saved
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 1, "Finalized session should be saved")
+  local savedSession = runtime.env.QuestieTraceCharacter.sessions[1]
+  assert(savedSession == oldSession, "Saved session must be the same table reference")
+  assert(savedSession.exportedAt ~= nil, "Saved session must retain exportedAt")
+
+  -- A fresh capture should now be running
+  local newSession = Session(runtime)
+  assert(newSession ~= oldSession, "Fresh capture must be a different session object")
+  assert(runtime.core.GetCaptureState() == "running", "After finalize, must be running a fresh capture")
+  assert(#newSession.events == 0, "Fresh session must start empty")
+
+  -- The old session should not be re-exported
+  local secondPayload = runtime.core.BuildExportPayload()
+  assert(#secondPayload.sessions == 0, "Old exported session must not be re-exported after finalize+restart")
+end
+
 local function TestPruneRemovesExportedSessionsFirst()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
   local maxSessions = runtime.env.QuestieTrace.settings.maxSessions
@@ -491,14 +525,6 @@ local function TestSaveCaptureClearsCurrentSession()
   assert(runtime.env.QuestieTraceCharacter.sessions[1] ~= nil, "Session must be moved to sessions array")
 end
 
-local function TestResetCaptureClearsCurrentSession()
-  local runtime = NewRuntime({})
-  runtime.core.StartCapture("reset test")
-  runtime.core.StopCapture()
-  runtime.core.ResetCapture()
-  assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "ResetCapture must clear currentSession")
-  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "ResetCapture must not save to sessions array")
-end
 
 local function TestRecoverCurrentSessionOnVariablesLoaded()
   local runtime = NewRuntime({})
@@ -520,20 +546,21 @@ local function TestRecoverCurrentSessionOnVariablesLoaded()
   -- Set virtual time to a value > startedAt so duration is non-negative
   runtime.now = 150
 
-  -- Trigger VARIABLES_LOADED which calls EnsureSavedVariables and recovery
+  -- Trigger VARIABLES_LOADED which calls EnsureSavedVariables and auto-finalizes the recovered session
   SendEvent(runtime, "VARIABLES_LOADED")
 
-  -- Should now have the session in capture.session with stoppedAt filled
-  local recovered, source = runtime.core.GetDiagnosticSession()
+  -- The recovered session should now be in sessions[] (auto-finalized), not in capture.session
+  assert(#env.QuestieTraceCharacter.sessions == 1, "Recovered session must be auto-finalized into sessions[]")
+  local recovered = env.QuestieTraceCharacter.sessions[1]
   assert(recovered == leftover, "Recovered session must be the same table reference")
-  assert(source == "stopped_unsaved", "Recovered session source must be stopped_unsaved")
   assert(recovered.stoppedAt == 150, "Recovery must fill stoppedAt with current virtual time")
   assert(recovered.duration == 50, "Recovery must compute correct non-negative duration (150 - 100)")
   assert(recovered.durationPrecise == 50, "Recovery must compute correct durationPrecise")
-  assert(runtime.core.GetCaptureState() == "stopped_unsaved", "GetCaptureState must report stopped_unsaved after recovery")
+  assert(runtime.core.GetCaptureState() == "idle", "After recovery finalization, state must be idle")
+  assert(env.QuestieTraceCharacter.currentSession == nil, "currentSession must be cleared after finalization")
 end
 
-local function TestAutoStartDoesNotOverwriteRecoveredSession()
+local function TestAutoStartAfterRecoveryStartsFreshCapture()
   local runtime = NewRuntime({})
   local env = runtime.env
   -- Simulate a leftover currentSession from a previous load
@@ -551,18 +578,23 @@ local function TestAutoStartDoesNotOverwriteRecoveredSession()
   -- Enable autoStart
   env.QuestieTrace.settings.autoStart = true
 
-  -- Trigger VARIABLES_LOADED (recovery)
+  -- Trigger VARIABLES_LOADED (recovery auto-finalizes)
   SendEvent(runtime, "VARIABLES_LOADED")
 
-  -- Then trigger PLAYER_LOGIN (auto-start logic)
+  -- Recovered session should be saved
+  assert(#env.QuestieTraceCharacter.sessions == 1, "Recovered session must be saved")
+  local recoveredSession = env.QuestieTraceCharacter.sessions[1]
+  assert(recoveredSession == leftover, "Recovered session in array must be same reference")
+  assert(#recoveredSession.events == 1, "Recovered session events must be preserved")
+
+  -- Trigger PLAYER_LOGIN (auto-start logic should start a fresh capture)
   SendEvent(runtime, "PLAYER_LOGIN")
 
-  -- The recovered session should still be there, not overwritten
-  local recovered, source = runtime.core.GetDiagnosticSession()
-  assert(recovered == leftover, "Recovered session must not be overwritten by auto-start")
-  assert(source == "stopped_unsaved", "Source must still be stopped_unsaved")
-  assert(#recovered.events == 1, "Recovered session events must be preserved")
-  assert(runtime.core.GetCaptureState() == "stopped_unsaved", "Must remain stopped_unsaved")
+  -- A fresh capture should now be running, different from the recovered session
+  local currentSession = runtime.core.GetDiagnosticSession()
+  assert(currentSession ~= leftover, "Auto-start must create a fresh capture, not reuse the recovered one")
+  assert(runtime.core.GetCaptureState() == "running", "After auto-start on login, state must be running")
+  assert(#env.QuestieTraceCharacter.sessions == 1, "Sessions array must still have only the recovered one (not the new capture yet)")
 end
 
 ---@type string[] Files a share-reminder runtime needs on top of globals.lua.
@@ -681,27 +713,28 @@ local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
   { name = "greeting retries failed calls", run = function() TestGreetingRetry("error") end },
   { name = "greeting close cancels delayed samples", run = TestGreetingClose },
-  { name = "greeting capture restart resets probes", run = TestGreetingRestart },
-  { name = "session contract preserves legacy saves", run = TestSessionContract },
-  { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
-  { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },
-  { name = "export payload never exposes sourceSessions or exportedAt", run = TestExportPayloadNeverExposesSourceSessionsOrExportedAt },
-  { name = "export excludes already-exported sessions", run = TestExportPayloadExcludesAlreadyExportedSessions },
-  { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
-  { name = "export live session is exported only once", run = TestExportPayloadLiveSessionExportedOnce },
-  { name = "prune removes exported sessions first", run = TestPruneRemovesExportedSessionsFirst },
-  { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
-  { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
-  { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
-  { name = "ResetCapture clears currentSession", run = TestResetCaptureClearsCurrentSession },
-  { name = "recover currentSession on VARIABLES_LOADED", run = TestRecoverCurrentSessionOnVariablesLoaded },
-  { name = "autoStart does not overwrite recovered session", run = TestAutoStartDoesNotOverwriteRecoveredSession },
-  { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
-  { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
-  { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
-  { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
-  { name = "share reminder survives session pruning", run = TestShareReminderSurvivesSessionPruning },
-  { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
+   { name = "greeting capture restart resets probes", run = TestGreetingRestart },
+   { name = "session contract preserves legacy saves", run = TestSessionContract },
+   { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
+   { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },
+   { name = "export payload never exposes sourceSessions or exportedAt", run = TestExportPayloadNeverExposesSourceSessionsOrExportedAt },
+   { name = "export excludes already-exported sessions", run = TestExportPayloadExcludesAlreadyExportedSessions },
+   { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
+   { name = "export live session is exported only once", run = TestExportPayloadLiveSessionExportedOnce },
+   { name = "export finalizes and restarts live session after export", run = TestExportFinalizesAndRestartsLiveSession },
+   { name = "prune removes exported sessions first", run = TestPruneRemovesExportedSessionsFirst },
+   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
+   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
+   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
+   { name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
+   { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
+   { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
+   { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
+   { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
+   { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
+   { name = "share reminder survives session pruning", run = TestShareReminderSurvivesSessionPruning },
+   { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
+
 }
 
 local failures = 0
