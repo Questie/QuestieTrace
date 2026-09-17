@@ -15,7 +15,7 @@
 ## Category-zhCN: 任务
 ## Category-zhTW: 任務
 ## RequiredDeps:
-## OptionalDeps:
+## OptionalDeps: LibStub, LibDeflate
 ## SavedVariables: QuestieTrace, QuestieTraceDumps
 ## SavedVariablesPerCharacter: QuestieTraceCharacter
 ## IconTexture: Interface\AddOns\QuestieTrace\icon.png
