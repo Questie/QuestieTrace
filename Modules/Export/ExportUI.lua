@@ -114,18 +114,24 @@ end
 
 --- Show the export window, populated with the current export string.
 --- If there is nothing to export, displays a warning and hides the input elements.
-function Core.ShowExportWindow()
+---
+--- By default, sessions already shown in a previous export are left out so
+--- the same data is never bundled twice. Pass includeAlreadyExported = true
+--- to force everything back in (e.g. to resend after a failed submission).
+---@param includeAlreadyExported boolean?
+function Core.ShowExportWindow(includeAlreadyExported)
   if (not exportFrame) then
     exportFrame = BuildExportFrame()
   end
 
-  -- Check if there's actually exportable data by inspecting the payload.
-  local payload = Core.BuildExportPayload()
+  -- Build once: reused for the hasExportableData check, the encoded string,
+  -- and marking sessions exported, so all three agree on the same data.
+  local payload, sourceSessions = Core.BuildExportPayload(includeAlreadyExported)
   local hasData = payload.hasExportableData
 
   if hasData then
     -- Show the export data
-    local text = Core.BuildExportString()
+    local text = Core.BuildExportString(payload)
     exportFrame.editBox.originalText = text
     exportFrame.editBox:SetText(text)
 
@@ -135,9 +141,12 @@ function Core.ShowExportWindow()
     exportFrame.scrollFrame:Show()
     exportFrame.warningText:Hide()
     exportFrame.editBox:SetFocus()
+
+    -- Don't bundle these sessions again next time the window is opened.
+    Core.MarkSessionsExported(sourceSessions)
   else
     -- Show warning, hide export data
-    exportFrame.warningText:SetText(l10n("Nothing to export yet. Start a capture first."))
+    exportFrame.warningText:SetText(l10n("Nothing new to share yet. Keep playing and check back later."))
     exportFrame.warningText:Show()
 
     exportFrame.urlEditBox:Hide()
