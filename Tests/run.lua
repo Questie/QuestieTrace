@@ -502,7 +502,9 @@ local function TestExportSerializationRoundTrips()
   session.functions.GetZoneText = { { t = 0, tp = 0, v = "Dun Morogh" } }
   runtime.core.SaveCapture()
 
-  local text = runtime.core.BuildExportString()
+  local ok, text = runtime.core.BuildExportString()
+
+  assert(ok)
   -- text should be a compressed/encoded string, not raw Lua
   assert(type(text) == "string" and #text > 0, "Export string must be non-empty")
   -- Verify it starts with the version marker, followed by the print-encoding marker
