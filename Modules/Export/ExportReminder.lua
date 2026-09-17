@@ -84,7 +84,11 @@ local function GetSavedSessionCounter()
   return type(characterDb.sessions) == "table" and #characterDb.sessions or 0
 end
 
---- Count the sessions that Core.BuildExportPayload() would actually include.
+--- Count all saved sessions, regardless of whether Core.BuildExportPayload()
+--- would actually include them (it skips ones already marked exported via
+--- `exportedAt`). This is only used to gate whether *any* saved data exists
+--- at all, not whether new/unexported data exists -- that's what
+--- `savedSessionCounter` vs `reminder.sessionCounterAtExport` is for below.
 ---@return number count
 local function GetSavedSessionCount()
   ---@type table?
@@ -102,9 +106,9 @@ end
 --- Is there saved data the player has not been prompted about since their
 --- last visit to the export window?
 ---
---- Only saved sessions count: Core.BuildExportPayload() reads
---- QuestieTraceCharacter.sessions, so an unsaved live session is not yet
---- shareable and must not trigger a reminder.
+--- Only sessions in QuestieTraceCharacter.sessions count here; an unsaved
+--- live session is not yet reflected in savedSessionCounter and must not
+--- trigger a reminder on its own.
 ---
 --- Extension point: a trace-size rule belongs here as a further condition.
 ---@return boolean due

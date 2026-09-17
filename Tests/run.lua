@@ -259,6 +259,99 @@ local function TestExportScrubsPlayerIdentity()
   assert(savedSession.functions.UnitName.player ~= nil, "BuildExportPayload must not mutate the saved session")
 end
 
+--- The payload handed to the encoder (i.e. what Core.BuildExportString
+--- actually serializes) must never contain the real, unscrubbed source
+--- session tables or bookkeeping fields like exportedAt -- only the second
+--- return value (sourceSessions) may reference them, and that must never be
+--- nested inside the payload table itself.
+local function TestExportPayloadNeverExposesSourceSessionsOrExportedAt()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  runtime.core.StartCapture("s1")
+  local session = Session(runtime)
+  session.functions.UnitName = {
+    player = { { t = 0, tp = 0, v = { "Hero", "Realm", n = 2 } } },
+  }
+  session.functions.UnitGUID = {
+    player = { { t = 0, tp = 0, v = "Player-1-000001" } },
+  }
+  runtime.core.SaveCapture()
+
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  runtime.core.MarkSessionsExported(sourceSessions)
+
+  assert(payload.sourceSessions == nil, "The payload table must never carry the real session references")
+  assert(payload.sessions[1].exportedAt == nil, "exportedAt must be stripped from the exported copy")
+  assert(sourceSessions[1].exportedAt ~= nil, "MarkSessionsExported must still stamp the real source session")
+
+  -- Simulate what the encoder actually sees: only `payload` is ever passed to
+  -- Core.EncodeExportPayload()/serialization, never `sourceSessions`.
+  local sawPlayerGuid = false
+  local function ScanForPlayerGuid(value)
+    if type(value) ~= "table" then return end
+    for _, v in pairs(value) do
+      if v == "Player-1-000001" then sawPlayerGuid = true end
+      ScanForPlayerGuid(v)
+    end
+  end
+  ScanForPlayerGuid(payload)
+  assert(not sawPlayerGuid, "The scrubbed player GUID must not be reachable from the payload passed to the encoder")
+end
+
+local function TestExportPayloadExcludesAlreadyExportedSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  runtime.core.StartCapture("s1")
+  runtime.core.SaveCapture()
+
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 1, "First build must include the freshly saved session")
+  assert(payload.hasExportableData == true, "hasExportableData must be true when a session is included")
+
+  runtime.core.MarkSessionsExported(sourceSessions)
+
+  local secondPayload = runtime.core.BuildExportPayload()
+  assert(#secondPayload.sessions == 0, "A session already marked exported must not be bundled again")
+  assert(secondPayload.hasExportableData == false, "hasExportableData must be false once nothing new remains")
+
+  local forcedPayload = runtime.core.BuildExportPayload(true)
+  assert(#forcedPayload.sessions == 1, "includeAlreadyExported = true must force previously-exported sessions back in")
+end
+
+local function TestExportPayloadIncludesOnlyNewSessionsAfterExport()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  runtime.core.StartCapture("s1")
+  runtime.core.SaveCapture()
+  local _, firstSourceSessions = runtime.core.BuildExportPayload()
+  runtime.core.MarkSessionsExported(firstSourceSessions)
+
+  runtime.core.StartCapture("s2")
+  runtime.core.SaveCapture()
+
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 1, "Only the newly saved session must be included")
+  assert(sourceSessions[1].name == "s2", "The included session must be the new one, not the already-exported one")
+end
+
+local function TestExportPayloadLiveSessionExportedOnce()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  runtime.core.StartCapture("live")
+  local session = Session(runtime)
+  session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
+
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 1, "A live session with events must be included once")
+
+  runtime.core.MarkSessionsExported(sourceSessions)
+
+  local secondPayload = runtime.core.BuildExportPayload()
+  assert(#secondPayload.sessions == 0, "The live session must not be re-bundled after being marked exported")
+
+  -- Saving it afterwards must not resurrect it into future payloads either,
+  -- since the exportedAt marker carries over onto the saved record.
+  runtime.core.SaveCapture()
+  local thirdPayload = runtime.core.BuildExportPayload()
+  assert(#thirdPayload.sessions == 0, "A saved session that was already exported while live must stay excluded")
+end
+
 local function TestExportSerializationRoundTrips()
   local runtime = { env = {}, core = {}, now = 0, timers = {}, frame = {} }
   local env = runtime.env
@@ -566,6 +659,10 @@ local tests = {
   { name = "session contract preserves legacy saves", run = TestSessionContract },
   { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
   { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },
+  { name = "export payload never exposes sourceSessions or exportedAt", run = TestExportPayloadNeverExposesSourceSessionsOrExportedAt },
+  { name = "export excludes already-exported sessions", run = TestExportPayloadExcludesAlreadyExportedSessions },
+  { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
+  { name = "export live session is exported only once", run = TestExportPayloadLiveSessionExportedOnce },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },

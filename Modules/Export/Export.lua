@@ -135,15 +135,33 @@ local function ScrubFunctions(functions)
   PruneEmptyTokens(nameStream)
 end
 
---- Build a scrubbed, exportable copy of all saved sessions for this character,
---- plus the current unsaved session (if any), so users don't have to Save
---- before exporting. If there is nothing to export, the payload will have an
---- empty sessions array and hasExportableData = false, letting the UI display
---- an appropriate warning.
+--- Build a scrubbed, exportable copy of sessions for this character, plus the
+--- current unsaved session (if any), so users don't have to Save before
+--- exporting. If there is nothing to export, the payload will have an empty
+--- sessions array and hasExportableData = false, letting the UI display an
+--- appropriate warning.
+---
+--- By default, sessions already marked as exported (`exportedAt` set) are
+--- skipped so the same data is never bundled twice. Pass
+--- includeAlreadyExported = true to force everything back in (e.g. a failed
+--- submission that needs to be resent).
+---
+--- The payload itself only ever contains scrubbed, deep-copied data safe to
+--- serialize and send off-device. The real (non-copied) session tables
+--- included in this payload are returned separately as `sourceSessions`,
+--- parallel to `payload.sessions` -- NOT as a field of the payload, so it can
+--- never accidentally end up inside the string handed to the encoder. Callers
+--- that actually hand the payload off (e.g. by showing it in the export
+--- window) should pass `sourceSessions` to Core.MarkSessionsExported()
+--- afterwards so those sessions are not bundled again next time.
+---@param includeAlreadyExported boolean? Force-include sessions already marked exported
 ---@return table payload
-function Core.BuildExportPayload()
+---@return SessionRecord[] sourceSessions Real session tables backing `payload.sessions`, in the same order.
+function Core.BuildExportPayload(includeAlreadyExported)
   ---@type SessionRecord[]
   local sessions = {}
+  ---@type SessionRecord[]
+  local sourceSessions = {}
 
   ---@type table?
   local characterDb = QuestieTraceCharacter
@@ -152,17 +170,25 @@ function Core.BuildExportPayload()
 
   for i = 1, #savedSessions do
     ---@type SessionRecord
-    local session = DeepCopy(savedSessions[i])
-    ScrubFunctions(session.functions)
-    sessions[#sessions + 1] = session
+    local source = savedSessions[i]
+    if includeAlreadyExported or not source.exportedAt then
+      local session = DeepCopy(source)
+      session.exportedAt = nil
+      ScrubFunctions(session.functions)
+      sessions[#sessions + 1] = session
+      sourceSessions[#sourceSessions + 1] = source
+    end
   end
 
   ---@type SessionRecord?
   local currentSession = type(characterDb) == "table" and characterDb.currentSession or nil
-  if type(currentSession) == "table" and type(currentSession.events) == "table" and #currentSession.events > 0 then
+  if type(currentSession) == "table" and type(currentSession.events) == "table" and #currentSession.events > 0
+      and (includeAlreadyExported or not currentSession.exportedAt) then
     local session = DeepCopy(currentSession)
+    session.exportedAt = nil
     ScrubFunctions(session.functions)
     sessions[#sessions + 1] = session
+    sourceSessions[#sourceSessions + 1] = currentSession
   end
 
   return {
@@ -170,20 +196,41 @@ function Core.BuildExportPayload()
     generatedAt = (type(date) == "function") and date("%Y-%m-%d %H:%M:%S") or nil,
     hasExportableData = #sessions > 0,
     sessions = sessions,
-  }
+  }, sourceSessions
+end
+
+--- Mark every session in `sourceSessions` (the second return value of
+--- Core.BuildExportPayload()) as exported, so Core.BuildExportPayload() will
+--- not bundle it again. Call this once the payload has actually been handed
+--- to the user (e.g. shown in the export window), not before.
+---@param sourceSessions SessionRecord[] Second return value of Core.BuildExportPayload()
+function Core.MarkSessionsExported(sourceSessions)
+  if type(sourceSessions) ~= "table" then return end
+
+  ---@type number
+  local now = GetTime()
+  for i = 1, #sourceSessions do
+    sourceSessions[i].exportedAt = now
+  end
 end
 
 ---------------------------------------------------------------------------
 -- Serialization
 ---------------------------------------------------------------------------
 
---- Build the full exportable string for the current character's saved sessions.
---- The result is always prefixed with EXPORT_PREFIX so the export version is
---- visible without decoding the payload, and suffixed with EXPORT_SUFFIX so
---- users can detect if the string was cut off.
+--- Build the full exportable string for a payload previously built by
+--- Core.BuildExportPayload(). The result is always prefixed with
+--- EXPORT_PREFIX so the export version is visible without decoding the
+--- payload, and suffixed with EXPORT_SUFFIX so users can detect if the
+--- string was cut off.
+---
+--- Accepting the payload as a parameter (rather than building one
+--- internally) lets callers build it once, inspect hasExportableData, encode
+--- it, and mark it exported, all from the same payload/sourceSessions.
+---@param payload table? Result of Core.BuildExportPayload(). Built fresh (with defaults) if omitted.
 ---@return string
-function Core.BuildExportString()
-  local payload = Core.BuildExportPayload()
+function Core.BuildExportString(payload)
+  payload = payload or Core.BuildExportPayload()
   local encoded = Core.EncodeExportPayload(payload)
   if encoded then
     return EXPORT_PREFIX .. encoded .. EXPORT_SUFFIX
