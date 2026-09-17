@@ -1,6 +1,6 @@
 # QuestieTrace
 
-QuestieTrace records a World of Warcraft **Classic** play session to disk — every tracked game event, plus what the WoW API returned at each moment — so the session can be replayed and inspected later without a running game client.
+QuestieTrace records a WoW Classic play session to disk — every tracked game event, plus what the WoW API returned at each moment — so the session can be replayed and inspected later without a running game client.
 
 It's built for Questie development: capture a real character doing real quests, then step through exactly what the game told the addon at any point in time.
 
@@ -15,19 +15,17 @@ It's built for Questie development: capture a real character doing real quests, 
 
 Records the events the game fires and the return values of the WoW API functions Questie depends on — quest log, position, reputation, spellbook, loot, gossip dialogs and more. Values are only stored when they change, and everything is timestamped relative to the start of the session.
 
-**Requirements:** WoW Classic Era. Nothing else.
+**Requirements:** WoW Classic. Every Classic flavor is supported — Classic Era (including Anniversary/Fresh realms), TBC, Wrath, Cata and MoP Classic. Retail is not supported.
 
-**Install:** copy or symlink this repo into your AddOns folder:
+**Install:** copy or symlink this repo into your Classic client's AddOns folder, named exactly `QuestieTrace`:
 
 ```
-World of Warcraft/_classic_era_/Interface/AddOns/QuestieTrace/
+World of Warcraft/<client folder>/Interface/AddOns/QuestieTrace/
 ```
 
-The folder must be named exactly `QuestieTrace`, or the game won't find `QuestieTrace-Classic.toc`.
+The folder name matters — the game finds the addon by matching it to `QuestieTrace-<Flavor>.toc`.
 
-Classic Era is the only supported client. There are no Retail, TBC, Wrath or Cata builds.
-
-**You don't need to do anything to start recording.** The addon begins capturing when you log in and saves automatically when you log out.
+**First login:** you'll be asked for consent to collect data locally. Nothing is recorded before you accept, and declining stops the addon from doing anything. You can change your answer anytime with `/qlt consent`. Once consented, recording is automatic — log in and play.
 
 ---
 
@@ -67,9 +65,7 @@ A small standalone CLI for decoding a QuestieTrace export string back into a pla
 
 ### 1. Record
 
-Log in with the addon installed. Recording starts by itself — just play.
-
-To check on it, type `/qlt status` in chat. A small Start/Stop/Save panel is also shown on screen with an "Auto-start on login" checkbox.
+Log in, accept the consent prompt on first login, and play. Recording starts and stops by itself — check `/qlt status` any time to see what's happening.
 
 ### 2. Log out
 
@@ -78,7 +74,7 @@ To check on it, type `/qlt status` in chat. A small Start/Stop/Save panel is als
 ### 3. Find your trace file
 
 ```
-World of Warcraft/_classic_era_/WTF/Account/<ACCOUNT>/<Realm>/<Character>/SavedVariables/QuestieTrace.lua
+World of Warcraft/<client folder>/WTF/Account/<ACCOUNT>/<Realm>/<Character>/SavedVariables/QuestieTrace.lua
 ```
 
 Sessions are saved per character, so make sure you're looking under the character you played.
@@ -93,7 +89,7 @@ If you add a file while the analyzer is already running, restart it or visit `/a
 
 ### Sending a capture to a developer
 
-Just send the `QuestieTrace.lua` file. Note that it contains your character name, realm, level, everywhere you walked, your quest log and your known spells — nothing private to your account, but worth knowing before you share it.
+Just send the `QuestieTrace.lua` file, or use `/qlt export` in-game to get a shareable string instead. Either way it contains your character name, realm, level, everywhere you walked, your quest log and your known spells — nothing private to your account, but worth knowing before you share it.
 
 ---
 
@@ -104,15 +100,15 @@ Both `/qlt` and `/questietrace` work.
 | Command | Description |
 |---|---|
 | `/qlt` or `/qlt help` | Print the command list |
-| `/qlt start [name]` | Start a capture, optionally naming it |
-| `/qlt stop` | Stop the active capture |
-| `/qlt save [name]` | Save the session, stopping it first if needed |
-| `/qlt reset` | Discard an unsaved session (only when stopped) |
 | `/qlt status` | Print capture status to chat |
-| `/qlt auto` | Toggle auto-start on login |
-| `/qlt dumpmap` | Dump the map hierarchy (provided by the map dump provider) |
+| `/qlt tracking` | Toggle auto-start on login |
+| `/qlt consent` | Show the data collection consent prompt |
+| `/qlt debug` | Toggle debug prints |
+| `/qlt export` | Open the export window |
+| `/qlt export all` | Reopen the export window, including previously exported sessions (e.g. if a submission failed) |
+| `/qlt dumpmap` | Refresh the static map hierarchy dump |
 
-Sessions are named by date and time unless you give one. The oldest are pruned once you pass 20 saved sessions.
+Sessions are named by date and time. The oldest are pruned once you pass 20 saved sessions.
 
 ---
 
@@ -135,6 +131,7 @@ Internals, data format and tracker architecture are documented in [`specs/README
 Before opening a PR:
 
 ```sh
-lua5.1 Tests/run.lua
-luacheck -q -- Trackers globals.lua QuestieTrace.lua QuestieTrace_UI.lua
+lua Tests/run.lua
+busted -p ".test.lua" .
+luacheck -q .
 ```
