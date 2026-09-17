@@ -312,3 +312,22 @@ function Core.GetDumpHelpLines()
   table.sort(lines)
   return lines
 end
+
+--- Print a debug message if debug mode is enabled.
+---@param ... any Values to print
+function Core.Debug(...)
+  if QuestieTrace and QuestieTrace.settings and QuestieTrace.settings.debug then
+    Core.Print("DEBUG:", ...)
+  end
+end
+
+--- Print a message with colored addon name prefix.
+--- Usage: Core.Print("message") or Core.Print("msg1", "msg2", ...)
+function Core.Print(...)
+  local parts = { ... }
+  for i, v in ipairs(parts) do
+    parts[i] = tostring(v)
+  end
+  local message = table.concat(parts, " ")
+  print("|cFFFFD100QuestieTrace|r: " .. message)
+end

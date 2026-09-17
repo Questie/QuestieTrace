@@ -6,9 +6,6 @@ local Core = QuestieTraceCore
 ---@type l10n
 local l10n = Core.l10n
 
----@type string
-local ADDON_NAME = "QuestieTrace"
-
 ---------------------------------------------------------------------------
 -- Data collection consent
 ---------------------------------------------------------------------------
@@ -54,5 +51,5 @@ end
 --- Print a friendly reminder to chat that gameplay data is being collected locally.
 --- Only meaningful (and only ever called) when consent has been granted.
 function Core.PrintConsentReminder()
-  print(ADDON_NAME, l10n("Thank you for helping improve Questie! Your gameplay data is being collected locally on this device."))
+  Core.Print(l10n("Thank you for helping improve Questie! Your gameplay data is being collected locally on this device."))
 end
