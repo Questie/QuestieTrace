@@ -282,15 +282,22 @@ local function EnsureSavedVariables()
   -- or logout without explicit Save). Auto-finalize it into sessions[]
   -- immediately so the normal PLAYER_LOGIN flow starts fresh.
   if QuestieTraceCharacter.currentSession then
-    capture.session = QuestieTraceCharacter.currentSession
-    if (not capture.session.stoppedAt) then
-      capture.session.stoppedAt = GetTime()
-      capture.session.stoppedAtPrecise = GetTimePreciseSec()
-      capture.session.duration = capture.session.stoppedAt - capture.session.startedAt
-      capture.session.durationPrecise = capture.session.stoppedAtPrecise - capture.session.startedAtPrecise
+    local settings = QuestieTrace and QuestieTrace.settings
+    local consent = settings and settings.dataCollectionConsent
+    if consent == true then
+      capture.session = QuestieTraceCharacter.currentSession
+      if (not capture.session.stoppedAt) then
+        capture.session.stoppedAt = GetTime()
+        capture.session.stoppedAtPrecise = GetTimePreciseSec()
+        capture.session.duration = capture.session.stoppedAt - capture.session.startedAt
+        capture.session.durationPrecise = capture.session.stoppedAtPrecise - capture.session.startedAtPrecise
+      end
+      -- Finalize it into sessions[] right away
+      Core.SaveCapture()
+    else
+      -- Consent not granted (declined or undecided): discard the recovered session
+      QuestieTraceCharacter.currentSession = nil
     end
-    -- Finalize it into sessions[] right away
-    Core.SaveCapture()
   end
 end
 
