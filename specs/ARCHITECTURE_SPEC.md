@@ -13,8 +13,10 @@ Libs/LibStub/LibStub.lua              -- Library stub for LibDeflate
 Libs/LibDeflate/LibDeflate.lua        -- Compression library (CBOR + Deflate)
 Modules/globals.lua                   -- Core namespace, utilities, RegisterTracker/RegisterDump APIs
 Modules/Localization/l10n.lua         -- Localization system (Core.l10n)
+Modules/Localization/Translations/Consent.lua  -- Data collection consent translations
 Modules/Localization/Translations/ExportUI.lua -- Export/UI translations
 Modules/Localization/Translations/ExportReminder.lua -- Share-reminder translations
+Modules/Consent.lua                   -- Data collection consent popup + login reminder
 Modules/Trackers/PlayerIdentity.lua   -- UnitRace, UnitClass, UnitClassBase, UnitSex, UnitFactionGroup (t=0 only)
 Modules/Trackers/UnitLevel.lua        -- UnitLevel["player"], GetQuestGreenRange
 Modules/Trackers/Position.lua         -- Zone texts, map ID, player position, instance state
@@ -41,15 +43,16 @@ QuestieTrace.lua                      -- Entry point: session lifecycle, event b
 1. `LibStub.lua` / `LibDeflate.lua` provide the compression codec used by the Export subsystem.
 2. `globals.lua` establishes `QuestieTraceCore`, shared types, utility helpers, tracker registration, and dump registration.
 3. `l10n.lua` + the `Translations/` files initialize the localization system (`Core.l10n`) before any module calls `l10n(...)`.
-4. Tracker files call `Core.RegisterTracker` at file scope so event routing tables exist before the event frame is created.
-5. Dump files call `Core.RegisterDump` at file scope so dump event/slash routing exists before bootstrap.
-6. `Encoding.lua` provides CBOR/Deflate encoding functions used by `Export.lua`.
-7. `Export.lua` builds and scrubs export payloads (depends on `Encoding.lua` and `Core.l10n`).
-8. `ExportUI.lua` defines the export window (depends on `Core.l10n` and `Export.lua`).
-9. `ExportReminder.lua` installs the chat hyperlink handler at file scope and defines
+4. `Translations/Consent.lua` + `Consent.lua` register the consent popup (`StaticPopupDialogs["QUESTIETRACE_CONSENT"]`) and reminder helpers before `QuestieTrace.lua` calls them on `PLAYER_LOGIN`.
+5. Tracker files call `Core.RegisterTracker` at file scope so event routing tables exist before the event frame is created.
+6. Dump files call `Core.RegisterDump` at file scope so dump event/slash routing exists before bootstrap.
+7. `Encoding.lua` provides CBOR/Deflate encoding functions used by `Export.lua`.
+8. `Export.lua` builds and scrubs export payloads (depends on `Encoding.lua` and `Core.l10n`).
+9. `ExportUI.lua` defines the export window (depends on `Core.l10n` and `Export.lua`).
+10. `ExportReminder.lua` installs the chat hyperlink handler at file scope and defines
    `Core.StartShareReminders()`, which `QuestieTrace.lua` calls on `PLAYER_LOGIN`. It loads after
    `ExportUI.lua` because the hyperlink opens `Core.ShowExportWindow()`.
-10. `QuestieTrace.lua` runs last, creates the event frame, registers tracked events, and handles slash commands.
+11. `QuestieTrace.lua` runs last, creates the event frame, registers tracked events, and handles slash commands.
 
 ---
 
@@ -65,7 +68,10 @@ On `VARIABLES_LOADED`:
 
 After bootstrap:
 
-- `PLAYER_LOGIN` starts capture automatically when `QuestieTrace.settings.autoStart ~= false`; this happens before event processing so `PLAYER_LOGIN` is the first event in an auto-started session.
+- `PLAYER_LOGIN` first checks `QuestieTrace.settings.dataCollectionConsent` (see §4 and §6 for the consent gate):
+  - `nil` (undecided, e.g. first login after install) → shows the `QUESTIETRACE_CONSENT` popup and does nothing else.
+  - `true` (consented) → prints a friendly reminder to chat via `Core.PrintConsentReminder()`, then starts capture automatically when `QuestieTrace.settings.autoStart ~= false`; this happens before event processing so `PLAYER_LOGIN` is the first event in an auto-started session.
+  - `false` (declined) → no popup, no chat message, no auto-start. `Core.StartCapture()` itself also refuses to start (see §7), so toggling `/qlt tracking` on is a no-op while declined.
 - `PLAYER_LOGOUT` is processed first, then an active capture is saved, so logout is included in the saved session.
 
 ---
@@ -100,6 +106,7 @@ QuestieTrace = {
   settings = {
     maxSessions = 20,
     autoStart = true,
+    dataCollectionConsent = nil, -- tri-state: nil = undecided, true = accepted, false = declined
   },
 }
 ```
@@ -138,6 +145,7 @@ Each `SessionRecord` (saved or live) may also carry `exportedAt`, set once it ha
 - If `QuestieTrace` is missing or has a non-v9 schema, the account settings table is recreated with defaults.
 - Missing/invalid `settings.maxSessions` resets to 20.
 - Missing `settings.autoStart` defaults to `true`.
+- `settings.dataCollectionConsent` is intentionally left untouched (`nil`) when absent; unlike other settings it must NOT be defaulted to a boolean, since `nil` is the "not yet asked" signal that triggers the consent popup on the next `PLAYER_LOGIN`.
 - `QuestieTraceDumps` and its `dumps` table are ensured.
 - Existing `QuestieTraceCharacter.sessions` data is preserved when it is already a table; otherwise it is initialized to an empty table.
 - Missing `QuestieTraceCharacter.savedSessionCounter` initializes to the current `#sessions`, so existing users start from their current save count.
@@ -149,8 +157,7 @@ Each `SessionRecord` (saved or live) may also carry `exportedAt`, set once it ha
 ## 5) Session pruning and naming
 
 After every save, sessions over `QuestieTrace.settings.maxSessions` are pruned, preferring already-exported sessions (oldest-first among them) over
-never-exported ones — see "Session pruning" in `specs/SCHEMA_SPEC.md`. If no name is supplied at start/save, sessions use `date("%Y-%m-%d_%H-%M-%S")`;
-`/qlt save [name]` overrides a start-time name.
+never-exported ones — see "Session pruning" in `specs/SCHEMA_SPEC.md`. If no name is supplied at start, sessions use `date("%Y-%m-%d_%H-%M-%S")`.
 
 ---
 
@@ -163,6 +170,18 @@ never-exported ones — see "Session pruning" in `specs/SCHEMA_SPEC.md`. If no n
 
 This is the sole user-facing control for the data collection lifecycle. All other capture state transitions (finalization on logout, finalization on export) happen automatically and silently.
 
+---
+
+## 7) Data collection consent, auto-start, and control surface
+
+`QuestieTrace.settings.dataCollectionConsent` gates all data collection and takes precedence over `autoStart`:
+
+- `nil` — undecided. On the first `PLAYER_LOGIN` after install (or after any reset of this flag), the `QUESTIETRACE_CONSENT` popup (`StaticPopupDialogs`, defined in `Modules/Consent.lua`) asks the player for permission. Answering sets the flag to `true`/`false`; the popup is not shown again once answered.
+- `true` — consented. Every `PLAYER_LOGIN` prints a friendly reminder to chat (`Core.PrintConsentReminder()`) that data is being collected locally, then `autoStart` behavior applies as before.
+- `false` — declined. No popup, no reminder, and `Core.StartCapture()` itself refuses to start (prints a short message pointing to `/qlt consent`), so toggling `/qlt tracking` on cannot bypass a decline. Declining via the popup's `OnCancel` (e.g. after reopening it with `/qlt consent`) also stops and discards any capture that was already running via `Core.DiscardCapture()`, so no session data is collected or saved past the point of declining.
+
+`QuestieTrace.settings.autoStart` controls login capture *once consent is granted*. It defaults to `true` and can be toggled by `/qlt tracking`.
+
 Slash command aliases are `/questietrace` and `/qlt`:
 
 | Command | Purpose |
@@ -171,8 +190,8 @@ Slash command aliases are `/questietrace` and `/qlt`:
 | `/qlt tracking` | Toggle data collection on/off, effective immediately |
 | `/qlt export` | Show the export window (never-exported sessions only) |
 | `/qlt export all` | Show the export window, forcing already-exported sessions back in (e.g. to resend after a failed submission) |
+| `/qlt consent` | Show the data collection consent prompt (also used to change a prior decision) |
 | `/qlt dumpmap` | Run the map hierarchy dump provider |
-| `/qlt ui` | Toggle the control frame |
 
 For bridge-based diagnostics and tests, `Core.GetDiagnosticSession()` returns
 `(session, source)` where `source` is `"active"`, `"stopped_unsaved"`,

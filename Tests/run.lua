@@ -30,9 +30,14 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 9, settings = { maxSessions = 7, autoStart = false } }
+  env.QuestieTrace = { schemaVersion = 9, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
-  env.print = function() end
+  runtime.printedMessages = {}
+  env.print = function(...)
+    local parts = { ... }
+    for i, v in ipairs(parts) do parts[i] = tostring(v) end
+    runtime.printedMessages[#runtime.printedMessages + 1] = table.concat(parts, " ")
+  end
   env.GetLocale = function() return "enUS" end
   env.GetTime = function() return runtime.now end
   env.GetTimePreciseSec = env.GetTime
@@ -51,7 +56,21 @@ local function NewRuntime(trackerFiles)
   runtime.frame.SetScript = function(frame, name, callback) frame[name] = callback end
   env.CreateFrame = function() return runtime.frame end
 
+  -- Consent popup mocks
+  env.StaticPopupDialogs = {}
+  env.YES = "Yes"
+  env.NO = "No"
+  runtime.consentPopupShown = 0
+  env.StaticPopup_Show = function(name)
+    if name == "QUESTIETRACE_CONSENT" then
+      runtime.consentPopupShown = runtime.consentPopupShown + 1
+    end
+  end
+
   LoadAddonFile(runtime, "Modules/globals.lua")
+  LoadAddonFile(runtime, "Modules/Localization/l10n.lua")
+  LoadAddonFile(runtime, "Modules/Localization/Translations/Consent.lua")
+  LoadAddonFile(runtime, "Modules/Consent.lua")
   for _, path in ipairs(trackerFiles) do LoadAddonFile(runtime, path) end
   LoadAddonFile(runtime, "QuestieTrace.lua")
   runtime.core = env.QuestieTraceCore
@@ -419,7 +438,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 9, settings = { maxSessions = 7, autoStart = false } }
+  env.QuestieTrace = { schemaVersion = 9, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -526,7 +545,6 @@ local function TestSaveCaptureClearsCurrentSession()
   assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "SaveCapture must clear currentSession")
   assert(runtime.env.QuestieTraceCharacter.sessions[1] ~= nil, "Session must be moved to sessions array")
 end
-
 
 local function TestRecoverCurrentSessionOnVariablesLoaded()
   local runtime = NewRuntime({})
@@ -723,34 +741,112 @@ local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
   assert(#messages == 3, "The still-running loop must fire again once new data is saved")
 end
 
+---@param runtime TestRuntime
+---@param needle string
+---@return boolean
+local function WasPrinted(runtime, needle)
+  for _, message in ipairs(runtime.printedMessages) do
+    if message:find(needle, 1, true) then return true end
+  end
+  return false
+end
+
+local function TestConsentUndecidedShowsPromptAndDoesNotAutoStart()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.autoStart = true
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = nil
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  assert(runtime.consentPopupShown == 1, "Consent popup must be shown on first login when undecided")
+  assert(not WasPrinted(runtime, "gameplay data is being collected"), "No reminder message should be printed while undecided")
+  assert(runtime.core.GetCaptureState() == "idle", "Capture must not auto-start while consent is undecided")
+end
+
+local function TestConsentDeclinedBlocksEverything()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.autoStart = true
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = false
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  assert(runtime.consentPopupShown == 0, "Consent popup must not be shown again once declined")
+  assert(not WasPrinted(runtime, "gameplay data is being collected"), "No reminder message should be printed when consent is declined")
+  assert(runtime.core.GetCaptureState() == "idle", "Capture must not auto-start when consent is declined")
+
+  runtime.core.StartCapture("manual attempt")
+  assert(runtime.core.GetCaptureState() == "idle", "Manual /qlt start must also be blocked when consent is declined")
+end
+
+local function TestConsentAcceptedPrintsReminderAndAllowsAutoStart()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.autoStart = true
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = true
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  assert(runtime.consentPopupShown == 0, "Consent popup must not be shown once already accepted")
+  assert(WasPrinted(runtime, "gameplay data is being collected"), "A reminder message must be printed every login once consented")
+  assert(runtime.core.GetCaptureState() == "running", "Capture must auto-start when consent is granted and autoStart is enabled")
+end
+
+local function TestDecliningConsentStopsAndDiscardsActiveCapture()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = true
+  runtime.core.StartCapture("in progress")
+  assert(runtime.core.GetCaptureState() == "running", "Precondition: capture must be running before declining")
+
+  -- Simulate the user reopening the popup (e.g. /qlt consent) and clicking No.
+  runtime.env.StaticPopupDialogs["QUESTIETRACE_CONSENT"].OnCancel()
+
+  assert(runtime.env.QuestieTrace.settings.dataCollectionConsent == false, "Consent flag must be recorded as declined")
+  assert(runtime.core.GetCaptureState() == "idle", "Declining consent must stop and discard any active capture")
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "Declining consent must not save the discarded capture")
+end
+
+local function TestConsentAcceptImmediatelyStartsCapture()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = nil
+
+  -- Simulate user accepting consent popup before PLAYER_LOGIN
+  runtime.env.StaticPopupDialogs["QUESTIETRACE_CONSENT"].OnAccept()
+
+  assert(runtime.env.QuestieTrace.settings.dataCollectionConsent == true, "Consent flag must be set to true")
+  assert(runtime.core.GetCaptureState() == "running", "Capture must start immediately when consent is accepted")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
   { name = "greeting retries failed calls", run = function() TestGreetingRetry("error") end },
   { name = "greeting close cancels delayed samples", run = TestGreetingClose },
-   { name = "greeting capture restart resets probes", run = TestGreetingRestart },
-   { name = "session contract preserves legacy saves", run = TestSessionContract },
-   { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
-   { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },
-   { name = "export payload never exposes sourceSessions or exportedAt", run = TestExportPayloadNeverExposesSourceSessionsOrExportedAt },
-   { name = "export excludes already-exported sessions", run = TestExportPayloadExcludesAlreadyExportedSessions },
-   { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
-   { name = "export live session is exported only once", run = TestExportPayloadLiveSessionExportedOnce },
-   { name = "export finalizes and restarts live session after export", run = TestExportFinalizesAndRestartsLiveSession },
-   { name = "prune removes exported sessions first", run = TestPruneRemovesExportedSessionsFirst },
-   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
-   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
-   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
-   { name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
-   { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
-   { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
-   { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },
-   { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
-   { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
-   { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
-   { name = "share reminder survives session pruning", run = TestShareReminderSurvivesSessionPruning },
-   { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
-
+  { name = "greeting capture restart resets probes", run = TestGreetingRestart },
+  { name = "session contract preserves legacy saves", run = TestSessionContract },
+  { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
+  { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },
+  { name = "export payload never exposes sourceSessions or exportedAt", run = TestExportPayloadNeverExposesSourceSessionsOrExportedAt },
+  { name = "export excludes already-exported sessions", run = TestExportPayloadExcludesAlreadyExportedSessions },
+  { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
+  { name = "export live session is exported only once", run = TestExportPayloadLiveSessionExportedOnce },
+  { name = "export finalizes and restarts live session after export", run = TestExportFinalizesAndRestartsLiveSession },
+  { name = "prune removes exported sessions first", run = TestPruneRemovesExportedSessionsFirst },
+  { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
+  { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
+  { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
+  { name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
+   { name = "consent undecided shows prompt and does not auto-start", run = TestConsentUndecidedShowsPromptAndDoesNotAutoStart },
+   { name = "consent declined blocks auto-start and manual start", run = TestConsentDeclinedBlocksEverything },
+   { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
+   { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
+   { name = "declining consent stops and discards an active capture", run = TestDecliningConsentStopsAndDiscardsActiveCapture },
+  { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
+  { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
+  { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },
+  { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
+  { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
+  { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
+  { name = "share reminder survives session pruning", run = TestShareReminderSurvivesSessionPruning },
+  { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
 }
 
 local failures = 0
