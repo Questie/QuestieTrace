@@ -151,11 +151,6 @@ trackers IS the SessionRecord stored in SavedVariables.
 2. Session is appended directly to `QuestieTraceCharacter.sessions`.
 3. `capture.session` is set to `nil`.
 
-### On ResetCapture
-
-1. Only works when not active (stopped_unsaved state).
-2. `capture.session` is set to `nil`, discarding the unsaved data.
-
 ---
 
 ## 6) Trigger patterns

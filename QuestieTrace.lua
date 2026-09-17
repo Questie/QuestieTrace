@@ -389,6 +389,12 @@ function Core.StartCapture(sessionName)
     return
   end
 
+  local settings = QuestieTrace and QuestieTrace.settings
+  if not (settings and settings.dataCollectionConsent == true) then
+    print(ADDON_NAME, Core.l10n("Data collection is disabled. Use /qlt consent to change this."))
+    return
+  end
+
   capture.token = capture.token + 1
   capture.startedAt = GetTime()
   capture.startedAtPrecise = GetTimePreciseSec()
@@ -441,6 +447,17 @@ function Core.StopCapture()
       tracker.OnCaptureStopped(capture)
     end
   end
+end
+
+--- Stop and discard the current capture without saving it to sessions[].
+--- Used only when consent is revoked mid-capture (see Modules/Consent.lua),
+--- since data collected up to that point must not be persisted once declined.
+function Core.DiscardCapture()
+  if capture.active then
+    Core.StopCapture()
+  end
+  capture.session = nil
+  QuestieTraceCharacter.currentSession = nil
 end
 
 --- Save the current capture session to SavedVariables.
@@ -543,6 +560,7 @@ end
 local function PrintHelp()
   print("/qlt status - Show capture status")
   print("/qlt tracking - Toggle data collection on login")
+  print("/qlt consent - Show the data collection consent prompt")
   print("/qlt debug - Toggle debug prints")
   print("/qlt export - Show the export window")
   print("/qlt export all - Re-show the export window including previously exported sessions (e.g. if a submission failed)")
@@ -580,6 +598,8 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
         Core.SaveCapture()
       end
     end
+  elseif action == "consent" then
+    Core.ShowConsentPrompt()
   elseif action == "debug" then
     QuestieTrace.settings.debug = not QuestieTrace.settings.debug
     print(ADDON_NAME, "Debug prints:", QuestieTrace.settings.debug and "enabled" or "disabled")
@@ -626,17 +646,29 @@ local function OnEvent(_, event, ...)
     Core.RunDumpsForEvent(event, ...)
   end
   if event == "PLAYER_LOGIN" then
-    -- Only auto-start if no capture is running AND no recovered session exists
-    -- (capture.session would be set by EnsureSavedVariables recovery)
-    if (not capture.active) and (not capture.session) then
-      local settings = QuestieTrace and QuestieTrace.settings
-      if settings and settings.autoStart ~= false then
-        Core.StartCapture()
+    local settings = QuestieTrace and QuestieTrace.settings
+    local consent = settings and settings.dataCollectionConsent
+    if consent == nil then
+      -- First login: ask for permission before collecting anything.
+      if Core.ShowConsentPrompt then
+        Core.ShowConsentPrompt()
+      end
+    elseif consent == true then
+      if Core.PrintConsentReminder then
+        Core.PrintConsentReminder()
+      end
+      -- Only auto-start if no capture is running AND no recovered session exists
+      -- (capture.session would be set by EnsureSavedVariables recovery)
+      if (not capture.active) and (not capture.session) then
+        if settings.autoStart ~= false then
+          Core.StartCapture()
+        end
+      end
+      if Core.StartShareReminders then
+        Core.StartShareReminders()
       end
     end
-    if Core.StartShareReminders then
-      Core.StartShareReminders()
-    end
+    -- consent == false: declined; do not prompt, message, or auto-start.
   end
 
   -- 4. Process the event (record + dispatch to trackers)
