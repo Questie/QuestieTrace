@@ -14,14 +14,14 @@ echo "Uploading $RELEASE_TYPE $LATEST_GIT_TAG to CurseForge"
 #### CurseForge Upload
 # Docs: https://support.curseforge.com/en/support/solutions/articles/9000197321-curseforge-upload-api
 
-# The order of the "gameVersions" below is: Classic Era, TBC, Wrath (3.80.1), MoP
+# The order of the "gameVersions" below is: Classic Era, Forever, TBC, Wrath (3.80.1), MoP
 CF_METADATA=$(cat <<-EOF
 {
     "displayName": "$LATEST_GIT_TAG",
     "releaseType": "$RELEASE_TYPE",
     "changelog": $CHANGELOG,
     "changelogType": "markdown",
-    "gameVersions": [16630, 16533, 16785, 16168],
+    "gameVersions": [16630, 17053, 16533, 16785, 16168],
     "relations": {
         "projects": [
             {"slug": "LibStub", "type": "embeddedLibrary"},
