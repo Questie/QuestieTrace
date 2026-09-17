@@ -131,7 +131,7 @@ function Core.ShowExportWindow(includeAlreadyExported)
 
   if hasData then
     -- Show the export data
-    local text = Core.BuildExportString(payload)
+    local ok, text = Core.BuildExportString(payload)
     exportFrame.editBox.originalText = text
     exportFrame.editBox:SetText(text)
 
@@ -142,12 +142,17 @@ function Core.ShowExportWindow(includeAlreadyExported)
     exportFrame.warningText:Hide()
     exportFrame.editBox:SetFocus()
 
-    -- Don't bundle these sessions again next time the window is opened.
-    Core.MarkSessionsExported(sourceSessions)
+    -- Only treat this as "shown to the player" if the string actually
+    -- contains encoded data. If the codec is unavailable, `text` is just an
+    -- error message -- marking sessions exported here would make that data
+    -- unrecoverable since it would never be offered again.
+    if ok then
+      Core.MarkSessionsExported(sourceSessions)
 
-    -- Finalize and restart the live session (if it was exported) so new events
-    -- don't get added to an already-exported record.
-    Core.FinalizeLiveSessionIfExported()
+      -- Finalize and restart the live session (if it was exported) so new events
+      -- don't get added to an already-exported record.
+      Core.FinalizeLiveSessionIfExported()
+    end
   else
     -- Show warning, hide export data
     exportFrame.warningText:SetText(l10n("Nothing new to share yet. Keep playing and check back later."))

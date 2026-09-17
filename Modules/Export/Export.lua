@@ -228,13 +228,14 @@ end
 --- internally) lets callers build it once, inspect hasExportableData, encode
 --- it, and mark it exported, all from the same payload/sourceSessions.
 ---@param payload table? Result of Core.BuildExportPayload(). Built fresh (with defaults) if omitted.
----@return string
+---@return boolean ok Whether `text` contains real encoded data (false = error message).
+---@return string text
 function Core.BuildExportString(payload)
   payload = payload or Core.BuildExportPayload()
   local encoded = Core.EncodeExportPayload(payload)
   if encoded then
-    return EXPORT_PREFIX .. encoded .. EXPORT_SUFFIX
+    return  true, EXPORT_PREFIX .. encoded .. EXPORT_SUFFIX
   end
   -- Fallback: if codec is missing, return an error message instead of crashing.
-  return l10n("ERROR: Client does not have required codec support (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)")
+  return false, l10n("ERROR: Client does not have required codec support (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)")
 end

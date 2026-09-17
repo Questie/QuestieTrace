@@ -150,8 +150,9 @@ describe("Export.BuildExportString", function()
   end)
 
   it("should have prefix, payload, and suffix in correct order", function()
-    local result = Core.BuildExportString()
+    local ok, result = Core.BuildExportString()
 
+    assert.is_true(ok)
     assert.equal("!QuestieTrace:1!ENCODED_PAYLOAD!End:QuestieTrace:1!", result)
   end)
 
@@ -160,8 +161,9 @@ describe("Export.BuildExportString", function()
     local Core2 = LoadExportModule(env2)
     env2.QuestieTraceCharacter = { sessions = {} }
 
-    local result = Core2.BuildExportString()
+    local ok, result = Core2.BuildExportString()
 
+    assert.is_true(ok)
     assert.matches("^!QuestieTrace:1!.*!End:QuestieTrace:1!$", result)
   end)
 end)
