@@ -352,6 +352,32 @@ local function TestExportPayloadLiveSessionExportedOnce()
   assert(#thirdPayload.sessions == 0, "A saved session that was already exported while live must stay excluded")
 end
 
+local function TestPruneRemovesExportedSessionsFirst()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  local maxSessions = runtime.env.QuestieTrace.settings.maxSessions
+  for i = 1, maxSessions do
+    runtime.core.StartCapture("s" .. i)
+    runtime.core.SaveCapture()
+  end
+
+  local sessions = runtime.env.QuestieTraceCharacter.sessions
+  -- Mark the 3rd and 5th sessions (not the oldest) as already exported.
+  sessions[3].exportedAt = 1
+  sessions[5].exportedAt = 1
+
+  -- Saving one more session pushes the list over the cap and triggers pruning.
+  runtime.core.StartCapture("overflow")
+  runtime.core.SaveCapture()
+
+  assert(#sessions == maxSessions, "Pruning must still cap the session list")
+
+  local names = {}
+  for i = 1, #sessions do names[sessions[i].name] = true end
+  assert(names["s3"] == nil, "An already-exported session must be pruned before never-exported ones")
+  assert(names["s1"] == true, "Never-exported sessions must be kept over already-exported ones")
+  assert(names["overflow"] == true, "The newly saved session must be present")
+end
+
 local function TestExportSerializationRoundTrips()
   local runtime = { env = {}, core = {}, now = 0, timers = {}, frame = {} }
   local env = runtime.env
@@ -663,6 +689,7 @@ local tests = {
   { name = "export excludes already-exported sessions", run = TestExportPayloadExcludesAlreadyExportedSessions },
   { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
   { name = "export live session is exported only once", run = TestExportPayloadLiveSessionExportedOnce },
+  { name = "prune removes exported sessions first", run = TestPruneRemovesExportedSessionsFirst },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },

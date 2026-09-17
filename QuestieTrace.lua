@@ -306,13 +306,27 @@ local function EnsureSavedVariables()
 end
 
 --- Remove oldest sessions if the count exceeds the configured maximum.
+---
+--- Already-exported sessions are removed first (oldest-first among them),
+--- since their data has already been shared. Only once those are exhausted
+--- does pruning fall back to removing never-exported sessions, so a slow or
+--- infrequent exporter doesn't lose data they haven't had a chance to share.
 local function PruneSessionsIfNeeded()
   ---@type number
   local maxSessions = QuestieTrace.settings.maxSessions
   ---@type SessionRecord[]
   local sessions = QuestieTraceCharacter.sessions
+
   while #sessions > maxSessions do
-    table.remove(sessions, 1)
+    ---@type number?
+    local removeIndex
+    for i = 1, #sessions do
+      if sessions[i].exportedAt then
+        removeIndex = i
+        break
+      end
+    end
+    table.remove(sessions, removeIndex or 1)
   end
 end
 
