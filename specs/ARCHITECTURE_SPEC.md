@@ -140,6 +140,10 @@ no periodic sync is needed — the reference remains valid for the session's lif
 `Core.ResetCapture()` (session explicitly discarded). On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is recovered as a stopped-unsaved
 session (see Bootstrap sequence).
 
+Each `SessionRecord` (saved or live) may also carry `exportedAt`, set once it has actually been shown in the export window — see "Export dedup" in
+`specs/SCHEMA_SPEC.md`. This is separate from `reminder.sessionCounterAtExport`, which only gates the chat reminder; `exportedAt` is what prevents the same
+session's data from being bundled into the export payload twice.
+
 ### Migration behavior
 
 - If `QuestieTrace` is missing or has a non-v9 schema, the account settings table is recreated with defaults.
@@ -155,7 +159,9 @@ session (see Bootstrap sequence).
 
 ## 5) Session pruning and naming
 
-After every save, sessions over `QuestieTrace.settings.maxSessions` are pruned oldest-first. If no name is supplied at start/save, sessions use `date("%Y-%m-%d_%H-%M-%S")`; `/qlt save [name]` overrides a start-time name.
+After every save, sessions over `QuestieTrace.settings.maxSessions` are pruned, preferring already-exported sessions (oldest-first among them) over
+never-exported ones — see "Session pruning" in `specs/SCHEMA_SPEC.md`. If no name is supplied at start/save, sessions use `date("%Y-%m-%d_%H-%M-%S")`;
+`/qlt save [name]` overrides a start-time name.
 
 ---
 
@@ -173,6 +179,8 @@ Slash command aliases are `/questietrace` and `/qlt`:
 | `/qlt reset` | Discard an unsaved stopped session |
 | `/qlt status` | Print capture status |
 | `/qlt auto` | Toggle auto-start on login |
+| `/qlt export` | Show the export window (never-exported sessions only) |
+| `/qlt export all` | Show the export window, forcing already-exported sessions back in (e.g. to resend after a failed submission) |
 | `/qlt dumpmap` | Run the map hierarchy dump provider |
 | `/qlt ui` | Toggle the control frame |
 
