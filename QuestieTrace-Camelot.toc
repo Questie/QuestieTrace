@@ -1,0 +1,57 @@
+## Interface: 16001
+## Title: QuestieTrace
+## Version: 1.0.0
+## Author: Logon/TheCrux(BreakBB)
+## Notes: Event Trace + Function Trace
+## Category: Quests
+## Category-deDE: Quests
+## Category-esES: Misiones
+## Category-esMX: Misiones
+## Category-frFR: Quêtes
+## Category-itIT: Missioni
+## Category-koKR: 퀘스트
+## Category-ptBR: Missões
+## Category-ruRU: Задания
+## Category-zhCN: 任务
+## Category-zhTW: 任務
+## RequiredDeps:
+## OptionalDeps:
+## SavedVariables: QuestieTrace, QuestieTraceDumps
+## SavedVariablesPerCharacter: QuestieTraceCharacter
+## IconTexture: Interface\AddOns\QuestieTrace\icon.png
+## X-Curse-Project-ID: 1695789
+
+Libs/LibStub/LibStub.lua
+Libs/LibDeflate/LibDeflate.lua
+
+Modules/globals.lua
+
+Modules/Localization/l10n.lua
+Modules/Localization/Translations/Consent.lua
+Modules/Localization/Translations/ExportReminder.lua
+Modules/Localization/Translations/ExportUI.lua
+
+Modules/Consent.lua
+
+Modules/Trackers/PlayerIdentity.lua
+Modules/Trackers/UnitLevel.lua
+Modules/Trackers/Position.lua
+Modules/Trackers/Loot.lua
+Modules/Trackers/Reputation.lua
+Modules/Trackers/QuestLog.lua
+Modules/Trackers/CompletedQuests.lua
+Modules/Trackers/QuestDialog.lua
+Modules/Trackers/UnitInteraction.lua
+Modules/Trackers/GroupState.lua
+Modules/Trackers/SkillLines.lua
+Modules/Trackers/SpellBook.lua
+Modules/Trackers/ResetTime.lua
+
+Modules/Dumps/MapHierarchy.lua
+
+Modules/Export/Encoding.lua
+Modules/Export/Export.lua
+Modules/Export/ExportUI.lua
+Modules/Export/ExportReminder.lua
+
+QuestieTrace.lua
