@@ -617,6 +617,60 @@ local function TestAutoStartAfterRecoveryStartsFreshCapture()
   assert(#env.QuestieTraceCharacter.sessions == 1, "Sessions array must still have only the recovered one (not the new capture yet)")
 end
 
+local function TestRecoverCurrentSessionDiscardedWhenConsentDeclined()
+  local runtime = NewRuntime({})
+  local env = runtime.env
+  -- Simulate a leftover currentSession from a previous load
+  local leftover = {
+    schemaVersion = 9,
+    recordingContractVersion = 1,
+    name = "recovered",
+    startedAt = 100,
+    startedAtPrecise = 100,
+    events = { { t = 101, e = "TEST_EVENT" } },
+    functions = {},
+    functionsDelta = {},
+  }
+  env.QuestieTraceCharacter.currentSession = leftover
+  -- Consent explicitly declined
+  env.QuestieTrace.settings.dataCollectionConsent = false
+
+  runtime.now = 150
+  SendEvent(runtime, "VARIABLES_LOADED")
+
+  -- Session should be discarded, not saved
+  assert(#env.QuestieTraceCharacter.sessions == 0, "Recovered session must not be saved when consent is declined")
+  assert(env.QuestieTraceCharacter.currentSession == nil, "currentSession must be cleared")
+  assert(runtime.core.GetCaptureState() == "idle", "State must be idle after discarding")
+end
+
+local function TestRecoverCurrentSessionDiscardedWhenConsentUndecided()
+  local runtime = NewRuntime({})
+  local env = runtime.env
+  -- Simulate a leftover currentSession from a previous load
+  local leftover = {
+    schemaVersion = 9,
+    recordingContractVersion = 1,
+    name = "recovered",
+    startedAt = 100,
+    startedAtPrecise = 100,
+    events = { { t = 101, e = "TEST_EVENT" } },
+    functions = {},
+    functionsDelta = {},
+  }
+  env.QuestieTraceCharacter.currentSession = leftover
+  -- Consent not yet decided (nil)
+  env.QuestieTrace.settings.dataCollectionConsent = nil
+
+  runtime.now = 150
+  SendEvent(runtime, "VARIABLES_LOADED")
+
+  -- Session should be discarded, not saved
+  assert(#env.QuestieTraceCharacter.sessions == 0, "Recovered session must not be saved when consent is undecided")
+  assert(env.QuestieTraceCharacter.currentSession == nil, "currentSession must be cleared")
+  assert(runtime.core.GetCaptureState() == "idle", "State must be idle after discarding")
+end
+
 ---@type string[] Files a share-reminder runtime needs on top of globals.lua.
 local REMINDER_FILES = {
   "Modules/Localization/l10n.lua",
@@ -833,8 +887,10 @@ local tests = {
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
-  { name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
-   { name = "consent undecided shows prompt and does not auto-start", run = TestConsentUndecidedShowsPromptAndDoesNotAutoStart },
+{ name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
+  { name = "recover currentSession discarded when consent declined", run = TestRecoverCurrentSessionDiscardedWhenConsentDeclined },
+  { name = "recover currentSession discarded when consent undecided", run = TestRecoverCurrentSessionDiscardedWhenConsentUndecided },
+  { name = "consent undecided shows prompt and does not auto-start", run = TestConsentUndecidedShowsPromptAndDoesNotAutoStart },
    { name = "consent declined blocks auto-start and manual start", run = TestConsentDeclinedBlocksEverything },
    { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
    { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
