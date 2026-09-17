@@ -60,8 +60,28 @@ is no incremental migration from v8 to v9.
 
 ### Session pruning
 
-After every save, sessions exceeding `maxSessions` are removed oldest
-first (FIFO). Default limit is 20.
+After every save, sessions exceeding `maxSessions` are removed, preferring
+already-exported sessions (oldest-first among them) over never-exported ones,
+so a session the player hasn't had a chance to share yet is not silently
+dropped in favor of one that's already been reported. Only once all
+already-exported sessions are gone does pruning fall back to the oldest
+never-exported session. Default limit is 20.
+
+### Export dedup
+
+`Core.BuildExportPayload(includeAlreadyExported)` skips any saved session (and
+the live `currentSession`) whose `exportedAt` is set, unless
+`includeAlreadyExported = true` is passed (used by `/qlt export all`). This
+prevents the same session's data from being bundled into the export window
+twice. `Core.MarkSessionsExported(sourceSessions)` stamps `exportedAt` on every
+session in `sourceSessions` (the second return value of `Core.BuildExportPayload()`);
+`ExportUI.lua` calls it right after building and displaying the export string,
+so a session is only ever marked once it has actually been shown to the player.
+
+This is a coarse, best-effort proxy — the addon cannot know whether a shown
+export string was actually copied and submitted. Opening the export window is
+treated as "handled," consistent with how the share-reminder watermark
+(`reminder.sessionCounterAtExport`) already worked before this field existed.
 
 ---
 
@@ -85,8 +105,12 @@ SessionRecord = {
   events         = EventEntry[],
   functions      = table<string, FunctionStream>,
   functionsDelta = table<string, DeltaStream>,
+
+  exportedAt = 100400.000,           -- GetTime() when last included in a shown export payload; absent = never exported
 }
 ```
+
+`exportedAt` is set by `Core.MarkSessionsExported()` once a payload has actually been shown in the export window (see "Export dedup" below). It carries over when a live session (`currentSession`) that was already exported is later saved, so a session is never counted as new again just because it moved from `currentSession` into `sessions[]`.
 
 ### Recording contract
 
