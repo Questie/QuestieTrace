@@ -99,6 +99,26 @@ local function GetSavedSessionCount()
   return #characterDb.sessions
 end
 
+--- Does the live (unsaved) session hold any events Core.BuildExportPayload()
+--- would actually include? Mirrors the eligibility check in
+--- Core.BuildExportPayload() (has events, not already exported) so a player
+--- who has been playing for hours without saving still gets prompted, and
+--- doesn't lose that data to a crash before /qlt save runs.
+---@return boolean hasEvents
+local function HasUnexportedLiveSessionEvents()
+  ---@type table?
+  local characterDb = QuestieTraceCharacter
+  if type(characterDb) ~= "table" then return false end
+
+  ---@type SessionRecord?
+  local currentSession = characterDb.currentSession
+  if type(currentSession) ~= "table" or type(currentSession.events) ~= "table" then
+    return false
+  end
+
+  return #currentSession.events > 0 and not currentSession.exportedAt
+end
+
 ---------------------------------------------------------------------------
 -- Eligibility
 ---------------------------------------------------------------------------
@@ -106,13 +126,18 @@ end
 --- Is there saved data the player has not been prompted about since their
 --- last visit to the export window?
 ---
---- Only sessions in QuestieTraceCharacter.sessions count here; an unsaved
---- live session is not yet reflected in savedSessionCounter and must not
---- trigger a reminder on its own.
+--- Sessions in QuestieTraceCharacter.sessions are gated by the saved-session
+--- counter watermark. The live (unsaved) session is checked separately: it
+--- has no counter of its own, so it's due whenever it holds unexported
+--- events, regardless of whether anything has been saved yet.
 ---
 --- Extension point: a trace-size rule belongs here as a further condition.
 ---@return boolean due
 function Core.IsShareDue()
+  if HasUnexportedLiveSessionEvents() then
+    return true
+  end
+
   if GetSavedSessionCount() == 0 then
     return false
   end
