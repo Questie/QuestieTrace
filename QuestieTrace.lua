@@ -213,14 +213,6 @@ local function Trim(s)
   return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
---- Print a debug message if debug mode is enabled.
----@param ... any Values to print
-function Core.Debug(...)
-  if QuestieTrace and QuestieTrace.settings and QuestieTrace.settings.debug then
-    print(ADDON_NAME, "DEBUG:", ...)
-  end
-end
-
 --- Create a session name from an override or generate one from the current date.
 ---@param override any The optional name override
 ---@return string name
@@ -391,7 +383,7 @@ function Core.StartCapture(sessionName)
 
   local settings = QuestieTrace and QuestieTrace.settings
   if not (settings and settings.dataCollectionConsent == true) then
-    print(ADDON_NAME, Core.l10n("Data collection is disabled. Use /qlt consent to change this."))
+    Core.Print(Core.l10n("Data collection is disabled. Use /qlt consent to change this."))
     return
   end
 
@@ -553,7 +545,7 @@ local function PrintStatus()
   local state = Core.GetStatusData()
   ---@type string
   local running = state.isRunning and "running" or "stopped"
-  print(ADDON_NAME, "status:", running, "session:", state.sessionName, "events:", state.eventCount)
+  Core.Print("status:", running, "session:", state.sessionName, "events:", state.eventCount)
 end
 
 --- Print the available slash commands to chat.
@@ -602,7 +594,7 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
     Core.ShowConsentPrompt()
   elseif action == "debug" then
     QuestieTrace.settings.debug = not QuestieTrace.settings.debug
-    print(ADDON_NAME, "Debug prints:", QuestieTrace.settings.debug and "enabled" or "disabled")
+    Core.Print("Debug prints:", QuestieTrace.settings.debug and "enabled" or "disabled")
   elseif action == "export" then
     if string.lower(Trim(argument)) == "all" then
       Core.ShowExportWindow(true)
@@ -612,7 +604,7 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
   elseif Core.RunDumpBySlash(action, argument) then
     -- handled by dump provider
   else
-    print(ADDON_NAME, "Unknown command:", action)
+    Core.Print("Unknown command:", action)
     PrintHelp()
   end
 end
@@ -689,7 +681,7 @@ for i = 1, #TRACKED_EVENTS do
   ---@type boolean
   local ok = pcall(eventFrame.RegisterEvent, eventFrame, TRACKED_EVENTS[i])
   if not ok then
-    print(ADDON_NAME, "Skipping unsupported event:", TRACKED_EVENTS[i])
+    Core.Debug("Skipping unsupported event:", TRACKED_EVENTS[i])
   end
 end
 eventFrame:SetScript("OnEvent", OnEvent)
