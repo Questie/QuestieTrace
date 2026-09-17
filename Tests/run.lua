@@ -632,9 +632,22 @@ local function TestShareReminderNotDueWithoutSavedSessions()
   SendEvent(runtime, "VARIABLES_LOADED")
   assert(runtime.core.IsShareDue() == false, "No saved sessions means nothing is shareable yet")
 
-  -- A live, unsaved capture is not in the export payload and must stay silent.
+  -- A live, unsaved capture with no events yet is not in the export payload and must stay silent.
   runtime.core.StartCapture("live only")
-  assert(runtime.core.IsShareDue() == false, "An unsaved live session must not trigger a reminder")
+  assert(runtime.core.IsShareDue() == false, "An unsaved live session with no events must not trigger a reminder")
+end
+
+local function TestShareReminderDueWithUnsavedLiveSessionEvents()
+  local runtime = NewRuntime(REMINDER_FILES)
+  SendEvent(runtime, "VARIABLES_LOADED")
+
+  -- Once the live session has recorded events, it must be shareable even
+  -- though nothing has been saved yet -- a crash shouldn't lose hours of
+  -- unprompted data.
+  runtime.core.StartCapture("live only")
+  local currentSession = runtime.env.QuestieTraceCharacter.currentSession
+  currentSession.events[#currentSession.events + 1] = { t = 0, tp = 0, e = "SOME_EVENT", a = { n = 0 } }
+  assert(runtime.core.IsShareDue() == true, "An unsaved live session with events must trigger a reminder")
 end
 
 local function TestShareReminderDueAfterSave()
@@ -729,6 +742,7 @@ local tests = {
    { name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
    { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
    { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
+   { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },
    { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
    { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
    { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
