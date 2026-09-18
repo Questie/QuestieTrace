@@ -52,6 +52,30 @@ local function EscapePattern(str)
   return (str:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%1"))
 end
 
+--- Normalize UnitName return values into a flat list of name parts.
+--- Handles both patterns:
+---   - UnitName("player") -> "First Last" (single return, full name)
+---   - UnitName("partyX") -> "First", "Last" (two returns)
+--- If Blizzard ever makes UnitName("player") return two values like party units,
+--- this captures both. Also splits the first return by spaces as a fallback.
+---@param token string
+---@return string[] parts
+local function GetUnitNameParts(token)
+  if type(UnitName) ~= "function" then return {} end
+  local first, second = UnitName(token)
+  local parts = {}
+  if type(first) == "string" and first ~= "" then
+    parts[#parts + 1] = first
+    for part in first:gmatch("%S+") do
+      parts[#parts + 1] = part
+    end
+  end
+  if type(second) == "string" and second ~= "" then
+    parts[#parts + 1] = second
+  end
+  return parts
+end
+
 --- Collect the set of player names currently known to the client: the
 --- local player and, if grouped, the player's raid/party members. Built
 --- fresh on every call and never persisted -- it exists purely as an
@@ -68,17 +92,23 @@ function Core.GetPrivacyNameSet()
     end
   end
 
-  if type(UnitName) == "function" then
-    AddName(UnitName("player"))
+  -- Local player
+  for _, part in ipairs(GetUnitNameParts("player")) do
+    AddName(part)
   end
 
+  -- Party/raid members
   if type(IsInRaid) == "function" and IsInRaid() then
     for i = 1, 40 do
-      AddName(UnitName("raid" .. i))
+      for _, part in ipairs(GetUnitNameParts("raid" .. i)) do
+        AddName(part)
+      end
     end
   elseif type(IsInGroup) == "function" and IsInGroup() then
     for i = 1, 4 do
-      AddName(UnitName("party" .. i))
+      for _, part in ipairs(GetUnitNameParts("party" .. i)) do
+        AddName(part)
+      end
     end
   end
 

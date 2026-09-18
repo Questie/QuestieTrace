@@ -92,24 +92,39 @@ describe("Privacy", function()
     end)
   end)
 
-  describe("GetPrivacyNameSet", function()
-    it("should include local player name", function()
+describe("GetPrivacyNameSet", function()
+    it("should include local player name and split into parts", function()
       env.UnitName = function(token)
-        if token == "player" then return "TestPlayer" end
+        if token == "player" then return "John Doe" end
         return nil
       end
       env.IsInGroup = function() return false end
       env.IsInRaid = function() return false end
 
       local names = Core.GetPrivacyNameSet()
-      assert.is_true(names["TestPlayer"])
+      assert.is_true(names["John Doe"])
+      assert.is_true(names["John"])
+      assert.is_true(names["Doe"])
     end)
 
-    it("should include party members when in group", function()
+    it("should include local player when UnitName returns firstname, lastname separately (future-proof)", function()
+      env.UnitName = function(token)
+        if token == "player" then return "John", "Doe" end
+        return nil
+      end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      local names = Core.GetPrivacyNameSet()
+      assert.is_true(names["John"])
+      assert.is_true(names["Doe"])
+    end)
+
+    it("should include party members with both firstname and lastname", function()
       env.UnitName = function(token)
         if token == "player" then return "Player1" end
-        if token == "party1" then return "PartyMember1" end
-        if token == "party2" then return "PartyMember2" end
+        if token == "party1" then return "PartyMember", "One" end
+        if token == "party2" then return "PartyMember", "Two" end
         return nil
       end
       env.IsInGroup = function() return true end
@@ -117,24 +132,34 @@ describe("Privacy", function()
 
       local names = Core.GetPrivacyNameSet()
       assert.is_true(names["Player1"])
-      assert.is_true(names["PartyMember1"])
-      assert.is_true(names["PartyMember2"])
+      assert.is_true(names["PartyMember"])
+      assert.is_true(names["One"])
+      assert.is_true(names["Two"])
     end)
 
-    it("should include raid members when in raid", function()
+    it("should include raid members with both firstname and lastname", function()
       env.UnitName = function(token)
         if token == "player" then return "Player1" end
-        if token == "raid1" then return "Raider1" end
-        if token == "raid2" then return "Raider2" end
-        return nil
+        if token == "raid1" then return "Raider", "One" end
+        if token == "raid2" then return "Raider", "Two" end
       end
       env.IsInGroup = function() return true end
       env.IsInRaid = function() return true end
 
       local names = Core.GetPrivacyNameSet()
       assert.is_true(names["Player1"])
-      assert.is_true(names["Raider1"])
-      assert.is_true(names["Raider2"])
+      assert.is_true(names["Raider"])
+      assert.is_true(names["One"])
+      assert.is_true(names["Two"])
+    end)
+
+    it("should handle nil UnitName gracefully", function()
+      env.UnitName = function() return nil end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      local names = Core.GetPrivacyNameSet()
+      assert.are.same({}, names)
     end)
 
     it("should not include empty names", function()
@@ -146,39 +171,99 @@ describe("Privacy", function()
       assert.is_nil(names[""])
     end)
 
-    it("should handle nil UnitName gracefully", function()
-      env.UnitName = function() return nil end
-      env.IsInGroup = function() return false end
-      env.IsInRaid = function() return false end
-
-      local names = Core.GetPrivacyNameSet()
-      assert.are.same({}, names)
-    end)
-  end)
-
-  describe("SanitizeText", function()
-    it("should redact local player name from text", function()
+    it("should capture all return values from UnitName for local player", function()
+      -- Tests the GetUnitNameParts wrapper behavior through GetPrivacyNameSet
       env.UnitName = function(token)
-        if token == "player" then return "TestPlayer" end
+        if token == "player" then return "A", "B", "C" end
         return nil
       end
       env.IsInGroup = function() return false end
       env.IsInRaid = function() return false end
 
-      local result = Core.SanitizeText("Greetings, TestPlayer, welcome!")
-      assert.are.equal("Greetings, <name>, welcome!", result)
+      local names = Core.GetPrivacyNameSet()
+      assert.is_true(names["A"])
+      assert.is_true(names["B"])
+      -- third return value (if any) is ignored per wrapper design
     end)
 
-    it("should redact party member names", function()
+    it("should split first return value by spaces", function()
       env.UnitName = function(token)
-        if token == "player" then return "Player1" end
-        if token == "party1" then return "PartyMember" end
+        if token == "player" then return "First Middle Last" end
+        return nil
+      end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      local names = Core.GetPrivacyNameSet()
+      assert.is_true(names["First Middle Last"])
+      assert.is_true(names["First"])
+      assert.is_true(names["Middle"])
+      assert.is_true(names["Last"])
+    end)
+
+    it("should include party members when UnitName returns two values", function()
+      env.UnitName = function(token)
+        if token == "player" then return "Player" end
+        if token == "party1" then return "First", "Last" end
         return nil
       end
       env.IsInGroup = function() return true end
       env.IsInRaid = function() return false end
 
-      local result = Core.SanitizeText("PartyMember and Player1 are here.")
+      local names = Core.GetPrivacyNameSet()
+      assert.is_true(names["Player"])
+      assert.is_true(names["First"])
+      assert.is_true(names["Last"])
+    end)
+  end)
+
+  describe("SanitizeText", function()
+    it("should redact local player full name", function()
+      env.UnitName = function(token)
+        if token == "player" then return "John Doe" end
+        return nil
+      end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      local result = Core.SanitizeText("Greetings, John Doe, welcome!")
+      assert.are.equal("Greetings, <name>, welcome!", result)
+    end)
+
+    it("should redact local player firstname only", function()
+      env.UnitName = function(token)
+        if token == "player" then return "John Doe" end
+        return nil
+      end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      local result = Core.SanitizeText("Hello John, how are you?")
+      assert.are.equal("Hello <name>, how are you?", result)
+    end)
+
+    it("should redact local player lastname only", function()
+      env.UnitName = function(token)
+        if token == "player" then return "John Doe" end
+        return nil
+      end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      local result = Core.SanitizeText("Goodbye Doe")
+      assert.are.equal("Goodbye <name>", result)
+    end)
+
+    it("should redact party member firstname and lastname", function()
+      env.UnitName = function(token)
+        if token == "player" then return "Player1" end
+        if token == "party1" then return "PartyMember", "One" end
+        return nil
+      end
+      env.IsInGroup = function() return true end
+      env.IsInRaid = function() return false end
+
+      local result = Core.SanitizeText("PartyMember and One are here.")
       assert.are.equal("<name> and <name> are here.", result)
     end)
 
