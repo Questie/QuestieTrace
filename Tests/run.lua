@@ -582,7 +582,7 @@ local function TestRecoverCurrentSessionOnVariablesLoaded()
 end
 
 local function TestAutoStartAfterRecoveryStartsFreshCapture()
-  local runtime = NewRuntime({})
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   local env = runtime.env
   -- Simulate a leftover currentSession from a previous load
   local leftover = {
@@ -807,7 +807,7 @@ local function WasPrinted(runtime, needle)
 end
 
 local function TestConsentUndecidedShowsPromptAndDoesNotAutoStart()
-  local runtime = NewRuntime({})
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   runtime.env.QuestieTrace.settings.autoStart = true
   runtime.env.QuestieTrace.settings.dataCollectionConsent = nil
 
@@ -819,7 +819,7 @@ local function TestConsentUndecidedShowsPromptAndDoesNotAutoStart()
 end
 
 local function TestConsentDeclinedBlocksEverything()
-  local runtime = NewRuntime({})
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   runtime.env.QuestieTrace.settings.autoStart = true
   runtime.env.QuestieTrace.settings.dataCollectionConsent = false
 
@@ -834,7 +834,7 @@ local function TestConsentDeclinedBlocksEverything()
 end
 
 local function TestConsentAcceptedPrintsReminderAndAllowsAutoStart()
-  local runtime = NewRuntime({})
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   runtime.env.QuestieTrace.settings.autoStart = true
   runtime.env.QuestieTrace.settings.dataCollectionConsent = true
 
@@ -860,7 +860,7 @@ local function TestDecliningConsentStopsAndDiscardsActiveCapture()
 end
 
 local function TestConsentAcceptImmediatelyStartsCapture()
-  local runtime = NewRuntime({})
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   runtime.env.QuestieTrace.settings.dataCollectionConsent = nil
 
   -- Simulate user accepting consent popup before PLAYER_LOGIN
