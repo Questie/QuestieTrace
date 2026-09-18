@@ -123,8 +123,14 @@ function Core.SanitizeText(text)
   if type(text) ~= "string" or text == "" then return text end
 
   local sanitized = text
-  for name in pairs(Core.GetPrivacyNameSet()) do
-    sanitized = sanitized:gsub(EscapePattern(name), "<name>")
+  local nameSet = Core.GetPrivacyNameSet()
+  local names = {}
+  for name in pairs(nameSet) do
+    names[#names + 1] = name
+  end
+  table.sort(names, function(a, b) return #a > #b end)
+  for i = 1, #names do
+    sanitized = sanitized:gsub(EscapePattern(names[i]), "<name>")
   end
   return sanitized
 end
