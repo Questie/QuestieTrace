@@ -25,6 +25,7 @@ Libs/LibStub/LibStub.lua
 Libs/LibDeflate/LibDeflate.lua
 
 Modules/globals.lua
+Modules/Privacy.lua
 
 Modules/Localization/l10n.lua
 Modules/Localization/Translations/Consent.lua
