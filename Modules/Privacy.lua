@@ -180,3 +180,91 @@ function Core.SanitizeChatMsgArgs(args)
 
   return out
 end
+
+---------------------------------------------------------------------------
+-- CHAT_MSG_SYSTEM allowlist
+---------------------------------------------------------------------------
+-- CHAT_MSG_SYSTEM carries many unrelated message kinds, several of which
+-- embed player or guild names with no structural way to separate the name
+-- from the rest of the sentence (e.g. guild join/leave/invite/promote,
+-- online/offline notices). Rather than trying to detect and scrub every
+-- possible name-leaking shape (a losing game of whack-a-mole), this only
+-- allows CHAT_MSG_SYSTEM messages that match a reviewed allowlist of
+-- Blizzard's own global format strings -- see
+-- Documentation/GlobalStrings.1.60.1.69913.csv -- that are useful for
+-- quest tracing and never contain player/guild names. Anything else must
+-- be treated as unsafe and discarded by the caller.
+
+---@type string[] `BaseTag` names (Documentation/GlobalStrings.1.60.1.69913.csv)
+--- of allowlisted global format strings. Read from the client's own
+--- (locale-correct) globals at runtime, so this works regardless of game
+--- locale without hardcoding any language's wording here.
+local ALLOWED_SYSTEM_MESSAGE_TAGS = {
+  "ERR_QUEST_ACCEPTED_S",           -- "Quest accepted: %s"
+  "ERR_QUEST_COMPLETE_S",           -- "%s completed."
+  "ERR_QUEST_FAILED_S",             -- "%s failed."
+  "ERR_QUEST_FAILED_BAG_FULL_S",    -- "%s failed: Inventory is full."
+  "ERR_QUEST_FAILED_WRONG_RACE",    -- "That quest is not available to your race."
+  "ERR_QUEST_REWARD_EXP_I",         -- "Experience gained: %d."
+  "ERR_QUEST_REWARD_MONEY_S",       -- "Received %s."
+  "ERR_QUEST_LOG_FULL",             -- "Your quest log is full."
+  "ERR_QUEST_FORCE_REMOVED_S",      -- "The quest %s has been removed from your quest log."
+  "ERR_QUEST_ALREADY_DONE",         -- "You have completed that quest."
+  "ERR_QUEST_ALREADY_DONE_DAILY",   -- "You have completed that daily quest today."
+  "ERR_QUEST_ALREADY_ON",           -- "You are already on that quest."
+  "ERR_ZONE_EXPLORED_XP",           -- "Discovered %s: %d experience gained"
+  "ERR_SKILL_GAINED_S",             -- "You have gained the %s skill."
+  "ERR_SKILL_UP_SI",                -- "Your skill in %s has increased to %d."
+  "ERR_LEARN_ABILITY_S",            -- "You have learned a new ability: %s."
+  "ERR_LEARN_SPELL_S",              -- "You have learned a new spell: %s."
+  "ERR_LEARN_RECIPE_S",             -- "You have learned how to create a new item: %s."
+  "LEVEL_REQUIRED",                 -- "Req level %d"
+}
+
+--- Convert a Blizzard global format string (with `%s`/`%d`/positional
+--- `%1$s` placeholders) into an anchored Lua pattern that matches any
+--- value in place of each placeholder.
+---@param template string
+---@return string pattern
+local function GlobalStringToPattern(template)
+  -- Placeholders never contain pattern-magic characters worth preserving,
+  -- so swap them for a sentinel byte before escaping the literal parts,
+  -- then turn the sentinel into a wildcard capture-free match. Uses "\1"
+  -- rather than "\0" as the sentinel: Lua 5.1's pattern matching does not
+  -- reliably match a literal embedded NUL byte (that requires "%z").
+  local withSentinel = template:gsub("%%%d%$[sd]", "\1"):gsub("%%[sd]", "\1")
+  local escaped = EscapePattern(withSentinel)
+  return "^" .. escaped:gsub("\1", ".-") .. "$"
+end
+
+---@type string[]? Lazily built from ALLOWED_SYSTEM_MESSAGE_TAGS on first use.
+local allowedSystemMessagePatterns
+
+--- Whether a `CHAT_MSG_SYSTEM` message body matches one of the allowlisted,
+--- name-free Blizzard system message templates (quest accept/complete/fail,
+--- reward XP/money, skill/spell/recipe learned, faction requirement).
+--- Anything that does not match must be discarded rather than recorded,
+--- since CHAT_MSG_SYSTEM has no reliable structural way to separate player
+--- or guild names from the rest of the sentence.
+---@param text any
+---@return boolean
+function Core.IsAllowedSystemMessage(text)
+  if type(text) ~= "string" or text == "" then return false end
+
+  if not allowedSystemMessagePatterns then
+    allowedSystemMessagePatterns = {}
+    for i = 1, #ALLOWED_SYSTEM_MESSAGE_TAGS do
+      local template = _G[ALLOWED_SYSTEM_MESSAGE_TAGS[i]]
+      if type(template) == "string" and template ~= "" then
+        allowedSystemMessagePatterns[#allowedSystemMessagePatterns + 1] = GlobalStringToPattern(template)
+      end
+    end
+  end
+
+  for i = 1, #allowedSystemMessagePatterns do
+    if text:match(allowedSystemMessagePatterns[i]) then
+      return true
+    end
+  end
+  return false
+end

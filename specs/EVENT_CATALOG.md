@@ -270,6 +270,17 @@ dispatched: `playerName`/`playerName2` are stripped, any literal occurrence
 of those names (or the local player/party/raid roster) in `text` is
 replaced with `<name>`, and `guid` is dropped if it identifies a player.
 
+`CHAT_MSG_SYSTEM` additionally goes through an allowlist filter
+(`Core.IsAllowedSystemMessage` in `Modules/Privacy.lua`) *before* any of the
+above sanitization runs. This event type carries many unrelated message
+kinds -- several of which embed a player or guild name with no reliable
+structural way to separate the name from the rest of the sentence (guild
+join/leave/invite/promote, online/offline notices, ...). Rather than trying
+to detect and scrub every possible name-leaking shape, only messages
+matching a reviewed allowlist of Blizzard's own global format strings (see
+`Documentation/GlobalStrings.1.60.1.69913.csv`) are kept; anything else is
+dropped and never recorded or dispatched to trackers.
+
 ### Group/world
 
 - `GROUP_JOINED`

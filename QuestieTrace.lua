@@ -199,6 +199,16 @@ local EVENT_FILTERS = {
   ADDON_LOADED = function(addonName)
     return addonName == ADDON_NAME
   end,
+  -- Privacy: CHAT_MSG_SYSTEM carries many message kinds that embed player
+  -- or guild names with no reliable structural way to strip them (guild
+  -- join/leave/invite/promote, online/offline notices, ...). Only allow
+  -- through the reviewed, name-free allowlist; see Core.IsAllowedSystemMessage
+  -- in Modules/Privacy.lua.
+  ---@param text string
+  ---@return boolean
+  CHAT_MSG_SYSTEM = function(text)
+    return Core.IsAllowedSystemMessage(text)
+  end,
 }
 
 ---------------------------------------------------------------------------
