@@ -62,13 +62,14 @@ def main():
     # Parse interface versions and map to flavors
     interface_versions = get_interface_versions()
 
-    # Map leading digit to flavor: 1=classic, 2=bcc, 3=wrath, 5=mists
-    flavor_map = {"1": "classic", "2": "bcc", "3": "wrath", "5": "mists"}
+    # Map leading digit to flavor: 1=classic, 2=bcc, 3=wrath, 5=mists, 16=forever
+    flavor_map = {"1": "classic", "2": "bcc", "3": "wrath", "5": "mists", "16": "forever"}
 
     metadata_list = []
     for version in interface_versions:
         version = version.strip()
-        flavor_digit = version[0]
+        # Handle multi-digit interface versions (e.g., "16001" for forever)
+        flavor_digit = version[:2] if version.startswith("16") else version[0]
         flavor = flavor_map.get(flavor_digit)
         if flavor:
             metadata_list.append(
@@ -174,11 +175,17 @@ def get_branch():
 
 
 def get_interface_versions():
-    with open("QuestieTrace-Classic.toc", "r") as toc:
-        match = re.match("## Interface: (.*?)\n", toc.read(), re.DOTALL)
-        if match:
-            return [v.strip() for v in match.group(1).split(",")]
-        return []
+    all_versions = []
+    toc_files = ["QuestieTrace-Classic.toc", "QuestieTrace-Camelot.toc"]
+    
+    for toc_file in toc_files:
+        with open(toc_file, "r") as toc:
+            match = re.match("## Interface: (.*?)\n", toc.read(), re.DOTALL)
+            if match:
+                versions = [v.strip() for v in match.group(1).split(",")]
+                all_versions.extend(versions)
+    
+    return all_versions
 
 
 def is_tool(name):
