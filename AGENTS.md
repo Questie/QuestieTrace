@@ -2,6 +2,32 @@
 
 QuestieTrace is a World of Warcraft Classic addon written in Lua 5.1 that provides event tracing and function tracing capabilities for debugging and development.
 
+## Privacy (CRITICAL)
+
+User privacy is of the utmost importance. QuestieTrace must **never** collect or persist:
+
+- Player character names (including the local player's own name), or realm-qualified names
+- Guild names
+- Player GUIDs (e.g. `Player-1234-0053656F`) — only NPC/Creature/GameObject/Vehicle/Item GUIDs are allowed
+- Any free-form text (chat messages, gossip/quest text) that embeds a player name
+
+Rules for any code that touches trackers, dumps, or raw event recording:
+
+- Any GUID captured from a WoW API (`UnitGUID`, `GetLootSourceInfo`, chat message `guid` args, etc.) **must**
+  be classified with `Core.ParseGUIDKind` (see `Modules/globals.lua`) before being stored. Discard the value
+  entirely if the kind is `"player"` or unrecognized.
+- Any free text captured from a WoW API (`C_GossipInfo.GetText`, `GetQuestText`, chat message `text`, etc.)
+  **must** be passed through `Core.SanitizeText` before being stored.
+- Chat message events (`CHAT_MSG_*`) **must** go through `Core.SanitizeChatMsgArgs` before being recorded to
+  `session.events` or dispatched to trackers.
+- Never introduce a tracker that stores `UnitName(...)`/`UnitGUID(...)` for a token that can resolve to another
+  player without filtering through the helpers above.
+- Do not rely on `issecretvalue()` or similar "sometimes correct" global flags as the sole privacy guard —
+  privacy filtering must use explicit, deterministic, manually-reviewed checks (e.g. GUID prefix matching,
+  known-name substitution) that we own and can test.
+- Any new tracker or dump provider must be reviewed against this policy, and covered by a test that proves
+  player names/GUIDs are filtered out (see `Tests/run.lua`).
+
 ## Build & Test Commands
 
 ### Prerequisites

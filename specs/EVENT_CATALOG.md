@@ -1,8 +1,12 @@
 # Event Catalog (v9)
 
-All events are recorded to `session.events` with full packed args. Events
-are also used to trigger tracker sampling — each tracker registers which
-events it cares about via `Core.RegisterTracker`.
+All events are recorded to `session.events` with full packed args, **except**
+that every `CHAT_MSG_*` event is first passed through
+`Core.SanitizeChatMsgArgs` (see the "Privacy" sections in AGENTS.md/CLAUDE.md
+and the "Chat/system" section below) to strip player names and player GUIDs
+before recording or dispatch. Events are also used to trigger tracker
+sampling — each tracker registers which events it cares about via
+`Core.RegisterTracker`.
 
 ---
 
@@ -43,6 +47,11 @@ re-samples on open/update events to catch UI/server state settling. Close/finish
 events cancel pending delayed reads and perform one observed API sample; raw
 streams do not receive synthetic inactive values.
 
+Privacy: free-text APIs that can embed the local player's own name (e.g.
+`C_GossipInfo.GetText`'s "Greetings, <name>" pattern, `GetQuestText`,
+`GetObjectiveText`, `GetProgressText`, `GetRewardText`, `GetGreetingText`)
+are passed through `Core.SanitizeText` before being stored.
+
 - `QUEST_DETAIL`
 - `QUEST_PROGRESS`
 - `QUEST_COMPLETE`
@@ -55,6 +64,11 @@ streams do not receive synthetic inactive values.
 ### Loot tracker
 
 Triggers loot function sampling on open and observed close-state sampling on close. `LOOT_CLOSED` probes known loot APIs and records only successful API returns.
+
+Privacy: `GetLootSourceInfo` can return a player's GUID (e.g. a party member's
+corpse/personal-loot roll). Any observed source tuple containing a GUID that
+is a player's, or that does not classify as `"npc"`/`"object"`/`"item"` per
+`Core.ParseGUIDKind`, is discarded entirely rather than stored.
 
 - `LOOT_READY`
 - `LOOT_CLOSED`
@@ -104,6 +118,13 @@ sampling events).
 Triggers observed `UnitGUID` and packed observed `UnitName` sampling for
 `"target"`, `"npc"`, and `"questnpc"` tokens. All six streams are sampled on
 every event without synthesizing `UnitName` from `UnitExists`.
+
+Privacy: any of these tokens can resolve to another player character (e.g.
+targeting a party member), not just an NPC. `Core.ParseGUIDKind` classifies
+the observed `UnitGUID` before it is stored; if it resolves to `"player"` (or
+an unrecognized kind), neither the GUID nor the paired `UnitName` observation
+for that token/cycle is recorded. A `nil` GUID (no unit present) is still
+recorded, since that reflects a state transition rather than PII.
 
 **From `player_state` (shared with other trackers):**
 - `PLAYER_TARGET_CHANGED`
@@ -237,7 +258,17 @@ to trackers for login-time data sampling (see tracker sections above).
 - `CHAT_MSG_MONEY`
 - `CHAT_MSG_SKILL`
 - `CHAT_MSG_TRADESKILLS`
+- `CHAT_MSG_COMBAT_FACTION_CHANGE`
 - `CHAT_MSG_COMBAT_XP_GAIN`
+
+All of the above share the same argument shape (`text, playerName,
+languageName, channelName, playerName2, specialFlags, zoneChannelID,
+channelIndex, channelBaseName, languageID, lineID, guid, bnSenderID,
+isMobile, isSubtitle, hideSenderInLetterbox, supressRaidIcons`) and are
+routed through `Core.SanitizeChatMsgArgs` before being recorded or
+dispatched: `playerName`/`playerName2` are stripped, any literal occurrence
+of those names (or the local player/party/raid roster) in `text` is
+replaced with `<name>`, and `guid` is dropped if it identifies a player.
 
 ### Group/world
 
