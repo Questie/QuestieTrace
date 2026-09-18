@@ -9,6 +9,9 @@ on:
       repo_full_name:
         required: true
         type: string
+    secrets:
+      DISCORD_WEBHOOK:
+        required: true
   push:
     branches:
       - '**'
