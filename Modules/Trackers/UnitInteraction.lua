@@ -68,25 +68,36 @@ local function SampleAll(t, tp)
     -- UnitGUID (scalar string or nil). Store only successful observed returns.
     local guidOk, guid = SafeScalarCall(UnitGUID, token)
     if guidOk then
-      ---@type FunctionStreamEntry[]
-      local guidStream = guidStreams[token]
-      ---@type FunctionStreamEntry?
-      local prevGuid = guidStream[#guidStream]
-      if not prevGuid or prevGuid.v ~= guid then
-        guidStream[#guidStream + 1] = { t = t, tp = tp, v = guid }
-      end
-    end
+      -- Privacy: `target`/`npc`/`questnpc` tokens can resolve to another
+      -- player character just as easily as an NPC (e.g. targeting a party
+      -- member). Never record a player's GUID or name. A nil guid (no
+      -- unit) is still recorded, since that's a state transition, not PII.
+      ---@type "player"|"npc"|"object"|"item"|nil
+      local kind = Core.ParseGUIDKind(guid)
+      ---@type boolean
+      local allowed = guid == nil or kind == "npc" or kind == "object" or kind == "item"
 
-    -- UnitName (packed actual returns). Do not synthesize nil from UnitExists;
-    -- the token itself is mutable, so event-synchronous observations are the trace.
-    local nameOk, nameVal = SafePackedCall(UnitName, token)
-    if nameOk and nameVal then
-      ---@type FunctionStreamEntry[]
-      local nameStream = nameStreams[token]
-      ---@type FunctionStreamEntry?
-      local prevName = nameStream[#nameStream]
-      if not prevName or not DeepCompare(prevName.v, nameVal) then
-        nameStream[#nameStream + 1] = { t = t, tp = tp, v = nameVal }
+      if allowed then
+        ---@type FunctionStreamEntry[]
+        local guidStream = guidStreams[token]
+        ---@type FunctionStreamEntry?
+        local prevGuid = guidStream[#guidStream]
+        if not prevGuid or prevGuid.v ~= guid then
+          guidStream[#guidStream + 1] = { t = t, tp = tp, v = guid }
+        end
+
+        -- UnitName (packed actual returns). Do not synthesize nil from UnitExists;
+        -- the token itself is mutable, so event-synchronous observations are the trace.
+        local nameOk, nameVal = SafePackedCall(UnitName, token)
+        if nameOk and nameVal then
+          ---@type FunctionStreamEntry[]
+          local nameStream = nameStreams[token]
+          ---@type FunctionStreamEntry?
+          local prevName = nameStream[#nameStream]
+          if not prevName or not DeepCompare(prevName.v, nameVal) then
+            nameStream[#nameStream + 1] = { t = t, tp = tp, v = nameVal }
+          end
+        end
       end
     end
   end

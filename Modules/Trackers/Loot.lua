@@ -141,6 +141,30 @@ local function SampleLootCount(t, tp)
   return nil
 end
 
+---Whether every GUID present in a packed GetLootSourceInfo tuple
+---(guid1, qty1, guid2, qty2, ...) is safe to store. Mirrors the allow-list
+---used by UnitInteraction.lua: only recognized non-player kinds are kept, so
+---a player GUID *or* an unrecognized GUID kind causes the whole tuple to be
+---discarded (see AGENTS.md/CLAUDE.md "Privacy": discard if "player" or
+---unrecognized).
+---@param source PackedArgs?
+---@return boolean allowed
+local function IsLootSourceAllowed(source)
+  if type(source) ~= "table" then return true end
+  for i = 1, source.n or 0, 2 do
+    ---@type any
+    local guid = source[i]
+    if guid ~= nil then
+      ---@type "player"|"npc"|"object"|"item"|nil
+      local kind = Core.ParseGUIDKind(guid)
+      if kind ~= "npc" and kind ~= "object" and kind ~= "item" then
+        return false
+      end
+    end
+  end
+  return true
+end
+
 ---Probe one loot slot and append successful observed API returns.
 ---@param t number
 ---@param tp number
@@ -153,8 +177,10 @@ local function ProbeLootSlot(t, tp, slot)
     AppendPackedIfChanged(streams.info, t, tp, info)
   end
 
+  -- Privacy: never record a loot source GUID that belongs to a player, or
+  -- to an unrecognized GUID kind.
   local sourceOk, source = SafePackedCall(GetLootSourceInfo, slot)
-  if sourceOk and source then
+  if sourceOk and source and IsLootSourceAllowed(source) then
     AppendPackedIfChanged(streams.source, t, tp, source)
   end
 

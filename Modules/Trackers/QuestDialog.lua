@@ -161,6 +161,20 @@ local function EnsureFlatStream(key)
   availableFlatStreams[key] = true
 end
 
+---Function keys whose returned string is free-form text that can embed a
+---player's own name (e.g. NPC greetings like "Greetings, <name>"). These are
+---run through Core.SanitizeText before being stored; see AGENTS.md/CLAUDE.md
+---"Privacy" sections.
+---@type table<string, boolean>
+local SANITIZE_TEXT_FUNCTIONS = {
+  ["C_GossipInfo.GetText"] = true,
+  GetGreetingText = true,
+  GetQuestText = true,
+  GetObjectiveText = true,
+  GetProgressText = true,
+  GetRewardText = true,
+}
+
 ---Sample one parameterless stream.
 ---@param t number
 ---@param tp number
@@ -170,6 +184,10 @@ local function SampleFlatStream(t, tp, def)
 
   local ok, value = def.getter()
   if not ok then return end
+
+  if SANITIZE_TEXT_FUNCTIONS[def.key] then
+    value = Core.SanitizeText(value)
+  end
 
   local stream = functions[def.key]
   ---@cast stream FunctionStreamEntry[]

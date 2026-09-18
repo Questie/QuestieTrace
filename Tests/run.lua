@@ -869,6 +869,313 @@ local function TestConsentAcceptImmediatelyStartsCapture()
   assert(runtime.core.GetCaptureState() == "running", "Capture must start immediately when consent is accepted")
 end
 
+---------------------------------------------------------------------------
+-- Privacy tests
+---------------------------------------------------------------------------
+
+local function TestParseGUIDKindClassifiesPrefixes()
+  local runtime = NewRuntime({})
+  local Core = runtime.core
+
+  assert(Core.ParseGUIDKind("Player-4618-0053656F") == "player", "Player- prefix must classify as player")
+  assert(Core.ParseGUIDKind("Creature-0-6783-1-269-2980-00002C50D7") == "npc", "Creature- prefix must classify as npc")
+  assert(Core.ParseGUIDKind("Pet-0-6783-1-269-2980-00002C50D7") == "npc", "Pet- prefix must classify as npc")
+  assert(Core.ParseGUIDKind("Vehicle-0-6783-1-269-2980-00002C50D7") == "npc", "Vehicle- prefix must classify as npc")
+  assert(Core.ParseGUIDKind("GameObject-0-6783-1-269-2980-00002C50D7") == "object", "GameObject- prefix must classify as object")
+  assert(Core.ParseGUIDKind("Item-4-0-000012") == "item", "Item- prefix must classify as item")
+  assert(Core.ParseGUIDKind("Nonsense-guid") == nil, "Unrecognized GUID prefixes must classify as nil")
+  assert(Core.ParseGUIDKind(nil) == nil, "nil guid must classify as nil")
+
+  assert(Core.IsPlayerGUID("Player-4618-0053656F") == true, "IsPlayerGUID must detect player GUIDs")
+  assert(Core.IsPlayerGUID("Creature-0-6783-1-269-2980-00002C50D7") == false, "IsPlayerGUID must not flag npc GUIDs")
+end
+
+local function TestSanitizeTextRedactsLocalPlayerName()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function(token)
+    if token == "player" then return "Cruxdruid" end
+    return nil
+  end
+
+  local sanitized = runtime.core.SanitizeText("Greetings, Cruxdruid, and welcome to Camp Narache.")
+  assert(sanitized == "Greetings, <name>, and welcome to Camp Narache.",
+    "Local player's own name must be redacted: " .. tostring(sanitized))
+  assert(not sanitized:find("Cruxdruid", 1, true), "Sanitized text must not contain the raw player name")
+end
+
+local function TestSanitizeTextRedactsGroupRosterNames()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function(token)
+    if token == "player" then return "Cruxdruid" end
+    if token == "party1" then return "Alice" end
+    if token == "party2" then return "Bob" end
+    return nil
+  end
+  runtime.env.IsInGroup = function() return true end
+  runtime.env.IsInRaid = function() return false end
+
+  local sanitized = runtime.core.SanitizeText("Alice and Bob and Cruxdruid enter the dungeon.")
+  assert(sanitized == "<name> and <name> and <name> enter the dungeon.",
+    "Party roster names must be redacted: " .. tostring(sanitized))
+end
+
+local function TestSanitizeTextLeavesUnrelatedTextAlone()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function() return nil end
+
+  local text = "Your reputation with Timbermaw Hold has very slightly increased."
+  assert(runtime.core.SanitizeText(text) == text, "Text without known player names must be left untouched")
+  assert(runtime.core.SanitizeText(nil) == nil, "Non-string input must be returned unchanged")
+  assert(runtime.core.SanitizeText("") == "", "Empty string must be returned unchanged")
+end
+
+local function TestSanitizeChatMsgArgsStripsNamesAndGuid()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function() return nil end
+
+  -- CHAT_MSG_LOOT signature: text, playerName, languageName, channelName,
+  -- playerName2, specialFlags, zoneChannelID, channelIndex, channelBaseName,
+  -- languageID, lineID, guid, bnSenderID, isMobile, isSubtitle,
+  -- hideSenderInLetterbox, supressRaidIcons
+  local args = runtime.core.PackArgs(
+    "Grimtotem receives loot: [Plainstrider Feather].", "Grimtotem", "", "",
+    "", "", 0, 0, "", 0, 1, "Player-4618-0053656F", 0, false, false, false, false
+  )
+
+  local sanitized = runtime.core.SanitizeChatMsgArgs(args)
+
+  assert(sanitized[1] == "<name> receives loot: [Plainstrider Feather].",
+    "Message text must have the player's name redacted: " .. tostring(sanitized[1]))
+  assert(sanitized[2] == nil, "playerName arg must be discarded")
+  assert(sanitized[5] == nil, "playerName2 arg must be discarded")
+  assert(sanitized[12] == nil, "Player guid arg must be discarded")
+  assert(sanitized[11] == 1, "Unrelated args (lineID) must be preserved")
+  assert(args[2] == "Grimtotem", "The original PackedArgs must not be mutated")
+end
+
+local function TestSanitizeChatMsgArgsPreservesNonPlayerGuid()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function() return nil end
+
+  local args = runtime.core.PackArgs(
+    "You loot 4 Copper", "Cruxdruid", "", "", "", "", 0, 0, "", 0, 1,
+    "Creature-0-6783-1-269-2980-00002C50D7", 0, false, false, false, false
+  )
+
+  local sanitized = runtime.core.SanitizeChatMsgArgs(args)
+  assert(sanitized[12] == "Creature-0-6783-1-269-2980-00002C50D7", "Non-player guid must be preserved")
+end
+
+local function TestChatMsgLootEventIsSanitizedInSession()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function() return nil end
+  runtime.core.StartCapture("chat loot sanitize")
+
+  runtime.frame.OnEvent(
+    runtime.frame, "CHAT_MSG_LOOT",
+    "Grimtotem receives loot: [Plainstrider Feather].", "Grimtotem", "", "",
+    "", "", 0, 0, "", 0, 1, "Player-4618-0053656F", 0, false, false, false, false
+  )
+
+  local session = Session(runtime)
+  local recorded = session.events[#session.events]
+  assert(recorded.e == "CHAT_MSG_LOOT", "Precondition: last event must be CHAT_MSG_LOOT")
+  assert(recorded.a[1] == "<name> receives loot: [Plainstrider Feather].",
+    "Recorded event text must be sanitized: " .. tostring(recorded.a[1]))
+  assert(recorded.a[2] == nil, "Recorded playerName must be scrubbed")
+  assert(recorded.a[12] == nil, "Recorded guid must be scrubbed")
+end
+
+local function TestUnitInteractionSkipsPlayerTarget()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  runtime.env.UnitGUID = function(token)
+    if token == "target" then return "Player-4620-00572164" end
+    return nil
+  end
+  runtime.env.UnitName = function(token)
+    if token == "target" then return "SomeOtherPlayer", nil end
+    return nil
+  end
+
+  runtime.core.StartCapture("unit interaction privacy")
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+
+  local session = Session(runtime)
+  local guidStream = session.functions.UnitGUID.target
+  local nameStream = session.functions.UnitName.target
+  assert(#guidStream == 0, "A player target's GUID must never be recorded")
+  assert(#nameStream == 0, "A player target's name must never be recorded")
+end
+
+local function TestUnitInteractionRecordsNpcTarget()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  runtime.env.UnitGUID = function(token)
+    if token == "target" then return "Creature-0-6783-1-269-2980-00002C50D7" end
+    return nil
+  end
+  runtime.env.UnitName = function(token)
+    if token == "target" then return "Plainstrider", nil end
+    return nil
+  end
+
+  runtime.core.StartCapture("unit interaction npc")
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+
+  local session = Session(runtime)
+  local guidStream = session.functions.UnitGUID.target
+  local nameStream = session.functions.UnitName.target
+  assert(#guidStream == 1 and guidStream[1].v == "Creature-0-6783-1-269-2980-00002C50D7",
+    "NPC target GUID must still be recorded")
+  assert(#nameStream == 1 and nameStream[1].v[1] == "Plainstrider", "NPC target name must still be recorded")
+end
+
+local function TestLootSkipsPlayerSourcedGuid()
+  local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" })
+  runtime.env.GetNumLootItems = function() return 1 end
+  runtime.env.GetLootSlotInfo = function() return "icon", "Item", 1, 0, 1, false, false, 0, true end
+  runtime.env.GetLootSourceInfo = function() return "Player-4620-00572164", 1 end
+  runtime.env.GetLootSlotLink = function() return "itemlink" end
+  runtime.env.GetLootSlotType = function() return 1 end
+
+  runtime.core.StartCapture("loot privacy")
+  SendEvent(runtime, "LOOT_READY")
+
+  local session = Session(runtime)
+  local sourceStream = session.functions.GetLootSourceInfo[1]
+  assert(sourceStream == nil or #sourceStream == 0, "A player-sourced loot GUID must never be recorded")
+end
+
+local function TestLootRecordsNpcSourcedGuid()
+  local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" })
+  runtime.env.GetNumLootItems = function() return 1 end
+  runtime.env.GetLootSlotInfo = function() return "icon", "Item", 1, 0, 1, false, false, 0, true end
+  runtime.env.GetLootSourceInfo = function() return "Creature-0-6783-1-269-2980-00002C50D7", 1 end
+  runtime.env.GetLootSlotLink = function() return "itemlink" end
+  runtime.env.GetLootSlotType = function() return 1 end
+
+  runtime.core.StartCapture("loot npc source")
+  SendEvent(runtime, "LOOT_READY")
+
+  local session = Session(runtime)
+  local sourceStream = session.functions.GetLootSourceInfo[1]
+  assert(sourceStream and #sourceStream == 1 and sourceStream[1].v[1] == "Creature-0-6783-1-269-2980-00002C50D7",
+    "An npc-sourced loot GUID must be recorded")
+end
+
+local function TestLootAllowsMultiPairAllNpcSourceTuple()
+  local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" })
+  runtime.env.GetNumLootItems = function() return 1 end
+  runtime.env.GetLootSlotInfo = function() return "icon", "Item", 1, 0, 1, false, false, 0, true end
+  runtime.env.GetLootSourceInfo = function()
+    return "Creature-0-6783-1-269-2980-00002C50D7", 1, "Creature-0-6783-1-269-2981-00002C50D7", 1
+  end
+  runtime.env.GetLootSlotLink = function() return "itemlink" end
+  runtime.env.GetLootSlotType = function() return 1 end
+
+  runtime.core.StartCapture("loot multi npc source")
+  SendEvent(runtime, "LOOT_READY")
+
+  local session = Session(runtime)
+  local sourceStream = session.functions.GetLootSourceInfo[1]
+  assert(sourceStream and #sourceStream == 1 and sourceStream[1].v.n == 4,
+    "A multi-pair source tuple with only npc guids must be recorded in full")
+end
+
+local function TestLootSkipsMultiPairSourceTupleWithAnyPlayerGuid()
+  local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" })
+  runtime.env.GetNumLootItems = function() return 1 end
+  runtime.env.GetLootSlotInfo = function() return "icon", "Item", 1, 0, 1, false, false, 0, true end
+  runtime.env.GetLootSourceInfo = function()
+    return "Creature-0-6783-1-269-2980-00002C50D7", 1, "Player-4620-00572164", 1
+  end
+  runtime.env.GetLootSlotLink = function() return "itemlink" end
+  runtime.env.GetLootSlotType = function() return 1 end
+
+  runtime.core.StartCapture("loot mixed source with player")
+  SendEvent(runtime, "LOOT_READY")
+
+  local session = Session(runtime)
+  local sourceStream = session.functions.GetLootSourceInfo[1]
+  assert(sourceStream == nil or #sourceStream == 0,
+    "A source tuple must be discarded entirely if any entry is a player guid, even alongside an npc entry")
+end
+
+local function TestLootSkipsUnrecognizedGuidKind()
+  local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" })
+  runtime.env.GetNumLootItems = function() return 1 end
+  runtime.env.GetLootSlotInfo = function() return "icon", "Item", 1, 0, 1, false, false, 0, true end
+  runtime.env.GetLootSourceInfo = function() return "Corpse-0-6783-1-269-2980-00002C50D7", 1 end
+  runtime.env.GetLootSlotLink = function() return "itemlink" end
+  runtime.env.GetLootSlotType = function() return 1 end
+
+  runtime.core.StartCapture("loot unrecognized guid kind")
+  SendEvent(runtime, "LOOT_READY")
+
+  local session = Session(runtime)
+  local sourceStream = session.functions.GetLootSourceInfo[1]
+  assert(sourceStream == nil or #sourceStream == 0,
+    "An unrecognized (non npc/object/item) guid kind must be discarded, not just player guids")
+end
+
+local function TestUnitInteractionSkipsUnrecognizedGuidKind()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  runtime.env.UnitGUID = function(token)
+    if token == "target" then return "Corpse-0-6783-1-269-2980-00002C50D7" end
+    return nil
+  end
+  runtime.env.UnitName = function(token)
+    if token == "target" then return "SomeCorpse", nil end
+    return nil
+  end
+
+  runtime.core.StartCapture("unit interaction unrecognized kind")
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+
+  local session = Session(runtime)
+  local guidStream = session.functions.UnitGUID.target
+  local nameStream = session.functions.UnitName.target
+  assert(#guidStream == 0, "An unrecognized guid kind must never be recorded")
+  assert(#nameStream == 0, "The paired name for an unrecognized guid kind must never be recorded")
+end
+
+local function TestSanitizeTextEscapesSpecialCharactersInNames()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function(token)
+    if token == "player" then return "Bri'ka-Nn" end
+    return nil
+  end
+
+  local sanitized = runtime.core.SanitizeText("Greetings, Bri'ka-Nn, welcome home.")
+  assert(sanitized == "Greetings, <name>, welcome home.",
+    "Names with pattern-magic characters (apostrophe, hyphen) must be escaped and redacted: " .. tostring(sanitized))
+end
+
+local function TestChatMsgLootDispatchArgsAreSanitized()
+  local runtime = NewRuntime({})
+  runtime.env.UnitName = function() return nil end
+
+  local capturedArgs
+  runtime.core.RegisterTracker({
+    events = { "CHAT_MSG_LOOT" },
+    OnEvent = function(_, _, ...)
+      capturedArgs = runtime.core.PackArgs(...)
+    end,
+  })
+
+  runtime.core.StartCapture("dispatch sanitize")
+  runtime.frame.OnEvent(
+    runtime.frame, "CHAT_MSG_LOOT",
+    "Grimtotem receives loot: [Plainstrider Feather].", "Grimtotem", "", "",
+    "", "", 0, 0, "", 0, 1, "Player-4618-0053656F", 0, false, false, false, false
+  )
+
+  assert(capturedArgs, "The dummy tracker callback must have been invoked")
+  assert(capturedArgs[1] == "<name> receives loot: [Plainstrider Feather].",
+    "Args dispatched to trackers must be sanitized, not just the recorded event: " .. tostring(capturedArgs[1]))
+  assert(capturedArgs[2] == nil, "Dispatched playerName must be scrubbed")
+  assert(capturedArgs[12] == nil, "Dispatched guid must be scrubbed")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -903,6 +1210,23 @@ local tests = {
   { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
   { name = "share reminder survives session pruning", run = TestShareReminderSurvivesSessionPruning },
   { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
+  { name = "ParseGUIDKind classifies GUID prefixes", run = TestParseGUIDKindClassifiesPrefixes },
+  { name = "SanitizeText redacts local player's own name", run = TestSanitizeTextRedactsLocalPlayerName },
+  { name = "SanitizeText redacts group roster names", run = TestSanitizeTextRedactsGroupRosterNames },
+  { name = "SanitizeText leaves unrelated text alone", run = TestSanitizeTextLeavesUnrelatedTextAlone },
+  { name = "SanitizeChatMsgArgs strips names and player guid", run = TestSanitizeChatMsgArgsStripsNamesAndGuid },
+  { name = "SanitizeChatMsgArgs preserves non-player guid", run = TestSanitizeChatMsgArgsPreservesNonPlayerGuid },
+  { name = "CHAT_MSG_LOOT event is sanitized in session", run = TestChatMsgLootEventIsSanitizedInSession },
+  { name = "UnitInteraction skips a player target's guid/name", run = TestUnitInteractionSkipsPlayerTarget },
+  { name = "UnitInteraction still records an npc target's guid/name", run = TestUnitInteractionRecordsNpcTarget },
+  { name = "Loot skips a player-sourced loot guid", run = TestLootSkipsPlayerSourcedGuid },
+  { name = "Loot still records an npc-sourced loot guid", run = TestLootRecordsNpcSourcedGuid },
+  { name = "Loot allows a multi-pair all-npc source tuple", run = TestLootAllowsMultiPairAllNpcSourceTuple },
+  { name = "Loot skips a multi-pair source tuple with any player guid", run = TestLootSkipsMultiPairSourceTupleWithAnyPlayerGuid },
+  { name = "Loot skips an unrecognized (non npc/object/item) guid kind", run = TestLootSkipsUnrecognizedGuidKind },
+  { name = "UnitInteraction skips an unrecognized guid kind", run = TestUnitInteractionSkipsUnrecognizedGuidKind },
+  { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
+  { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
 }
 
 local failures = 0
