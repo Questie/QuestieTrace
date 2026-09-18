@@ -216,9 +216,8 @@ local function HandleExportLink(link)
     return false
   end
 
-  if Core.ShowExportWindow then
-    Core.ShowExportWindow()
-  end
+  Core.ShowExportWindow()
+
   return true
 end
 

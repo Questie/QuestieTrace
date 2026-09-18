@@ -689,9 +689,8 @@ local function OnEvent(_, event, ...)
         Core.ShowConsentPrompt()
       end
     elseif consent == true then
-      if Core.PrintConsentReminder then
-        Core.PrintConsentReminder()
-      end
+      Core.PrintConsentReminder()
+
       -- Only auto-start if no capture is running AND no recovered session exists
       -- (capture.session would be set by EnsureSavedVariables recovery)
       if (not capture.active) and (not capture.session) then
@@ -699,9 +698,8 @@ local function OnEvent(_, event, ...)
           Core.StartCapture()
         end
       end
-      if Core.StartShareReminders then
-        Core.StartShareReminders()
-      end
+
+      Core.StartShareReminders()
     end
     -- consent == false: declined; do not prompt, message, or auto-start.
   end
