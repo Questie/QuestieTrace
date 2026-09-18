@@ -397,6 +397,20 @@ describe("GetPrivacyNameSet", function()
       assert.are.equal("Creature-0-6783-1-269-2980-00002C50D7", sanitized[12])
     end)
 
+    it("should discard unrecognized GUID kinds (arg 12)", function()
+      env.UnitName = function() return nil end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      local args = Core.PackArgs(
+        "text", "player", "", "", "", "", 0, 0, "", 0, 1,
+        "Corpse-0-6783-1-269-2980-00002C50D7", 0, false, false, false, false
+      )
+
+      local sanitized = Core.SanitizeChatMsgArgs(args)
+      assert.is_nil(sanitized[12])
+    end)
+
     it("should not mutate the original args", function()
       env.UnitName = function() return nil end
       env.IsInGroup = function() return false end
