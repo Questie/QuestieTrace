@@ -167,7 +167,8 @@ function Core.SanitizeChatMsgArgs(args)
     out[index] = nil
   end
 
-  if Core.IsPlayerGUID(out[CHAT_MSG_GUID_ARG_INDEX]) then
+  local guidKind = Core.ParseGUIDKind(out[CHAT_MSG_GUID_ARG_INDEX])
+  if guidKind ~= "npc" and guidKind ~= "object" and guidKind ~= "item" then
     out[CHAT_MSG_GUID_ARG_INDEX] = nil
   end
 
