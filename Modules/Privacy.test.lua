@@ -10,6 +10,29 @@ local function LoadPrivacyModule(env)
   env.IsInGroup = function() return false end
   env.IsInRaid = function() return false end
 
+  -- Mock the Blizzard global strings Core.IsAllowedSystemMessage reads from
+  -- _G (normally populated by Interface/GlobalStrings.lua on the client).
+  -- Wording taken from Documentation/GlobalStrings.1.60.1.69913.csv (enUS).
+  env.ERR_QUEST_ACCEPTED_S = "Quest accepted: %s"
+  env.ERR_QUEST_COMPLETE_S = "%s completed."
+  env.ERR_QUEST_FAILED_S = "%s failed."
+  env.ERR_QUEST_FAILED_BAG_FULL_S = "%s failed: Inventory is full."
+  env.ERR_QUEST_FAILED_WRONG_RACE = "That quest is not available to your race."
+  env.ERR_QUEST_REWARD_EXP_I = "Experience gained: %d."
+  env.ERR_QUEST_REWARD_MONEY_S = "Received %s."
+  env.ERR_QUEST_LOG_FULL = "Your quest log is full."
+  env.ERR_QUEST_FORCE_REMOVED_S = "The quest %s has been removed from your quest log."
+  env.ERR_QUEST_ALREADY_DONE = "You have completed that quest."
+  env.ERR_QUEST_ALREADY_DONE_DAILY = "You have completed that daily quest today."
+  env.ERR_QUEST_ALREADY_ON = "You are already on that quest."
+  env.ERR_ZONE_EXPLORED_XP = "Discovered %s: %d experience gained"
+  env.ERR_SKILL_GAINED_S = "You have gained the %s skill."
+  env.ERR_SKILL_UP_SI = "Your skill in %s has increased to %d."
+  env.ERR_LEARN_ABILITY_S = "You have learned a new ability: %s."
+  env.ERR_LEARN_SPELL_S = "You have learned a new spell: %s."
+  env.ERR_LEARN_RECIPE_S = "You have learned how to create a new item: %s."
+  env.LEVEL_REQUIRED = "Req level %d"
+
   -- Load globals.lua first (provides CopyPacked, etc.)
   local chunkGlobals = assert(loadfile("Modules/globals.lua"))
   setfenv(chunkGlobals, env)
@@ -480,6 +503,101 @@ describe("GetPrivacyNameSet", function()
       local sanitized = Core.SanitizeChatMsgArgs(nil)
       assert.is_table(sanitized)
       assert.are.equal(0, sanitized.n)
+    end)
+  end)
+
+  describe("IsAllowedSystemMessage", function()
+    it("should allow a quest accepted message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("Quest accepted: A Humble Task"))
+    end)
+
+    it("should allow a quest completed message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("Grace of An'she and Mu'sha completed."))
+    end)
+
+    it("should allow a quest failed message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("The Hunt Begins failed."))
+    end)
+
+    it("should allow an experience gained message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("Experience gained: 170."))
+    end)
+
+    it("should allow a money received message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("Received 17 Copper."))
+    end)
+
+    it("should allow a skill gained message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("You have gained the Herbalism skill."))
+    end)
+
+    it("should allow a skill increased message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("Your skill in Herbalism has increased to 50."))
+    end)
+
+    it("should allow a learned ability message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("You have learned a new ability: |cff71d5ff|Hspell:2383:0|h[Find Herbs]|h|r."))
+    end)
+
+    it("should allow a learned spell message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("You have learned a new spell: |cff71d5ff|Hspell:1126:0|h[Mark of the Wild]|h|r."))
+    end)
+
+    it("should allow a learned recipe message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("You have learned how to create a new item: Bronze Tube."))
+    end)
+
+    it("should allow a static quest log full message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("Your quest log is full."))
+    end)
+
+    it("should allow a static wrong-race quest failure message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("That quest is not available to your race."))
+    end)
+
+    it("should allow a level requirement message", function()
+      assert.is_true(Core.IsAllowedSystemMessage("Req level 10"))
+    end)
+
+    it("should reject a guild join message", function()
+      assert.is_false(Core.IsAllowedSystemMessage("Tommy Naid has joined the guild."))
+    end)
+
+    it("should reject a guild leave message", function()
+      assert.is_false(Core.IsAllowedSystemMessage("Arrow Beth has left the guild."))
+    end)
+
+    it("should reject an offline notification", function()
+      assert.is_false(Core.IsAllowedSystemMessage("Pinky Rakiyash has gone offline."))
+    end)
+
+    it("should reject an online notification with a player hyperlink", function()
+      assert.is_false(Core.IsAllowedSystemMessage("|Hplayer:Red Axl|h[Red Axl]|h has come online."))
+    end)
+
+    it("should reject a guild invite message", function()
+      assert.is_false(Core.IsAllowedSystemMessage("|Hplayer:Red Axl|h[Red Axl]|h invites you to join Ony Fans."))
+    end)
+
+    it("should reject a guild promote message", function()
+      assert.is_false(Core.IsAllowedSystemMessage("Red Axl has promoted Ar Droll to Common."))
+    end)
+
+    it("should reject an unrelated server broadcast", function()
+      assert.is_false(Core.IsAllowedSystemMessage("[SERVER] We're restarting soon."))
+    end)
+
+    it("should reject a rested-state message not on the allowlist", function()
+      assert.is_false(Core.IsAllowedSystemMessage("You are no longer rested."))
+    end)
+
+    it("should reject non-string input", function()
+      assert.is_false(Core.IsAllowedSystemMessage(nil))
+      assert.is_false(Core.IsAllowedSystemMessage(42))
+    end)
+
+    it("should reject empty string input", function()
+      assert.is_false(Core.IsAllowedSystemMessage(""))
     end)
   end)
 end)
