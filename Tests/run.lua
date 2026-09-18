@@ -1177,6 +1177,115 @@ local function TestChatMsgLootDispatchArgsAreSanitized()
   assert(capturedArgs[12] == nil, "Dispatched guid must be scrubbed")
 end
 
+local function TestUnitInteractionMouseover()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local env = runtime.env
+
+  -- Mock WoW API for mouseover unit
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitGUID = function(token)
+    if token == "mouseover" then return "Creature-0-1-1-1-12345-000001" end
+    return nil
+  end
+  env.UnitName = function(token)
+    if token == "mouseover" then return "Test NPC", "Realm" end
+    return nil
+  end
+
+  runtime.core.StartCapture("mouseover test")
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify UnitGUID["mouseover"] was recorded
+  assert(functions.UnitGUID and functions.UnitGUID.mouseover, "UnitGUID[mouseover] stream must exist")
+  assert(#functions.UnitGUID.mouseover >= 1, "UnitGUID[mouseover] must have at least one entry")
+  assert(functions.UnitGUID.mouseover[1].v == "Creature-0-1-1-1-12345-000001", "UnitGUID[mouseover] value must match mocked GUID")
+
+  -- Verify UnitName["mouseover"] was recorded
+  assert(functions.UnitName and functions.UnitName.mouseover, "UnitName[mouseover] stream must exist")
+  assert(#functions.UnitName.mouseover >= 1, "UnitName[mouseover] must have at least one entry")
+  assert(functions.UnitName.mouseover[1].v[1] == "Test NPC" and functions.UnitName.mouseover[1].v[2] == "Realm",
+    "UnitName[mouseover] value must match mocked name")
+end
+
+local function TestUnitStateTracker()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+
+  -- Mock WoW API for target and mouseover
+  env.UnitExists = function(token) return token == "target" or token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitLevel = function(token)
+    if token == "target" then return 20 end
+    if token == "mouseover" then return -1 end -- "??" skull boss
+    return nil
+  end
+  env.UnitClassification = function(token)
+    if token == "target" then return "elite" end
+    if token == "mouseover" then return "worldboss" end
+    return nil
+  end
+  env.UnitReaction = function(unit, token)
+    if unit == "player" and token == "target" then return 5 end -- Neutral
+    if unit == "player" and token == "mouseover" then return 8 end -- Exalted
+    return nil
+  end
+
+  runtime.core.StartCapture("unitstate test")
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify UnitLevel["target"] recorded
+  assert(functions.UnitLevel and functions.UnitLevel.target, "UnitLevel[target] stream must exist")
+  assert(#functions.UnitLevel.target >= 1, "UnitLevel[target] must have entry")
+  assert(functions.UnitLevel.target[1].v == 20, "UnitLevel[target] must be 20")
+
+  -- Verify UnitLevel["mouseover"] recorded (-1 for "??")
+  assert(functions.UnitLevel and functions.UnitLevel.mouseover, "UnitLevel[mouseover] stream must exist")
+  assert(#functions.UnitLevel.mouseover >= 1, "UnitLevel[mouseover] must have entry")
+  assert(functions.UnitLevel.mouseover[1].v == -1, "UnitLevel[mouseover] must be -1")
+
+  -- Verify UnitClassification["target"] recorded
+  assert(functions.UnitClassification and functions.UnitClassification.target, "UnitClassification[target] stream must exist")
+  assert(#functions.UnitClassification.target >= 1, "UnitClassification[target] must have entry")
+  assert(functions.UnitClassification.target[1].v == "elite", "UnitClassification[target] must be elite")
+
+  -- Verify UnitClassification["mouseover"] recorded
+  assert(functions.UnitClassification and functions.UnitClassification.mouseover, "UnitClassification[mouseover] stream must exist")
+  assert(#functions.UnitClassification.mouseover >= 1, "UnitClassification[mouseover] must have entry")
+  assert(functions.UnitClassification.mouseover[1].v == "worldboss", "UnitClassification[mouseover] must be worldboss")
+
+  -- Verify UnitReaction["player"]["target"] recorded
+  assert(functions.UnitReaction and functions.UnitReaction.player and functions.UnitReaction.player.target,
+    "UnitReaction[player][target] stream must exist")
+  assert(#functions.UnitReaction.player.target >= 1, "UnitReaction[player][target] must have entry")
+  assert(functions.UnitReaction.player.target[1].v == 5, "UnitReaction[player][target] must be 5 (neutral)")
+
+  -- Verify UnitReaction["player"]["mouseover"] recorded
+  assert(functions.UnitReaction and functions.UnitReaction.player and functions.UnitReaction.player.mouseover,
+    "UnitReaction[player][mouseover] stream must exist")
+  assert(#functions.UnitReaction.player.mouseover >= 1, "UnitReaction[player][mouseover] must have entry")
+  assert(functions.UnitReaction.player.mouseover[1].v == 8, "UnitReaction[player][mouseover] must be 8 (exalted)")
+
+  -- Verify player units are NOT sampled (guard works)
+  env.UnitIsPlayer = function(_token) return true end
+  env.UnitLevel = function(_token) return 60 end
+  env.UnitClassification = function(_token) return "normal" end
+  env.UnitReaction = function(_unit, _token) return 5 end
+
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+
+  -- Should NOT have new entries (player guard)
+  assert(#functions.UnitLevel.target == 1, "Player target must not be sampled")
+  assert(#functions.UnitClassification.target == 1, "Player target must not be sampled")
+  assert(#functions.UnitReaction.player.target == 1, "Player target must not be sampled for reaction")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -1195,14 +1304,14 @@ local tests = {
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
-{ name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
+  { name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
   { name = "recover currentSession discarded when consent declined", run = TestRecoverCurrentSessionDiscardedWhenConsentDeclined },
   { name = "recover currentSession discarded when consent undecided", run = TestRecoverCurrentSessionDiscardedWhenConsentUndecided },
   { name = "consent undecided shows prompt and does not auto-start", run = TestConsentUndecidedShowsPromptAndDoesNotAutoStart },
-   { name = "consent declined blocks auto-start and manual start", run = TestConsentDeclinedBlocksEverything },
-   { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
-   { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
-   { name = "declining consent stops and discards an active capture", run = TestDecliningConsentStopsAndDiscardsActiveCapture },
+  { name = "consent declined blocks auto-start and manual start", run = TestConsentDeclinedBlocksEverything },
+  { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
+  { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
+  { name = "declining consent stops and discards an active capture", run = TestDecliningConsentStopsAndDiscardsActiveCapture },
   { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
   { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
   { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },
@@ -1228,6 +1337,8 @@ local tests = {
   { name = "UnitInteraction skips an unrecognized guid kind", run = TestUnitInteractionSkipsUnrecognizedGuidKind },
   { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
   { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
+  { name = "unit interaction mouseover records GUID and name", run = TestUnitInteractionMouseover },
+  { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
 }
 
 local failures = 0

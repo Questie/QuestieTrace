@@ -383,12 +383,25 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetActiveTitle` | tuple (n=2) | title, isComplete |
 | `GetAvailableTitle` | scalar (string/nil) | title; stale indices are probed with the actual API when counts shrink |
 
-### Parameterized by unit token (`"target"`, `"npc"`, `"questnpc"`)
+### Parameterized by unit token (`"target"`, `"npc"`, `"questnpc"`, `"mouseover"`)
 
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | GUID string; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+
+### Parameterized by unit token (`"target"`, `"mouseover"`)
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `UnitLevel` | scalar (number) | -1 indicates "??" (skull boss); UnitState tracker |
+| `UnitClassification` | scalar (string) | "normal", "elite", "rare", "rareelite", "worldboss"; UnitState tracker |
+
+### Nested parameterized by native arguments (UnitReaction)
+
+| Function key | Shape | Return type | Notes |
+|---|---|---|---|
+| `UnitReaction` | `["player"][token]` | scalar (number) | 1..8 (1=hated, 8=exalted); UnitState tracker; native argument order `UnitReaction("player", token)` |
 
 ### Parameterized by slot index
 
