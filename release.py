@@ -21,7 +21,7 @@ The CI publish pipeline (.github/workflows/publish.yml) triggers on pushed
 "v*" tags, builds the zip via build.py, and creates the GitHub release.
 """
 
-TOC_FILE = "QuestieTrace-Classic.toc"
+TOC_FILES = ["QuestieTrace-Classic.toc", "QuestieTrace-Camelot.toc"]
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-b\d+)?$")
 
 
@@ -52,10 +52,10 @@ def main():
         print("Working tree has uncommitted changes. Commit or stash them first.")
         sys.exit(1)
 
-    bump_toc_version(version)
+    bump_toc_versions(version)
 
     try:
-        subprocess.run(["git", "add", TOC_FILE], check=True)
+        subprocess.run(["git", "add"] + TOC_FILES, check=True)
         subprocess.run(["git", "commit", "-m", f"chore: bump version to {tag}"], check=True)
     except subprocess.CalledProcessError:
         subprocess.run(["git", "reset", "HEAD"])
@@ -79,16 +79,17 @@ def main():
         print(f"Run 'git push && git push --tags' to publish the release.")
 
 
-def bump_toc_version(version):
-    with open(TOC_FILE, "r") as f:
-        lines = f.readlines()
+def bump_toc_versions(version):
+    for toc_file in TOC_FILES:
+        with open(toc_file, "r") as f:
+            lines = f.readlines()
 
-    with open(TOC_FILE, "w") as f:
-        for line in lines:
-            if line.startswith("## Version:"):
-                f.write(f"## Version: {version}\n")
-            else:
-                f.write(line)
+        with open(toc_file, "w") as f:
+            for line in lines:
+                if line.startswith("## Version:"):
+                    f.write(f"## Version: {version}\n")
+                else:
+                    f.write(line)
 
 
 def tag_exists(tag):
