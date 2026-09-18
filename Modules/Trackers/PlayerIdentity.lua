@@ -19,6 +19,8 @@ local Core = QuestieTraceCore
 --
 -- UnitFactionGroup(unit) -> string englishFaction,  -- "Alliance"|"Horde"|"Neutral"
 --                           string localizedFaction
+--
+-- GetLocale() -> string locale
 ---------------------------------------------------------------------------
 
 Core.RegisterTracker({
@@ -36,6 +38,8 @@ Core.RegisterTracker({
     local sex = UnitSex("player")
     ---@type string, string
     local factionE, factionL = UnitFactionGroup("player")
+    ---@type string
+    local locale = GetLocale()
 
     functions["UnitRace"] = {
       ["player"] = { { t = 0, tp = 0, v = { raceL, raceE, raceID, n = 3 } } },
@@ -59,6 +63,9 @@ Core.RegisterTracker({
     }
     functions["UnitFactionGroup"] = {
       ["player"] = { { t = 0, tp = 0, v = { factionE, factionL, n = 2 } } },
+    }
+    functions["GetLocale"] = {
+      ["player"] = { { t = 0, tp = 0, v = locale } },
     }
   end,
 })
