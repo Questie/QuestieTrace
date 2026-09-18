@@ -47,13 +47,14 @@ def main():
     copy_content_to(release_addon_folder_path)
 
     if versionOverride != "":
-        toc_path = release_addon_folder_path + "/QuestieTrace-Classic.toc"
-        with fileinput.FileInput(toc_path, inplace=True) as file:
-            for line in file:
-                if line.startswith("## Version"):
-                    print("## Version: " + versionOverride)
-                else:
-                    print(line, end="")
+        for toc_file in ["QuestieTrace-Classic.toc", "QuestieTrace-Camelot.toc"]:
+            toc_path = release_addon_folder_path + "/" + toc_file
+            with fileinput.FileInput(toc_path, inplace=True) as file:
+                for line in file:
+                    if line.startswith("## Version"):
+                        print("## Version: " + versionOverride)
+                    else:
+                        print(line, end="")
 
     zip_name = "%s-%s" % (addonDir, release_dir)
     zip_release_folder(zip_name, release_dir, addonDir)
@@ -122,6 +123,7 @@ filesToInclude = [
     "QuestieTrace.lua",
     "QuestieTrace_UI.lua",
     "QuestieTrace-Classic.toc",
+    "QuestieTrace-Camelot.toc",
 ]
 ignorePatterns = ["*.test.lua"]
 
