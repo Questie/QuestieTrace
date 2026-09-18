@@ -25,10 +25,13 @@ if StaticPopupDialogs then
     OnAccept = function()
       QuestieTrace.settings.dataCollectionConsent = true
       Core.PrintConsentReminder()
+
       -- Start capturing immediately
       if Core.GetCaptureState() == "idle" then
         Core.StartCapture()
       end
+
+      Core.StartShareReminders()
     end,
     OnCancel = function()
       QuestieTrace.settings.dataCollectionConsent = false
