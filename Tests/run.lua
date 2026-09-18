@@ -68,6 +68,7 @@ local function NewRuntime(trackerFiles)
   end
 
   LoadAddonFile(runtime, "Modules/globals.lua")
+  LoadAddonFile(runtime, "Modules/Privacy.lua")
   LoadAddonFile(runtime, "Modules/Localization/l10n.lua")
   LoadAddonFile(runtime, "Modules/Localization/Translations/Consent.lua")
   LoadAddonFile(runtime, "Modules/Consent.lua")
