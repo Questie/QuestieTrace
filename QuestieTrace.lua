@@ -202,6 +202,25 @@ local EVENT_FILTERS = {
 }
 
 ---------------------------------------------------------------------------
+-- Event argument sanitizers (privacy: see AGENTS.md / CLAUDE.md)
+---------------------------------------------------------------------------
+-- Every CHAT_MSG_* event QuestieTrace tracks shares the same argument
+-- shape, so a single shared sanitizer (Core.SanitizeChatMsgArgs) covers all
+-- of them. Applied in ProcessTrackedEvent before args are recorded to
+-- session.events or dispatched to tracker callbacks.
+
+---@type table<string, fun(args: PackedArgs): PackedArgs>
+local EVENT_ARG_SANITIZERS = {
+  CHAT_MSG_SYSTEM = Core.SanitizeChatMsgArgs,
+  CHAT_MSG_LOOT = Core.SanitizeChatMsgArgs,
+  CHAT_MSG_MONEY = Core.SanitizeChatMsgArgs,
+  CHAT_MSG_SKILL = Core.SanitizeChatMsgArgs,
+  CHAT_MSG_TRADESKILLS = Core.SanitizeChatMsgArgs,
+  CHAT_MSG_COMBAT_FACTION_CHANGE = Core.SanitizeChatMsgArgs,
+  CHAT_MSG_COMBAT_XP_GAIN = Core.SanitizeChatMsgArgs,
+}
+
+---------------------------------------------------------------------------
 -- Helpers
 ---------------------------------------------------------------------------
 
@@ -525,6 +544,13 @@ local function ProcessTrackedEvent(event, ...)
   ---@type PackedArgs
   local packedArgs = Core.CopyPacked(Core.PackArgs(...))
 
+  -- Privacy: sanitize args (e.g. strip player names/GUIDs from CHAT_MSG_*
+  -- events) before they are ever stored or handed to trackers.
+  local sanitizer = EVENT_ARG_SANITIZERS[event]
+  if sanitizer then
+    packedArgs = sanitizer(packedArgs)
+  end
+
   capture.session.events[#capture.session.events + 1] = {
     t = t,
     tp = tp,
@@ -537,7 +563,7 @@ local function ProcessTrackedEvent(event, ...)
   local callbacks = Core._trackerCallbacks[event]
   if callbacks then
     for i = 1, #callbacks do
-      callbacks[i](capture, event, ...)
+      callbacks[i](capture, event, unpack(packedArgs, 1, packedArgs.n))
     end
   end
 end
