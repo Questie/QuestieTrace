@@ -2,7 +2,7 @@
 ## Title: QuestieTrace
 ## Version: 1.0.0
 ## Author: Logon/TheCrux(BreakBB)
-## Notes: Event Trace + Function Trace
+## Notes: Data collection addon for Questie
 ## Category: Quests
 ## Category-deDE: Quests
 ## Category-esES: Misiones
