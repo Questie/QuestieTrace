@@ -264,6 +264,21 @@ local function SafeScalarCall(fn, ...)
   return true, value
 end
 
+--- Recursively sanitize string values in a table using Core.SanitizeText.
+---@param tbl table
+---@return table sanitized
+local function SanitizeTable(tbl)
+  if type(tbl) ~= "table" then return tbl end
+  for k, v in pairs(tbl) do
+    if type(v) == "string" then
+      tbl[k] = Core.SanitizeText(v)
+    elseif type(v) == "table" then
+      tbl[k] = SanitizeTable(v)
+    end
+  end
+  return tbl
+end
+
 ---Safely call a function and pack all returned values.
 ---@param fn function?
 ---@param ... any
@@ -371,7 +386,14 @@ local function ProbeQuestDirectApis(t, tp, questId)
   if type(C_QuestLog) == "table" then
     ProbeQuestScalar("C_QuestLog.IsOnQuest", C_QuestLog.IsOnQuest, t, tp, questId)
     ProbeQuestScalar("C_QuestLog.IsQuestFlaggedCompleted", C_QuestLog.IsQuestFlaggedCompleted, t, tp, questId)
-    ProbeQuestScalar("C_QuestLog.GetQuestObjectives", C_QuestLog.GetQuestObjectives, t, tp, questId)
+    local objOk, objectives = SafeScalarCall(C_QuestLog.GetQuestObjectives, questId)
+    if objOk then
+      objectives = SanitizeTable(objectives)
+      AppendIfChanged(
+        GetOrCreateParamStream("C_QuestLog.GetQuestObjectives", questId),
+        t, tp, objectives, questId, "C_QuestLog.GetQuestObjectives"
+      )
+    end
   end
 
   ProbeQuestPacked("GetQuestTagInfo", GetQuestTagInfo, t, tp, questId)
@@ -549,6 +571,12 @@ local function SampleQuestLog(capture)
       -- GetQuestLogQuestText -- tuple (n=2: questDescription, questObjectives)
       local textOk, questTextData = SafePackedCall(GetQuestLogQuestText, questLogIndex)
       if textOk then
+        -- Privacy: quest text can embed player names. Sanitize any string values.
+        for i = 1, questTextData.n or 0 do
+          if type(questTextData[i]) == "string" then
+            questTextData[i] = Core.SanitizeText(questTextData[i])
+          end
+        end
         AppendIfChanged(
           GetOrCreateParamStream("GetQuestLogQuestText", questId),
           t, tp, questTextData, questId, "GetQuestLogQuestText"
