@@ -320,6 +320,19 @@ describe("GetPrivacyNameSet", function()
       local result = Core.SanitizeText("Announce Ann")
       assert.are.equal("<name>ounce <name>", result)
     end)
+
+    it("should redact longer overlapping names before shorter names", function()
+      env.UnitName = function(token)
+        if token == "player" then return "Bobby" end
+        if token == "party1" then return "Bob" end
+        return nil
+      end
+      env.IsInGroup = function() return true end
+      env.IsInRaid = function() return false end
+
+      local result = Core.SanitizeText("Bobby and Bob are here.")
+      assert.are.equal("<name> and <name> are here.", result)
+    end)
   end)
 
   describe("SanitizeChatMsgArgs", function()
