@@ -100,4 +100,40 @@ describe("Compat", function()
       assert.spy(errorSpy).was.called()
     end)
   end)
+
+  describe("GetQuestLogIndexByID", function()
+    it("should use C_QuestLog.GetLogIndexForQuestID when available", function()
+      env.C_QuestLog = {
+        GetLogIndexForQuestID = function(questID)
+          if questID ~= 42 then return nil end
+          return 3
+        end,
+      }
+
+      local questLogIndex = Core.Compat.GetQuestLogIndexByID(42)
+
+      assert.are.equal(3, questLogIndex)
+    end)
+
+    it("should fall back to the global GetQuestLogIndexByID when C_QuestLog.GetLogIndexForQuestID is unavailable", function()
+      env.GetQuestLogIndexByID = function(questID)
+        if questID ~= 42 then return nil end
+        return 5
+      end
+
+      local questLogIndex = Core.Compat.GetQuestLogIndexByID(42)
+
+      assert.are.equal(5, questLogIndex)
+    end)
+
+    it("should return nil and report an error when neither API is available", function()
+      local errorSpy = spy.new(function() end)
+      Core.Error = errorSpy
+
+      local questLogIndex = Core.Compat.GetQuestLogIndexByID(42)
+
+      assert.is_nil(questLogIndex)
+      assert.spy(errorSpy).was.called()
+    end)
+  end)
 end)
