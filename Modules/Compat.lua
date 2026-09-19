@@ -102,5 +102,6 @@ function Compat.GetQuestLogTitle(questLogIndex)
     }
   end
 
+  Core.Error("Compat.GetQuestLogTitle: no available API (C_QuestLog.GetInfo / GetQuestLogTitle)")
   return nil
 end
