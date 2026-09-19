@@ -57,9 +57,9 @@ local function BuildStreams()
     functions["GetServerTime"] = {}
     defs[#defs + 1] = { key = "GetServerTime", fn = GetServerTime }
   end
-  if type(GetQuestResetTime) == "function" then
+  if type(GetQuestResetTime) == "function" or (C_DateAndTime and type(C_DateAndTime.GetSecondsUntilDailyReset) == "function") then
     functions["GetQuestResetTime"] = {}
-    defs[#defs + 1] = { key = "GetQuestResetTime", fn = GetQuestResetTime }
+    defs[#defs + 1] = { key = "GetQuestResetTime", fn = Core.Compat.GetQuestResetTime }
   end
 
   return defs
