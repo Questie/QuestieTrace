@@ -30,11 +30,10 @@ local completedQuestScratch = {}
 local function GetCompletedQuestIds()
   ---@type number[]
   local ids = {}
-  if type(GetQuestsCompleted) ~= "function" then return ids end
 
   wipe(completedQuestScratch)
   ---@type table<number, boolean>?
-  local completed = GetQuestsCompleted(completedQuestScratch)
+  local completed = Core.Compat.GetQuestsCompleted(completedQuestScratch)
   if type(completed) ~= "table" then return ids end
 
   for questId, isCompleted in pairs(completed) do

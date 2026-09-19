@@ -121,3 +121,24 @@ function Compat.GetQuestLogIndexByID(questID)
   Core.Error("Compat.GetQuestLogIndexByID: no available API (C_QuestLog.GetLogIndexForQuestID / GetQuestLogIndexByID)")
   return nil
 end
+
+--- Compatibility wrapper for GetQuestsCompleted. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetQuestsCompleted and only provide
+--- C_QuestLog.GetAllCompletedQuestIDs (a plain array) instead. Always returns
+--- a [questID] = true map, converting the array form when needed.
+---@param target table<number, boolean>? Table to fill and return instead of allocating a new one.
+---@return table<number, boolean>? questsCompleted
+function Compat.GetQuestsCompleted(target)
+  if C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs then
+    local completed = target or {}
+    for _, questID in ipairs(C_QuestLog.GetAllCompletedQuestIDs()) do
+      completed[questID] = true
+    end
+    return completed
+  elseif GetQuestsCompleted then
+    return GetQuestsCompleted(target)
+  end
+
+  Core.Error("Compat.GetQuestsCompleted: no available API (C_QuestLog.GetAllCompletedQuestIDs / GetQuestsCompleted)")
+  return nil
+end
