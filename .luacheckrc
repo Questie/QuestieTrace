@@ -541,6 +541,7 @@ globals = {
     "C_RecruitAFriend.GetRecruitInfo",
     "C_RecruitAFriend.IsSendingEnabled",
     "C_RecruitAFriend.SendRecruit",
+    "C_Reputation",
     "C_Scenario.GetStepInfo",
     "C_ScenarioInfo.GetCriteriaInfo",
     "C_Seasons",

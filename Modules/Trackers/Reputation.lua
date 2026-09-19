@@ -43,15 +43,13 @@ local collecting      -- recursion guard for ExpandFactionHeader
 --- Expands collapsed headers (side effect). Never re-collapses.
 ---@return number[] ids Ordered array of factionIDs
 local function CollectFactionIDs()
-  if type(GetNumFactions) ~= "function" or type(GetFactionInfo) ~= "function" then
-    return {}
-  end
-
-  collecting = true
   ---@type number[]
   local ids = {}
   ---@type number
-  local numFactions = GetNumFactions() or 0
+  local numFactions = Core.Compat.GetNumFactions() or 0
+  if numFactions == 0 then return ids end
+
+  collecting = true
   ---@type number
   local index = 1
 
@@ -59,7 +57,7 @@ local function CollectFactionIDs()
     local _, _, _, _, _, _,
       _, _, isHeader, isCollapsed, _,
       _, _, factionID =
-      GetFactionInfo(index)
+      Core.Compat.GetFactionInfo(index)
 
     if factionID then
       ids[#ids + 1] = factionID
@@ -67,7 +65,7 @@ local function CollectFactionIDs()
 
     if isHeader and isCollapsed and type(ExpandFactionHeader) == "function" then
       ExpandFactionHeader(index)
-      numFactions = GetNumFactions() or numFactions
+      numFactions = Core.Compat.GetNumFactions() or numFactions
     end
 
     index = index + 1
@@ -85,13 +83,11 @@ local function SampleReputation(capture)
   ---@type number
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
-  if type(GetFactionInfoByID) ~= "function" then return end
-
   for i = 1, #factionOrder do
     ---@type number
     local factionID = factionOrder[i]
     ---@type PackedArgs
-    local v = PackArgs(GetFactionInfoByID(factionID))
+    local v = PackArgs(Core.Compat.GetFactionInfoByID(factionID))
 
     ---@type PackedArgs?
     local prev = prevValues[factionID]

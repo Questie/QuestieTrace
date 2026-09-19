@@ -211,4 +211,123 @@ describe("Compat", function()
       assert.spy(errorSpy).was.called()
     end)
   end)
+
+  describe("GetNumFactions", function()
+    it("should use C_Reputation.GetNumFactions when available", function()
+      env.C_Reputation = {
+        GetNumFactions = function() return 7 end,
+      }
+
+      assert.are.equal(7, Core.Compat.GetNumFactions())
+    end)
+
+    it("should fall back to the global GetNumFactions when C_Reputation.GetNumFactions is unavailable", function()
+      env.GetNumFactions = function() return 4 end
+
+      assert.are.equal(4, Core.Compat.GetNumFactions())
+    end)
+
+    it("should return nil and report an error when neither API is available", function()
+      local errorSpy = spy.new(function() end)
+      Core.Error = errorSpy
+
+      local numFactions = Core.Compat.GetNumFactions()
+
+      assert.is_nil(numFactions)
+      assert.spy(errorSpy).was.called()
+    end)
+  end)
+
+  describe("GetFactionInfo", function()
+    it("should use C_Reputation.GetFactionDataByIndex when available", function()
+      env.C_Reputation = {
+        GetFactionDataByIndex = function(index)
+          if index ~= 2 then return nil end
+          return {
+            name = "Stormwind", reaction = 5, isHeader = false,
+            isCollapsed = false, factionID = 72,
+          }
+        end,
+      }
+
+      local name, _, reaction, _, _, _, _, _, isHeader, isCollapsed, _, _, _, factionID =
+          Core.Compat.GetFactionInfo(2)
+
+      assert.are.equal("Stormwind", name)
+      assert.are.equal(5, reaction)
+      assert.is_false(isHeader)
+      assert.is_false(isCollapsed)
+      assert.are.equal(72, factionID)
+    end)
+
+    it("should return nil when C_Reputation.GetFactionDataByIndex has no entry at the index", function()
+      env.C_Reputation = {
+        GetFactionDataByIndex = function() return nil end,
+      }
+
+      assert.is_nil(Core.Compat.GetFactionInfo(99))
+    end)
+
+    it("should fall back to the global GetFactionInfo when C_Reputation.GetFactionDataByIndex is unavailable", function()
+      env.GetFactionInfo = function(index)
+        if index ~= 1 then return nil end
+        return "Legacy Faction", "desc", 4
+      end
+
+      local name, description, reaction = Core.Compat.GetFactionInfo(1)
+
+      assert.are.equal("Legacy Faction", name)
+      assert.are.equal("desc", description)
+      assert.are.equal(4, reaction)
+    end)
+
+    it("should return nil and report an error when neither API is available", function()
+      local errorSpy = spy.new(function() end)
+      Core.Error = errorSpy
+
+      local info = Core.Compat.GetFactionInfo(1)
+
+      assert.is_nil(info)
+      assert.spy(errorSpy).was.called()
+    end)
+  end)
+
+  describe("GetFactionInfoByID", function()
+    it("should use C_Reputation.GetFactionDataByID when available", function()
+      env.C_Reputation = {
+        GetFactionDataByID = function(factionID)
+          if factionID ~= 72 then return nil end
+          return { name = "Stormwind", reaction = 5, factionID = 72 }
+        end,
+      }
+
+      local name, _, reaction, _, _, _, _, _, _, _, _, _, _, factionID =
+          Core.Compat.GetFactionInfoByID(72)
+
+      assert.are.equal("Stormwind", name)
+      assert.are.equal(5, reaction)
+      assert.are.equal(72, factionID)
+    end)
+
+    it("should fall back to the global GetFactionInfoByID when C_Reputation.GetFactionDataByID is unavailable", function()
+      env.GetFactionInfoByID = function(factionID)
+        if factionID ~= 72 then return nil end
+        return "Legacy Faction", "desc", 4
+      end
+
+      local name = Core.Compat.GetFactionInfoByID(72)
+
+      assert.are.equal("Legacy Faction", name)
+    end)
+
+    it("should return nil and report an error when neither API is available", function()
+      local errorSpy = spy.new(function() end)
+      Core.Error = errorSpy
+
+      local info = Core.Compat.GetFactionInfoByID(72)
+
+      assert.is_nil(info)
+      assert.spy(errorSpy).was.called()
+    end)
+  end)
 end)
