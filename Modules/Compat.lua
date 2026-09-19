@@ -105,3 +105,19 @@ function Compat.GetQuestLogTitle(questLogIndex)
   Core.Error("Compat.GetQuestLogTitle: no available API (C_QuestLog.GetInfo / GetQuestLogTitle)")
   return nil
 end
+
+--- Compatibility wrapper for GetQuestLogIndexByID. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetQuestLogIndexByID and only provide
+--- C_QuestLog.GetLogIndexForQuestID instead.
+---@param questID number
+---@return number? questLogIndex
+function Compat.GetQuestLogIndexByID(questID)
+  if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+    return C_QuestLog.GetLogIndexForQuestID(questID)
+  elseif GetQuestLogIndexByID then
+    return GetQuestLogIndexByID(questID)
+  end
+
+  Core.Error("Compat.GetQuestLogIndexByID: no available API (C_QuestLog.GetLogIndexForQuestID / GetQuestLogIndexByID)")
+  return nil
+end

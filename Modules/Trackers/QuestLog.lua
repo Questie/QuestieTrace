@@ -553,7 +553,7 @@ local function SampleQuestLog(capture)
 
     -- GetQuestLogTitle -- table (needs questLogIndex lookup)
     ---@type number?
-    local questLogIndex = GetQuestLogIndexByID(questId)
+    local questLogIndex = Core.Compat.GetQuestLogIndexByID(questId)
     if questLogIndex then
       ---@type QuestLogTitleInfo?
       local titleData = GetQuestLogTitle(questLogIndex)
