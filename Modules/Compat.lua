@@ -251,3 +251,68 @@ function Compat.GetFactionInfoByID(factionID)
   return nil
 end
 
+-- The indexed skill-line API is gone on modern clients. GetNumSkillLines /
+-- GetSkillLineInfo are used purely to learn which professions the player has
+-- and at what rank, so rebuild that list from whichever modern source this
+-- client provides and present it in the old shape.
+local skillLines = {}
+
+local function collectSkillLines()
+  wipe(skillLines)
+
+  if GetProfessions and GetProfessionInfo then
+    local prof1, prof2, archaeology, fishing, cooking = GetProfessions()
+    for _, index in ipairs({ prof1 or false, prof2 or false, archaeology or false,
+                              fishing or false, cooking or false }) do
+      if index then
+        local name, _, rank = GetProfessionInfo(index)
+        if name then
+          skillLines[#skillLines + 1] = { name = name, rank = rank or 0 }
+        end
+      end
+    end
+  end
+
+  if #skillLines == 0 and C_TradeSkillUI and C_TradeSkillUI.GetAllProfessionTradeSkillLines
+      and C_TradeSkillUI.GetTradeSkillLineInfoByID then
+    for _, skillLineID in ipairs(C_TradeSkillUI.GetAllProfessionTradeSkillLines()) do
+      local info = C_TradeSkillUI.GetTradeSkillLineInfoByID(skillLineID)
+      local name = info and (info.professionName or info.displayName)
+      if name then
+        skillLines[#skillLines + 1] = { name = name, rank = info.skillLevel or 0 }
+      end
+    end
+  end
+
+  return #skillLines
+end
+
+--- Compatibility wrapper for GetNumSkillLines. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetNumSkillLines and only provide
+--- GetProfessions/GetProfessionInfo or C_TradeSkillUI instead. Rebuilds the
+--- profession list from whichever of those is available and reports its size.
+---@return number numSkillLines
+function Compat.GetNumSkillLines()
+  if GetNumSkillLines then
+    return GetNumSkillLines()
+  end
+  return collectSkillLines()
+end
+
+--- Compatibility wrapper for GetSkillLineInfo. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetSkillLineInfo. Reads from the
+--- profession list rebuilt by Compat.GetNumSkillLines and returns the
+--- (name, isHeader, isExpanded, rank) subset the legacy global provided.
+---@param index number
+---@return string? skillName
+---@return boolean? isHeader
+---@return boolean? isExpanded
+---@return number? skillRank
+function Compat.GetSkillLineInfo(index)
+  if GetSkillLineInfo then
+    return GetSkillLineInfo(index)
+  end
+  local line = skillLines[index]
+  if not line then return nil end
+  return line.name, false, false, line.rank
+end

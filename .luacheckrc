@@ -579,6 +579,7 @@ globals = {
     "C_TaxiMap.GetAllTaxiNodes",
     "C_TaxiMap.GetTaxiNodesForMap",
     "C_Timer.After",
+    "C_TradeSkillUI",
     "C_UI.Reload",
     "C_UIWidgetManager.GetAllWidgetsBySetID",
     "C_UIWidgetManager.GetBelowMinimapWidgetSetID",

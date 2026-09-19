@@ -330,4 +330,60 @@ describe("Compat", function()
       assert.spy(errorSpy).was.called()
     end)
   end)
+
+  describe("GetNumSkillLines / GetSkillLineInfo", function()
+    it("should use the global GetNumSkillLines/GetSkillLineInfo when available", function()
+      env.GetNumSkillLines = function() return 1 end
+      env.GetSkillLineInfo = function(index)
+        if index ~= 1 then return nil end
+        return "Tailoring", false, false, 150
+      end
+
+      assert.are.equal(1, Core.Compat.GetNumSkillLines())
+      local name, isHeader, isExpanded, rank = Core.Compat.GetSkillLineInfo(1)
+      assert.are.equal("Tailoring", name)
+      assert.is_false(isHeader)
+      assert.is_false(isExpanded)
+      assert.are.equal(150, rank)
+    end)
+
+    it("should fall back to GetProfessions/GetProfessionInfo when the legacy globals are unavailable", function()
+      env.wipe = function(t) for k in pairs(t) do t[k] = nil end end
+      env.GetProfessions = function() return 1, nil, nil, nil, nil end
+      env.GetProfessionInfo = function(index)
+        if index ~= 1 then return nil end
+        return "Alchemy", "icon", 75
+      end
+
+      assert.are.equal(1, Core.Compat.GetNumSkillLines())
+      local name, isHeader, isExpanded, rank = Core.Compat.GetSkillLineInfo(1)
+      assert.are.equal("Alchemy", name)
+      assert.is_false(isHeader)
+      assert.is_false(isExpanded)
+      assert.are.equal(75, rank)
+    end)
+
+    it("should fall back to C_TradeSkillUI when GetProfessions is also unavailable", function()
+      env.wipe = function(t) for k in pairs(t) do t[k] = nil end end
+      env.C_TradeSkillUI = {
+        GetAllProfessionTradeSkillLines = function() return { 101 } end,
+        GetTradeSkillLineInfoByID = function(skillLineID)
+          if skillLineID ~= 101 then return nil end
+          return { professionName = "Blacksmithing", skillLevel = 200 }
+        end,
+      }
+
+      assert.are.equal(1, Core.Compat.GetNumSkillLines())
+      local name, _, _, rank = Core.Compat.GetSkillLineInfo(1)
+      assert.are.equal("Blacksmithing", name)
+      assert.are.equal(200, rank)
+    end)
+
+    it("should return 0/nil without an error when no source is available", function()
+      env.wipe = function(t) for k in pairs(t) do t[k] = nil end end
+
+      assert.are.equal(0, Core.Compat.GetNumSkillLines())
+      assert.is_nil(Core.Compat.GetSkillLineInfo(1))
+    end)
+  end)
 end)
