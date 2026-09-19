@@ -90,9 +90,14 @@ describe("Compat", function()
       assert.are.equal(7, info.questID)
     end)
 
-    it("should return nil when neither API is available", function()
+    it("should return nil and report an error when neither API is available", function()
+      local errorSpy = spy.new(function() end)
+      Core.Error = errorSpy
+
       local info = Core.Compat.GetQuestLogTitle(1)
+
       assert.is_nil(info)
+      assert.spy(errorSpy).was.called()
     end)
   end)
 end)
