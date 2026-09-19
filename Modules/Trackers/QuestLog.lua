@@ -6,10 +6,7 @@ local PackArgs = Core.PackArgs
 local DeepCompare = Core.DeepCompare
 
 local C_After = C_Timer.After
-
--- Some clients don't expose the global GetQuestLogTitle; route all calls in
--- this file through the compat wrapper (see Modules/Compat.lua).
-local GetQuestLogTitle = Core.Compat.GetQuestLogTitle
+local Compat = Core.Compat
 
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
@@ -553,10 +550,10 @@ local function SampleQuestLog(capture)
 
     -- GetQuestLogTitle -- table (needs questLogIndex lookup)
     ---@type number?
-    local questLogIndex = Core.Compat.GetQuestLogIndexByID(questId)
+    local questLogIndex = Compat.GetQuestLogIndexByID(questId)
     if questLogIndex then
       ---@type QuestLogTitleInfo?
-      local titleData = GetQuestLogTitle(questLogIndex)
+      local titleData = Compat.GetQuestLogTitle(questLogIndex)
       AppendIfChanged(
         GetOrCreateParamStream("GetQuestLogTitle", questId),
         t, tp, titleData, questId, "GetQuestLogTitle"
