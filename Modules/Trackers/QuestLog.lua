@@ -6,10 +6,7 @@ local PackArgs = Core.PackArgs
 local DeepCompare = Core.DeepCompare
 
 local C_After = C_Timer.After
-
--- Some clients don't expose the global GetQuestLogTitle; route all calls in
--- this file through the compat wrapper (see Modules/Compat.lua).
-local GetQuestLogTitle = Core.Compat.GetQuestLogTitle
+local Compat = Core.Compat
 
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
@@ -78,7 +75,7 @@ local prevRewardCounts -- Highest reward index previously captured for each acti
 ---@return number? questId
 local function GetQuestIdAtLogIndex(questLogIndex)
   ---@type boolean, QuestLogTitleInfo?
-  local ok, info = pcall(Core.Compat.GetQuestLogTitle, questLogIndex)
+  local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
   if not ok or not info then return nil end
   if info.questID and info.questID > 0 then return info.questID end
   return nil
@@ -92,7 +89,7 @@ local function GetAllQuestIdsInLog()
   for questLogIndex = 1, 75 do
     local questId = GetQuestIdAtLogIndex(questLogIndex)
     if not questId then
-      local ok, info = pcall(Core.Compat.GetQuestLogTitle, questLogIndex)
+      local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
       if not ok or not info then return questIds end
     else
       questIds[#questIds + 1] = questId
@@ -553,10 +550,10 @@ local function SampleQuestLog(capture)
 
     -- GetQuestLogTitle -- table (needs questLogIndex lookup)
     ---@type number?
-    local questLogIndex = Core.Compat.GetQuestLogIndexByID(questId)
+    local questLogIndex = Compat.GetQuestLogIndexByID(questId)
     if questLogIndex then
       ---@type QuestLogTitleInfo?
-      local titleData = GetQuestLogTitle(questLogIndex)
+      local titleData = Compat.GetQuestLogTitle(questLogIndex)
       AppendIfChanged(
         GetOrCreateParamStream("GetQuestLogTitle", questId),
         t, tp, titleData, questId, "GetQuestLogTitle"

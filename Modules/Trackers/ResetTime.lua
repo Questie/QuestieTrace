@@ -1,6 +1,8 @@
 ---@type QuestieTraceCore
 local Core = QuestieTraceCore
 
+local Compat = Core.Compat
+
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
@@ -59,7 +61,7 @@ local function BuildStreams()
   end
   if type(GetQuestResetTime) == "function" or (C_DateAndTime and type(C_DateAndTime.GetSecondsUntilDailyReset) == "function") then
     functions["GetQuestResetTime"] = {}
-    defs[#defs + 1] = { key = "GetQuestResetTime", fn = Core.Compat.GetQuestResetTime }
+    defs[#defs + 1] = { key = "GetQuestResetTime", fn = Compat.GetQuestResetTime }
   end
 
   return defs

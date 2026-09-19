@@ -5,6 +5,8 @@ local PackArgs = Core.PackArgs
 ---@type fun(t1: any, t2: any, ignore_mt: boolean?, visited: table?): boolean
 local DeepCompare = Core.DeepCompare
 
+local Compat = Core.Compat
+
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
@@ -46,7 +48,7 @@ local function CollectFactionIDs()
   ---@type number[]
   local ids = {}
   ---@type number
-  local numFactions = Core.Compat.GetNumFactions() or 0
+  local numFactions = Compat.GetNumFactions() or 0
   if numFactions == 0 then return ids end
 
   collecting = true
@@ -57,7 +59,7 @@ local function CollectFactionIDs()
     local _, _, _, _, _, _,
       _, _, isHeader, isCollapsed, _,
       _, _, factionID =
-      Core.Compat.GetFactionInfo(index)
+      Compat.GetFactionInfo(index)
 
     if factionID then
       ids[#ids + 1] = factionID
@@ -65,7 +67,7 @@ local function CollectFactionIDs()
 
     if isHeader and isCollapsed and type(ExpandFactionHeader) == "function" then
       ExpandFactionHeader(index)
-      numFactions = Core.Compat.GetNumFactions() or numFactions
+      numFactions = Compat.GetNumFactions() or numFactions
     end
 
     index = index + 1
@@ -87,7 +89,7 @@ local function SampleReputation(capture)
     ---@type number
     local factionID = factionOrder[i]
     ---@type PackedArgs
-    local v = PackArgs(Core.Compat.GetFactionInfoByID(factionID))
+    local v = PackArgs(Compat.GetFactionInfoByID(factionID))
 
     ---@type PackedArgs?
     local prev = prevValues[factionID]

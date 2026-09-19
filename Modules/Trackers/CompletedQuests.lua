@@ -2,6 +2,7 @@
 local Core = QuestieTraceCore
 
 local C_After = C_Timer.After
+local Compat = Core.Compat
 
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
@@ -33,7 +34,7 @@ local function GetCompletedQuestIds()
 
   wipe(completedQuestScratch)
   ---@type table<number, boolean>?
-  local completed = Core.Compat.GetQuestsCompleted(completedQuestScratch)
+  local completed = Compat.GetQuestsCompleted(completedQuestScratch)
   if type(completed) ~= "table" then return ids end
 
   for questId, isCompleted in pairs(completed) do
