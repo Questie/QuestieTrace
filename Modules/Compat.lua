@@ -142,3 +142,19 @@ function Compat.GetQuestsCompleted(target)
   Core.Error("Compat.GetQuestsCompleted: no available API (C_QuestLog.GetAllCompletedQuestIDs / GetQuestsCompleted)")
   return nil
 end
+
+--- Compatibility wrapper for GetQuestResetTime. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetQuestResetTime and only provide
+--- C_DateAndTime.GetSecondsUntilDailyReset instead.
+---@return number? secondsUntilReset
+function Compat.GetQuestResetTime()
+  if C_DateAndTime and C_DateAndTime.GetSecondsUntilDailyReset then
+    return C_DateAndTime.GetSecondsUntilDailyReset()
+  elseif GetQuestResetTime then
+    return GetQuestResetTime()
+  end
+
+  Core.Error("Compat.GetQuestResetTime: no available API (C_DateAndTime.GetSecondsUntilDailyReset / GetQuestResetTime)")
+  return nil
+end
+

@@ -185,4 +185,30 @@ describe("Compat", function()
       assert.spy(errorSpy).was.called()
     end)
   end)
+
+  describe("GetQuestResetTime", function()
+    it("should use C_DateAndTime.GetSecondsUntilDailyReset when available", function()
+      env.C_DateAndTime = {
+        GetSecondsUntilDailyReset = function() return 12345 end,
+      }
+
+      assert.are.equal(12345, Core.Compat.GetQuestResetTime())
+    end)
+
+    it("should fall back to the global GetQuestResetTime when C_DateAndTime.GetSecondsUntilDailyReset is unavailable", function()
+      env.GetQuestResetTime = function() return 6789 end
+
+      assert.are.equal(6789, Core.Compat.GetQuestResetTime())
+    end)
+
+    it("should return nil and report an error when neither API is available", function()
+      local errorSpy = spy.new(function() end)
+      Core.Error = errorSpy
+
+      local secondsUntilReset = Core.Compat.GetQuestResetTime()
+
+      assert.is_nil(secondsUntilReset)
+      assert.spy(errorSpy).was.called()
+    end)
+  end)
 end)
