@@ -5,6 +5,8 @@ local PackArgs = Core.PackArgs
 ---@type fun(t1: any, t2: any, ignore_mt: boolean?, visited: table?): boolean
 local DeepCompare = Core.DeepCompare
 
+local Compat = Core.Compat
+
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
@@ -164,7 +166,7 @@ local function SampleSkills(capture)
   ---@type number
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
-  local numSkillLinesOk, numSkillLines = SafeScalarCall(Core.Compat.GetNumSkillLines)
+  local numSkillLinesOk, numSkillLines = SafeScalarCall(Compat.GetNumSkillLines)
   if numSkillLinesOk then
     AppendScalarIfChanged(streamNumSkillLines, t, tp, numSkillLines)
   end
@@ -173,7 +175,7 @@ local function SampleSkills(capture)
   local seenSkillLineIndices = {}
   if type(numSkillLines) == "number" then
     for index = 1, numSkillLines do
-      local ok, value = SafePackedCall(Core.Compat.GetSkillLineInfo, index)
+      local ok, value = SafePackedCall(Compat.GetSkillLineInfo, index)
       if ok and value then
         seenSkillLineIndices[index] = true
         knownSkillLineIndices[index] = true
@@ -184,7 +186,7 @@ local function SampleSkills(capture)
 
   for index in pairs(knownSkillLineIndices) do
     if not seenSkillLineIndices[index] then
-      local ok, value = SafePackedCall(Core.Compat.GetSkillLineInfo, index)
+      local ok, value = SafePackedCall(Compat.GetSkillLineInfo, index)
       if ok and value then
         AppendPackedIfChanged("GetSkillLineInfo", index, prevSkillLineInfo, t, tp, value)
       end
