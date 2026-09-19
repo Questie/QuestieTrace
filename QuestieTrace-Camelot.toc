@@ -3,6 +3,15 @@
 ## Version: 1.0.1
 ## Author: Logon/TheCrux(BreakBB)
 ## Notes: Data collection addon for Questie
+## Notes-deDE: Datensammlungs-Addon für Questie
+## Notes-esES: Addon de recopilación de datos para Questie
+## Notes-esMX: Addon de recopilación de datos para Questie
+## Notes-frFR: Addon de collecte de données pour Questie
+## Notes-ptBR: Addon de coleta de dados para Questie
+## Notes-ruRU: Аддон для сбора данных для Questie
+## Notes-koKR: Questie용 데이터 수집 애드온
+## Notes-zhCN: Questie 数据收集插件
+## Notes-zhTW: Questie 資料收集插件
 ## Category: Quests
 ## Category-deDE: Quests
 ## Category-esES: Misiones
