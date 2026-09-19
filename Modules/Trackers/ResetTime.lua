@@ -48,8 +48,11 @@ local function AppendIfChanged(stream, t, tp, key, value)
 end
 
 ---Create stream definitions for APIs available on this client.
----These APIs are client/era dependent, so unavailable functions simply do not
----create streams. That keeps missing API support distinct from a captured nil.
+---GetServerTime is client/era dependent, so when unavailable it simply does
+---not create a stream (keeps missing API support distinct from a captured
+---nil). GetQuestResetTime is always registered instead: it goes through
+---Compat.GetQuestResetTime, which reports unavailable APIs itself via
+---Core.Error rather than being silently skipped here.
 ---@return ResetTimeStreamDef[]
 local function BuildStreams()
   ---@type ResetTimeStreamDef[]
@@ -59,10 +62,13 @@ local function BuildStreams()
     functions["GetServerTime"] = {}
     defs[#defs + 1] = { key = "GetServerTime", fn = GetServerTime }
   end
-  if type(GetQuestResetTime) == "function" or (C_DateAndTime and type(C_DateAndTime.GetSecondsUntilDailyReset) == "function") then
-    functions["GetQuestResetTime"] = {}
-    defs[#defs + 1] = { key = "GetQuestResetTime", fn = Compat.GetQuestResetTime }
-  end
+
+  -- Unlike GetServerTime, GetQuestResetTime is always registered: Compat.GetQuestResetTime
+  -- itself detects API availability (C_DateAndTime.GetSecondsUntilDailyReset / legacy
+  -- global) and reports via Core.Error when neither exists, so gating registration here
+  -- would silently swallow that case instead of surfacing it.
+  functions["GetQuestResetTime"] = {}
+  defs[#defs + 1] = { key = "GetQuestResetTime", fn = Compat.GetQuestResetTime }
 
   return defs
 end
