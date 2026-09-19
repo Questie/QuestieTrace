@@ -136,4 +136,53 @@ describe("Compat", function()
       assert.spy(errorSpy).was.called()
     end)
   end)
+
+  describe("GetQuestsCompleted", function()
+    it("should use C_QuestLog.GetAllCompletedQuestIDs when available", function()
+      env.C_QuestLog = {
+        GetAllCompletedQuestIDs = function() return { 1, 2, 3 } end,
+      }
+
+      local completed = Core.Compat.GetQuestsCompleted()
+
+      assert.is_true(completed[1])
+      assert.is_true(completed[2])
+      assert.is_true(completed[3])
+      assert.is_nil(completed[4])
+    end)
+
+    it("should fill and return the given target table", function()
+      env.C_QuestLog = {
+        GetAllCompletedQuestIDs = function() return { 7 } end,
+      }
+      local target = {}
+
+      local completed = Core.Compat.GetQuestsCompleted(target)
+
+      assert.are.equal(target, completed)
+      assert.is_true(completed[7])
+    end)
+
+    it("should fall back to the global GetQuestsCompleted when C_QuestLog.GetAllCompletedQuestIDs is unavailable", function()
+      env.GetQuestsCompleted = function(target)
+        target = target or {}
+        target[9] = true
+        return target
+      end
+
+      local completed = Core.Compat.GetQuestsCompleted()
+
+      assert.is_true(completed[9])
+    end)
+
+    it("should return nil and report an error when neither API is available", function()
+      local errorSpy = spy.new(function() end)
+      Core.Error = errorSpy
+
+      local completed = Core.Compat.GetQuestsCompleted()
+
+      assert.is_nil(completed)
+      assert.spy(errorSpy).was.called()
+    end)
+  end)
 end)
