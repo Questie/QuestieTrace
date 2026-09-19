@@ -158,3 +158,96 @@ function Compat.GetQuestResetTime()
   return nil
 end
 
+--- Compatibility wrapper for GetNumFactions. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetNumFactions and only provide
+--- C_Reputation.GetNumFactions instead.
+---@return number? numFactions
+function Compat.GetNumFactions()
+  if C_Reputation and C_Reputation.GetNumFactions then
+    return C_Reputation.GetNumFactions()
+  elseif GetNumFactions then
+    return GetNumFactions()
+  end
+
+  Core.Error("Compat.GetNumFactions: no available API (C_Reputation.GetNumFactions / GetNumFactions)")
+  return nil
+end
+
+--- Compatibility wrapper for GetFactionInfo. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetFactionInfo and only provide
+--- C_Reputation.GetFactionDataByIndex (a table) instead. Returns the same
+--- legacy tuple shape as the global so existing callers keep working
+--- unchanged.
+---@param index number
+---@return string? name
+---@return string? description
+---@return number? reaction
+---@return number? currentReactionThreshold
+---@return number? nextReactionThreshold
+---@return number? currentStanding
+---@return boolean? atWarWith
+---@return boolean? canToggleAtWar
+---@return boolean? isHeader
+---@return boolean? isCollapsed
+---@return boolean? isHeaderWithRep
+---@return boolean? isWatched
+---@return boolean? isChild
+---@return number? factionID
+---@return boolean? hasBonusRepGain
+---@return boolean? canSetInactive
+function Compat.GetFactionInfo(index)
+  if C_Reputation and C_Reputation.GetFactionDataByIndex then
+    local d = C_Reputation.GetFactionDataByIndex(index)
+    if not d then return nil end
+    return d.name, d.description, d.reaction, d.currentReactionThreshold,
+        d.nextReactionThreshold, d.currentStanding, d.atWarWith,
+        d.canToggleAtWar, d.isHeader, d.isCollapsed, d.isHeaderWithRep,
+        d.isWatched, d.isChild, d.factionID, d.hasBonusRepGain,
+        d.canSetInactive
+  elseif GetFactionInfo then
+    return GetFactionInfo(index)
+  end
+
+  Core.Error("Compat.GetFactionInfo: no available API (C_Reputation.GetFactionDataByIndex / GetFactionInfo)")
+  return nil
+end
+
+--- Compatibility wrapper for GetFactionInfoByID. Some clients (e.g. "WoW
+--- Forever") do not expose the global GetFactionInfoByID and only provide
+--- C_Reputation.GetFactionDataByID (a table) instead. Returns the same
+--- legacy tuple shape as the global so existing callers keep working
+--- unchanged.
+---@param factionID number
+---@return string? name
+---@return string? description
+---@return number? reaction
+---@return number? currentReactionThreshold
+---@return number? nextReactionThreshold
+---@return number? currentStanding
+---@return boolean? atWarWith
+---@return boolean? canToggleAtWar
+---@return boolean? isHeader
+---@return boolean? isCollapsed
+---@return boolean? isHeaderWithRep
+---@return boolean? isWatched
+---@return boolean? isChild
+---@return number? factionID
+---@return boolean? hasBonusRepGain
+---@return boolean? canSetInactive
+function Compat.GetFactionInfoByID(factionID)
+  if C_Reputation and C_Reputation.GetFactionDataByID then
+    local d = C_Reputation.GetFactionDataByID(factionID)
+    if not d then return nil end
+    return d.name, d.description, d.reaction, d.currentReactionThreshold,
+        d.nextReactionThreshold, d.currentStanding, d.atWarWith,
+        d.canToggleAtWar, d.isHeader, d.isCollapsed, d.isHeaderWithRep,
+        d.isWatched, d.isChild, d.factionID, d.hasBonusRepGain,
+        d.canSetInactive
+  elseif GetFactionInfoByID then
+    return GetFactionInfoByID(factionID)
+  end
+
+  Core.Error("Compat.GetFactionInfoByID: no available API (C_Reputation.GetFactionDataByID / GetFactionInfoByID)")
+  return nil
+end
+
