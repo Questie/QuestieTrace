@@ -164,16 +164,16 @@ local function SampleSkills(capture)
   ---@type number
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
-  local numSkillLinesOk, numSkillLines = SafeScalarCall(GetNumSkillLines)
+  local numSkillLinesOk, numSkillLines = SafeScalarCall(Core.Compat.GetNumSkillLines)
   if numSkillLinesOk then
     AppendScalarIfChanged(streamNumSkillLines, t, tp, numSkillLines)
   end
 
   ---@type table<number, boolean>
   local seenSkillLineIndices = {}
-  if type(numSkillLines) == "number" and type(GetSkillLineInfo) == "function" then
+  if type(numSkillLines) == "number" then
     for index = 1, numSkillLines do
-      local ok, value = SafePackedCall(GetSkillLineInfo, index)
+      local ok, value = SafePackedCall(Core.Compat.GetSkillLineInfo, index)
       if ok and value then
         seenSkillLineIndices[index] = true
         knownSkillLineIndices[index] = true
@@ -184,7 +184,7 @@ local function SampleSkills(capture)
 
   for index in pairs(knownSkillLineIndices) do
     if not seenSkillLineIndices[index] then
-      local ok, value = SafePackedCall(GetSkillLineInfo, index)
+      local ok, value = SafePackedCall(Core.Compat.GetSkillLineInfo, index)
       if ok and value then
         AppendPackedIfChanged("GetSkillLineInfo", index, prevSkillLineInfo, t, tp, value)
       end
