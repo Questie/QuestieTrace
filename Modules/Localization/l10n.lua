@@ -17,7 +17,6 @@ local supportedLocales = {
   ["esES"] = true,
   ["esMX"] = true,
   ["frFR"] = true,
-  ["itIT"] = true,
   ["koKR"] = true,
   ["ptBR"] = true,
   ["ruRU"] = true,
