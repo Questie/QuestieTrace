@@ -321,6 +321,14 @@ function Core.Debug(...)
   end
 end
 
+--- Print an error message, always printed regardless of debug settings.
+--- Intended for hard failures such as a Compat wrapper finding no available
+--- WoW API to call.
+---@param ... any Values to print
+function Core.Error(...)
+  Core.Print("|cffff0000ERROR:|r", ...)
+end
+
 --- Print a message with colored addon name prefix.
 --- Usage: Core.Print("message") or Core.Print("msg1", "msg2", ...)
 function Core.Print(...)
