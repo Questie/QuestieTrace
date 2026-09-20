@@ -40,6 +40,7 @@ Modules/Localization/l10n.lua
 Modules/Localization/Translations/Consent.lua
 Modules/Localization/Translations/ExportReminder.lua
 Modules/Localization/Translations/ExportUI.lua
+Modules/Localization/Translations/Clear.lua
 
 Modules/Consent.lua
 

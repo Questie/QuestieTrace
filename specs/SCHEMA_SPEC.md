@@ -66,6 +66,10 @@ dropped in favor of one that's already been reported. Only once all
 already-exported sessions are gone does pruning fall back to the oldest
 never-exported session. Default limit is 20.
 
+This is a backstop for players who never share, not the primary way exported
+sessions get removed — see "Export dedup now drives deletion, not just prune
+ordering" below for the deferred clear that runs on every export.
+
 ### Export dedup
 
 `Core.BuildExportPayload(includeAlreadyExported)` skips any saved session (and
@@ -81,6 +85,27 @@ This is a coarse, best-effort proxy — the addon cannot know whether a shown
 export string was actually copied and submitted. Opening the export window is
 treated as "handled," consistent with how the share-reminder watermark
 (`reminder.sessionCounterAtExport`) already worked before this field existed.
+
+### Export dedup now drives deletion, not just prune ordering
+
+`exportedAt` used to be read in exactly one place besides dedup: pruning
+(below) preferred removing already-exported sessions first when `#sessions`
+passed `maxSessions`. It now has a second, more consequential reader.
+`Core.ShowExportWindow()` (`specs/UI_SPEC.md` section 7) calls
+`Core.ClearExportedSessions()` on every successful export, which deletes
+every session with `exportedAt` set — the sessions the *previous* export
+cycle already marked. Net effect: a session survives at most one export
+cycle past being marked exported, not just until the 20-session cap is hit.
+`/qlt clear` triggers the same removal on demand; `/qlt clear all`
+(`Core.ClearAllSessions()`) ignores `exportedAt` entirely and removes
+everything.
+
+`exportedAt` itself is unchanged: still a plain `GetTime()` timestamp, set
+once by `Core.MarkSessionsExported()`, never read as anything but "present or
+not" and "how old." Nothing about the field's type or meaning changed, only
+what consumes it — so this shipped without a `SCHEMA_VERSION` bump. A bump
+would wipe every user's `QuestieTrace` settings table (see Migration, above)
+for a change that deletes rows rather than reshaping them.
 
 ---
 
@@ -109,7 +134,7 @@ SessionRecord = {
 }
 ```
 
-`exportedAt` is set by `Core.MarkSessionsExported()` once a payload has actually been shown in the export window (see "Export dedup" below). It carries over when a live session (`currentSession`) that was already exported is later saved, so a session is never counted as new again just because it moved from `currentSession` into `sessions[]`.
+`exportedAt` is set by `Core.MarkSessionsExported()` once a payload has actually been shown in the export window (see "Export dedup" below). It carries over when a live session (`currentSession`) that was already exported is later saved, so a session is never counted as new again just because it moved from `currentSession` into `sessions[]`. Beyond dedup, its presence is also what makes a session eligible for deletion on the *next* export cycle or via `/qlt clear` — see "Export dedup now drives deletion, not just prune ordering" below.
 
 ### Recording contract
 

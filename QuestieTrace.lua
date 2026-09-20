@@ -478,14 +478,19 @@ function Core.StopCapture()
 end
 
 --- Stop and discard the current capture without saving it to sessions[].
---- Used only when consent is revoked mid-capture (see Modules/Consent.lua),
---- since data collected up to that point must not be persisted once declined.
+--- Used when consent is revoked mid-capture (see Modules/Consent.lua), since
+--- data collected up to that point must not be persisted once declined, and by
+--- Core.ClearAllSessions().
 function Core.DiscardCapture()
   if capture.active then
     Core.StopCapture()
   end
   capture.session = nil
-  QuestieTraceCharacter.currentSession = nil
+  -- Shape guard so callers that tolerate absent SavedVariables (see
+  -- Core.ClearAllSessions) are actually as nil-safe as they look.
+  if type(QuestieTraceCharacter) == "table" then
+    QuestieTraceCharacter.currentSession = nil
+  end
 end
 
 --- Save the current capture session to SavedVariables.
@@ -534,6 +539,110 @@ function Core.FinalizeLiveSessionIfExported()
       Core.StartCapture()
     end
   end
+end
+
+--- Remove every saved session already marked as exported.
+---
+--- Called on the next export (see Core.ShowExportWindow) and by `/qlt clear`.
+--- Deliberately leaves QuestieTraceCharacter.currentSession alone: a live
+--- session marked exported is finalized into sessions[] by
+--- Core.FinalizeLiveSessionIfExported() before the next export runs, so a
+--- single sweep over sessions[] is always sufficient.
+---
+--- savedSessionCounter is NOT decremented -- it is monotonic and backs the
+--- share-reminder watermark (see Modules/Export/ExportReminder.lua). Lowering
+--- it would make IsShareDue() fire again for data that no longer exists.
+---@return number removed Number of sessions removed.
+function Core.ClearExportedSessions()
+  -- Shape guards mirror Modules/Export/Export.lua: SavedVariables can be
+  -- absent or malformed on a first login or after a corrupt write.
+  if type(QuestieTraceCharacter) ~= "table" or type(QuestieTraceCharacter.sessions) ~= "table" then
+    return 0
+  end
+
+  ---@type SessionRecord[]
+  local sessions = QuestieTraceCharacter.sessions
+  ---@type number
+  local removed = 0
+
+  -- Iterate backwards: table.remove shifts every later entry down by one, so
+  -- a forward loop would step straight over the session that slid into the
+  -- index just freed and silently leave exported data behind.
+  for i = #sessions, 1, -1 do
+    ---@type SessionRecord?
+    local session = sessions[i]
+    if type(session) == "table" and session.exportedAt then
+      table.remove(sessions, i)
+      removed = removed + 1
+    end
+  end
+
+  return removed
+end
+
+--- Count every session `/qlt clear all` would delete: the saved sessions plus
+--- the live capture, if there is one.
+---
+--- Shared by Core.ClearAllSessions(), which reports what it removed, and
+--- Core.ShowClearAllPrompt(), which warns the player beforehand. Both must
+--- report the same number -- stating exactly what is about to be irreversibly
+--- deleted is the confirmation popup's whole job -- so the tally lives here
+--- once instead of being mirrored in Modules/Consent.lua, where the two copies
+--- could drift apart.
+---@return number count
+function Core.CountClearableSessions()
+  ---@type table?
+  local characterDb = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter or nil
+
+  ---@type number
+  local count = (characterDb and type(characterDb.sessions) == "table") and #characterDb.sessions or 0
+
+  -- The live capture counts as one more record whether it is still held in
+  -- memory (capture.session) or only linked into SavedVariables after a
+  -- /reload (currentSession). Core.DiscardCapture() drops both.
+  if capture.session or (characterDb and characterDb.currentSession) then
+    count = count + 1
+  end
+
+  return count
+end
+
+--- Remove every saved session plus the live capture, exported or not.
+---
+--- Backs `/qlt clear all` and is only reached through the
+--- QUESTIETRACE_CLEAR_ALL confirmation popup (see Modules/Consent.lua).
+--- Restarts a fresh capture afterwards when autoStart and consent both allow
+--- it, so a user who wipes their data mid-session keeps collecting.
+---
+--- savedSessionCounter is NOT decremented here either, for the same reason as
+--- in Core.ClearExportedSessions: it is a monotonic watermark, not a count.
+---@return number removed Number of sessions removed, including the live one.
+function Core.ClearAllSessions()
+  -- Tallied before anything is dropped, and through the same helper the
+  -- confirmation popup used, so the count the player agreed to is the count
+  -- reported back to them.
+  ---@type number
+  local removed = Core.CountClearableSessions()
+
+  -- Reuse the consent-revocation path rather than re-implementing it: it stops
+  -- an active capture, notifies the trackers, and nils both references.
+  Core.DiscardCapture()
+
+  if type(QuestieTraceCharacter) == "table" then
+    QuestieTraceCharacter.sessions = {}
+  end
+
+  -- Resume collecting so a mid-session wipe doesn't silently stop tracking.
+  -- Gated on consent as well as autoStart: Core.StartCapture already refuses
+  -- without consent, but it prints "Data collection is disabled." while doing
+  -- so, and that message has no place in the clear flow.
+  ---@type table?
+  local settings = QuestieTrace and QuestieTrace.settings
+  if settings and settings.autoStart and settings.dataCollectionConsent == true then
+    Core.StartCapture()
+  end
+
+  return removed
 end
 
 ---------------------------------------------------------------------------
@@ -599,6 +708,8 @@ local function PrintHelp()
   print("/qlt debug - Toggle debug prints")
   print("/qlt export - Show the export window")
   print("/qlt export all - Re-show the export window including previously exported sessions (e.g. if a submission failed)")
+  print("/qlt clear - Delete sessions you have already shared")
+  print("/qlt clear all - Delete ALL collected sessions, including unshared ones")
   if Core.GetDumpHelpLines then
     local dumpHelpLines = Core.GetDumpHelpLines()
     for i = 1, #dumpHelpLines do
@@ -643,6 +754,20 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
       Core.ShowExportWindow(true)
     else
       Core.ShowExportWindow()
+    end
+  elseif action == "clear" then
+    if string.lower(Trim(argument)) == "all" then
+      -- Destructive: never clears directly, always behind the confirmation popup.
+      Core.ShowClearAllPrompt()
+    else
+      ---@type number
+      local removed = Core.ClearExportedSessions()
+      -- Always print, even for 0: silence reads as a broken command.
+      if removed > 0 then
+        Core.Print(Core.l10n("Removed %s shared session(s).", removed))
+      else
+        Core.Print(Core.l10n("No shared sessions to remove."))
+      end
     end
   elseif Core.RunDumpBySlash(action, argument) then
     -- handled by dump provider

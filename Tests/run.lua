@@ -61,10 +61,55 @@ local function NewRuntime(trackerFiles)
   env.YES = "Yes"
   env.NO = "No"
   runtime.consentPopupShown = 0
-  env.StaticPopup_Show = function(name)
+  runtime.popupsShown = {}
+  env.StaticPopup_Show = function(name, arg1)
     if name == "QUESTIETRACE_CONSENT" then
       runtime.consentPopupShown = runtime.consentPopupShown + 1
     end
+    runtime.popupsShown[#runtime.popupsShown + 1] = { name = name, arg1 = arg1 }
+  end
+
+  -- Real WoW semantics: split `str` on any character in `delimiter`. With a
+  -- `limit`, stop after producing `limit` pieces. The final piece keeps the
+  -- remainder unsplit.
+  ---@param delimiter string
+  ---@param str string?
+  ---@param limit number?
+  ---@return string ...
+  env.strsplit = function(delimiter, str, limit)
+    str = str or ""
+    delimiter = delimiter or ""
+    ---@type string[]
+    local results = {}
+    if delimiter == "" then
+      return str
+    end
+    ---@type number
+    local start = 1
+    ---@type number
+    local splitCount = 0
+    while true do
+      if limit and splitCount >= limit - 1 then
+        results[#results + 1] = str:sub(start)
+        break
+      end
+      ---@type number?
+      local delimIndex
+      for i = start, #str do
+        if delimiter:find(str:sub(i, i), 1, true) then
+          delimIndex = i
+          break
+        end
+      end
+      if not delimIndex then
+        results[#results + 1] = str:sub(start)
+        break
+      end
+      results[#results + 1] = str:sub(start, delimIndex - 1)
+      start = delimIndex + 1
+      splitCount = splitCount + 1
+    end
+    return unpack(results)
   end
 
   LoadAddonFile(runtime, "Modules/globals.lua")
@@ -1177,6 +1222,260 @@ local function TestChatMsgLootDispatchArgsAreSanitized()
   assert(capturedArgs[12] == nil, "Dispatched guid must be scrubbed")
 end
 
+---------------------------------------------------------------------------
+-- Clear shared sessions tests
+---------------------------------------------------------------------------
+
+local function TestExportClearsPreviouslyExportedSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+
+  -- First export cycle: save one session and export it. This mirrors
+  -- Core.ShowExportWindow's ok-branch ordering (sweep, then mark) even
+  -- though the sweep removes nothing here since nothing was exported yet.
+  runtime.core.StartCapture("s1")
+  runtime.core.SaveCapture()
+  local _, firstSourceSessions = runtime.core.BuildExportPayload()
+  runtime.core.ClearExportedSessions()
+  runtime.core.MarkSessionsExported(firstSourceSessions)
+
+  -- More data saved after the first export.
+  runtime.core.StartCapture("s2")
+  runtime.core.SaveCapture()
+
+  -- Second export cycle: BuildExportPayload must exclude the now-exported
+  -- s1, and the sweep must remove it before the new session is marked.
+  local payload, secondSourceSessions = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 1 and secondSourceSessions[1].name == "s2",
+    "Second export payload must only bundle the never-exported session")
+  local removed = runtime.core.ClearExportedSessions()
+  runtime.core.MarkSessionsExported(secondSourceSessions)
+
+  assert(removed == 1, "Sweep must remove exactly the one session exported by the first cycle")
+  local sessions = runtime.env.QuestieTraceCharacter.sessions
+  assert(#sessions == 1, "Only the post-first-export session must remain")
+  assert(sessions[1].name == "s2", "The surviving session must be the one saved after the first export")
+end
+
+local function TestExportAllStillRecoversJustExportedSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+
+  runtime.core.StartCapture("s1")
+  runtime.core.SaveCapture()
+  local _, sourceSessions = runtime.core.BuildExportPayload()
+  runtime.core.ClearExportedSessions()
+  runtime.core.MarkSessionsExported(sourceSessions)
+
+  -- Immediately after, /qlt export all (BuildExportPayload(true)) must still
+  -- bundle the just-exported session.
+  local allPayload = runtime.core.BuildExportPayload(true)
+  assert(#allPayload.sessions == 1, "export all must still recover the just-exported session")
+
+  -- The export-all path never sweeps: nothing must have been deleted.
+  local sessions = runtime.env.QuestieTraceCharacter.sessions
+  assert(#sessions == 1, "export all must delete nothing")
+  assert(sessions[1].name == "s1", "The originally exported session must survive export all")
+end
+
+local function TestClearExportedSessionsRemovesOnlyExported()
+  local runtime = NewRuntime({})
+  local sessions = runtime.env.QuestieTraceCharacter.sessions
+  -- Deliberately includes a run of ADJACENT exported sessions (a*, b*, and
+  -- e*, f*), not just alternating ones. A forward `table.remove` loop skips
+  -- whatever slides into the freed index: with a strictly alternating
+  -- fixture the skipped element always happens to be a keeper, so a broken
+  -- forward-iterating implementation can still produce the right survivor
+  -- set by coincidence. Adjacent pairs expose that: after a forward loop
+  -- removes index 1 ("a"), "b" slides into index 1 and index 2 becomes "c"
+  -- -- the loop's next index (2) then inspects "c" and skips over "b"
+  -- entirely, leaving the exported "b" behind and undercounting `removed`.
+  sessions[1] = { name = "a", exportedAt = 1 }
+  sessions[2] = { name = "b", exportedAt = 2 }
+  sessions[3] = { name = "c" }
+  sessions[4] = { name = "d" }
+  sessions[5] = { name = "e", exportedAt = 3 }
+  sessions[6] = { name = "f", exportedAt = 4 }
+  sessions[7] = { name = "g" }
+  runtime.env.QuestieTraceCharacter.currentSession = { name = "live" }
+
+  local removed = runtime.core.ClearExportedSessions()
+
+  assert(removed == 4, "Must return the count of exported sessions removed")
+  assert(#sessions == 3, "Only the never-exported sessions must remain")
+  assert(sessions[1].name == "c" and sessions[2].name == "d" and sessions[3].name == "g",
+    "Survivors must preserve their original relative order")
+  assert(runtime.env.QuestieTraceCharacter.currentSession.name == "live",
+    "currentSession must never be touched by ClearExportedSessions")
+end
+
+local function TestClearAllRemovesEverythingAndRestarts()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.autoStart = true
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = true
+
+  runtime.core.StartCapture("s1")
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("s2")
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("live") -- still running when clear all is invoked
+  local oldLive = runtime.env.QuestieTraceCharacter.currentSession
+
+  local removed = runtime.core.ClearAllSessions()
+
+  assert(removed == 3, "Must count the 2 saved sessions plus the live capture")
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "sessions[] must be emptied")
+  assert(runtime.core.GetCaptureState() == "running",
+    "autoStart + consent must restart a fresh capture immediately")
+  local fresh = Session(runtime)
+  assert(fresh ~= oldLive, "The old live capture must have been discarded, not reused")
+  assert(#fresh.events == 0, "The restarted capture must be a fresh, empty session")
+end
+
+local function TestClearAllWithoutConsentDoesNotRestart()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.autoStart = true
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = true
+
+  runtime.core.StartCapture("s1")
+  runtime.core.SaveCapture()
+
+  -- Consent revoked before the clear (e.g. via /qlt consent -> No).
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = false
+
+  local removed = runtime.core.ClearAllSessions()
+
+  assert(removed == 1, "Must still count and remove the saved session")
+  assert(runtime.core.GetCaptureState() == "idle", "Must not restart capture without consent")
+  assert(not WasPrinted(runtime, "Data collection is disabled"),
+    "ClearAllSessions must not surface StartCapture's consent-declined message")
+end
+
+local function TestClearSlashCommandRoutesToConfirmPopup()
+  local runtime = NewRuntime({})
+  local env = runtime.env
+
+  -- "/qlt clear": routes straight to the exported-only sweep and prints a count.
+  env.QuestieTraceCharacter.sessions[1] = { name = "a", exportedAt = 1 }
+  env.QuestieTraceCharacter.sessions[2] = { name = "b" }
+  env.SlashCmdList["QUESTIETRACE"]("clear")
+  assert(#env.QuestieTraceCharacter.sessions == 1 and env.QuestieTraceCharacter.sessions[1].name == "b",
+    "/qlt clear must sweep exported sessions immediately")
+  assert(WasPrinted(runtime, "Removed"), "/qlt clear must print a result count")
+
+  -- "/qlt clear all": must show the confirmation popup and delete nothing yet.
+  env.SlashCmdList["QUESTIETRACE"]("clear all")
+  assert(#runtime.popupsShown == 1 and runtime.popupsShown[1].name == "QUESTIETRACE_CLEAR_ALL",
+    "/qlt clear all must route to the QUESTIETRACE_CLEAR_ALL popup")
+  assert(#env.QuestieTraceCharacter.sessions == 1,
+    "/qlt clear all must not delete anything before OnAccept runs")
+
+  -- Case-insensitive: "/qlt clear ALL" must behave identically (R9).
+  env.SlashCmdList["QUESTIETRACE"]("clear ALL")
+  assert(#runtime.popupsShown == 2 and runtime.popupsShown[2].name == "QUESTIETRACE_CLEAR_ALL",
+    "/qlt clear ALL must be case-insensitive and also route to the popup")
+  assert(#env.QuestieTraceCharacter.sessions == 1,
+    "/qlt clear ALL must not delete anything before OnAccept runs")
+
+  -- Confirming the popup must now actually delete everything.
+  env.StaticPopupDialogs["QUESTIETRACE_CLEAR_ALL"].OnAccept()
+  assert(#env.QuestieTraceCharacter.sessions == 0, "OnAccept must delete all sessions")
+end
+
+local function TestClearDoesNotDecrementSavedSessionCounter()
+  local runtime = NewRuntime({})
+  local env = runtime.env
+
+  runtime.core.StartCapture("s1")
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("s2")
+  runtime.core.SaveCapture()
+  env.QuestieTraceCharacter.sessions[1].exportedAt = 1
+
+  local counterBeforeSweep = env.QuestieTraceCharacter.savedSessionCounter
+  runtime.core.ClearExportedSessions()
+  assert(env.QuestieTraceCharacter.savedSessionCounter == counterBeforeSweep,
+    "ClearExportedSessions must never decrement savedSessionCounter")
+
+  runtime.core.StartCapture("s3")
+  runtime.core.SaveCapture()
+  local counterBeforeClearAll = env.QuestieTraceCharacter.savedSessionCounter
+  runtime.core.ClearAllSessions()
+  assert(env.QuestieTraceCharacter.savedSessionCounter == counterBeforeClearAll,
+    "ClearAllSessions must never decrement savedSessionCounter")
+end
+
+local function TestHelpListsClearCommands()
+  local runtime = NewRuntime({})
+  runtime.env.SlashCmdList["QUESTIETRACE"]("help")
+  assert(WasPrinted(runtime, "/qlt clear - Delete sessions you have already shared"),
+    "/qlt help must list the exported-only clear command")
+  assert(WasPrinted(runtime, "/qlt clear all - Delete ALL collected sessions, including unshared ones"),
+    "/qlt help must list the clear-all command")
+end
+
+local function TestClearTranslationKeysFormatCleanly()
+  local runtime = NewRuntime({ "Modules/Localization/Translations/Clear.lua" })
+  local l10n = runtime.core.l10n
+
+  ---@type string[]
+  local locales = { "enUS", "deDE", "esES", "esMX", "frFR", "koKR", "ptBR", "ruRU", "zhCN", "zhTW" }
+
+  -- The three plain chat keys: production always passes a real count (a
+  -- Lua number) here, so a numeric arg is the faithful call shape.
+  ---@type { key: string, args: any[] }[]
+  local chatKeys = {
+    { key = "Removed %s shared session(s).", args = { 3 } },
+    { key = "No shared sessions to remove.", args = {} },
+    { key = "Deleted %s session(s).", args = { 5 } },
+  }
+
+  -- The confirmation-popup key is different: Modules/Consent.lua formats it
+  -- with the LITERAL STRING "%s" (not a number) so the placeholder survives
+  -- translation for Blizzard's StaticPopup_Show arg1 to fill in later at
+  -- click time (see Modules/Consent.lua). A number here would be an
+  -- unfaithful, strictly-safer call: string.format("%d", "5") happily
+  -- coerces a numeric *string*, but string.format("%d", "%s") is a hard
+  -- error -- so only formatting with the real production argument (the
+  -- string "%s") can catch a translation that mistakenly uses %d instead of
+  -- %s for this key.
+  ---@type string
+  local popupKey = "Delete ALL %s collected session(s), including data you have not shared yet? This cannot be undone."
+
+  for _, locale in ipairs(locales) do
+    l10n.SetUILocale(locale)
+
+    for _, entry in ipairs(chatKeys) do
+      -- Actually call string.format through Core.l10n -- a stray %d in any
+      -- translation raises here, since l10n.translate stringifies every arg
+      -- before formatting. Merely asserting the key exists would miss that.
+      local ok, result = pcall(l10n, entry.key, unpack(entry.args))
+      assert(ok, "Key must format without error in " .. locale .. ": " .. tostring(result))
+      assert(type(result) == "string" and #result > 0,
+        "Formatted translation must be a non-empty string in " .. locale)
+    end
+
+    -- Format the popup key exactly the way production does, with the
+    -- literal string "%s" as the argument.
+    local ok, result = pcall(l10n, popupKey, "%s")
+    assert(ok, "Popup key must format without error in " .. locale .. ": " .. tostring(result))
+    assert(type(result) == "string" and #result > 0,
+      "Formatted popup translation must be a non-empty string in " .. locale)
+    -- The placeholder must still be present in the OUTPUT: a translation
+    -- that drops it, or types %d/%1$s/anything else instead, would break
+    -- the count display silently for every player on that locale.
+    assert(result:find("%s", 1, true) ~= nil,
+      "Popup translation in " .. locale .. " must still contain a %s placeholder after formatting: " .. tostring(result))
+  end
+  l10n.SetUILocale("enUS")
+
+  -- The popup passes the literal "%s" through translation so
+  -- StaticPopup_Show's arg1 (the session count) can fill it in at click
+  -- time. A translation that drops or mistypes the placeholder would break
+  -- the count display silently.
+  local popupText = runtime.env.StaticPopupDialogs["QUESTIETRACE_CLEAR_ALL"].text
+  assert(popupText:find("%s", 1, true) ~= nil,
+    "QUESTIETRACE_CLEAR_ALL popup text must still contain a %s placeholder after translation")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -1228,6 +1527,15 @@ local tests = {
   { name = "UnitInteraction skips an unrecognized guid kind", run = TestUnitInteractionSkipsUnrecognizedGuidKind },
   { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
   { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
+  { name = "export clears previously exported sessions on the next export", run = TestExportClearsPreviouslyExportedSessions },
+  { name = "export all still recovers just-exported sessions without sweeping", run = TestExportAllStillRecoversJustExportedSessions },
+  { name = "ClearExportedSessions removes only exported sessions, in order", run = TestClearExportedSessionsRemovesOnlyExported },
+  { name = "ClearAllSessions removes everything and restarts capture", run = TestClearAllRemovesEverythingAndRestarts },
+  { name = "ClearAllSessions without consent does not restart capture", run = TestClearAllWithoutConsentDoesNotRestart },
+  { name = "/qlt clear routes to sweep, /qlt clear all routes to confirm popup", run = TestClearSlashCommandRoutesToConfirmPopup },
+  { name = "clear paths never decrement savedSessionCounter", run = TestClearDoesNotDecrementSavedSessionCounter },
+  { name = "/qlt help lists both clear commands", run = TestHelpListsClearCommands },
+  { name = "clear translation keys format cleanly in every locale", run = TestClearTranslationKeysFormatCleanly },
 }
 
 local failures = 0

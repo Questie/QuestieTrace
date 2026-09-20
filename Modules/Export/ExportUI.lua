@@ -147,6 +147,25 @@ function Core.ShowExportWindow(includeAlreadyExported)
     -- error message -- marking sessions exported here would make that data
     -- unrecoverable since it would never be offered again.
     if ok then
+      -- Sweep sessions left over from the *previous* export cycle now that we
+      -- know this cycle produced a usable payload. This must stay inside the
+      -- `ok` branch: if the codec were unavailable, sweeping here would
+      -- destroy the prior export's recoverable data while handing the user
+      -- nothing new in its place. It must also run before
+      -- Core.MarkSessionsExported below so it only ever removes sessions
+      -- exported by an earlier cycle, never the ones just bundled into
+      -- `sourceSessions` -- Core.BuildExportPayload already excludes
+      -- already-exported sessions, so the two calls can never target the
+      -- same rows.
+      --
+      -- Skipped entirely when includeAlreadyExported is true (`/qlt export
+      -- all`): that flag exists specifically to resend sessions that were
+      -- already marked exported, so sweeping here would delete the exact
+      -- data the user is trying to recover.
+      if not includeAlreadyExported then
+        Core.ClearExportedSessions()
+      end
+
       Core.MarkSessionsExported(sourceSessions)
 
       -- Finalize and restart the live session (if it was exported) so new events

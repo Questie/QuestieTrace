@@ -106,9 +106,13 @@ Both `/qlt` and `/questietrace` work.
 | `/qlt debug` | Toggle debug prints |
 | `/qlt export` | Open the export window |
 | `/qlt export all` | Reopen the export window, including previously exported sessions (e.g. if a submission failed) |
+| `/qlt clear` | Delete sessions you've already shared, freeing up space |
+| `/qlt clear all` | Delete every collected session, including ones you haven't shared yet — asks for confirmation first |
 | `/qlt dumpmap` | Refresh the static map hierarchy dump |
 
-Sessions are named by date and time. The oldest are pruned once you pass 20 saved sessions.
+Sessions are named by date and time. The oldest are pruned once you pass 20 saved sessions. Opening the export window (`/qlt export`) also clears out whatever was shared in the *previous* export, so collected data never grows past one share cycle — use `/qlt clear all` any time you want to purge everything, shared or not.
+
+**`/qlt export all` only recovers one export back.** It exists to resend a batch that failed to copy/paste, but that recovery window closes the moment you run a plain `/qlt export` again — that call sweeps away the batch `export all` would have recovered. If a share fails, use `/qlt export all` before exporting normally again.
 
 ---
 

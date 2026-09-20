@@ -23,6 +23,7 @@ local function LoadExportUIModules(env)
   env.GetTime = function() return 100 end
   env.QuestieTraceCore.FinalizeLiveSessionIfExported = function() end
   env.QuestieTraceCore.MarkExportOpened = function() end
+  env.QuestieTraceCore.ClearExportedSessions = function() end
 
   local exportChunk = assert(loadfile("Modules/Export/Export.lua"))
   setfenv(exportChunk, env)
@@ -74,5 +75,35 @@ describe("ExportUI.ShowExportWindow encoding state transition", function()
     Core.ShowExportWindow()
 
     assert.equal(100, session.exportedAt)
+  end)
+
+  it("should not clear previously exported sessions when the codec is unavailable", function()
+    Core.EncodeExportPayload = function() return nil end
+    local clearCalls = 0
+    Core.ClearExportedSessions = function() clearCalls = clearCalls + 1; return 0 end
+
+    Core.ShowExportWindow()
+
+    assert.equal(0, clearCalls)
+  end)
+
+  it("should clear previously exported sessions once the codec succeeds", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+    local clearCalls = 0
+    Core.ClearExportedSessions = function() clearCalls = clearCalls + 1; return 0 end
+
+    Core.ShowExportWindow()
+
+    assert.equal(1, clearCalls)
+  end)
+
+  it("should not clear anything when called with includeAlreadyExported", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+    local clearCalls = 0
+    Core.ClearExportedSessions = function() clearCalls = clearCalls + 1; return 0 end
+
+    Core.ShowExportWindow(true)
+
+    assert.equal(0, clearCalls)
   end)
 end)
