@@ -2,14 +2,18 @@
 local Core = QuestieTraceCore
 
 local C_After = C_Timer.After
-local Compat = Core.Compat
 
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
 -- GetQuestsCompleted(table?) -> table questsCompleted  -- keyed by questID -> true
+--                                (from either C_QuestLog.GetAllCompletedQuestIDs()
+--                                or the legacy GetQuestsCompleted() global,
+--                                whichever the client exposes)
 --
--- Stored as DeltaStream: initial set + add/remove deltas over time.
+-- Stored as DeltaStream: initial set + add/remove deltas over time. This is
+-- a derived synthetic stream (a completed-quest set), not a raw single-API
+-- return value.
 ---------------------------------------------------------------------------
 
 ---@type number[]
@@ -32,9 +36,19 @@ local function GetCompletedQuestIds()
   ---@type number[]
   local ids = {}
 
-  wipe(completedQuestScratch)
   ---@type table<number, boolean>?
-  local completed = Compat.GetQuestsCompleted(completedQuestScratch)
+  local completed
+
+  if C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs then
+    wipe(completedQuestScratch)
+    completed = completedQuestScratch
+    for _, questID in ipairs(C_QuestLog.GetAllCompletedQuestIDs()) do
+      completed[questID] = true
+    end
+  elseif GetQuestsCompleted then
+    completed = GetQuestsCompleted(wipe(completedQuestScratch))
+  end
+
   if type(completed) ~= "table" then return ids end
 
   for questId, isCompleted in pairs(completed) do
