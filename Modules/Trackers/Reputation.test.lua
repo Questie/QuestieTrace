@@ -69,7 +69,7 @@ describe("Reputation tracker", function()
     local stream = capture.session.functions["C_Reputation.GetFactionDataByID"]
     assert.is_not_nil(stream[42], "raw C_Reputation.GetFactionDataByID stream should exist for factionID 42")
     assert.are.equal("Stormwind", stream[42][1].v.name)
-    -- Legacy stream must stay untouched when the modern API is used.
+    -- The legacy global isn't mocked in this environment, so its stream stays empty.
     assert.are.equal(0, #capture.session.functions["GetFactionInfoByID"])
   end)
 
@@ -92,5 +92,32 @@ describe("Reputation tracker", function()
     assert.is_not_nil(stream[42], "legacy GetFactionInfoByID stream should exist for factionID 42")
     assert.are.equal("Stormwind", stream[42][1].v[1])
     assert.are.equal(0, #capture.session.functions["C_Reputation.GetFactionDataByID"])
+  end)
+
+  it("should record both C_Reputation.GetFactionDataByID and legacy GetFactionInfoByID independently when both APIs exist", function()
+    env.C_Reputation = {
+      GetNumFactions = function() return 1 end,
+      GetFactionDataByIndex = function(index)
+        if index ~= 1 then return nil end
+        return { isHeader = false, isCollapsed = false, factionID = 42 }
+      end,
+      GetFactionDataByID = function(factionID)
+        if factionID ~= 42 then return nil end
+        return { name = "Stormwind (modern)", factionID = 42 }
+      end,
+    }
+    env.GetFactionInfoByID = function(factionID)
+      if factionID ~= 42 then return nil end
+      return "Stormwind (legacy)", "desc", 5, 0, 100, 50, false, false, false, false, true, true, false, 42
+    end
+
+    tracker = select(2, LoadReputationTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    local modernStream = capture.session.functions["C_Reputation.GetFactionDataByID"]
+    local legacyStream = capture.session.functions["GetFactionInfoByID"]
+    assert.are.equal("Stormwind (modern)", modernStream[42][1].v.name)
+    assert.are.equal("Stormwind (legacy)", legacyStream[42][1].v[1])
   end)
 end)
