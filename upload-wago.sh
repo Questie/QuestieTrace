@@ -34,7 +34,7 @@ response=$(curl -sS \
     -H "authorization: Bearer $WAGO_API_TOKEN" \
     -H "accept: application/json" \
     -F "metadata=$WAGO_METADATA" \
-    -F "file=@releases/$LATEST_GIT_TAG/Questie-$LATEST_GIT_TAG.zip" \
+    -F "file=@releases/$LATEST_GIT_TAG/QuestieTrace-$LATEST_GIT_TAG.zip" \
     "https://addons.wago.io/api/projects/aN0amv6j/version")
 
 http_status=$(echo "$response" | tail -n1)
