@@ -5,17 +5,17 @@ local Core = QuestieTraceCore
 local l10n = Core.l10n
 
 local exportReminderLocales = {
-  ["It is time to share your trace data. %s"] = {
+  ["It is time to share your trace data again. Each submission only covers what happened so far, so please keep submitting regularly. %s"] = {
     ["enUS"] = true,
-    ["deDE"] = "Es ist Zeit, deine Trace-Daten zu teilen. %s",
-    ["esES"] = "Es hora de compartir tus datos. %s",
-    ["esMX"] = "Es hora de compartir tus datos. %s",
-    ["frFR"] = "Il est temps de partager vos données. %s",
-    ["koKR"] = "추적 데이터를 공유할 시간입니다. %s",
-    ["ptBR"] = "É hora de compartilhar seus dados. %s",
-    ["ruRU"] = "Пора поделиться данными трассировки. %s",
-    ["zhCN"] = "是时候分享你的追踪数据了。%s",
-    ["zhTW"] = "是時候分享你的追蹤資料了。%s",
+    ["deDE"] = "Es ist wieder Zeit, deine Trace-Daten zu teilen. Jede Übermittlung deckt nur das bisher Geschehene ab, also teile bitte regelmäßig weiter. %s",
+    ["esES"] = "Es hora de compartir tus datos de nuevo. Cada envío solo cubre lo ocurrido hasta ahora, así que sigue compartiendo regularmente. %s",
+    ["esMX"] = "Es hora de compartir tus datos de nuevo. Cada envío solo cubre lo ocurrido hasta ahora, así que sigue compartiendo regularmente. %s",
+    ["frFR"] = "Il est de nouveau temps de partager vos données. Chaque envoi ne couvre que ce qui s'est passé jusqu'à présent, alors continuez à partager régulièrement. %s",
+    ["koKR"] = "다시 추적 데이터를 공유할 시간입니다. 각 제출은 지금까지의 데이터만 포함하므로 정기적으로 계속 공유해 주세요. %s",
+    ["ptBR"] = "É hora de compartilhar seus dados novamente. Cada envio cobre apenas o que aconteceu até agora, então continue compartilhando regularmente. %s",
+    ["ruRU"] = "Снова пора поделиться данными трассировки. Каждая отправка охватывает только то, что произошло до сих пор, поэтому продолжайте делиться регулярно. %s",
+    ["zhCN"] = "又到了分享追踪数据的时候了。每次提交只涵盖目前为止发生的数据，请定期继续分享。%s",
+    ["zhTW"] = "又到了分享追蹤資料的時候了。每次提交只涵蓋目前為止發生的資料，請定期繼續分享。%s",
   },
   ["Click here to open the export window"] = {
     ["enUS"] = true,
