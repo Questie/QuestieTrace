@@ -34,7 +34,6 @@ Libs/LibStub/LibStub.lua
 Libs/LibDeflate/LibDeflate.lua
 
 Modules/globals.lua
-Modules/Compat.lua
 Modules/Privacy.lua
 
 Modules/Localization/l10n.lua
