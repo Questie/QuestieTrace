@@ -20,7 +20,7 @@ local function LoadAddonFile(runtime, path)
   chunk("QuestieTrace", runtime.env.QuestLog)
 end
 
--- WoW creates these controls from Dialog.xml and Consent.xml. Tests exercise
+-- WoW creates these controls from Widgets/Dialog.xml and Modules/Consent.xml. Tests exercise
 -- the Lua bindings; XML loading and taint still need in-client validation.
 local function NewConsentFrame()
   local function SetText(self, text) self.text = text end
@@ -129,9 +129,9 @@ local function NewRuntime(trackerFiles)
   LoadAddonFile(runtime, "Modules/Privacy.lua")
   LoadAddonFile(runtime, "Modules/Localization/l10n.lua")
   LoadAddonFile(runtime, "Modules/Localization/Translations/Consent.lua")
-  LoadAddonFile(runtime, "Modules/Dialog.lua")
-  env.QuestieTraceCore.OnDialogLoad(runtime.consentFrame)
-  runtime.consentFrame.OnShow = env.QuestieTraceCore.LayoutDialog
+  LoadAddonFile(runtime, "Widgets/Dialog.lua")
+  for key, value in pairs(env.QuestieTraceDialogMixin) do runtime.consentFrame[key] = value end
+  runtime.consentFrame:OnLoad()
   LoadAddonFile(runtime, "Modules/Consent.lua")
   env.QuestieTraceCore.OnConsentFrameLoad(runtime.consentFrame)
   for _, path in ipairs(trackerFiles) do LoadAddonFile(runtime, path) end
@@ -961,7 +961,7 @@ local function TestDialogUsesModernAssetsWhenAvailable()
   env.UserScaledFontGameNormal = {}
   env.UserScaledFontGameDisable = {}
 
-  runtime.core.OnDialogLoad(frame)
+  frame:OnLoad()
 
   assert(frame.Background.atlas == "UI-DialogBox-Background-Dark", "Use the original popup background")
   assert(frame.Border.atlas == "UI-DiamondDialogBox-Border", "Use the original popup border")
@@ -978,7 +978,7 @@ local function TestDialogFallsBackWhenAnAtlasIsMissing()
     if atlas == "UI-DialogBox-Background-Dark" then return {} end
   end }
 
-  runtime.core.OnDialogLoad(frame)
+  frame:OnLoad()
 
   assert(frame.backdrop == env.BACKDROP_DIALOG_32_32, "Older clients need the standard backdrop")
   assert(not frame.Background.shown and not frame.Border.shown, "Do not display incomplete modern art")
