@@ -20,6 +20,58 @@ local function LoadAddonFile(runtime, path)
   chunk("QuestieTrace", runtime.env.QuestLog)
 end
 
+-- WoW creates these controls from Dialog.xml and Consent.xml. Tests exercise
+-- the Lua bindings; XML loading and taint still need in-client validation.
+local function NewConsentFrame()
+  local function SetText(self, text) self.text = text end
+  local function SetScript(self, name, callback) self[name] = callback end
+  local function FontString(height)
+    return {
+      stringHeight = height,
+      SetText = SetText,
+      SetFontObject = function(self, font) self.font = font end,
+      GetStringHeight = function(self) return self.stringHeight end,
+    }
+  end
+  local function Button()
+    return {
+      textWidth = 24,
+      Text = FontString(12),
+      SetText = SetText,
+      SetScript = SetScript,
+      SetNormalFontObject = function(self, font) self.normalFont = font end,
+      SetHighlightFontObject = function(self, font) self.highlightFont = font end,
+      SetDisabledFontObject = function(self, font) self.disabledFont = font end,
+      GetTextWidth = function(self) return self.textWidth end,
+      GetFontString = function(self) return self.Text end,
+      SetSize = function(self, width, height) self.width, self.height = width, height end,
+    }
+  end
+  local function Texture()
+    return {
+      SetAtlas = function(self, atlas) self.atlas = atlas end,
+      Show = function(self) self.shown = true end,
+      Hide = function(self) self.shown = false end,
+    }
+  end
+  return {
+    shown = false,
+    Background = Texture(),
+    Border = Texture(),
+    Text = FontString(100),
+    AcceptButton = Button(),
+    DeclineButton = Button(),
+    SetBackdrop = function(self, backdrop) self.backdrop = backdrop end,
+    SetWidth = function(self, width) self.width = width end,
+    SetHeight = function(self, height) self.height = height end,
+    Hide = function(self) self.shown = false end,
+    Show = function(self)
+      self.shown = true
+      self.OnShow(self)
+    end,
+  }
+end
+
 ---@param trackerFiles string[]
 ---@return TestRuntime
 local function NewRuntime(trackerFiles)
@@ -56,22 +108,23 @@ local function NewRuntime(trackerFiles)
   runtime.frame.SetScript = function(frame, name, callback) frame[name] = callback end
   env.CreateFrame = function() return runtime.frame end
 
-  -- Consent popup mocks
-  env.StaticPopupDialogs = {}
   env.YES = "Yes"
   env.NO = "No"
-  runtime.consentPopupShown = 0
-  env.StaticPopup_Show = function(name)
-    if name == "QUESTIETRACE_CONSENT" then
-      runtime.consentPopupShown = runtime.consentPopupShown + 1
-    end
-  end
+  env.GameFontHighlight = {}
+  env.GameFontNormal = {}
+  env.GameFontDisable = {}
+  env.BACKDROP_DIALOG_32_32 = {}
+  runtime.consentFrame = NewConsentFrame()
 
   LoadAddonFile(runtime, "Modules/globals.lua")
   LoadAddonFile(runtime, "Modules/Privacy.lua")
   LoadAddonFile(runtime, "Modules/Localization/l10n.lua")
   LoadAddonFile(runtime, "Modules/Localization/Translations/Consent.lua")
+  LoadAddonFile(runtime, "Modules/Dialog.lua")
+  env.QuestieTraceCore.OnDialogLoad(runtime.consentFrame)
+  runtime.consentFrame.OnShow = env.QuestieTraceCore.LayoutDialog
   LoadAddonFile(runtime, "Modules/Consent.lua")
+  env.QuestieTraceCore.OnConsentFrameLoad(runtime.consentFrame)
   for _, path in ipairs(trackerFiles) do LoadAddonFile(runtime, path) end
   LoadAddonFile(runtime, "QuestieTrace.lua")
   runtime.core = env.QuestieTraceCore
@@ -813,7 +866,7 @@ local function TestConsentUndecidedShowsPromptAndDoesNotAutoStart()
 
   SendEvent(runtime, "PLAYER_LOGIN")
 
-  assert(runtime.consentPopupShown == 1, "Consent popup must be shown on first login when undecided")
+  assert(runtime.consentFrame.shown, "Consent dialog must be shown on first login when undecided")
   assert(not WasPrinted(runtime, "gameplay data is being collected"), "No reminder message should be printed while undecided")
   assert(runtime.core.GetCaptureState() == "idle", "Capture must not auto-start while consent is undecided")
 end
@@ -825,7 +878,7 @@ local function TestConsentDeclinedBlocksEverything()
 
   SendEvent(runtime, "PLAYER_LOGIN")
 
-  assert(runtime.consentPopupShown == 0, "Consent popup must not be shown again once declined")
+  assert(not runtime.consentFrame.shown, "Consent dialog must not be shown again once declined")
   assert(not WasPrinted(runtime, "gameplay data is being collected"), "No reminder message should be printed when consent is declined")
   assert(runtime.core.GetCaptureState() == "idle", "Capture must not auto-start when consent is declined")
 
@@ -840,7 +893,7 @@ local function TestConsentAcceptedPrintsReminderAndAllowsAutoStart()
 
   SendEvent(runtime, "PLAYER_LOGIN")
 
-  assert(runtime.consentPopupShown == 0, "Consent popup must not be shown once already accepted")
+  assert(not runtime.consentFrame.shown, "Consent dialog must not be shown once already accepted")
   assert(WasPrinted(runtime, "gameplay data is being collected"), "A reminder message must be printed every login once consented")
   assert(runtime.core.GetCaptureState() == "running", "Capture must auto-start when consent is granted and autoStart is enabled")
 end
@@ -851,9 +904,11 @@ local function TestDecliningConsentStopsAndDiscardsActiveCapture()
   runtime.core.StartCapture("in progress")
   assert(runtime.core.GetCaptureState() == "running", "Precondition: capture must be running before declining")
 
-  -- Simulate the user reopening the popup (e.g. /qlt consent) and clicking No.
-  runtime.env.StaticPopupDialogs["QUESTIETRACE_CONSENT"].OnCancel()
+  runtime.core.ShowConsentPrompt()
+  runtime.consentFrame.DeclineButton:OnClick()
 
+  assert(not runtime.consentFrame.shown, "No must close the consent dialog")
+  assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "Declining must remove the live SavedVariables reference")
   assert(runtime.env.QuestieTrace.settings.dataCollectionConsent == false, "Consent flag must be recorded as declined")
   assert(runtime.core.GetCaptureState() == "idle", "Declining consent must stop and discard any active capture")
   assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "Declining consent must not save the discarded capture")
@@ -863,11 +918,90 @@ local function TestConsentAcceptImmediatelyStartsCapture()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   runtime.env.QuestieTrace.settings.dataCollectionConsent = nil
 
-  -- Simulate user accepting consent popup before PLAYER_LOGIN
-  runtime.env.StaticPopupDialogs["QUESTIETRACE_CONSENT"].OnAccept()
+  runtime.core.ShowConsentPrompt()
+  runtime.consentFrame.AcceptButton:OnClick()
 
+  assert(not runtime.consentFrame.shown, "Yes must close the consent dialog")
   assert(runtime.env.QuestieTrace.settings.dataCollectionConsent == true, "Consent flag must be set to true")
   assert(runtime.core.GetCaptureState() == "running", "Capture must start immediately when consent is accepted")
+end
+
+local function TestConsentPromptReopensWithoutChangingConsent()
+  local runtime = NewRuntime({})
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = false
+  local frame = runtime.consentFrame
+
+  runtime.core.ShowConsentPrompt()
+  assert(frame.shown, "The prompt must reopen even after consent was declined")
+  assert(frame.AcceptButton.text == "Yes" and frame.DeclineButton.text == "No", "Both choices must be labeled")
+  assert(frame.Text.text:find("Help improve Questie", 1, true), "The dialog must display the consent explanation")
+  assert(frame.height == 162, "Dialog height must include wrapped text, button height, and original popup padding")
+  frame:Hide()
+  runtime.core.ShowConsentPrompt()
+
+  assert(frame.shown, "The same dialog must be reusable")
+  assert(runtime.env.QuestieTrace.settings.dataCollectionConsent == false, "Opening or hiding must not grant consent")
+  assert(runtime.core.GetCaptureState() == "idle", "Opening or hiding must not start capture")
+end
+
+local function TestDialogUsesModernAssetsWhenAvailable()
+  local runtime = NewRuntime({})
+  local env, frame = runtime.env, runtime.consentFrame
+  env.C_Texture = { GetAtlasInfo = function() return {} end }
+  env.UserScaledFontGameHighlight = {}
+  env.UserScaledFontGameNormal = {}
+  env.UserScaledFontGameDisable = {}
+
+  runtime.core.OnDialogLoad(frame)
+
+  assert(frame.Background.atlas == "UI-DialogBox-Background-Dark", "Use the original popup background")
+  assert(frame.Border.atlas == "UI-DiamondDialogBox-Border", "Use the original popup border")
+  assert(frame.Background.shown and frame.Border.shown and frame.backdrop == nil, "Do not draw a fallback behind modern art")
+  assert(frame.Text.font == env.UserScaledFontGameHighlight, "Use the client's user-scaled body font")
+  assert(frame.AcceptButton.normalFont == env.UserScaledFontGameNormal, "Use the client's user-scaled button font")
+  assert(frame.DeclineButton.disabledFont == env.UserScaledFontGameDisable, "Use the client's disabled font")
+end
+
+local function TestDialogFallsBackWhenAnAtlasIsMissing()
+  local runtime = NewRuntime({})
+  local env, frame = runtime.env, runtime.consentFrame
+  env.C_Texture = { GetAtlasInfo = function(atlas)
+    if atlas == "UI-DialogBox-Background-Dark" then return {} end
+  end }
+
+  runtime.core.OnDialogLoad(frame)
+
+  assert(frame.backdrop == env.BACKDROP_DIALOG_32_32, "Older clients need the standard backdrop")
+  assert(not frame.Background.shown and not frame.Border.shown, "Do not display incomplete modern art")
+  assert(frame.Text.font == env.GameFontHighlight, "Older clients need the standard body font")
+  assert(frame.AcceptButton.normalFont == env.GameFontNormal, "Older clients need the standard button font")
+end
+
+local function TestDialogFitsLongLabelsAndWrappedText()
+  local runtime = NewRuntime({})
+  local frame = runtime.consentFrame
+  frame.Text.stringHeight = 200
+  frame.AcceptButton.textWidth = 230
+  frame.AcceptButton.Text.stringHeight = 24
+
+  runtime.core.ShowConsentPrompt()
+
+  assert(frame.AcceptButton.width == 250 and frame.DeclineButton.width == 250, "Both buttons must fit the longest label")
+  assert(frame.AcceptButton.height == 32 and frame.DeclineButton.height == 32, "Buttons must fit taller fonts")
+  assert(frame.width == 542, "Widen the dialog to fit both buttons, their gap, and side margins")
+  assert(frame.height == 273, "Fit wrapped body text, buttons, and vertical spacing")
+end
+
+local function TestAcceptingConsentPreservesActiveCapture()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  runtime.core.StartCapture("in progress")
+  local session = Session(runtime)
+
+  runtime.core.ShowConsentPrompt()
+  runtime.consentFrame.AcceptButton:OnClick()
+
+  assert(not runtime.consentFrame.shown, "Accepting an already granted consent must close the dialog")
+  assert(Session(runtime) == session, "Accepting again must preserve the active capture")
 end
 
 ---------------------------------------------------------------------------
@@ -1203,6 +1337,11 @@ local tests = {
    { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
    { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
    { name = "declining consent stops and discards an active capture", run = TestDecliningConsentStopsAndDiscardsActiveCapture },
+  { name = "consent prompt reopens without changing consent", run = TestConsentPromptReopensWithoutChangingConsent },
+  { name = "accepting consent preserves an active capture", run = TestAcceptingConsentPreservesActiveCapture },
+  { name = "dialog uses modern assets when available", run = TestDialogUsesModernAssetsWhenAvailable },
+  { name = "dialog falls back when an atlas is missing", run = TestDialogFallsBackWhenAnAtlasIsMissing },
+  { name = "dialog fits long labels and wrapped text", run = TestDialogFitsLongLabelsAndWrappedText },
   { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
   { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
   { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },

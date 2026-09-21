@@ -1,6 +1,6 @@
 # UI Spec (v9)
 
-Slash command interface for QuestieTrace. No control frame or UI buttons.
+Slash command interface for QuestieTrace, with separate consent and export dialogs.
 
 ---
 
@@ -25,6 +25,7 @@ Aliases: `/questietrace` and `/qlt`.
 | `/qlt status` | Print tracking status and current event count to chat |
 | `/qlt tracking` | Toggle data collection on/off, effective immediately |
 | `/qlt debug` | Toggle debug prints |
+| `/qlt consent` | Show the data collection consent dialog |
 | `/qlt export` | Show the export window (see section 4) |
 | `/qlt export all` | Force re-show export window, including already-exported sessions |
 | `/qlt dumpmap` | Run map hierarchy dump provider, when registered |
@@ -120,3 +121,24 @@ Returned by `Core.GetStatusData()`:
 ```
 
 Used only by `/qlt status` to print a human-readable status line. No UI elements consume this.
+
+---
+
+## 7) Consent dialog
+
+`Modules/Dialog.xml` defines the addon-owned virtual `QuestieTraceDialogTemplate` and `QuestieTraceDialogButtonTemplate`. They reproduce the visual subset of Blizzard's popup without inheriting its popup mixins or handlers. `Modules/Dialog.lua` selects the client's available art and fonts and sizes the dialog to fit wrapped text and button labels.
+
+The default layout matches the observed Forever popup: 420-unit width, 290-unit centered text column, 36-unit warning icon, and 120-by-21 buttons with a 10-unit gap. Modern clients use the `UI-DiamondDialogBox-Border` and `UI-DialogBox-Background-Dark` atlases and available user-scaled fonts. Clients missing either atlas use the standard dialog backdrop instead.
+
+`Modules/Consent.xml` instantiates this template. It loads after `Modules/Consent.lua`, whose `Core.OnConsentFrameLoad` binds localized text and the button actions. The template's show handler owns layout; consent handling does not replace it.
+
+- Unanswered consent (`QuestieTrace.settings.dataCollectionConsent == nil`) shows the dialog at login. `/qlt consent` can reopen it at any time.
+- Yes grants consent, starts capture if idle, and starts share reminders. An existing active capture is preserved.
+- No declines consent and stops/discards any active or unsaved capture. It does not delete previously saved sessions.
+- Opening or hiding the frame does not change consent. It has no timeout or Escape-key dismissal, matching the previous prompt.
+
+The frame uses its own `Show`/`Hide` methods. Do not register it with `StaticPopupDialogs`, `StaticPopupSpecial_Show`, or another shared popup manager: reading addon-owned entries in Blizzard's popup lists can taint subsequent Edit Mode operations.
+
+### In-client validation
+
+Lua mocks cannot enforce WoW's taint rules or load its XML templates. After a clean reload, show the consent dialog, leave it open, enter Edit Mode, create a new layout, and exit Edit Mode. Verify there is no secret-value error and that `PartyFrame.settingMap` and `CompactPartyFrameMember1.optionTable` remain secure. Also check text wrapping and both consent choices; test No only with disposable capture data.
