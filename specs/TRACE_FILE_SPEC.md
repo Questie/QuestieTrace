@@ -399,6 +399,7 @@ Called with a quest ID as the argument.
 | `C_QuestLog.GetQuestObjectives` | object (table[]/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestLogTitle` | tuple (n=17) | title, level, suggestedGroup, isHeader, ... |
 | `GetQuestLogQuestText` | tuple (n=2) | questDescription, questObjectives |
+| `QuestLogZone` | scalar string/nil | Derived: header/zone title immediately preceding this quest in the quest log |
 | `GetQuestTimers` | scalar number/nil | Derived questId-keyed seconds-left |
 | `GetQuestLogTimeLeft` | scalar number/nil | Derived questId-keyed seconds-left |
 | `GetNumQuestLogRewards` | scalar number/nil | Reward count |

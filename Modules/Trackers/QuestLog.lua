@@ -46,6 +46,9 @@ local Compat = Core.Compat
 -- GetQuestLogIndexByID(questID)                -> number questLogIndex
 --
 -- QuestLog (custom stream) -> number[] questIDs  -- array of active quest IDs
+-- QuestLogZone[questId] -> string? headerTitle -- derived: the quest-log
+--                                                 header title immediately
+--                                                 preceding this quest
 ---------------------------------------------------------------------------
 
 ---@type number[]
@@ -81,21 +84,32 @@ local function GetQuestIdAtLogIndex(questLogIndex)
   return nil
 end
 
---- Get all quest IDs currently in the quest log.
+--- Get all quest IDs currently in the quest log, along with the header/zone
+--- title that immediately precedes each quest.
 ---@return number[] questIds Array of quest IDs
+---@return table<number, string?> questZones [questId] -> preceding header title
 local function GetAllQuestIdsInLog()
   ---@type number[]
   local questIds = {}
-  for questLogIndex = 1, 75 do
-    local questId = GetQuestIdAtLogIndex(questLogIndex)
-    if not questId then
-      local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
-      if not ok or not info then return questIds end
-    else
-      questIds[#questIds + 1] = questId
+  ---@type table<number, string?>
+  local questZones = {}
+  ---@type string?
+  local currentHeaderTitle = nil
+
+  for questLogIndex = 1, 80 do -- Forever allows 40 quests (+40 individual zones)
+    local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
+    if not ok or not info then
+      return questIds, questZones
+    end
+
+    if info.isHeader then
+      currentHeaderTitle = info.title
+    elseif info.questID and info.questID > 0 then
+      questIds[#questIds + 1] = info.questID
+      questZones[info.questID] = currentHeaderTitle
     end
   end
-  return questIds
+  return questIds, questZones
 end
 
 ---------------------------------------------------------------------------
@@ -510,7 +524,8 @@ local function SampleQuestLog(capture)
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
   ---@type number[]
-  local questIds = GetAllQuestIdsInLog()
+  ---@type table<number, string?>
+  local questIds, questZones = GetAllQuestIdsInLog()
 
   -- QuestLog membership discovers which quest IDs are active. When a quest
   -- leaves this list, raw direct questID APIs are probed again rather than
@@ -547,6 +562,12 @@ local function SampleQuestLog(capture)
   for _, questId in ipairs(questIds) do
     -- Raw direct questID APIs: append only values returned by successful calls.
     ProbeQuestDirectApis(t, tp, questId)
+
+    -- QuestLogZone -- derived: header/zone title preceding this quest
+    AppendIfChanged(
+      GetOrCreateParamStream("QuestLogZone", questId),
+      t, tp, questZones[questId], questId, "QuestLogZone"
+    )
 
     -- GetQuestLogTitle -- table (needs questLogIndex lookup)
     ---@type number?
