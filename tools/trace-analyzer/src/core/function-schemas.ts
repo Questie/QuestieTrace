@@ -62,6 +62,14 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
   ],
 
   // -- QuestLog.lua -----------------------------------------------------------
+  //
+  // Quest-log title/tag/completion data is split across several independent
+  // raw streams; there is no synthesized composite value. This schema only
+  // labels the legacy `GetQuestLogTitle` global's raw tuple (only present in
+  // captures from clients that expose that global). Modern clients instead
+  // populate `C_QuestLog.GetInfo`/`C_QuestLog.GetQuestTagInfo`/
+  // `C_QuestLog.IsComplete`/`C_QuestLog.IsFailed`, which are plain tables/
+  // scalars rendered without a tuple schema.
 
   "GetQuestLogTitle": [
     { name: "title", type: "string" },
@@ -109,6 +117,11 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
   ],
 
   // -- Reputation.lua ---------------------------------------------------------
+  //
+  // Only present when the legacy GetFactionInfoByID global is used (i.e. when
+  // C_Reputation.GetFactionDataByID is unavailable on the capturing client).
+  // C_Reputation.GetFactionDataByID stores a plain table, rendered without a
+  // tuple schema.
 
   "GetFactionInfoByID": [
     { name: "name", type: "string" },
@@ -130,6 +143,12 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
   ],
 
   // -- SkillLines.lua --------------------------------------------------------
+  //
+  // Only present when the legacy GetNumSkillLines/GetSkillLineInfo globals
+  // exist; there is no synthesized fallback derived from professions or
+  // C_TradeSkillUI on clients that lack them. C_TradeSkillUI.* streams are
+  // tracked independently and store plain tables, rendered without a tuple
+  // schema.
 
   "GetSkillLineInfo": [
     { name: "skillName", type: "string" },
