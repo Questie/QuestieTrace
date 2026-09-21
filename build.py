@@ -119,7 +119,7 @@ def get_version_dir(is_release_build, versionOverride):
     return release_dir
 
 
-directoriesToInclude = ["Libs", "Modules"]
+directoriesToInclude = ["Libs", "Modules", "Widgets"]
 filesToInclude = [
     "QuestieTrace.lua",
     "QuestieTrace_UI.lua",
