@@ -118,8 +118,9 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
 
   // -- Reputation.lua ---------------------------------------------------------
   //
-  // Only present when the legacy GetFactionInfoByID global is used (i.e. when
-  // C_Reputation.GetFactionDataByID is unavailable on the capturing client).
+  // Only present when the legacy GetFactionInfoByID global exists on the
+  // capturing client, independently of whether C_Reputation.GetFactionDataByID
+  // also exists (a client exposing both records both streams).
   // C_Reputation.GetFactionDataByID stores a plain table, rendered without a
   // tuple schema.
 

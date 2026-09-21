@@ -462,7 +462,7 @@ Called with a quest ID as the argument.
 
 | Function key | Return type | Description |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when `C_Reputation.GetFactionDataByID` is unavailable |
+| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists) |
 | `C_Reputation.GetFactionDataByID` | object (table) | Raw API result |
 
 ### Delta streams (in `functionsDelta`)

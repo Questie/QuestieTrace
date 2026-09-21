@@ -419,7 +419,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when `C_Reputation.GetFactionDataByID` is unavailable |
+| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists) |
 | `C_Reputation.GetFactionDataByID` | object (table) | Raw API result |
 
 ### Parameterized by skill index / profession tab index / trade-skill line ID
