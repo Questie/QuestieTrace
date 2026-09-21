@@ -364,9 +364,11 @@ Called with no arguments. Stream is a flat `{t, tp, v}` array.
 | `GetNumQuestChoices` | scalar number | Current choice reward count |
 | `C_QuestLog.GetMaxNumQuestsCanAccept` | scalar number | Quest log cap |
 | `GetServerTime` | scalar number | Low-frequency snapshot |
-| `GetQuestResetTime` | scalar number | Low-frequency reset snapshot |
-| `GetNumSkillLines` | scalar number | Visible skill row count |
+| `GetQuestResetTime` | scalar number | Legacy global; only present when it exists |
+| `C_DateAndTime.GetSecondsUntilDailyReset` | scalar number | Only present when this API exists |
+| `GetNumSkillLines` | scalar number | Legacy global; only present when it exists, no synthesized fallback |
 | `GetProfessions` | tuple (n=5) | Profession tab indices |
+| `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object number[] | Tracked independently whenever the API exists |
 | `QuestLog` | object number[] | Synthetic active quest IDs in quest-log order |
 | `FactionOrder` | object number[] | Synthetic faction IDs in display order |
 | `SpellBook` | object number[] | Synthetic ordered known spell IDs from slots |
@@ -397,7 +399,13 @@ Called with a quest ID as the argument.
 | `C_QuestLog.IsOnQuest` | scalar boolean/nil | Raw API result; probed again after quest leaves log |
 | `C_QuestLog.IsQuestFlaggedCompleted` | scalar boolean/nil | Raw API result; related to but not derived from `GetQuestsCompleted` |
 | `C_QuestLog.GetQuestObjectives` | object (table[]/nil) | Raw API result; probed again after quest leaves log |
-| `GetQuestLogTitle` | object (QuestLogTitleInfo) | Quest log entry info: title, level, questTag, isHeader, isCollapsed, isComplete, frequency, questID, startEvent, displayQuestID, isOnMap, hasLocalPOI, isTask, isBounty, isStory, isHidden, isScaling |
+| `C_QuestLog.GetInfo` | object (table) | Raw API result, keyed by questID after resolving current quest log index |
+| `C_QuestLog.GetQuestTagInfo` | object (table/nil) | Raw API result |
+| `C_QuestLog.IsComplete` | scalar boolean/nil | Raw API result |
+| `C_QuestLog.IsFailed` | scalar boolean/nil | Raw API result |
+| `C_QuestLog.GetLogIndexForQuestID` | scalar number/nil | Raw API result |
+| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, only present when this global exists -- not synthesized from `C_QuestLog.*` |
+| `GetQuestLogIndexByID` | scalar number/nil | Legacy global; raw API result |
 | `GetQuestLogQuestText` | tuple (n=2) | questDescription, questObjectives |
 | `QuestLogZone` | scalar string/nil | Derived: header/zone title immediately preceding this quest in the quest log |
 | `GetQuestTimers` | scalar number/nil | Derived questId-keyed seconds-left |
@@ -438,18 +446,20 @@ Called with a quest ID as the argument.
 | `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info return |
 | `IsPassiveSpell` | scalar number/nil | observed passive marker return |
 
-### Parameterized by skill/profession index (number)
+### Parameterized by skill/profession index / trade-skill line ID (number)
 
 | Function key | Return type | Description |
 |---|---|---|
-| `GetSkillLineInfo` | tuple (n=13) | Visible skill row information |
+| `GetSkillLineInfo` | tuple (n=13) | Legacy global; only present when `GetNumSkillLines` exists, no synthesized fallback |
 | `GetProfessionInfo` | tuple (n=10) | Profession tab information |
+| `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
 ### Parameterized by faction ID (number)
 
 | Function key | Return type | Description |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16) | Full faction info |
+| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when `C_Reputation.GetFactionDataByID` is unavailable |
+| `C_Reputation.GetFactionDataByID` | object (table) | Raw API result |
 
 ### Delta streams (in `functionsDelta`)
 
@@ -467,8 +477,8 @@ the capture system but stored identically to other streams:
 
 | Function key | Value type | Description |
 |---|---|---|
-| `QuestLog` | object (number[]) | Array of quest IDs currently in the player's quest log. Computed by iterating `GetQuestLogTitle` during capture. |
-| `FactionOrder` | object (number[]) | Ordered array of faction IDs as displayed in the reputation panel. Computed by iterating `GetFactionInfo` and expanding headers during capture. |
+| `QuestLog` | object (number[]) | Array of quest IDs currently in the player's quest log. Computed internally during capture from whichever of `C_QuestLog.GetInfo` or the legacy `GetQuestLogTitle` global exists (this internal lookup is not itself recorded to the trace). |
+| `FactionOrder` | object (number[]) | Ordered array of faction IDs as displayed in the reputation panel. Computed internally during capture from whichever of `C_Reputation.GetFactionDataByIndex`/`GetNumFactions` or the legacy `GetFactionInfo`/`GetNumFactions` globals exist, expanding headers as needed (not itself recorded to the trace). |
 | `SpellBook` | object (number[]) | Ordered unique spell IDs discovered by enumerating spellbook slots. |
 
 These are read like any parameterless function:
@@ -485,14 +495,17 @@ local questIDs = valueAt(getStream(session, "QuestLog"), target_t)
 Some WoW API functions can be reconstructed by combining stored streams
 rather than being stored directly:
 
-### `GetFactionInfo(index)` → from `FactionOrder` + `GetFactionInfoByID`
+### `GetFactionInfo(index)` → from `FactionOrder` + `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID`
 
 ```lua
 function emulateFactionInfo(session, index, target_t)
   local order = valueAt(getStream(session, "FactionOrder"), target_t)
   if not order or not order[index] then return nil end
   local factionID = order[index]
-  local stream = getStream(session, "GetFactionInfoByID", factionID)
+  -- Only one of these two streams is present on a given client -- whichever
+  -- real API it exposed at capture time.
+  local stream = getStream(session, "C_Reputation.GetFactionDataByID", factionID)
+      or getStream(session, "GetFactionInfoByID", factionID)
   if not stream then return nil end
   return emulate(valueAt(stream, target_t))
 end

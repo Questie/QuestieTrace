@@ -308,9 +308,10 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumLootItems` | scalar (number) | 0 when no loot window |
 | `IsInGroup` | scalar (boolean) | |
 | `GetNumGroupMembers` | scalar (number) | 0 when not in a group |
-| `GetNumSkillLines` | scalar (number) | visible skill rows after header expansion |
+| `GetNumSkillLines` | scalar (number) | Legacy global; only present when it exists, no synthesized fallback |
 | `GetQuestGreenRange` | scalar (number) | XP threshold; changes with player level |
 | `GetProfessions` | tuple (n=5) | profession tab indices; nil in missing tuple slots |
+| `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object (number[]) | Tracked independently whenever the API exists |
 | `C_GossipInfo.GetAvailableQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetActiveQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar (number) | QuestDialog; when API exists |
@@ -335,7 +336,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumQuestChoices` | scalar (number) | Current reward choice count |
 | `C_QuestLog.GetMaxNumQuestsCanAccept` | scalar (number) | Captured when API exists |
 | `GetServerTime` | scalar (number) | Low-frequency snapshot |
-| `GetQuestResetTime` | scalar (number) | Low-frequency reset snapshot |
+| `GetQuestResetTime` | scalar (number) | Legacy global; only present when it exists |
+| `C_DateAndTime.GetSecondsUntilDailyReset` | scalar (number) | Only present when this API exists |
 | `QuestLog` | object (number[]) | *(synthetic)* active quest IDs in quest-log order |
 | `FactionOrder` | object (number[]) | *(synthetic)* known faction IDs in display order |
 | `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration |
@@ -362,7 +364,13 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `C_QuestLog.IsOnQuest` | scalar (boolean/nil) | Raw API result; probed again after quest leaves log |
 | `C_QuestLog.IsQuestFlaggedCompleted` | scalar (boolean/nil) | Raw API result; related to but not derived from `GetQuestsCompleted` |
 | `C_QuestLog.GetQuestObjectives` | object (QuestObjectiveInfo[]/nil) | Raw API result; probed again after quest leaves log |
-| `GetQuestLogTitle` | tuple (n=17) | Stored by quest ID after resolving current quest log index |
+| `C_QuestLog.GetInfo` | object (table) | Raw `C_QuestLog.GetInfo` return, keyed by questID after resolving the current quest log index |
+| `C_QuestLog.GetQuestTagInfo` | object (table/nil) | Raw API result |
+| `C_QuestLog.IsComplete` | scalar (boolean/nil) | Raw API result |
+| `C_QuestLog.IsFailed` | scalar (boolean/nil) | Raw API result |
+| `C_QuestLog.GetLogIndexForQuestID` | scalar (number/nil) | Raw API result; used to resolve the quest-log index for the streams above |
+| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, stored by quest ID after resolving current quest log index. Only present when this global exists -- not synthesized from `C_QuestLog.*` |
+| `GetQuestLogIndexByID` | scalar (number/nil) | Legacy global; raw API result |
 | `GetQuestLogQuestText` | tuple (n=2) | questDescription, questObjectives |
 | `GetQuestTimers` | scalar (number/nil) | *(derived compatibility)* questId-keyed seconds-left from native timer slots |
 | `GetQuestLogTimeLeft` | scalar (number/nil) | *(derived compatibility)* same seconds-left value, no selection side effects |
@@ -406,14 +414,16 @@ All tuple-returning functions MUST have `n` on every stored value.
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16) | Full 16-value API return |
+| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when `C_Reputation.GetFactionDataByID` is unavailable |
+| `C_Reputation.GetFactionDataByID` | object (table) | Raw API result |
 
-### Parameterized by skill index / profession tab index
+### Parameterized by skill index / profession tab index / trade-skill line ID
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `GetSkillLineInfo` | tuple (n=13) | keyed by visible skill-line row index after header expansion |
+| `GetSkillLineInfo` | tuple (n=13) | Legacy global; keyed by visible skill-line row index after header expansion. Only present when `GetNumSkillLines` exists -- no synthesized fallback |
 | `GetProfessionInfo` | tuple (n=10) | keyed by profession tab index returned by `GetProfessions()` |
+| `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
 ### Delta streams (in `functionsDelta`)
 
@@ -536,7 +546,26 @@ only observed raw API returns instead of those resets.
       },
     },
 
-    -- GetQuestLogTitle (tuple, n=17)
+    -- C_QuestLog.GetInfo (object, table): raw API return, only present when
+    -- C_QuestLog.GetInfo exists on this client
+    ["C_QuestLog.GetInfo"] = {
+      [56789] = {
+        { t = 0.500, tp = 0.50033, v = { title = "A New Threat", level = 2, isHeader = false, questID = 56789 } },
+      },
+    },
+
+    -- C_QuestLog.IsComplete (scalar boolean/nil): raw API return, independent
+    -- of C_QuestLog.GetInfo -- there is no synthesized composite value
+    ["C_QuestLog.IsComplete"] = {
+      [56789] = {
+        { t = 0.500, tp = 0.50034, v = false },
+        { t = 49.000, tp = 49.00022, v = true },
+      },
+    },
+
+    -- Legacy GetQuestLogTitle (tuple, n=17): only present when this global
+    -- exists; on such clients it is recorded as its own raw tuple, not
+    -- derived from C_QuestLog.GetInfo/IsComplete above
     -- Returns: title, level, suggestedGroup, isHeader, isCollapsed, isComplete,
     --          frequency, questID, startEvent, displayQuestID, isOnMap,
     --          hasLocalPOI, isTask, isBounty, isStory, isHidden, isScaling
@@ -571,7 +600,18 @@ only observed raw API returns instead of those resets.
 
     ---- Parameterized by factionID ----
 
-    -- GetFactionInfoByID (tuple, n=16)
+    -- C_Reputation.GetFactionDataByID (object, table): recorded whenever this
+    -- modern API exists. On clients without it, the legacy GetFactionInfoByID
+    -- tuple below is recorded instead -- never both, never synthesized.
+    ["C_Reputation.GetFactionDataByID"] = {
+      [47] = {  -- Ironforge
+        { t = 0.000, tp = 0.00043, v = { name = "Ironforge", factionID = 47, reaction = 5, currentStanding = 4500 } },
+        { t = 120.500, tp = 120.50018, v = { name = "Ironforge", factionID = 47, reaction = 5, currentStanding = 4520 } },
+      },
+    },
+
+    -- Legacy GetFactionInfoByID (tuple, n=16): only present when
+    -- C_Reputation.GetFactionDataByID is unavailable
     ["GetFactionInfoByID"] = {
       [47] = {  -- Ironforge
         { t = 0.000, tp = 0.00043, v = {

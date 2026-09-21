@@ -28,7 +28,7 @@ Agent-facing index for QuestieTrace, a WoW Classic Era addon that records quest/
 │    UnitLevel          UnitLevel + quest green range     │
 │    Position           Zone/map/XY/instance state        │
 │    Loot               Loot window functions             │
-│    Reputation         FactionOrder, GetFactionInfoByID  │
+│    Reputation         FactionOrder, faction detail raw │
 │    QuestLog           Quest/reward/timer/text streams   │
 │    CompletedQuests    GetQuestsCompleted delta stream   │
 │    UnitInteraction    Unit identity + gossip quest APIs │
@@ -85,15 +85,15 @@ specs/
 | UnitLevel | 3 events | Event-driven | `UnitLevel["player"]`, `GetQuestGreenRange` |
 | Position | zone/login events + timer + private movement sampling | Timer + event-driven | Zone texts, map ID, XY, instance state |
 | Loot | `LOOT_READY`, `LOOT_CLOSED` | Window lifecycle | Loot count + per-slot functions |
-| Reputation | 5 events | Event + index iteration | `FactionOrder`, `GetFactionInfoByID` |
+| Reputation | 5 events | Event + index iteration | `FactionOrder`, `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` |
 | QuestLog | quest/login events | Event + delayed re-samples + iteration | Quest membership, per-quest text/data, timers, rewards |
 | CompletedQuests | quest/login events | Event + delayed re-samples | `GetQuestsCompleted` delta stream |
 | UnitInteraction | target/dialog/NPC/login events | Fixed unit-token fanout | `UnitGUID`, `UnitName`, gossip quest-list APIs |
 | GroupState | 5 events | Event-driven | `IsInGroup`, `GetNumGroupMembers` |
-| SkillLines | 3 events | Event + index iteration | `GetNumSkillLines`, `GetSkillLineInfo`, `GetProfessions`, `GetProfessionInfo` |
+| SkillLines | 3 events | Event + index iteration | `GetNumSkillLines`/`GetSkillLineInfo` (legacy, when present), `GetProfessions`, `GetProfessionInfo`, `C_TradeSkillUI.*` (independent, when present) |
 | SpellBook | 2 events | Event + slot iteration | Spellbook slot streams + `PlayerKnownSpells` delta |
 | QuestDialog | 8 dialog events | Event + delayed re-samples + observed close sample | Gossip/greeting/current quest dialog APIs |
-| ResetTime | 3 lifecycle events | Init + snapshots | `GetServerTime`, `GetQuestResetTime` |
+| ResetTime | 3 lifecycle events | Init + snapshots | `GetServerTime`, `GetQuestResetTime`/`C_DateAndTime.GetSecondsUntilDailyReset` (whichever present) |
 
 ---
 

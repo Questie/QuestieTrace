@@ -77,11 +77,16 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetNumLootItems()` | `functions["GetNumLootItems"]` |
 | `IsInGroup()` | `functions["IsInGroup"]` |
 | `GetNumGroupMembers()` | `functions["GetNumGroupMembers"]` |
-| `GetNumSkillLines()` | `functions["GetNumSkillLines"]` |
+| `GetNumSkillLines()` | `functions["GetNumSkillLines"]` (only present when this legacy global exists; no synthesized fallback) |
+| `GetSkillLineInfo(index)` (legacy) | `functions["GetSkillLineInfo"][index]` (only present when `GetNumSkillLines` exists) |
+| `C_TradeSkillUI.GetAllProfessionTradeSkillLines()` | `functions["C_TradeSkillUI.GetAllProfessionTradeSkillLines"]` |
+| `C_TradeSkillUI.GetTradeSkillLineInfoByID(skillLineID)` | `functions["C_TradeSkillUI.GetTradeSkillLineInfoByID"][skillLineID]` |
 | `GetProfessions()` | `functions["GetProfessions"]` |
+| `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
 | `C_QuestLog.GetMaxNumQuestsCanAccept()` | `functions["C_QuestLog.GetMaxNumQuestsCanAccept"]` |
 | `GetServerTime()` | `functions["GetServerTime"]` snapshot; derive continuous time if needed |
-| `GetQuestResetTime()` | `functions["GetQuestResetTime"]` snapshot; derive countdown semantics if needed |
+| `GetQuestResetTime()` (legacy) | `functions["GetQuestResetTime"]` snapshot; only present when this global exists |
+| `C_DateAndTime.GetSecondsUntilDailyReset()` | `functions["C_DateAndTime.GetSecondsUntilDailyReset"]` snapshot; only present when this API exists |
 | `C_GossipInfo.GetAvailableQuests()` | `functions["C_GossipInfo.GetAvailableQuests"]` |
 | `C_GossipInfo.GetActiveQuests()` | `functions["C_GossipInfo.GetActiveQuests"]` |
 | `C_GossipInfo.GetNumAvailableQuests()` | `functions["C_GossipInfo.GetNumAvailableQuests"]` |
@@ -121,7 +126,13 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_QuestLog.IsOnQuest(questId)` | `functions["C_QuestLog.IsOnQuest"][questId]` |
 | `C_QuestLog.IsQuestFlaggedCompleted(questId)` | `functions["C_QuestLog.IsQuestFlaggedCompleted"][questId]` |
 | `C_QuestLog.GetQuestObjectives(questId)` | `functions["C_QuestLog.GetQuestObjectives"][questId]` |
-| `GetQuestLogTitle(questLogIndex)` for active quest `questId` | `functions["GetQuestLogTitle"][questId]` |
+| `C_QuestLog.GetInfo(questLogIndex)` for active quest `questId` | `functions["C_QuestLog.GetInfo"][questId]` |
+| `C_QuestLog.GetQuestTagInfo(questId)` | `functions["C_QuestLog.GetQuestTagInfo"][questId]` |
+| `C_QuestLog.IsComplete(questId)` | `functions["C_QuestLog.IsComplete"][questId]` |
+| `C_QuestLog.IsFailed(questId)` | `functions["C_QuestLog.IsFailed"][questId]` |
+| `C_QuestLog.GetLogIndexForQuestID(questId)` | `functions["C_QuestLog.GetLogIndexForQuestID"][questId]` |
+| `GetQuestLogTitle(questLogIndex)` (legacy) for active quest `questId` | `functions["GetQuestLogTitle"][questId]` (raw 17-value tuple, only present when this global exists) |
+| `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]` |
 | `GetQuestLogQuestText(questLogIndex)` for active quest `questId` | `functions["GetQuestLogQuestText"][questId]` |
 | Timed quest value for `questId` | `functions["GetQuestTimers"][questId]` |
 | Quest log time-left value for `questId` | `functions["GetQuestLogTimeLeft"][questId]` |
@@ -133,8 +144,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetLootSourceInfo(slot)` | `functions["GetLootSourceInfo"][slot]` |
 | `GetLootSlotLink(slot)` | `functions["GetLootSlotLink"][slot]` |
 | `GetLootSlotType(slot)` | `functions["GetLootSlotType"][slot]` |
-| `GetFactionInfoByID(factionID)` | `functions["GetFactionInfoByID"][factionID]` |
-| `GetSkillLineInfo(index)` | `functions["GetSkillLineInfo"][index]` |
+| `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple, only present when `C_Reputation.GetFactionDataByID` is unavailable) |
+| `C_Reputation.GetFactionDataByID(factionID)` | `functions["C_Reputation.GetFactionDataByID"][factionID]` (raw table) |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
 | `GetSpellBookItemName(slot)` | `functions["GetSpellBookItemName"][slot]` |
 | `GetSpellBookItemInfo(slot)` | `functions["GetSpellBookItemInfo"][slot]` |
@@ -142,12 +153,15 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 
 Notes:
 
-- Raw questID API streams such as `C_QuestLog.IsQuestFlaggedCompleted`, `C_QuestLog.IsOnQuest`, `HaveQuestData`, objectives, reward count/money, and `GetQuestTagInfo` store observed API returns. When a quest leaves `QuestLog`, the tracker runs post-invalidation probes and records only values returned by successful calls. `C_QuestLog.IsQuestFlaggedCompleted` is related to `GetQuestsCompleted`, but the raw stream is not derived from it.
-- `GetQuestLogTitle` and `GetQuestLogQuestText` are sampled with the native quest-log index but stored by `questId`. Native index emulation should map index → questId via the `QuestLog` synthetic stream first. After a quest leaves the active log, there is no valid quest-log index to probe for these streams.
+- Raw questID API streams such as `C_QuestLog.IsQuestFlaggedCompleted`, `C_QuestLog.IsOnQuest`, `HaveQuestData`, objectives, reward count/money, `GetQuestTagInfo`, `C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, and `C_QuestLog.IsFailed` store observed API returns. When a quest leaves `QuestLog`, the tracker runs post-invalidation probes and records only values returned by successful calls. `C_QuestLog.IsQuestFlaggedCompleted` is related to `GetQuestsCompleted`, but the raw stream is not derived from it.
+- Quest-log title/tag/completion data is intentionally split across several independent raw streams (`C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, `C_QuestLog.IsFailed`, legacy `GetQuestLogTitle`) rather than one normalized composite value. Consumers that want a single "quest log title" view must combine whichever of these streams are present themselves; a client that lacks one of the modern `C_QuestLog.*` APIs simply has no entries for that stream, it is never backfilled from another API.
+- `GetQuestLogIndexByID`/`C_QuestLog.GetLogIndexForQuestID` and `GetQuestLogQuestText` are sampled with the native quest-log index but stored by `questId`. Native index emulation should map index → questId via the `QuestLog` synthetic stream first. After a quest leaves the active log, there is no valid quest-log index to probe for these streams.
 - `GetQuestTimers[questId]` and `GetQuestLogTimeLeft[questId]` are derived compatibility streams from `GetQuestTimers()` and `GetQuestIndexForTimer(timerIndex)`; they do not mutate quest-log selection. Their nil entries indicate derived timer mapping invalidation, not raw native API returns.
 - `GetQuestLogRewardInfo` uses nested maps in native argument order `[rewardIndex][questId]`. Previously observed reward indices are probed again after counts shrink or quests leave the log; stored values are successful API returns, not invented inactive values.
 - Legacy gossip globals are raw packed varargs; `GetGossipAvailableQuests` is repeated 7-tuples and `GetGossipActiveQuests` is repeated 6-tuples. Quest dialog close events cancel pending delayed open/update reads and perform one observed API sample; any empty string, nil, zero, or table value in these raw streams is an API return, not a synthetic reset.
 - Loot, skill/profession, spellbook, and unit-token streams follow the same raw-observation rule. Close events or shrinking index ranges cause event-synchronous probes of the represented APIs; failed calls are skipped rather than represented by invented values.
+- `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` are two independent raw streams for the same conceptual data, not one normalized value: whichever real API the client exposes is probed and recorded under that API's own name.
+- `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries. `GetProfessions`/`GetProfessionInfo` and `C_TradeSkillUI.GetAllProfessionTradeSkillLines`/`C_TradeSkillUI.GetTradeSkillLineInfoByID` are tracked independently and unconditionally whenever they exist (not only as a fallback for the legacy skill-line APIs).
 
 ### Stored custom streams
 
@@ -161,9 +175,9 @@ Notes:
 
 | WoW API call | Derivation |
 |---|---|
-| `GetFactionInfo(index)` | `factionID = valueAt(functions["FactionOrder"], t)[index]` → `functions["GetFactionInfoByID"][factionID]` |
+| `GetFactionInfo(index)` | `factionID = valueAt(functions["FactionOrder"], t)[index]` → `functions["GetFactionInfoByID"][factionID]` or `functions["C_Reputation.GetFactionDataByID"][factionID]`, whichever is present |
 | `GetNumFactions()` | `#valueAt(functions["FactionOrder"], t)` |
-| `GetQuestLogTitle(questLogIndex)` | `questId = valueAt(functions["QuestLog"], t)[questLogIndex]` → `functions["GetQuestLogTitle"][questId]` |
+| `GetQuestLogTitle(questLogIndex)` | `questId = valueAt(functions["QuestLog"], t)[questLogIndex]` → combine whichever of `functions["C_QuestLog.GetInfo"][questId]`, `functions["C_QuestLog.GetQuestTagInfo"][questId]`, `functions["C_QuestLog.IsComplete"][questId]`, `functions["C_QuestLog.IsFailed"][questId]`, or legacy `functions["GetQuestLogTitle"][questId]` are present |
 | `GetQuestLogQuestText(questLogIndex)` | same index → questId map, then `functions["GetQuestLogQuestText"][questId]` |
 
 ## 4) Delta stream replay

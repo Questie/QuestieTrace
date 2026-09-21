@@ -213,15 +213,15 @@ successful observed returns.
 | UnitLevel | `Trackers/UnitLevel.lua` | `UnitLevel["player"]`, `GetQuestGreenRange` | Event-driven | `PLAYER_LEVEL_UP`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | Position | `Trackers/Position.lua` | `GetZoneText`, `GetSubZoneText`, `GetRealZoneText`, `C_Map.GetBestMapForUnit["player"]`, `C_Map.GetPlayerMapPosition["player"]`, `IsInInstance`, `GetInstanceInfo` | Timer (0.2s) + event-driven + private movement sampling | zone/map events + `PLAYER_ENTERING_WORLD`, `PLAYER_ALIVE`, `SPELLS_CHANGED`; movement events are private sampling triggers and are not recorded globally |
 | Loot | `Trackers/Loot.lua` | `GetNumLootItems`, `GetLootSlotInfo[slot]`, `GetLootSourceInfo[slot]`, `GetLootSlotLink[slot]`, `GetLootSlotType[slot]` | Event + window lifecycle | `LOOT_READY`, `LOOT_CLOSED` |
-| Reputation | `Trackers/Reputation.lua` | `FactionOrder`, `GetFactionInfoByID[factionID]` | Event + index iteration | `CHAT_MSG_COMBAT_FACTION_CHANGE`, `UPDATE_FACTION`, `QUEST_TURNED_IN`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| QuestLog | `Trackers/QuestLog.lua` | `QuestLog`, `C_QuestLog.GetMaxNumQuestsCanAccept`, `IsQuestComplete[qid]`, `HaveQuestData[qid]`, `C_QuestLog.IsOnQuest[qid]`, `C_QuestLog.IsQuestFlaggedCompleted[qid]`, `C_QuestLog.GetQuestObjectives[qid]`, `GetQuestLogTitle[qid]`, `GetQuestLogQuestText[qid]`, `QuestLogZone[qid]`, timer streams, reward streams, `GetQuestTagInfo[qid]` | Event + delayed re-samples + index iteration | 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| Reputation | `Trackers/Reputation.lua` | `FactionOrder`, `GetFactionInfoByID[factionID]`/`C_Reputation.GetFactionDataByID[factionID]` (whichever the client exposes) | Event + index iteration | `CHAT_MSG_COMBAT_FACTION_CHANGE`, `UPDATE_FACTION`, `QUEST_TURNED_IN`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| QuestLog | `Trackers/QuestLog.lua` | `QuestLog`, `C_QuestLog.GetMaxNumQuestsCanAccept`, `IsQuestComplete[qid]`, `HaveQuestData[qid]`, `C_QuestLog.IsOnQuest[qid]`, `C_QuestLog.IsQuestFlaggedCompleted[qid]`, `C_QuestLog.GetQuestObjectives[qid]`, `C_QuestLog.GetInfo[qid]`, `C_QuestLog.GetQuestTagInfo[qid]`, `C_QuestLog.IsComplete[qid]`, `C_QuestLog.IsFailed[qid]`, `C_QuestLog.GetLogIndexForQuestID[qid]`, `GetQuestLogTitle[qid]`, `GetQuestLogIndexByID[qid]`, `GetQuestLogQuestText[qid]`, `QuestLogZone[qid]`, timer streams, reward streams, `GetQuestTagInfo[qid]` | Event + delayed re-samples + index iteration | 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | CompletedQuests | `Trackers/CompletedQuests.lua` | `GetQuestsCompleted` (functionsDelta) | Event + delayed re-samples | Same 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | UnitInteraction | `Trackers/UnitInteraction.lua` | `UnitGUID`/`UnitName` for `target`, `npc`, `questnpc`; `C_GossipInfo.GetAvailableQuests`; `C_GossipInfo.GetActiveQuests` | Event-driven fixed unit-token fanout | target, quest dialog, selected quest state, loot-open, NPC interaction, login-time events |
 | GroupState | `Trackers/GroupState.lua` | `IsInGroup`, `GetNumGroupMembers` | Event-driven | `GROUP_JOINED`, `GROUP_LEFT`, `GROUP_ROSTER_UPDATE`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| SkillLines | `Trackers/SkillLines.lua` | `GetNumSkillLines`, `GetSkillLineInfo[index]`, `GetProfessions`, `GetProfessionInfo[index]` | Event + index iteration | `SKILL_LINES_CHANGED`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| SkillLines | `Trackers/SkillLines.lua` | `GetNumSkillLines[?]`, `GetSkillLineInfo[index]` (legacy, when present), `GetProfessions`, `GetProfessionInfo[index]`, `C_TradeSkillUI.GetAllProfessionTradeSkillLines`, `C_TradeSkillUI.GetTradeSkillLineInfoByID[skillLineID]` | Event + index iteration | `SKILL_LINES_CHANGED`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | SpellBook | `Trackers/SpellBook.lua` | `SpellBook`, `GetSpellBookItemName[slot]`, `GetSpellBookItemInfo[slot]`, `IsPassiveSpell[slot]`, `PlayerKnownSpells` (functionsDelta) | Event + slot iteration | `SPELLS_CHANGED`, `PLAYER_ENTERING_WORLD` |
 | QuestDialog | `Trackers/QuestDialog.lua` | Gossip, greeting, and current quest-dialog APIs | Event + delayed re-samples + observed close sample | `QUEST_DETAIL`, `QUEST_PROGRESS`, `QUEST_COMPLETE`, `QUEST_FINISHED`, `QUEST_GREETING`, `QUEST_ACCEPT_CONFIRM`, `GOSSIP_SHOW`, `GOSSIP_CLOSED` |
-| ResetTime | `Trackers/ResetTime.lua` | `GetServerTime`, `GetQuestResetTime` | Init + low-frequency event snapshots | `PLAYER_LOGIN`, `PLAYER_ENTERING_WORLD`, `PLAYER_LOGOUT` |
+| ResetTime | `Trackers/ResetTime.lua` | `GetServerTime`, `GetQuestResetTime` (legacy, when present), `C_DateAndTime.GetSecondsUntilDailyReset` (when present) | Init + low-frequency event snapshots | `PLAYER_LOGIN`, `PLAYER_ENTERING_WORLD`, `PLAYER_LOGOUT` |
 
 ---
 
@@ -235,14 +235,14 @@ documentation.
 Two distinct phases:
 
 **CollectFactionIDs** (has side effects):
-- Iterates `GetFactionInfo(1..GetNumFactions())`.
+- Iterates `GetFactionInfo(1..GetNumFactions())` or `C_Reputation.GetFactionDataByIndex(1..C_Reputation.GetNumFactions())`, whichever the client exposes. These two calls only drive iteration; they are never themselves recorded to the trace.
 - Expands collapsed headers to discover children.
 - Returns ordered array of factionIDs.
 - Updates `FactionOrder` if the set changed.
 
 **SampleReputation** (pure reads):
-- For each known factionID, calls `GetFactionInfoByID(factionID)`.
-- Compares full 16-value tuple against previous value (DeepCompare).
+- For each known factionID, calls whichever of `C_Reputation.GetFactionDataByID(factionID)` or the legacy `GetFactionInfoByID(factionID)` the client exposes, and records the raw result under that API's own name (`C_Reputation.GetFactionDataByID[factionID]` or `GetFactionInfoByID[factionID]`). There is no synthesized composite value between the two.
+- Compares the raw value against the previous value (DeepCompare).
 - Appends `{t, tp, v}` only if changed.
 
 ### Event-to-action mapping
@@ -284,7 +284,7 @@ end
 
 ### No delayed re-samples
 
-Unlike quest functions, reputation changes are atomic — `GetFactionInfoByID`
+Unlike quest functions, reputation changes are atomic — `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID`
 returns the correct value immediately when the event fires. No staggered
 re-sampling is needed.
 
@@ -295,6 +295,8 @@ re-sampling is needed.
 The QuestLog tracker retains the existing active quest-log streams and adds Questie-oriented replay streams. `GetQuestLogQuestText[questId]` remains captured alongside current quest dialog text streams; they are different APIs.
 
 Raw questID API streams preserve observed API behavior. Values for `IsQuestComplete`, `HaveQuestData`, `C_QuestLog.IsOnQuest`, `C_QuestLog.IsQuestFlaggedCompleted`, `C_QuestLog.GetQuestObjectives`, `GetQuestTagInfo`, reward count/money, and `GetQuestLogRewardInfo` are appended only after successful calls to those functions with the represented quest ID/arguments. When a quest leaves `QuestLog`, the tracker runs post-invalidation probes immediately and at the standard delayed offsets so traces capture the exact post-removal API behavior after Blizzard state settles. `C_QuestLog.IsQuestFlaggedCompleted` is related to `GetQuestsCompleted`, but the raw function stream is not derived from the completed-quest delta set.
+
+Quest-log title/tag/completion data is split into several independent raw streams rather than one normalized composite value: `C_QuestLog.GetInfo[qid]`, `C_QuestLog.GetQuestTagInfo[qid]`, `C_QuestLog.IsComplete[qid]`, `C_QuestLog.IsFailed[qid]`, and the legacy `GetQuestLogTitle[qid]` (raw 17-value tuple, only recorded when that global exists). Each is probed and recorded independently, only when its own real API exists; a client lacking one of the modern `C_QuestLog.*` APIs simply produces no entries for that stream, it is never backfilled from another API. Likewise the quest-log index used to drive these lookups is recorded under whichever real API resolved it: `C_QuestLog.GetLogIndexForQuestID[qid]` or the legacy `GetQuestLogIndexByID[qid]`. Internally, the tracker also uses a private (unrecorded) row-reading helper purely to enumerate which quest-log indices hold quests vs. headers — that internal lookup is never itself written to the trace.
 
 Timer streams are derived compatibility streams. The native Classic API exposes `GetQuestTimers()` as timer slots, then `GetQuestIndexForTimer(timerIndex)` maps a slot to a quest-log index. The tracker resolves that index to a quest ID and records both `GetQuestTimers[questId]` and `GetQuestLogTimeLeft[questId]` as seconds-left values. When a previously timed quest disappears from the timer mapping, both streams receive nil entries because the derived mapping is no longer valid; those nils are not raw native API return values.
 

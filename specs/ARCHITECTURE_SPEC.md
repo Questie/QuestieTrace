@@ -29,7 +29,7 @@ Modules/Trackers/UnitInteraction.lua  -- UnitGUID/UnitName and gossip quest-list
 Modules/Trackers/GroupState.lua       -- IsInGroup, GetNumGroupMembers
 Modules/Trackers/SkillLines.lua       -- Skill window + profession tabs
 Modules/Trackers/SpellBook.lua        -- Raw spellbook slots + PlayerKnownSpells
-Modules/Trackers/ResetTime.lua        -- GetServerTime and GetQuestResetTime
+Modules/Trackers/ResetTime.lua        -- GetServerTime and GetQuestResetTime/C_DateAndTime.GetSecondsUntilDailyReset
 Modules/Dumps/MapHierarchy.lua        -- Static C_Map hierarchy dump (PLAYER_LOGIN + /qlt dumpmap)
 Modules/Export/Encoding.lua           -- CBOR/Deflate encoding for export payloads
 Modules/Export/Export.lua             -- Payload building, privacy scrubbing

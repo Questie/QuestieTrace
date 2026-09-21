@@ -102,7 +102,7 @@ event stream to avoid trace noise.
 
 ### Reputation tracker
 
-Triggers `GetFactionInfoByID` sampling and faction discovery. On
+Triggers faction detail sampling (`GetFactionInfoByID` or `C_Reputation.GetFactionDataByID`, whichever the client exposes) and faction discovery. On
 `QUEST_TURNED_IN`, runs full collection (discover new factions). On the
 other events, samples existing factions only (including the login-time
 sampling events).
@@ -184,9 +184,11 @@ Triggers `IsInGroup` and `GetNumGroupMembers` sampling.
 
 ### SkillLines tracker
 
-Triggers skill window and profession-tab sampling. Expands all skill
-headers before sampling so hidden child rows are visible to
-`GetSkillLineInfo(index)`.
+Triggers skill window, profession-tab, and trade-skill-line sampling.
+Expands all skill headers before sampling so hidden child rows are visible
+to `GetSkillLineInfo(index)` when that legacy global exists (no synthesized
+fallback when it doesn't). `C_TradeSkillUI.*` trade-skill-line data is
+tracked independently whenever that API exists.
 
 - `SKILL_LINES_CHANGED`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
