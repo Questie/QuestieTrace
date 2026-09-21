@@ -174,7 +174,7 @@ local function ShowReminder()
   chatFrame:AddMessage(string.format(
     "|cFFFFD100%s|r: %s",
     ADDON_NAME,
-    l10n("It is time to share your trace data. %s", BuildExportLink())
+    l10n("It is time to share your trace data again. Each submission only covers what happened so far, so please keep submitting regularly. %s", BuildExportLink())
   ))
 end
 

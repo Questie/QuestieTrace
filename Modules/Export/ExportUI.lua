@@ -70,7 +70,7 @@ local function BuildExportFrame()
   hint:SetPoint("LEFT", 16, 0)
   hint:SetPoint("RIGHT", -16, 0)
   hint:SetJustifyH("CENTER")
-  hint:SetText(l10n("Copy the text below and submit it at the URL above. This data helps us build the Questie database. Player and guild names are never included."))
+  hint:SetText(l10n("Copy the text below and submit it at the URL above. Please do this again each time this window has new data to share, since one submission only covers what happened up to that point. This helps us build the Questie database. Player and guild names are never included."))
 
   local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate") --[[@as ScrollFrame]]
   scrollFrame:SetPoint("TOPLEFT", 16, -110)

@@ -6,27 +6,18 @@ local PackArgs = Core.PackArgs
 local DeepCompare = Core.DeepCompare
 
 local C_After = C_Timer.After
+local Compat = Core.Compat
 
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
--- GetQuestLogTitle(questLogIndex) -> string  title,
---                                    number  level,
---                                    number  suggestedGroup,
---                                    boolean isHeader,
---                                    boolean isCollapsed,
---                                    number  isComplete,      -- 1=done, -1=failed, nil=in progress
---                                    number  frequency,       -- 1=normal, 2=daily, 3=weekly
---                                    number  questID,
---                                    boolean startEvent,
---                                    boolean displayQuestID,
---                                    boolean isOnMap,
---                                    boolean hasLocalPOI,
---                                    boolean isTask,
---                                    boolean isBounty,
---                                    boolean isStory,
---                                    boolean isHidden,
---                                    boolean isScaling
+-- GetQuestLogTitle(questLogIndex) -> Compat.GetQuestLogTitle table (QuestLogTitleInfo, see
+--                                    Modules/Compat.lua), with fields:
+--                                    title, level, questTag, isHeader, isCollapsed,
+--                                    isComplete (1=done, -1=failed, nil=in progress),
+--                                    frequency (1=normal, 2=daily, 3=weekly), questID,
+--                                    startEvent, displayQuestID, isOnMap, hasLocalPOI,
+--                                    isTask, isBounty, isStory, isHidden, isScaling
 --
 -- GetQuestLogQuestText(questLogIndex) -> string questDescription,
 --                                        string questObjectives
@@ -45,7 +36,7 @@ local C_After = C_Timer.After
 -- C_QuestLog.GetMaxNumQuestsCanAccept()        -> number maxNumQuestsCanAccept
 -- C_QuestLog.IsQuestFlaggedCompleted(questID)  -> boolean isCompleted
 -- C_QuestLog.GetQuestObjectives(questID)       -> QuestObjectiveInfo[] objectives
--- GetQuestLogTitle(questLogIndex)              -> packed title tuple keyed by questID
+-- GetQuestLogTitle(questLogIndex)              -> QuestLogTitleInfo table keyed by questID
 -- GetQuestLogQuestText(questLogIndex)          -> packed quest text tuple keyed by questID
 -- GetQuestTimers[questID]                      -> number secondsLeft (derived from GetQuestTimers())
 -- GetQuestLogTimeLeft[questID]                 -> number secondsLeft (same derived compatibility value)
@@ -55,6 +46,9 @@ local C_After = C_Timer.After
 -- GetQuestLogIndexByID(questID)                -> number questLogIndex
 --
 -- QuestLog (custom stream) -> number[] questIDs  -- array of active quest IDs
+-- QuestLogZone[questId] -> string? headerTitle -- derived: the quest-log
+--                                                 header title immediately
+--                                                 preceding this quest
 ---------------------------------------------------------------------------
 
 ---@type number[]
@@ -83,28 +77,39 @@ local prevRewardCounts -- Highest reward index previously captured for each acti
 ---@param questLogIndex number
 ---@return number? questId
 local function GetQuestIdAtLogIndex(questLogIndex)
-  ---@type boolean, string?, any, any, any, any, any, any, number?
-  local ok, title, _, _, _, _, _, _, questId = pcall(GetQuestLogTitle, questLogIndex)
-  if not ok or not title then return nil end
-  if questId and questId > 0 then return questId end
+  ---@type boolean, QuestLogTitleInfo?
+  local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
+  if not ok or not info then return nil end
+  if info.questID and info.questID > 0 then return info.questID end
   return nil
 end
 
---- Get all quest IDs currently in the quest log.
+--- Get all quest IDs currently in the quest log, along with the header/zone
+--- title that immediately precedes each quest.
 ---@return number[] questIds Array of quest IDs
+---@return table<number, string?> questZones [questId] -> preceding header title
 local function GetAllQuestIdsInLog()
   ---@type number[]
   local questIds = {}
-  for questLogIndex = 1, 75 do
-    local questId = GetQuestIdAtLogIndex(questLogIndex)
-    if not questId then
-      local ok, title = pcall(GetQuestLogTitle, questLogIndex)
-      if not ok or not title then return questIds end
-    else
-      questIds[#questIds + 1] = questId
+  ---@type table<number, string?>
+  local questZones = {}
+  ---@type string?
+  local currentHeaderTitle = nil
+
+  for questLogIndex = 1, 80 do -- Forever allows 40 quests (+40 individual zones)
+    local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
+    if not ok or not info then
+      return questIds, questZones
+    end
+
+    if info.isHeader then
+      currentHeaderTitle = info.title
+    elseif info.questID and info.questID > 0 then
+      questIds[#questIds + 1] = info.questID
+      questZones[info.questID] = currentHeaderTitle
     end
   end
-  return questIds
+  return questIds, questZones
 end
 
 ---------------------------------------------------------------------------
@@ -519,7 +524,8 @@ local function SampleQuestLog(capture)
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
   ---@type number[]
-  local questIds = GetAllQuestIdsInLog()
+  ---@type table<number, string?>
+  local questIds, questZones = GetAllQuestIdsInLog()
 
   -- QuestLog membership discovers which quest IDs are active. When a quest
   -- leaves this list, raw direct questID APIs are probed again rather than
@@ -557,12 +563,18 @@ local function SampleQuestLog(capture)
     -- Raw direct questID APIs: append only values returned by successful calls.
     ProbeQuestDirectApis(t, tp, questId)
 
-    -- GetQuestLogTitle -- tuple (needs questLogIndex lookup)
+    -- QuestLogZone -- derived: header/zone title preceding this quest
+    AppendIfChanged(
+      GetOrCreateParamStream("QuestLogZone", questId),
+      t, tp, questZones[questId], questId, "QuestLogZone"
+    )
+
+    -- GetQuestLogTitle -- table (needs questLogIndex lookup)
     ---@type number?
-    local questLogIndex = GetQuestLogIndexByID(questId)
+    local questLogIndex = Compat.GetQuestLogIndexByID(questId)
     if questLogIndex then
-      ---@type PackedArgs
-      local titleData = PackArgs(GetQuestLogTitle(questLogIndex))
+      ---@type QuestLogTitleInfo?
+      local titleData = Compat.GetQuestLogTitle(questLogIndex)
       AppendIfChanged(
         GetOrCreateParamStream("GetQuestLogTitle", questId),
         t, tp, titleData, questId, "GetQuestLogTitle"

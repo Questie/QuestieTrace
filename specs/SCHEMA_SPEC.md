@@ -572,6 +572,14 @@ only observed raw API returns instead of those resets.
       },
     },
 
+    -- QuestLogZone (scalar string/nil): derived header/zone title preceding
+    -- this quest in the quest log, resolved while iterating quest-log rows
+    ["QuestLogZone"] = {
+      [56789] = {
+        { t = 0.500, tp = 0.50033, v = "Westfall" },
+      },
+    },
+
     ---- Parameterized by slot index ----
 
     -- GetLootSlotInfo (tuple, n=9; nil when loot window closed)
