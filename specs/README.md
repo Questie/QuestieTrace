@@ -30,7 +30,7 @@ Agent-facing index for QuestieTrace, a WoW Classic Era addon that records quest/
 │    Loot               Loot window functions             │
 │    Reputation         FactionOrder, faction detail raw │
 │    QuestLog           Quest/reward/timer/text streams   │
-│    CompletedQuests    GetQuestsCompleted delta stream   │
+│    CompletedQuests    Independent completed-quest delta │
 │    UnitInteraction    Unit identity + gossip quest APIs │
 │    GroupState         Party membership state            │
 │    SkillLines         Skill window + profession tabs    │
@@ -87,7 +87,7 @@ specs/
 | Loot | `LOOT_READY`, `LOOT_CLOSED` | Window lifecycle | Loot count + per-slot functions |
 | Reputation | 5 events | Event + index iteration | `FactionOrder`, `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` |
 | QuestLog | quest/login events | Event + delayed re-samples + iteration | Quest membership, per-quest text/data, timers, rewards |
-| CompletedQuests | quest/login events | Event + delayed re-samples | `GetQuestsCompleted` delta stream |
+| CompletedQuests | quest/login events | Event + delayed re-samples | `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted`, tracked as independent delta streams |
 | UnitInteraction | target/dialog/NPC/login events | Fixed unit-token fanout | `UnitGUID`, `UnitName`, gossip quest-list APIs |
 | GroupState | 5 events | Event-driven | `IsInGroup`, `GetNumGroupMembers` |
 | SkillLines | 3 events | Event + index iteration | `GetNumSkillLines`/`GetSkillLineInfo` (legacy, when present), `GetProfessions`, `GetProfessionInfo`, `C_TradeSkillUI.*` (independent, when present) |
@@ -105,7 +105,7 @@ specs/
 - Function streams can be flat, one-level parameterized, or nested parameterized (`functions[name][arg1][arg2]...`) for true multi-argument APIs.
 - Packed args use `{ ..., n = count }`.
 - Missing `v` on a stream entry means a stored nil value.
-- `GetQuestsCompleted` and `PlayerKnownSpells` use delta streams.
+- `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted` and `PlayerKnownSpells` use delta streams.
 - Update specs when implementation changes.
 
 ---

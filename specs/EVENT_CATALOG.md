@@ -36,9 +36,11 @@ Uses delayed re-samples at `{ 0, 0.10, 0.35, 0.55, 0.75, 1.00 }` seconds.
 
 ### CompletedQuests tracker
 
-Triggers `GetQuestsCompleted` delta capture. Uses the same 14 quest events
-as the QuestLog tracker plus the two login-time sampling events, with the
-same delayed re-sample schedule.
+Triggers independent delta capture for `C_QuestLog.GetAllCompletedQuestIDs`
+and the legacy `GetQuestsCompleted` global (whichever exist on the client --
+never merged). Uses the same 14 quest events as the QuestLog tracker plus
+the two login-time sampling events, with the same delayed re-sample
+schedule.
 
 ### QuestDialog tracker
 
