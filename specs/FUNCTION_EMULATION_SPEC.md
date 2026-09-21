@@ -182,7 +182,7 @@ Notes:
 
 ## 4) Delta stream replay
 
-`GetQuestsCompleted` and `PlayerKnownSpells` live in `functionsDelta`:
+`C_QuestLog.GetAllCompletedQuestIDs`, the legacy `GetQuestsCompleted`, and `PlayerKnownSpells` live in `functionsDelta`. The two completed-quest streams are fully independent -- check whichever is present:
 
 ```lua
 function getDeltaSet(session, key, target_t)

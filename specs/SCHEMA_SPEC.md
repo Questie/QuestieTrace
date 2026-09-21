@@ -230,11 +230,16 @@ value, not as missing data.
 
 ## 6) Delta streams
 
-For functions that return large sets (e.g. `GetQuestsCompleted` —
+For functions that return large sets (e.g. completed-quest IDs —
 thousands of quest IDs). Stored in `functionsDelta`.
 
+`C_QuestLog.GetAllCompletedQuestIDs` and the legacy `GetQuestsCompleted`
+global are tracked as two fully independent delta streams, each only
+present when its own real API exists on the capturing client. There is no
+merged/normalized value between them.
+
 ```lua
-["GetQuestsCompleted"] = {
+["C_QuestLog.GetAllCompletedQuestIDs"] = {
   t = 0,
   tp = 0,
   initial = { 123, 456, 789 },
@@ -248,7 +253,7 @@ thousands of quest IDs). Stored in `functionsDelta`.
 - `initial`: full set at capture start.
 - `delta`: ordered entries with `add` and/or `remove` arrays.
 - Empty `add`/`remove` arrays are omitted during serialization.
-- `GetQuestsCompleted` only ever grows in practice (quests cannot be
+- Completed-quest sets only ever grow in practice (quests cannot be
   uncompleted), but the format supports `remove` for generality.
 
 ---
@@ -429,7 +434,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 
 | Function key | Notes |
 |---|---|
-| `GetQuestsCompleted` | Completed quest IDs; only grows in practice |
+| `C_QuestLog.GetAllCompletedQuestIDs` | Completed quest IDs; only grows in practice |
+| `GetQuestsCompleted` | Legacy global; independent completed-quest-ID stream, tracked whenever this global exists (not only as a fallback) |
 | `PlayerKnownSpells` | Known player spell IDs discovered by enumerating spellbook slots |
 
 ---
@@ -639,8 +645,10 @@ only observed raw API returns instead of those resets.
   -- Delta streams (functionsDelta)
   -----------------------------------------------------------------------
   functionsDelta = {
-    -- GetQuestsCompleted: initial set + ordered delta entries
-    ["GetQuestsCompleted"] = {
+    -- C_QuestLog.GetAllCompletedQuestIDs: initial set + ordered delta entries.
+    -- The legacy GetQuestsCompleted global, when it exists, would appear here
+    -- as its own fully independent stream -- never merged with this one.
+    ["C_QuestLog.GetAllCompletedQuestIDs"] = {
       t = 0,
       tp = 0,
       initial = { 123, 456, 789 },

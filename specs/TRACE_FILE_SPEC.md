@@ -177,10 +177,13 @@ not as "no data."
 ## 5) Delta streams
 
 Functions that return large sets are stored in `session.functionsDelta`
-as an initial snapshot plus ordered deltas:
+as an initial snapshot plus ordered deltas. `C_QuestLog.GetAllCompletedQuestIDs`
+and the legacy `GetQuestsCompleted` global are two fully independent delta
+streams -- each only present when its own real API exists on the capturing
+client, never merged into one value:
 
 ```lua
-["GetQuestsCompleted"] = {
+["C_QuestLog.GetAllCompletedQuestIDs"] = {
   t = 0,
   tp = 0,
   initial = { 123, 456, 789 },
@@ -202,7 +205,8 @@ To reconstruct the set at a target time:
 
 ```lua
 function getCompletedQuests(session, target_t)
-  local data = session.functionsDelta["GetQuestsCompleted"]
+  local data = session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+      or session.functionsDelta["GetQuestsCompleted"]
   local set = {}
   for _, id in ipairs(data.initial) do
     set[id] = true
@@ -465,7 +469,8 @@ Called with a quest ID as the argument.
 
 | Function key | Description |
 |---|---|
-| `GetQuestsCompleted` | Set of completed quest IDs (see section 5) |
+| `C_QuestLog.GetAllCompletedQuestIDs` | Set of completed quest IDs (see section 5) |
+| `GetQuestsCompleted` | Legacy global; independent set of completed quest IDs, tracked whenever this global exists (see section 5) |
 | `PlayerKnownSpells` | Set of known spell IDs discovered from spellbook slots |
 
 ---
@@ -616,7 +621,7 @@ function UnitLevel(unit)
   return emulate(valueAt(getStream(session, "UnitLevel", unit), currentTime))
 end
 
--- Delta stream example:
+-- Delta stream example (checks both independent completed-quest streams):
 function GetQuestsCompleted()
   return getCompletedQuests(session, currentTime)  -- section 5
 end

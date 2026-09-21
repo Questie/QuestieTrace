@@ -23,7 +23,7 @@ Modules/Trackers/Position.lua         -- Zone texts, map ID, player position, in
 Modules/Trackers/Loot.lua             -- Loot window capture
 Modules/Trackers/Reputation.lua       -- Faction reputation
 Modules/Trackers/QuestLog.lua         -- Quest log membership + per-quest/reward/timer functions
-Modules/Trackers/CompletedQuests.lua  -- GetQuestsCompleted delta stream
+Modules/Trackers/CompletedQuests.lua  -- C_QuestLog.GetAllCompletedQuestIDs/GetQuestsCompleted delta streams
 Modules/Trackers/QuestDialog.lua      -- Gossip, greeting, and current quest-dialog APIs
 Modules/Trackers/UnitInteraction.lua  -- UnitGUID/UnitName and gossip quest-list APIs
 Modules/Trackers/GroupState.lua       -- IsInGroup, GetNumGroupMembers
