@@ -30,7 +30,7 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 9, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 10, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   runtime.printedMessages = {}
   env.print = function(...)
@@ -206,7 +206,7 @@ local function TestSessionContract()
   local runtime = NewRuntime({})
   ---@type SessionRecord
   local legacy = {
-    schemaVersion = 9, name = "legacy", startedAt = 0, startedAtPrecise = 0,
+    schemaVersion = 10, name = "legacy", startedAt = 0, startedAtPrecise = 0,
     events = {}, functions = { GetNumLootItems = { { t = 0, tp = 0, v = 0 } } }, functionsDelta = {},
   }
   local env = runtime.env
@@ -218,7 +218,7 @@ local function TestSessionContract()
 
   runtime.core.StartCapture("new capture")
   local current = Session(runtime)
-  assert(current.schemaVersion == 9 and current.recordingContractVersion == 1,
+  assert(current.schemaVersion == 10 and current.recordingContractVersion == 1,
     "New captures need contract provenance without a storage schema bump")
   runtime.core.SaveCapture()
   assert(env.QuestieTraceCharacter.sessions[2] == current and current.recordingContractVersion == 1,
@@ -439,7 +439,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 9, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 10, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -552,7 +552,7 @@ local function TestRecoverCurrentSessionOnVariablesLoaded()
   local env = runtime.env
   -- Simulate a leftover currentSession from a previous load (e.g. /reload without Save)
   local leftover = {
-    schemaVersion = 9,
+    schemaVersion = 10,
     recordingContractVersion = 1,
     name = "recovered",
     startedAt = 100,
@@ -586,7 +586,7 @@ local function TestAutoStartAfterRecoveryStartsFreshCapture()
   local env = runtime.env
   -- Simulate a leftover currentSession from a previous load
   local leftover = {
-    schemaVersion = 9,
+    schemaVersion = 10,
     recordingContractVersion = 1,
     name = "recovered",
     startedAt = 100,
@@ -623,7 +623,7 @@ local function TestRecoverCurrentSessionDiscardedWhenConsentDeclined()
   local env = runtime.env
   -- Simulate a leftover currentSession from a previous load
   local leftover = {
-    schemaVersion = 9,
+    schemaVersion = 10,
     recordingContractVersion = 1,
     name = "recovered",
     startedAt = 100,
@@ -650,7 +650,7 @@ local function TestRecoverCurrentSessionDiscardedWhenConsentUndecided()
   local env = runtime.env
   -- Simulate a leftover currentSession from a previous load
   local leftover = {
-    schemaVersion = 9,
+    schemaVersion = 10,
     recordingContractVersion = 1,
     name = "recovered",
     startedAt = 100,
