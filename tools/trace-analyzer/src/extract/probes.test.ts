@@ -8,7 +8,6 @@ import {
   questIdAt,
   questTitleAt,
   unitGuidAt,
-  unitLevelAt,
   unitNameAt,
 } from "./probes";
 
@@ -69,14 +68,6 @@ describe("probes", () => {
     });
     expect(unitGuidAt(session, "target", 5)).toBe("Creature-0-5208-0-7-823-000031");
     expect(unitNameAt(session, "target", 5)).toBe("Kobold Vermin");
-  });
-
-  it("should read a UnitLevel stream, normalizing 0/negative to null", () => {
-    const session = makeSession({
-      UnitLevel: { target: [{ t: 0, tp: 0, v: 5 }] },
-    });
-    expect(unitLevelAt(session, "target", 5)).toBe(5);
-    expect(unitLevelAt(session, "missing", 5)).toBeNull();
   });
 
   it("should normalize GetQuestID's 0 (no active quest frame) to null", () => {

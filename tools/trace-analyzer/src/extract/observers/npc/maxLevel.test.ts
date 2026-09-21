@@ -19,25 +19,10 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 }
 
 describe("observeMaxLevel (npc)", () => {
-  it("should observe the npc's level at the same time/token as the GUID encounter", () => {
+  it("should always return no observations (no addon-side NPC level signal exists yet)", () => {
     const session = makeSession({
       UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitLevel: { target: [{ t: 3, tp: 3, v: 6 }] },
-    });
-
-    expect(observeMaxLevel(session)).toEqual([
-      {
-        entityId: 823,
-        value: 6,
-        confidence: "medium",
-        provenance: { session: "test-session", t: 3 },
-      },
-    ]);
-  });
-
-  it("should skip encounters where no level was observed", () => {
-    const session = makeSession({
-      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitLevel: { player: [{ t: 0, tp: 0, v: 5 }] },
     });
 
     expect(observeMaxLevel(session)).toEqual([]);
