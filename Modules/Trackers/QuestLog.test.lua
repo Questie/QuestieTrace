@@ -116,4 +116,81 @@ describe("QuestLog tracker", function()
     local zone = capture.session.functions["QuestLogZone"]
     assert.are.equal(1, #zone[100])
   end)
+
+  it("should map C_QuestLog.IsFailed to isComplete = -1", function()
+    env.questLogRows = {
+      { title = "Failed Quest", questID = 100, isComplete = -1 },
+    }
+
+    -- Override the mocked Compat.GetQuestLogTitle to support isComplete
+    local Core = env.QuestieTraceCore
+    Core.Compat.GetQuestLogTitle = function(questLogIndex)
+      local row = env.questLogRows[questLogIndex]
+      if not row then return nil end
+      return {
+        title = row.title,
+        isHeader = row.isHeader or false,
+        questID = row.questID,
+        level = 0,
+        frequency = 0,
+        startEvent = false,
+        isOnMap = false,
+        hasLocalPOI = false,
+        isTask = false,
+        isBounty = false,
+        isStory = false,
+        isHidden = false,
+        isScaling = false,
+        isComplete = row.isComplete,
+      }
+    end
+
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    -- Retrieve GetQuestLogTitle stream for quest 100
+    local titleStream = capture.session.functions["GetQuestLogTitle"]
+    assert.is_not_nil(titleStream[100], "GetQuestLogTitle stream should exist for quest 100")
+    assert.is_not_nil(titleStream[100][1], "GetQuestLogTitle should have at least one entry")
+    local titleData = titleStream[100][1].v
+    assert.are.equal(-1, titleData.isComplete)
+  end)
+
+  it("should skip quest-specific APIs for header rows and return nil isComplete", function()
+    env.questLogRows = {
+      { title = "Zone Header", isHeader = true, questID = 0 },
+    }
+
+    -- Override the mocked Compat.GetQuestLogTitle to support headers
+    local Core = env.QuestieTraceCore
+    Core.Compat.GetQuestLogTitle = function(questLogIndex)
+      local row = env.questLogRows[questLogIndex]
+      if not row then return nil end
+      return {
+        title = row.title,
+        isHeader = row.isHeader or false,
+        questID = row.questID,
+        level = 0,
+        frequency = 0,
+        startEvent = false,
+        isOnMap = false,
+        hasLocalPOI = false,
+        isTask = false,
+        isBounty = false,
+        isStory = false,
+        isHidden = false,
+        isScaling = false,
+        isComplete = nil,  -- Should be nil for headers since no quest-specific APIs are called
+      }
+    end
+
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    -- Headers should not appear in the QuestLog stream (only valid quests with questID > 0)
+    local questLogStream = capture.session.functions["QuestLog"]
+    assert.is_not_nil(questLogStream, "QuestLog stream should exist")
+    -- The QuestLog stream at [1] contains the array of quest IDs
+    assert.are.same({}, questLogStream[1].v, "QuestLog array should be empty since header has questID = 0")
+  end)
 end)

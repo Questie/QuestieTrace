@@ -44,14 +44,22 @@ function Compat.GetQuestLogTitle(questLogIndex)
     end
 
     local questTag
-    if C_QuestLog.GetQuestTagInfo then
-      local tagInfo = C_QuestLog.GetQuestTagInfo(info.questID)
-      questTag = tagInfo and tagInfo.tagName
-    end
-
     local isComplete
-    if C_QuestLog.IsComplete and C_QuestLog.IsComplete(info.questID) then
-      isComplete = 1
+
+    -- Only call quest-specific APIs for non-header entries with a valid questID
+    if not info.isHeader and info.questID and info.questID > 0 then
+      if C_QuestLog.GetQuestTagInfo then
+        local tagInfo = C_QuestLog.GetQuestTagInfo(info.questID)
+        questTag = tagInfo and tagInfo.tagName
+      end
+
+      if C_QuestLog.IsComplete then
+        if C_QuestLog.IsComplete(info.questID) then
+          isComplete = 1
+        elseif C_QuestLog.IsFailed and C_QuestLog.IsFailed(info.questID) then
+          isComplete = -1
+        end
+      end
     end
 
     return {
