@@ -2,7 +2,7 @@
 // extraction code reads like domain questions ("what was the player's zone at
 // time t?") instead of raw stream plumbing.
 
-import { getStream, valueAt } from "../core/emulator";
+import { emulate, getStream, valueAt } from "../core/emulator";
 import type { SessionRecord } from "../core/types";
 import { nearestByTime } from "./correlate";
 
@@ -55,9 +55,17 @@ export function unitGuidAt(session: SessionRecord, token: string, t: number): st
   return asNonEmptyString(valueAt(getStream(session, "UnitGUID", token) ?? [], t));
 }
 
-/** `UnitName(token)` at or before time `t`. */
+/**
+ * `UnitName(token)` at or before time `t`.
+ *
+ * UnitName returns packed args (name, realm) - `emulate()` unpacks the packed
+ * `{1: name, 2: realm, n: 2}` shape into `[name, realm]` so we can take the name.
+ */
 export function unitNameAt(session: SessionRecord, token: string, t: number): string | null {
-  return asNonEmptyString(valueAt(getStream(session, "UnitName", token) ?? [], t));
+  const raw = valueAt(getStream(session, "UnitName", token) ?? [], t);
+  const unpacked = emulate(raw);
+  const name = Array.isArray(unpacked) ? unpacked[0] : raw;
+  return asNonEmptyString(name);
 }
 
 /** `UnitLevel(token)` at or before time `t`. */
