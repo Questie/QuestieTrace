@@ -41,19 +41,19 @@ describe("dialog popup avoidance", function()
     for key, value in pairs(env.QuestieTraceDialogMixin) do frame[key] = value end
   end)
 
-  it("polls every 0.2 seconds and only moves when the destination changes", function()
+  it("polls every 0.1 seconds and only moves when the destination changes", function()
     env.StaticPopup1 = RectFrame(290, 530, 420, 135)
-    frame:OnUpdate(0.1)
+    frame:OnUpdate(0.05)
     assert.equals(0, env.StaticPopup1.rectReads)
     assert.equals(0, frame.moves)
 
-    frame:OnUpdate(0.1)
+    frame:OnUpdate(0.05)
     assert.equals(1, env.StaticPopup1.rectReads)
     assert.equals(500, frame.x)
     assert.equals(520, frame.y)
     assert.equals(1, frame.moves)
 
-    frame:OnUpdate(0.2)
+    frame:OnUpdate(0.1)
     assert.equals(2, env.StaticPopup1.rectReads)
     assert.equals(1, frame.moves)
   end)
