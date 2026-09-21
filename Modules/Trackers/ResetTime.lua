@@ -1,13 +1,12 @@
 ---@type QuestieTraceCore
 local Core = QuestieTraceCore
 
-local Compat = Core.Compat
-
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
 -- GetServerTime()     -> number serverTime
--- GetQuestResetTime() -> number nextReset
+-- GetQuestResetTime() -> number nextReset (legacy global)
+-- C_DateAndTime.GetSecondsUntilDailyReset() -> number secondsUntilReset
 ---------------------------------------------------------------------------
 
 ---@type table<string, FunctionStream>
@@ -47,12 +46,9 @@ local function AppendIfChanged(stream, t, tp, key, value)
   end
 end
 
----Create stream definitions for APIs available on this client.
----GetServerTime is client/era dependent, so when unavailable it simply does
----not create a stream (keeps missing API support distinct from a captured
----nil). GetQuestResetTime is always registered instead: it goes through
----Compat.GetQuestResetTime, which reports unavailable APIs itself via
----Core.Error rather than being silently skipped here.
+---Create stream definitions for APIs available on this client. Each API is
+---probed and recorded independently, only when it actually exists -- there
+---is no synthesized/normalized composite value.
 ---@return ResetTimeStreamDef[]
 local function BuildStreams()
   ---@type ResetTimeStreamDef[]
@@ -63,12 +59,15 @@ local function BuildStreams()
     defs[#defs + 1] = { key = "GetServerTime", fn = GetServerTime }
   end
 
-  -- Unlike GetServerTime, GetQuestResetTime is always registered: Compat.GetQuestResetTime
-  -- itself detects API availability (C_DateAndTime.GetSecondsUntilDailyReset / legacy
-  -- global) and reports via Core.Error when neither exists, so gating registration here
-  -- would silently swallow that case instead of surfacing it.
-  functions["GetQuestResetTime"] = {}
-  defs[#defs + 1] = { key = "GetQuestResetTime", fn = Compat.GetQuestResetTime }
+  if type(GetQuestResetTime) == "function" then
+    functions["GetQuestResetTime"] = {}
+    defs[#defs + 1] = { key = "GetQuestResetTime", fn = GetQuestResetTime }
+  end
+
+  if type(C_DateAndTime) == "table" and type(C_DateAndTime.GetSecondsUntilDailyReset) == "function" then
+    functions["C_DateAndTime.GetSecondsUntilDailyReset"] = {}
+    defs[#defs + 1] = { key = "C_DateAndTime.GetSecondsUntilDailyReset", fn = C_DateAndTime.GetSecondsUntilDailyReset }
+  end
 
   return defs
 end
