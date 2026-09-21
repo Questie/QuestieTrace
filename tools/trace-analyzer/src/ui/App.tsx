@@ -6,10 +6,11 @@ import { Timeline } from "./components/Timeline.js";
 import { StreamViewer } from "./components/StreamViewer.js";
 import { EventLog } from "./components/EventLog.js";
 import { PositionPlot } from "./components/PositionPlot.js";
+import { ExtractView } from "./components/ExtractView.js";
 import type { SessionRecord } from "../core/types.js";
 import "./App.css";
 
-type Tab = "streams" | "events" | "position";
+type Tab = "streams" | "events" | "position" | "extract";
 
 function PlayerIdentity({ session, t }: { session: SessionRecord; t: number }) {
   const info = useMemo(() => {
@@ -165,6 +166,12 @@ export function App() {
         >
           Position
         </button>
+        <button
+          className={activeTab === "extract" ? "active" : ""}
+          onClick={() => setActiveTab("extract")}
+        >
+          Extract
+        </button>
       </div>
 
       {/* Content */}
@@ -201,6 +208,7 @@ export function App() {
             )}
           </>
         )}
+        {activeTab === "extract" && selectedFile && <ExtractView fileName={selectedFile} />}
       </div>
     </>
   );
