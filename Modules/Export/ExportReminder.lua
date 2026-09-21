@@ -223,11 +223,12 @@ end
 
 --- Install the questietrace: hyperlink handler.
 ---
---- LinkUtil is preferred: the click is consumed, so SetItemRef never falls
---- through to ItemRefTooltip. Clients without LinkUtil fall back to a secure
---- hook, where the stock handler has already opened an empty tooltip for our
---- unknown link type and we hide it again. SetItemRef is never replaced,
---- which would risk taint.
+--- LinkUtil is the preferred and taint-safe method: it handles the hyperlink
+--- click before SetItemRef, consuming the event so it doesn't bubble up to
+--- ItemRefTooltip. OnHyperlinkClick is a fallback for clients where LinkUtil
+--- isn't available yet at load time (though it's always available eventually).
+--- Both approaches avoid hooking secure globals, which would taint Edit Mode
+--- and other secure UIs.
 local function RegisterLinkHandler()
   if linkHandlerRegistered then return end
 
@@ -242,14 +243,29 @@ local function RegisterLinkHandler()
     return
   end
 
-  if type(hooksecurefunc) == "function" then
-    hooksecurefunc("SetItemRef", function(link)
-      if HandleExportLink(link) and type(ItemRefTooltip) == "table" then
-        ItemRefTooltip:Hide()
-      end
-    end)
-    linkHandlerRegistered = true
+  -- Fallback: hook the OnHyperlinkClick script on chat frames to intercept
+  -- our custom hyperlinks before they reach SetItemRef. This avoids tainting
+  -- the secure execution path since OnHyperlinkClick is a frame script, not
+  -- a hooksecurefunc on a global.
+  for i = 1, NUM_CHAT_WINDOWS do
+    local frame = _G["ChatFrame" .. i]
+    if type(frame) == "table" then
+      frame:HookScript("OnHyperlinkClick", function(_, link)
+        HandleExportLink(link)
+      end)
+    end
   end
+
+  linkHandlerRegistered = true
 end
 
-RegisterLinkHandler()
+-- Defer registration to PLAYER_LOGIN to ensure LinkUtil and chat frames are
+-- reliably available. RegisterLinkHandler() is idempotent so it's safe to
+-- call multiple times.
+local loginFrame = CreateFrame("Frame")
+loginFrame:RegisterEvent("PLAYER_LOGIN")
+loginFrame:SetScript("OnEvent", function(_, event)
+  if event == "PLAYER_LOGIN" then
+    RegisterLinkHandler()
+  end
+end)
