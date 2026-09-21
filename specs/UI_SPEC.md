@@ -126,7 +126,7 @@ Used only by `/qlt status` to print a human-readable status line. No UI elements
 
 ## 7) Consent dialog
 
-`Modules/Dialog.xml` defines the addon-owned virtual `QuestieTraceDialogTemplate` and `QuestieTraceDialogButtonTemplate`. They reproduce the visual subset of Blizzard's popup without inheriting its popup mixins or handlers. `Modules/Dialog.lua` selects the client's available art and fonts and sizes the dialog to fit wrapped text and button labels.
+`Widgets/Dialog.xml` defines the addon-owned virtual `QuestieTraceDialogTemplate` and `QuestieTraceDialogButtonTemplate`. They reproduce the visual subset of Blizzard's popup without inheriting its popup mixins or handlers. `Widgets/Dialog.lua` defines `QuestieTraceDialogMixin`, independent of `QuestieTraceCore`, settings, localization, and consent. Its `OnLoad`, `OnShow`, and `OnUpdate` methods own art/font selection, layout, and popup avoidance; XML binds these methods to each frame instance. Widget tests live alongside it in `Widgets/Dialog.test.lua`.
 
 The default layout matches the observed Forever popup: 420-unit width, 290-unit centered text column, 36-unit warning icon, and 120-by-21 buttons with a 10-unit gap. Modern clients use the `UI-DiamondDialogBox-Border` and `UI-DialogBox-Background-Dark` atlases and available user-scaled fonts. Clients missing either atlas use the standard dialog backdrop instead.
 

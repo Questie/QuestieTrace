@@ -1,9 +1,7 @@
--- luacheck: globals C_Texture BACKDROP_DIALOG_32_32 GameFontDisable issecretvalue
+-- luacheck: globals C_Texture BACKDROP_DIALOG_32_32 GameFontDisable issecretvalue QuestieTraceDialogMixin
 -- luacheck: globals UserScaledFontGameHighlight UserScaledFontGameNormal UserScaledFontGameDisable
 
----@type QuestieTraceCore
-local Core = QuestieTraceCore
-
+-- Namespaced for XML, but independent of addon-core state and consent behavior.
 ---@class QuestieTraceDialog : Frame
 ---@field Background Texture
 ---@field Border Texture
@@ -13,8 +11,10 @@ local Core = QuestieTraceCore
 ---@field popupCheckElapsed number?
 ---@field popupAnchorX number?
 ---@field popupAnchorY number?
+QuestieTraceDialogMixin = {}
+local Dialog = QuestieTraceDialogMixin
 
-local POPUP_CHECK_INTERVAL = 0.2
+local POPUP_CHECK_INTERVAL = 0.1
 local POPUP_GAP = 10
 local SCREEN_MARGIN = 8
 
@@ -132,37 +132,35 @@ end
 --- Observe newly shown/hidden popups without hooking their lifecycle functions.
 --- XML OnUpdate runs only while our frame is visible, including in combat;
 --- throttling keeps the read-only scan out of the per-render-frame hot path.
----@param frame QuestieTraceDialog
 ---@param elapsed number
-function Core.OnDialogUpdate(frame, elapsed)
-  frame.popupCheckElapsed = (frame.popupCheckElapsed or 0) + elapsed
-  if frame.popupCheckElapsed < POPUP_CHECK_INTERVAL then return end
-  frame.popupCheckElapsed = 0
-  UpdateDialogPosition(frame)
+function Dialog:OnUpdate(elapsed)
+  self.popupCheckElapsed = (self.popupCheckElapsed or 0) + elapsed
+  if self.popupCheckElapsed < POPUP_CHECK_INTERVAL then return end
+  self.popupCheckElapsed = 0
+  UpdateDialogPosition(self)
 end
 
 --- Style only our own controls. Inheriting StaticPopupTemplate would register
 --- this frame with Blizzard's popup manager and reintroduce the taint path.
----@param frame QuestieTraceDialog
-function Core.OnDialogLoad(frame)
+function Dialog:OnLoad()
   local backgroundAtlas = "UI-DialogBox-Background-Dark"
   local borderAtlas = "UI-DiamondDialogBox-Border"
   local getAtlasInfo = C_Texture and C_Texture.GetAtlasInfo
   if getAtlasInfo and getAtlasInfo(backgroundAtlas) and getAtlasInfo(borderAtlas) then
-    frame:SetBackdrop(nil)
-    frame.Background:SetAtlas(backgroundAtlas)
-    frame.Border:SetAtlas(borderAtlas)
-    frame.Background:Show()
-    frame.Border:Show()
+    self:SetBackdrop(nil)
+    self.Background:SetAtlas(backgroundAtlas)
+    self.Border:SetAtlas(borderAtlas)
+    self.Background:Show()
+    self.Border:Show()
   else
     -- Classic clients may not have the modern dialog atlases.
-    frame.Background:Hide()
-    frame.Border:Hide()
-    frame:SetBackdrop(BACKDROP_DIALOG_32_32)
+    self.Background:Hide()
+    self.Border:Hide()
+    self:SetBackdrop(BACKDROP_DIALOG_32_32)
   end
 
-  frame.Text:SetFontObject(UserScaledFontGameHighlight or GameFontHighlight)
-  for _, button in ipairs({ frame.AcceptButton, frame.DeclineButton }) do
+  self.Text:SetFontObject(UserScaledFontGameHighlight or GameFontHighlight)
+  for _, button in ipairs({ self.AcceptButton, self.DeclineButton }) do
     button:SetNormalFontObject(UserScaledFontGameNormal or GameFontNormal)
     button:SetHighlightFontObject(UserScaledFontGameHighlight or GameFontHighlight)
     button:SetDisabledFontObject(UserScaledFontGameDisable or GameFontDisable)
@@ -171,19 +169,18 @@ end
 
 --- Match GameDialog's default spacing, growing to fit translated button labels
 --- and wrapped text. Font objects are shared read-only; only our widgets resize.
----@param frame QuestieTraceDialog
-function Core.LayoutDialog(frame)
-  local buttonWidth = math.max(120, frame.AcceptButton:GetTextWidth() + 20, frame.DeclineButton:GetTextWidth() + 20)
+function Dialog:OnShow()
+  local buttonWidth = math.max(120, self.AcceptButton:GetTextWidth() + 20, self.DeclineButton:GetTextWidth() + 20)
   local buttonHeight = math.max(21,
-    frame.AcceptButton:GetFontString():GetStringHeight() + 8,
-    frame.DeclineButton:GetFontString():GetStringHeight() + 8)
-  frame.AcceptButton:SetSize(buttonWidth, buttonHeight)
-  frame.DeclineButton:SetSize(buttonWidth, buttonHeight)
+    self.AcceptButton:GetFontString():GetStringHeight() + 8,
+    self.DeclineButton:GetFontString():GetStringHeight() + 8)
+  self.AcceptButton:SetSize(buttonWidth, buttonHeight)
+  self.DeclineButton:SetSize(buttonWidth, buttonHeight)
 
   -- XML uses 16 above the text, 9 before the buttons, and 16 below them.
-  frame:SetWidth(math.max(420, buttonWidth * 2 + 10 + 32))
-  frame:SetHeight(16 + frame.Text:GetStringHeight() + 9 + buttonHeight + 16)
+  self:SetWidth(math.max(420, buttonWidth * 2 + 10 + 32))
+  self:SetHeight(16 + self.Text:GetStringHeight() + 9 + buttonHeight + 16)
 
-  frame.popupCheckElapsed = 0
-  UpdateDialogPosition(frame)
+  self.popupCheckElapsed = 0
+  UpdateDialogPosition(self)
 end

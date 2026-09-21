@@ -24,7 +24,7 @@
     <HighlightFont style="GameFontHighlight"/>
   </Button>
 
-  <Frame name="QuestieTraceDialogTemplate" inherits="BackdropTemplate" virtual="true"
+  <Frame name="QuestieTraceDialogTemplate" inherits="BackdropTemplate" mixin="QuestieTraceDialogMixin" virtual="true"
       hidden="true" toplevel="true" frameStrata="DIALOG" enableMouse="true" clampedToScreen="true">
     <Size x="420" y="136"/>
     <Anchors>
@@ -70,15 +70,9 @@
       </Button>
     </Frames>
     <Scripts>
-      <OnLoad inherit="append">
-        QuestieTraceCore.OnDialogLoad(self);
-      </OnLoad>
-      <OnShow>
-        QuestieTraceCore.LayoutDialog(self);
-      </OnShow>
-      <OnUpdate>
-        QuestieTraceCore.OnDialogUpdate(self, elapsed);
-      </OnUpdate>
+      <OnLoad method="OnLoad" inherit="append"/>
+      <OnShow method="OnShow"/>
+      <OnUpdate method="OnUpdate"/>
     </Scripts>
   </Frame>
 </Ui>
