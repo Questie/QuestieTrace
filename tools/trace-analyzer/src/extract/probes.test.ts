@@ -62,10 +62,10 @@ describe("probes", () => {
     expect(playerPosNear(session, 5)).toEqual({ x: 0.5, y: 0.25 });
   });
 
-  it("should read a UnitGUID/UnitName stream for a given token", () => {
+  it("should read a UnitGUID stream, and unpack UnitName's packed (name, realm) args", () => {
     const session = makeSession({
       UnitGUID: { target: [{ t: 0, tp: 0, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { target: [{ t: 0, tp: 0, v: "Kobold Vermin" }] },
+      UnitName: { target: [{ t: 0, tp: 0, v: { 1: "Kobold Vermin", n: 2 } }] },
     });
     expect(unitGuidAt(session, "target", 5)).toBe("Creature-0-5208-0-7-823-000031");
     expect(unitNameAt(session, "target", 5)).toBe("Kobold Vermin");
