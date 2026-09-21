@@ -42,7 +42,10 @@ Modules/Localization/Translations/Consent.lua
 Modules/Localization/Translations/ExportReminder.lua
 Modules/Localization/Translations/ExportUI.lua
 
+Modules/Dialog.lua
+Modules/Dialog.xml
 Modules/Consent.lua
+Modules/Consent.xml
 
 Modules/Trackers/PlayerIdentity.lua
 Modules/Trackers/UnitLevel.lua
