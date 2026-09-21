@@ -68,12 +68,6 @@ export function unitNameAt(session: SessionRecord, token: string, t: number): st
   return asNonEmptyString(name);
 }
 
-/** `UnitLevel(token)` at or before time `t`. */
-export function unitLevelAt(session: SessionRecord, token: string, t: number): number | null {
-  const v = asNumber(valueAt(getStream(session, "UnitLevel", token) ?? [], t));
-  return v && v > 0 ? v : null;
-}
-
 /** `GetQuestID()` at or before time `t` (0 means "no active quest frame", normalized to null). */
 export function questIdAt(session: SessionRecord, t: number): number | null {
   const v = asNumber(valueAt(getStream(session, "GetQuestID") ?? [], t));
