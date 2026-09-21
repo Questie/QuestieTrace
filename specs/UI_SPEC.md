@@ -139,6 +139,14 @@ The default layout matches the observed Forever popup: 420-unit width, 290-unit 
 
 The frame uses its own `Show`/`Hide` methods. Do not register it with `StaticPopupDialogs`, `StaticPopupSpecial_Show`, or another shared popup manager: reading addon-owned entries in Blizzard's popup lists can taint subsequent Edit Mode operations.
 
+### Coexisting with Blizzard popups
+
+On show and every 0.2 seconds while visible, the dialog uses `StaticPopup_ForEachShownDialog` to enumerate normal and special popups, including Edit Mode's new-layout dialog. The callback reads native visibility/rectangle getters and updates local bounds only. Clients without the iterator fall back to scanning `StaticPopup1` through `StaticPopup4`. It positions itself below their combined bounds with a 10-unit gap, or above/right/left if there is not enough room below. With no visible popups it returns to its normal top-center position. If none of the candidate positions fit, it uses the normal position rather than hiding the consent choices; overlap is unavoidable in that case.
+
+Coordinates are converted to the dialog's effective scale and anchored relative to `UIParent`, never to a Blizzard popup. Only the addon-owned frame is repositioned, and only when the destination changes. Secret visibility/coordinates, forbidden frames, or unresolved geometry leave its current placement unchanged. The watcher runs in combat because the dialog is unprotected, and stops naturally when the frame is hidden. It does not cover windows outside Blizzard's shared popup list; the older-client fallback covers normal popups only.
+
 ### In-client validation
 
 Lua mocks cannot enforce WoW's taint rules or load its XML templates. After a clean reload, show the consent dialog, leave it open, enter Edit Mode, create a new layout, and exit Edit Mode. Verify there is no secret-value error and that `PartyFrame.settingMap` and `CompactPartyFrameMember1.optionTable` remain secure. Also check text wrapping and both consent choices; test No only with disposable capture data.
+
+With the consent dialog visible, show/dismiss a normal Blizzard popup and Edit Mode's new-layout dialog and check that ours moves below each and returns afterward. Repeat in combat where the Blizzard dialog is available, and with multiple popups. Check low-screen-space placement and different UI scales without moving or modifying Blizzard's frames.

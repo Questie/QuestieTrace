@@ -76,6 +76,9 @@
       <OnShow>
         QuestieTraceCore.LayoutDialog(self);
       </OnShow>
+      <OnUpdate>
+        QuestieTraceCore.OnDialogUpdate(self, elapsed);
+      </OnUpdate>
     </Scripts>
   </Frame>
 </Ui>

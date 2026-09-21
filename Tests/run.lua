@@ -64,6 +64,11 @@ local function NewConsentFrame()
     SetBackdrop = function(self, backdrop) self.backdrop = backdrop end,
     SetWidth = function(self, width) self.width = width end,
     SetHeight = function(self, height) self.height = height end,
+    GetWidth = function(self) return self.width end,
+    GetHeight = function(self) return self.height end,
+    GetEffectiveScale = function() return 1 end,
+    ClearAllPoints = function() end,
+    SetPoint = function(self, ...) self.point = { ... } end,
     Hide = function(self) self.shown = false end,
     Show = function(self)
       self.shown = true
@@ -114,6 +119,10 @@ local function NewRuntime(trackerFiles)
   env.GameFontNormal = {}
   env.GameFontDisable = {}
   env.BACKDROP_DIALOG_32_32 = {}
+  env.UIParent = {
+    GetRect = function() return 0, 0, 1920, 1080 end,
+    GetEffectiveScale = function() return 1 end,
+  }
   runtime.consentFrame = NewConsentFrame()
 
   LoadAddonFile(runtime, "Modules/globals.lua")
