@@ -42,8 +42,10 @@ local DeepCompare = Core.DeepCompare
 local functions       -- capture.session.functions
 ---@type number[]
 local factionOrder    -- ordered array of known factionIDs
+---@type table<number, table>
+local prevModernValues -- [factionID] -> last C_Reputation.GetFactionDataByID table (for change detection)
 ---@type table<number, PackedArgs>
-local prevValues      -- [factionID] -> last packed tuple (for change detection)
+local prevLegacyValues -- [factionID] -> last legacy GetFactionInfoByID packed tuple (for change detection)
 ---@type boolean
 local collecting      -- recursion guard for ExpandFactionHeader
 
@@ -111,28 +113,15 @@ local function CollectFactionIDs()
   return ids
 end
 
---- Sample one faction's detail and append if changed. Uses whichever real
---- API the client exposes, recording the result under that API's own name --
---- there is no synthesized/normalized composite value.
+--- Append a faction detail value to its stream if changed against the
+--- given source's own previous-value table.
+---@param streamKey string
+---@param prevValues table<number, any>
+---@param factionID number
 ---@param t number
 ---@param tp number
----@param factionID number
-local function SampleFaction(t, tp, factionID)
-  ---@type string?
-  local streamKey
-  ---@type table|PackedArgs|nil
-  local value
-
-  if C_Reputation and C_Reputation.GetFactionDataByID then
-    streamKey = "C_Reputation.GetFactionDataByID"
-    value = C_Reputation.GetFactionDataByID(factionID)
-  elseif GetFactionInfoByID then
-    streamKey = "GetFactionInfoByID"
-    value = PackArgs(GetFactionInfoByID(factionID))
-  end
-
-  if not streamKey or value == nil then return end
-
+---@param value any
+local function AppendFactionIfChanged(streamKey, prevValues, factionID, t, tp, value)
   ---@type any
   local prev = prevValues[factionID]
   if not prev or not DeepCompare(value, prev) then
@@ -144,6 +133,27 @@ local function SampleFaction(t, tp, factionID)
     end
     stream[#stream + 1] = { t = t, tp = tp, v = value }
     prevValues[factionID] = value
+  end
+end
+
+--- Sample one faction's detail from every available source, recording each
+--- under its own real API name. There is no synthesized/normalized
+--- composite value: a client exposing both APIs gets both streams recorded
+--- independently.
+---@param t number
+---@param tp number
+---@param factionID number
+local function SampleFaction(t, tp, factionID)
+  if C_Reputation and C_Reputation.GetFactionDataByID then
+    local value = C_Reputation.GetFactionDataByID(factionID)
+    if value ~= nil then
+      AppendFactionIfChanged("C_Reputation.GetFactionDataByID", prevModernValues, factionID, t, tp, value)
+    end
+  end
+
+  if GetFactionInfoByID then
+    local value = PackArgs(GetFactionInfoByID(factionID))
+    AppendFactionIfChanged("GetFactionInfoByID", prevLegacyValues, factionID, t, tp, value)
   end
 end
 
@@ -201,7 +211,8 @@ Core.RegisterTracker({
     functions["FactionOrder"] = {}
     functions["GetFactionInfoByID"] = {}
     functions["C_Reputation.GetFactionDataByID"] = {}
-    prevValues = {}
+    prevModernValues = {}
+    prevLegacyValues = {}
     factionOrder = {}
     collecting = false
 
