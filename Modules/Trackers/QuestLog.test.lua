@@ -15,10 +15,12 @@ local function LoadQuestLogTracker(env)
   local Core = env.QuestieTraceCore
   Core.SanitizeText = function(s) return s end
 
-  -- Minimal Compat mock: quest-log rows are supplied per-test via env.questLogRows,
-  -- a plain array of { title, isHeader, questID } indexed like the real quest log.
-  Core.Compat = {
-    GetQuestLogTitle = function(questLogIndex)
+  -- Minimal C_QuestLog mock: quest-log rows are supplied per-test via
+  -- env.questLogRows, a plain array of { title, isHeader, questID } indexed
+  -- like the real quest log. Each raw API below is probed independently by
+  -- the tracker, mirroring how the real client exposes them.
+  env.C_QuestLog = {
+    GetInfo = function(questLogIndex)
       local row = env.questLogRows[questLogIndex]
       if not row then return nil end
       return {
@@ -27,7 +29,7 @@ local function LoadQuestLogTracker(env)
         questID = row.questID,
       }
     end,
-    GetQuestLogIndexByID = function(questID)
+    GetLogIndexForQuestID = function(questID)
       for index, row in ipairs(env.questLogRows) do
         if row.questID == questID then return index end
       end
@@ -117,80 +119,84 @@ describe("QuestLog tracker", function()
     assert.are.equal(1, #zone[100])
   end)
 
-  it("should map C_QuestLog.IsFailed to isComplete = -1", function()
+  it("should record C_QuestLog.GetInfo as its own raw stream keyed by questID", function()
     env.questLogRows = {
-      { title = "Failed Quest", questID = 100, isComplete = -1 },
+      { title = "A Quest", questID = 100 },
     }
 
-    -- Override the mocked Compat.GetQuestLogTitle to support isComplete
-    local Core = env.QuestieTraceCore
-    Core.Compat.GetQuestLogTitle = function(questLogIndex)
-      local row = env.questLogRows[questLogIndex]
-      if not row then return nil end
-      return {
-        title = row.title,
-        isHeader = row.isHeader or false,
-        questID = row.questID,
-        level = 0,
-        frequency = 0,
-        startEvent = false,
-        isOnMap = false,
-        hasLocalPOI = false,
-        isTask = false,
-        isBounty = false,
-        isStory = false,
-        isHidden = false,
-        isScaling = false,
-        isComplete = row.isComplete,
-      }
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    local infoStream = capture.session.functions["C_QuestLog.GetInfo"]
+    assert.is_not_nil(infoStream[100], "C_QuestLog.GetInfo stream should exist for quest 100")
+    assert.are.equal("A Quest", infoStream[100][1].v.title)
+  end)
+
+  it("should record C_QuestLog.IsComplete and C_QuestLog.IsFailed as independent raw streams", function()
+    env.questLogRows = {
+      { title = "Failed Quest", questID = 100 },
+    }
+    env.C_QuestLog.IsComplete = function(questID) return questID == 100 and false end
+    env.C_QuestLog.IsFailed = function(questID) return questID == 100 and true end
+
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    local isCompleteStream = capture.session.functions["C_QuestLog.IsComplete"]
+    local isFailedStream = capture.session.functions["C_QuestLog.IsFailed"]
+    assert.is_false(isCompleteStream[100][1].v)
+    assert.is_true(isFailedStream[100][1].v)
+  end)
+
+  it("should record C_QuestLog.GetQuestTagInfo as its own raw stream", function()
+    env.questLogRows = {
+      { title = "Group Quest", questID = 100 },
+    }
+    env.C_QuestLog.GetQuestTagInfo = function(questID)
+      if questID ~= 100 then return nil end
+      return { tagName = "Group" }
     end
 
     local capture = NewCapture()
     tracker.Init(capture)
 
-    -- Retrieve GetQuestLogTitle stream for quest 100
-    local titleStream = capture.session.functions["GetQuestLogTitle"]
-    assert.is_not_nil(titleStream[100], "GetQuestLogTitle stream should exist for quest 100")
-    assert.is_not_nil(titleStream[100][1], "GetQuestLogTitle should have at least one entry")
-    local titleData = titleStream[100][1].v
-    assert.are.equal(-1, titleData.isComplete)
+    local tagStream = capture.session.functions["C_QuestLog.GetQuestTagInfo"]
+    assert.are.equal("Group", tagStream[100][1].v.tagName)
   end)
 
-  it("should skip quest-specific APIs for header rows and return nil isComplete", function()
+  it("should not probe quest-specific APIs for header rows", function()
     env.questLogRows = {
       { title = "Zone Header", isHeader = true, questID = 0 },
     }
-
-    -- Override the mocked Compat.GetQuestLogTitle to support headers
-    local Core = env.QuestieTraceCore
-    Core.Compat.GetQuestLogTitle = function(questLogIndex)
-      local row = env.questLogRows[questLogIndex]
-      if not row then return nil end
-      return {
-        title = row.title,
-        isHeader = row.isHeader or false,
-        questID = row.questID,
-        level = 0,
-        frequency = 0,
-        startEvent = false,
-        isOnMap = false,
-        hasLocalPOI = false,
-        isTask = false,
-        isBounty = false,
-        isStory = false,
-        isHidden = false,
-        isScaling = false,
-        isComplete = nil,  -- Should be nil for headers since no quest-specific APIs are called
-      }
-    end
+    env.C_QuestLog.IsComplete = function() error("should not be called for header rows") end
+    env.C_QuestLog.IsFailed = function() error("should not be called for header rows") end
 
     local capture = NewCapture()
     tracker.Init(capture)
 
     -- Headers should not appear in the QuestLog stream (only valid quests with questID > 0)
     local questLogStream = capture.session.functions["QuestLog"]
-    assert.is_not_nil(questLogStream, "QuestLog stream should exist")
-    -- The QuestLog stream at [1] contains the array of quest IDs
     assert.are.same({}, questLogStream[1].v, "QuestLog array should be empty since header has questID = 0")
+    assert.is_nil(capture.session.functions["C_QuestLog.IsComplete"])
+  end)
+
+  it("should record the legacy GetQuestLogTitle global as a raw tuple only when it exists", function()
+    env.questLogRows = {
+      { title = "Legacy Quest", questID = 100 },
+    }
+    env.GetQuestLogTitle = function(questLogIndex)
+      local row = env.questLogRows[questLogIndex]
+      if not row then return nil end
+      return row.title, 3, nil, false, false, nil, 1, row.questID
+    end
+
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    local titleStream = capture.session.functions["GetQuestLogTitle"]
+    assert.is_not_nil(titleStream[100], "legacy GetQuestLogTitle stream should exist for quest 100")
+    local titleTuple = titleStream[100][1].v
+    assert.are.equal("Legacy Quest", titleTuple[1])
+    assert.are.equal(100, titleTuple[8])
   end)
 end)
