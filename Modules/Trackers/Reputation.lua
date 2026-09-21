@@ -5,14 +5,17 @@ local PackArgs = Core.PackArgs
 ---@type fun(t1: any, t2: any, ignore_mt: boolean?, visited: table?): boolean
 local DeepCompare = Core.DeepCompare
 
-local Compat = Core.Compat
-
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
--- GetFactionInfoByID(factionID) -> string  name,
---                                  string  description,
---                                  number  standingID,      -- 4=Neutral, 5=Friendly, 6=Honored...
+-- Faction detail is recorded from whichever real API the client exposes;
+-- there is no synthesized/normalized composite value.
+--
+-- C_Reputation.GetFactionDataByID(factionID) -> table data (raw, as returned)
+--
+-- GetFactionInfoByID(factionID) -> string  name,     -- legacy global, only
+--                                  string  description,  -- recorded when it
+--                                  number  standingID,   -- exists
 --                                  number  barMin,
 --                                  number  barMax,
 --                                  number  barValue,
@@ -27,7 +30,10 @@ local Compat = Core.Compat
 --                                  boolean hasBonusRepGain,
 --                                  boolean canSetInactive
 --
--- GetNumFactions() -> number numberOfFactions
+-- GetNumFactions()/C_Reputation.GetNumFactions() and
+-- GetFactionInfo(index)/C_Reputation.GetFactionDataByIndex(index) are used
+-- only to drive faction-ID discovery (CollectFactionIDs) below; they are not
+-- themselves recorded to the trace.
 --
 -- FactionOrder (custom stream) -> number[] factionIDs  -- ordered known faction IDs
 ---------------------------------------------------------------------------
@@ -41,6 +47,37 @@ local prevValues      -- [factionID] -> last packed tuple (for change detection)
 ---@type boolean
 local collecting      -- recursion guard for ExpandFactionHeader
 
+--- Number of factions visible in the reputation panel, from whichever real
+--- API exists. Used only to bound CollectFactionIDs' iteration; not recorded.
+---@return number
+local function GetNumFactionsRaw()
+  if C_Reputation and C_Reputation.GetNumFactions then
+    return C_Reputation.GetNumFactions() or 0
+  elseif GetNumFactions then
+    return GetNumFactions() or 0
+  end
+  return 0
+end
+
+--- Header/collapsed/factionID for a reputation-panel row, from whichever
+--- real API exists. Used only to drive CollectFactionIDs' iteration; not
+--- recorded.
+---@param index number
+---@return boolean? isHeader
+---@return boolean? isCollapsed
+---@return number? factionID
+local function GetFactionRowRaw(index)
+  if C_Reputation and C_Reputation.GetFactionDataByIndex then
+    local d = C_Reputation.GetFactionDataByIndex(index)
+    if not d then return nil end
+    return d.isHeader, d.isCollapsed, d.factionID
+  elseif GetFactionInfo then
+    local _, _, _, _, _, _, _, _, isHeader, isCollapsed, _, _, _, factionID = GetFactionInfo(index)
+    return isHeader, isCollapsed, factionID
+  end
+  return nil
+end
+
 --- Discover all factionIDs by iterating the reputation panel.
 --- Expands collapsed headers (side effect). Never re-collapses.
 ---@return number[] ids Ordered array of factionIDs
@@ -48,7 +85,7 @@ local function CollectFactionIDs()
   ---@type number[]
   local ids = {}
   ---@type number
-  local numFactions = Compat.GetNumFactions() or 0
+  local numFactions = GetNumFactionsRaw()
   if numFactions == 0 then return ids end
 
   collecting = true
@@ -56,10 +93,7 @@ local function CollectFactionIDs()
   local index = 1
 
   while index <= numFactions do
-    local _, _, _, _, _, _,
-      _, _, isHeader, isCollapsed, _,
-      _, _, factionID =
-      Compat.GetFactionInfo(index)
+    local isHeader, isCollapsed, factionID = GetFactionRowRaw(index)
 
     if factionID then
       ids[#ids + 1] = factionID
@@ -67,7 +101,7 @@ local function CollectFactionIDs()
 
     if isHeader and isCollapsed and type(ExpandFactionHeader) == "function" then
       ExpandFactionHeader(index)
-      numFactions = Compat.GetNumFactions() or numFactions
+      numFactions = GetNumFactionsRaw()
     end
 
     index = index + 1
@@ -75,6 +109,42 @@ local function CollectFactionIDs()
 
   collecting = false
   return ids
+end
+
+--- Sample one faction's detail and append if changed. Uses whichever real
+--- API the client exposes, recording the result under that API's own name --
+--- there is no synthesized/normalized composite value.
+---@param t number
+---@param tp number
+---@param factionID number
+local function SampleFaction(t, tp, factionID)
+  ---@type string?
+  local streamKey
+  ---@type table|PackedArgs|nil
+  local value
+
+  if C_Reputation and C_Reputation.GetFactionDataByID then
+    streamKey = "C_Reputation.GetFactionDataByID"
+    value = C_Reputation.GetFactionDataByID(factionID)
+  elseif GetFactionInfoByID then
+    streamKey = "GetFactionInfoByID"
+    value = PackArgs(GetFactionInfoByID(factionID))
+  end
+
+  if not streamKey or value == nil then return end
+
+  ---@type any
+  local prev = prevValues[factionID]
+  if not prev or not DeepCompare(value, prev) then
+    ---@type FunctionStreamEntry[]
+    local stream = functions[streamKey][factionID]
+    if not stream then
+      stream = {}
+      functions[streamKey][factionID] = stream
+    end
+    stream[#stream + 1] = { t = t, tp = tp, v = value }
+    prevValues[factionID] = value
+  end
 end
 
 --- Sample all known factions. Appends {t,tp,v} only when value changed.
@@ -86,23 +156,7 @@ local function SampleReputation(capture)
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
   for i = 1, #factionOrder do
-    ---@type number
-    local factionID = factionOrder[i]
-    ---@type PackedArgs
-    local v = PackArgs(Compat.GetFactionInfoByID(factionID))
-
-    ---@type PackedArgs?
-    local prev = prevValues[factionID]
-    if not prev or not DeepCompare(v, prev) then
-      ---@type FunctionStreamEntry[]
-      local stream = functions["GetFactionInfoByID"][factionID]
-      if not stream then
-        stream = {}
-        functions["GetFactionInfoByID"][factionID] = stream
-      end
-      stream[#stream + 1] = { t = t, tp = tp, v = v }
-      prevValues[factionID] = v
-    end
+    SampleFaction(t, tp, factionOrder[i])
   end
 end
 
@@ -146,6 +200,7 @@ Core.RegisterTracker({
     functions = capture.session.functions
     functions["FactionOrder"] = {}
     functions["GetFactionInfoByID"] = {}
+    functions["C_Reputation.GetFactionDataByID"] = {}
     prevValues = {}
     factionOrder = {}
     collecting = false
