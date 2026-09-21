@@ -6,18 +6,23 @@ local PackArgs = Core.PackArgs
 local DeepCompare = Core.DeepCompare
 
 local C_After = C_Timer.After
-local Compat = Core.Compat
 
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
--- GetQuestLogTitle(questLogIndex) -> Compat.GetQuestLogTitle table (QuestLogTitleInfo, see
---                                    Modules/Compat.lua), with fields:
---                                    title, level, questTag, isHeader, isCollapsed,
---                                    isComplete (1=done, -1=failed, nil=in progress),
---                                    frequency (1=normal, 2=daily, 3=weekly), questID,
---                                    startEvent, displayQuestID, isOnMap, hasLocalPOI,
---                                    isTask, isBounty, isStory, isHidden, isScaling
+-- Quest-log title/tag/completion data is split across several independent
+-- raw APIs. Each is probed and recorded only when it actually exists on the
+-- current client -- there is no synthesized/normalized composite value.
+--
+-- C_QuestLog.GetInfo(questLogIndex)      -> table info (raw, as returned by the API)
+-- C_QuestLog.GetQuestTagInfo(questID)    -> table? tagInfo (raw)
+-- C_QuestLog.IsComplete(questID)         -> boolean isComplete
+-- C_QuestLog.IsFailed(questID)           -> boolean isFailed
+-- C_QuestLog.GetLogIndexForQuestID(questID) -> number? questLogIndex
+--
+-- GetQuestLogTitle(questLogIndex)   -> packed 17-value tuple (legacy global,
+--                                      only recorded when that global exists)
+-- GetQuestLogIndexByID(questID)     -> number questLogIndex (legacy global)
 --
 -- GetQuestLogQuestText(questLogIndex) -> string questDescription,
 --                                        string questObjectives
@@ -36,14 +41,12 @@ local Compat = Core.Compat
 -- C_QuestLog.GetMaxNumQuestsCanAccept()        -> number maxNumQuestsCanAccept
 -- C_QuestLog.IsQuestFlaggedCompleted(questID)  -> boolean isCompleted
 -- C_QuestLog.GetQuestObjectives(questID)       -> QuestObjectiveInfo[] objectives
--- GetQuestLogTitle(questLogIndex)              -> QuestLogTitleInfo table keyed by questID
 -- GetQuestLogQuestText(questLogIndex)          -> packed quest text tuple keyed by questID
 -- GetQuestTimers[questID]                      -> number secondsLeft (derived from GetQuestTimers())
 -- GetQuestLogTimeLeft[questID]                 -> number secondsLeft (same derived compatibility value)
 -- GetNumQuestLogRewards(questID)               -> number numRewards
 -- GetQuestLogRewardInfo(index, questID)        -> packed reward item tuple
 -- GetQuestLogRewardMoney(questID)              -> number money
--- GetQuestLogIndexByID(questID)                -> number questLogIndex
 --
 -- QuestLog (custom stream) -> number[] questIDs  -- array of active quest IDs
 -- QuestLogZone[questId] -> string? headerTitle -- derived: the quest-log
@@ -73,14 +76,33 @@ local prevRewardCounts -- Highest reward index previously captured for each acti
 -- API helpers (logic preserved from existing implementation)
 ---------------------------------------------------------------------------
 
+--- Read the questID/isHeader/title of a quest-log row for internal iteration
+--- only. This is not a recorded trace value: it exists purely to drive
+--- enumeration (which log indices hold quests vs. headers, and which header
+--- precedes each quest). The actual raw API results are recorded separately
+--- and independently by ProbeQuestLogIndexAndTitle.
+---@param questLogIndex number
+---@return { questID: number?, isHeader: boolean?, title: string? }? row
+local function ReadQuestLogRow(questLogIndex)
+  if C_QuestLog and C_QuestLog.GetInfo then
+    local info = C_QuestLog.GetInfo(questLogIndex)
+    if not info then return nil end
+    return { questID = info.questID, isHeader = info.isHeader, title = info.title }
+  elseif GetQuestLogTitle then
+    local title, _, _, isHeader, _, _, _, questID = GetQuestLogTitle(questLogIndex)
+    if not title then return nil end
+    return { questID = questID, isHeader = isHeader, title = title }
+  end
+  return nil
+end
+
 --- Get a quest ID at a quest log index.
 ---@param questLogIndex number
 ---@return number? questId
 local function GetQuestIdAtLogIndex(questLogIndex)
-  ---@type boolean, QuestLogTitleInfo?
-  local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
-  if not ok or not info then return nil end
-  if info.questID and info.questID > 0 then return info.questID end
+  local row = ReadQuestLogRow(questLogIndex)
+  if not row then return nil end
+  if row.questID and row.questID > 0 then return row.questID end
   return nil
 end
 
@@ -97,16 +119,16 @@ local function GetAllQuestIdsInLog()
   local currentHeaderTitle = nil
 
   for questLogIndex = 1, 80 do -- Forever allows 40 quests (+40 individual zones)
-    local ok, info = pcall(Compat.GetQuestLogTitle, questLogIndex)
-    if not ok or not info then
+    local row = ReadQuestLogRow(questLogIndex)
+    if not row then
       return questIds, questZones
     end
 
-    if info.isHeader then
-      currentHeaderTitle = info.title
-    elseif info.questID and info.questID > 0 then
-      questIds[#questIds + 1] = info.questID
-      questZones[info.questID] = currentHeaderTitle
+    if row.isHeader then
+      currentHeaderTitle = row.title
+    elseif row.questID and row.questID > 0 then
+      questIds[#questIds + 1] = row.questID
+      questZones[row.questID] = currentHeaderTitle
     end
   end
   return questIds, questZones
@@ -405,6 +427,111 @@ local function ProbeQuestDirectApis(t, tp, questId)
   ProbeQuestRewards(t, tp, questId)
 end
 
+---Probe raw quest-log-index-family APIs for an active quest ID. Each API
+---(modern `C_QuestLog.*` and/or legacy globals) is probed and recorded
+---independently, only when it actually exists on the current client. There
+---is no synthesized composite value -- callers of this data must combine
+---whichever raw streams are present themselves.
+---@param t number
+---@param tp number
+---@param questId number
+local function ProbeQuestLogIndexAndTitle(t, tp, questId)
+  ---@type number?
+  local questLogIndex
+
+  if type(C_QuestLog) == "table" and type(C_QuestLog.GetLogIndexForQuestID) == "function" then
+    local ok, value = SafeScalarCall(C_QuestLog.GetLogIndexForQuestID, questId)
+    if ok then
+      AppendIfChanged(
+        GetOrCreateParamStream("C_QuestLog.GetLogIndexForQuestID", questId),
+        t, tp, value, questId, "C_QuestLog.GetLogIndexForQuestID"
+      )
+      questLogIndex = value
+    end
+  end
+
+  if type(GetQuestLogIndexByID) == "function" then
+    local ok, value = SafeScalarCall(GetQuestLogIndexByID, questId)
+    if ok then
+      AppendIfChanged(
+        GetOrCreateParamStream("GetQuestLogIndexByID", questId),
+        t, tp, value, questId, "GetQuestLogIndexByID"
+      )
+      questLogIndex = questLogIndex or value
+    end
+  end
+
+  if not questLogIndex then return end
+
+  if type(C_QuestLog) == "table" then
+    if type(C_QuestLog.GetInfo) == "function" then
+      local ok, info = SafeScalarCall(C_QuestLog.GetInfo, questLogIndex)
+      if ok and info then
+        AppendIfChanged(
+          GetOrCreateParamStream("C_QuestLog.GetInfo", questId),
+          t, tp, info, questId, "C_QuestLog.GetInfo"
+        )
+      end
+    end
+
+    if type(C_QuestLog.GetQuestTagInfo) == "function" then
+      local ok, tagInfo = SafeScalarCall(C_QuestLog.GetQuestTagInfo, questId)
+      if ok then
+        AppendIfChanged(
+          GetOrCreateParamStream("C_QuestLog.GetQuestTagInfo", questId),
+          t, tp, tagInfo, questId, "C_QuestLog.GetQuestTagInfo"
+        )
+      end
+    end
+
+    if type(C_QuestLog.IsComplete) == "function" then
+      local ok, isComplete = SafeScalarCall(C_QuestLog.IsComplete, questId)
+      if ok then
+        AppendIfChanged(
+          GetOrCreateParamStream("C_QuestLog.IsComplete", questId),
+          t, tp, isComplete, questId, "C_QuestLog.IsComplete"
+        )
+      end
+    end
+
+    if type(C_QuestLog.IsFailed) == "function" then
+      local ok, isFailed = SafeScalarCall(C_QuestLog.IsFailed, questId)
+      if ok then
+        AppendIfChanged(
+          GetOrCreateParamStream("C_QuestLog.IsFailed", questId),
+          t, tp, isFailed, questId, "C_QuestLog.IsFailed"
+        )
+      end
+    end
+  end
+
+  -- Legacy global -- raw 17-value tuple, only recorded when the global exists.
+  if type(GetQuestLogTitle) == "function" then
+    local ok, titleTuple = SafePackedCall(GetQuestLogTitle, questLogIndex)
+    if ok then
+      AppendIfChanged(
+        GetOrCreateParamStream("GetQuestLogTitle", questId),
+        t, tp, titleTuple, questId, "GetQuestLogTitle"
+      )
+    end
+  end
+
+  -- GetQuestLogQuestText -- tuple (n=2: questDescription, questObjectives)
+  local textOk, questTextData = SafePackedCall(GetQuestLogQuestText, questLogIndex)
+  if textOk then
+    -- Privacy: quest text can embed player names. Sanitize any string values.
+    for i = 1, questTextData.n or 0 do
+      if type(questTextData[i]) == "string" then
+        questTextData[i] = Core.SanitizeText(questTextData[i])
+      end
+    end
+    AppendIfChanged(
+      GetOrCreateParamStream("GetQuestLogQuestText", questId),
+      t, tp, questTextData, questId, "GetQuestLogQuestText"
+    )
+  end
+end
+
 ---Probe a removed quest after the current event stack has settled.
 ---@param capture CaptureState
 ---@param questId number
@@ -569,33 +696,9 @@ local function SampleQuestLog(capture)
       t, tp, questZones[questId], questId, "QuestLogZone"
     )
 
-    -- GetQuestLogTitle -- table (needs questLogIndex lookup)
-    ---@type number?
-    local questLogIndex = Compat.GetQuestLogIndexByID(questId)
-    if questLogIndex then
-      ---@type QuestLogTitleInfo?
-      local titleData = Compat.GetQuestLogTitle(questLogIndex)
-      AppendIfChanged(
-        GetOrCreateParamStream("GetQuestLogTitle", questId),
-        t, tp, titleData, questId, "GetQuestLogTitle"
-      )
-
-      -- GetQuestLogQuestText -- tuple (n=2: questDescription, questObjectives)
-      local textOk, questTextData = SafePackedCall(GetQuestLogQuestText, questLogIndex)
-      if textOk then
-        -- Privacy: quest text can embed player names. Sanitize any string values.
-        for i = 1, questTextData.n or 0 do
-          if type(questTextData[i]) == "string" then
-            questTextData[i] = Core.SanitizeText(questTextData[i])
-          end
-        end
-        AppendIfChanged(
-          GetOrCreateParamStream("GetQuestLogQuestText", questId),
-          t, tp, questTextData, questId, "GetQuestLogQuestText"
-        )
-      end
-    end
-
+    -- Quest-log index, title-family, and text APIs: each raw API is probed
+    -- and recorded independently, only when it actually exists.
+    ProbeQuestLogIndexAndTitle(t, tp, questId)
   end
 end
 
