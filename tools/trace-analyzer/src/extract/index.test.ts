@@ -26,12 +26,12 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
     });
 
     const { npcDB } = extractAll([session], {
-      sourceFileName: "test.lua",
+      sourceFileNames: ["test.lua"],
       now: new Date("2020-01-01T00:00:00.000Z"),
     });
 
     expect(npcDB).toContain("local npcData = {");
-    expect(npcDB).toContain("-- Source trace file: test.lua");
+    expect(npcDB).toContain("-- Source trace files: 1");
     // minLevel/maxLevel have no observer yet (see observers/npc/minLevel.ts) so they fall back to their schema default (0).
     expect(npcDB).toContain('[823] = {"Deputy Willem",0,0,0,0,0,nil,nil,0,nil,nil,0,nil,nil,0},');
   });
@@ -42,7 +42,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
       UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 2 } }] },
     });
 
-    const { npcDB } = extractAll([session], { sourceFileName: "test.lua" });
+    const { npcDB } = extractAll([session], { sourceFileNames: ["test.lua"] });
 
     const row = npcDB.match(/\[823] = \{([^}]*)},/)?.[1];
     expect(row).toBeDefined();

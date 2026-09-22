@@ -8,7 +8,7 @@ const testSchema: QuestieEntitySchema = {
   spawns: { index: 3, type: "table", default: null, comment: "" },
 };
 
-const header = { sourceFileName: "test.lua", sessionCount: 1, generatedAt: new Date("2020-01-01T00:00:00.000Z") };
+const header = { sourceFileNames: ["test.lua"], sessionCount: 1, generatedAt: new Date("2020-01-01T00:00:00.000Z") };
 
 describe("writeQuestieLua", () => {
   it("should fill every schema field, using extracted values where set and defaults elsewhere", () => {
@@ -42,7 +42,7 @@ describe("writeQuestieLua", () => {
 
   it("should include a header comment with source file, session count, and generation timestamp", () => {
     const lua = writeQuestieLua("npcData", testSchema, new Map(), header);
-    expect(lua).toContain("-- Source trace file: test.lua");
+    expect(lua).toContain("-- Source trace files: 1");
     expect(lua).toContain("-- Sessions aggregated: 1");
     expect(lua).toContain("-- Generated at: 2020-01-01T00:00:00.000Z");
     expect(lua).toContain("local npcData = {");
