@@ -6,7 +6,7 @@ local Core = QuestieTraceCore
 ---@type string
 local ADDON_NAME = "QuestieTrace"
 ---@type number
-local SCHEMA_VERSION = 10
+local SCHEMA_VERSION = 11
 ---@type number
 local DEFAULT_MAX_SESSIONS = 20
 
