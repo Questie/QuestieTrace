@@ -680,6 +680,42 @@ body {
   padding-left: 20px;
 }
 
+.extract-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 6px;
+}
+
+.extract-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extract-section-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ccc;
+  margin-right: 4px;
+}
+
+.extract-section-header button {
+  background: #333366;
+  color: #ddd;
+  border: 1px solid #4a4a6e;
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.extract-section-header button:hover {
+  background: #444488;
+  color: #fff;
+}
+
 .extract-output {
   flex: 1;
   min-height: 0;
