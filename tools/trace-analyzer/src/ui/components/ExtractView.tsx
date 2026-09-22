@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 interface ExtractResult {
-  npcDB: string;
+  npcFixes: string;
   sessionCount: number;
   fileCount: number;
   skippedFiles: { name: string; error: string }[];
@@ -16,14 +16,17 @@ type Status =
 /**
  * "Extract" tab content: on demand, runs the full observe -> aggregate ->
  * emit -> write chain over EVERY trace file in Traces/ (server-side, via
- * /api/extract/npc) and renders the resulting Questie-format Lua for
- * copy/download.
+ * /api/extract/npc) and renders the resulting ForeverTraceNpcFixes.lua
+ * corrections module for copy/download.
  *
  * Combining across all trace files - not just the one selected in the file
  * dropdown - is the whole point of this tool: more traces means more
  * confidence in the aggregated facts. Extraction happens server-side because
  * transferring full session JSON for dozens of multi-MB trace files to the
  * browser just to extract a handful of facts doesn't scale.
+ *
+ * This is a CORRECTIONS module (only fields we actually have data for),
+ * meant to be layered on top of Questie's base DB - not a full DB dump.
  *
  * Currently only the npc entity kind has observers wired up (see
  * src/extract/index.ts); quest/item/object will get their own
@@ -43,16 +46,16 @@ export function ExtractView() {
       .catch((e) => setStatus({ kind: "error", message: e.message }));
   };
 
-  const handleCopy = (npcDB: string) => {
-    navigator.clipboard.writeText(npcDB);
+  const handleCopy = (npcFixes: string) => {
+    navigator.clipboard.writeText(npcFixes);
   };
 
-  const handleDownload = (npcDB: string) => {
-    const blob = new Blob([npcDB], { type: "text/plain" });
+  const handleDownload = (npcFixes: string) => {
+    const blob = new Blob([npcFixes], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "npcDB.lua";
+    a.download = "ForeverTraceNpcFixes.lua";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -65,8 +68,8 @@ export function ExtractView() {
         </button>
         {status.kind === "done" && (
           <>
-            <button onClick={() => handleCopy(status.result.npcDB)}>Copy to clipboard</button>
-            <button onClick={() => handleDownload(status.result.npcDB)}>Download npcDB.lua</button>
+            <button onClick={() => handleCopy(status.result.npcFixes)}>Copy to clipboard</button>
+            <button onClick={() => handleDownload(status.result.npcFixes)}>Download ForeverTraceNpcFixes.lua</button>
           </>
         )}
       </div>
@@ -90,7 +93,7 @@ export function ExtractView() {
               </ul>
             </div>
           )}
-          <pre className="extract-output">{status.result.npcDB}</pre>
+          <pre className="extract-output">{status.result.npcFixes}</pre>
         </>
       )}
     </div>

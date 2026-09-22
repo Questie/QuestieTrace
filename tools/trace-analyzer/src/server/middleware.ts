@@ -159,11 +159,11 @@ export function traceApiPlugin(): Plugin {
             allSessions.push(...data.sessions);
           }
 
-          const { npcDB } = extractAll(allSessions, { sourceFileNames: loadedFileNames });
+          const { npcFixes } = extractAll(allSessions, { sourceFileNames: loadedFileNames });
 
           res.end(
             JSON.stringify({
-              npcDB,
+              npcFixes,
               sessionCount: allSessions.length,
               fileCount: loadedFileNames.length,
               skippedFiles,
