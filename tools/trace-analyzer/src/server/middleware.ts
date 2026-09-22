@@ -6,6 +6,7 @@ import type { Plugin } from "vite";
 import { resolve } from "path";
 import { readdirSync } from "fs";
 import { loadTraceFile } from "../core/loader.js";
+import { extractAll } from "../extract/index.js";
 import type { TraceFile, SessionSummary, TraceFileSummary } from "../core/types.js";
 
 export function traceApiPlugin(): Plugin {
@@ -136,6 +137,38 @@ export function traceApiPlugin(): Plugin {
             return;
           }
           res.end(JSON.stringify(session));
+          return;
+        }
+
+        // GET /api/extract/npc — combined npc extraction across every trace file
+        if (req.url === "/api/extract/npc") {
+          const loadedFileNames: string[] = [];
+          const skippedFiles: { name: string; error: string }[] = [];
+          const allSessions: TraceFile["sessions"] = [];
+
+          for (const fileName of traceFileNames) {
+            const data = getOrLoad(fileName);
+            if (!data) {
+              skippedFiles.push({
+                name: fileName,
+                error: loadErrors.get(fileName) ?? "Unknown error",
+              });
+              continue;
+            }
+            loadedFileNames.push(fileName);
+            allSessions.push(...data.sessions);
+          }
+
+          const { npcDB } = extractAll(allSessions, { sourceFileNames: loadedFileNames });
+
+          res.end(
+            JSON.stringify({
+              npcDB,
+              sessionCount: allSessions.length,
+              fileCount: loadedFileNames.length,
+              skippedFiles,
+            }),
+          );
           return;
         }
 
