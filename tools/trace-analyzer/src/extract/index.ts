@@ -1,8 +1,13 @@
-// Top-level orchestration: sessions -> per-entity Questie-format Lua files.
+// Top-level orchestration: sessions -> per-entity Questie "Forever...Fixes"
+// correction modules.
 //
 // Currently wires up the npc entity kind only (name/minLevel/maxLevel fields).
 // Quest/item/object entities, and the remaining npc fields, follow the same
 // shape and will be added incrementally (see observers/<entity>/ + emit/<entity>.ts).
+//
+// This produces CORRECTIONS layered on top of Questie's base DB (matching
+// `Database/Custom/Fixes/foreverNPCFixes.lua`'s shape), not a full DB dump:
+// only fields we actually have an aggregated Fact for are emitted.
 
 import type { SessionRecord } from "../core/types";
 import { aggregateField } from "./aggregate";
@@ -10,8 +15,7 @@ import { emitNpcRecords } from "./emit/npc";
 import { observeMaxLevel } from "./observers/npc/maxLevel";
 import { observeMinLevel } from "./observers/npc/minLevel";
 import { observeName } from "./observers/npc/name";
-import { npcKeys } from "./schema/questie-keys";
-import { writeQuestieLua } from "./schema/lua-writer";
+import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 
 export interface ExtractOptions {
   sourceFileNames: string[];
@@ -20,7 +24,7 @@ export interface ExtractOptions {
 }
 
 export interface FactBundle {
-  npcDB: string;
+  npcFixes: string;
 }
 
 export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
@@ -40,7 +44,7 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     maxLevel: aggregateField(maxLevelObservations),
   });
 
-  const npcDB = writeQuestieLua("npcData", npcKeys, npcRecords, header);
+  const npcFixes = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", npcRecords, header);
 
-  return { npcDB };
+  return { npcFixes };
 }
