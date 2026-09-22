@@ -121,6 +121,7 @@ def get_version_dir(is_release_build, versionOverride):
 
 directoriesToInclude = ["Libs", "Modules", "Widgets"]
 filesToInclude = [
+    "icon.png",
     "QuestieTrace.lua",
     "QuestieTrace_UI.lua",
     "QuestieTrace-Classic.toc",
