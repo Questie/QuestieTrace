@@ -21,6 +21,8 @@ local Core = QuestieTraceCore
 --                           string localizedFaction
 --
 -- GetLocale() -> string locale
+--
+-- GetBuildInfo() -> select(4, ...) returns number interfaceVersion
 ---------------------------------------------------------------------------
 
 Core.RegisterTracker({
@@ -40,6 +42,8 @@ Core.RegisterTracker({
     local factionE, factionL = UnitFactionGroup("player")
     ---@type string
     local locale = GetLocale()
+    ---@type number
+    local interfaceVersion = select(4, GetBuildInfo())
 
     functions["UnitRace"] = {
       ["player"] = { { t = 0, tp = 0, v = { raceL, raceE, raceID, n = 3 } } },
@@ -66,6 +70,9 @@ Core.RegisterTracker({
     }
     functions["GetLocale"] = {
       ["player"] = { { t = 0, tp = 0, v = locale } },
+    }
+    functions["GetBuildInfo"] = {
+      ["player"] = { { t = 0, tp = 0, v = interfaceVersion } },
     }
   end,
 })
