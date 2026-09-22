@@ -87,7 +87,7 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 10, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 11, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   runtime.printedMessages = {}
   env.print = function(...)
@@ -280,7 +280,7 @@ local function TestSessionContract()
 
   runtime.core.StartCapture("new capture")
   local current = Session(runtime)
-  assert(current.schemaVersion == 10 and current.recordingContractVersion == 1,
+  assert(current.schemaVersion == 11 and current.recordingContractVersion == 1,
     "New captures need contract provenance without a storage schema bump")
   runtime.core.SaveCapture()
   assert(env.QuestieTraceCharacter.sessions[2] == current and current.recordingContractVersion == 1,
@@ -501,7 +501,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 10, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 11, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -1338,14 +1338,14 @@ local tests = {
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
-{ name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
+  { name = "recover currentSession on VARIABLES_LOADED and auto-finalize", run = TestRecoverCurrentSessionOnVariablesLoaded },
   { name = "recover currentSession discarded when consent declined", run = TestRecoverCurrentSessionDiscardedWhenConsentDeclined },
   { name = "recover currentSession discarded when consent undecided", run = TestRecoverCurrentSessionDiscardedWhenConsentUndecided },
   { name = "consent undecided shows prompt and does not auto-start", run = TestConsentUndecidedShowsPromptAndDoesNotAutoStart },
-   { name = "consent declined blocks auto-start and manual start", run = TestConsentDeclinedBlocksEverything },
-   { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
-   { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
-   { name = "declining consent stops and discards an active capture", run = TestDecliningConsentStopsAndDiscardsActiveCapture },
+  { name = "consent declined blocks auto-start and manual start", run = TestConsentDeclinedBlocksEverything },
+  { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
+  { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
+  { name = "declining consent stops and discards an active capture", run = TestDecliningConsentStopsAndDiscardsActiveCapture },
   { name = "consent prompt reopens without changing consent", run = TestConsentPromptReopensWithoutChangingConsent },
   { name = "accepting consent preserves an active capture", run = TestAcceptingConsentPreservesActiveCapture },
   { name = "dialog uses modern assets when available", run = TestDialogUsesModernAssetsWhenAvailable },
