@@ -6,8 +6,15 @@ import type { Plugin } from "vite";
 import { resolve } from "path";
 import { readdirSync } from "fs";
 import { loadTraceFile } from "../core/loader.js";
-import { extractAll } from "../extract/index.js";
-import type { TraceFile, SessionSummary, TraceFileSummary } from "../core/types.js";
+import { extractAll, type FactBundle } from "../extract/index.js";
+import type { TraceFile, SessionRecord, SessionSummary, TraceFileSummary } from "../core/types.js";
+
+const EXTRACT_ENTITY_TO_FACT_BUNDLE_FIELD: Record<string, keyof FactBundle> = {
+  npc: "npcFixes",
+  quest: "questFixes",
+  item: "itemFixes",
+  object: "objectFixes",
+};
 
 export function traceApiPlugin(): Plugin {
   let traceDir = "";
@@ -44,6 +51,29 @@ export function traceApiPlugin(): Plugin {
       traceFileNames = [];
       console.error(`[trace-api] Traces directory not found at ${traceDir}`);
     }
+  }
+
+  /** Loads (or reuses the cache for) every trace file, collecting sessions from those that succeeded. */
+  function loadAllSessions(): {
+    sessions: SessionRecord[];
+    loadedFileNames: string[];
+    skippedFiles: { name: string; error: string }[];
+  } {
+    const loadedFileNames: string[] = [];
+    const skippedFiles: { name: string; error: string }[] = [];
+    const sessions: SessionRecord[] = [];
+
+    for (const fileName of traceFileNames) {
+      const data = getOrLoad(fileName);
+      if (!data) {
+        skippedFiles.push({ name: fileName, error: loadErrors.get(fileName) ?? "Unknown error" });
+        continue;
+      }
+      loadedFileNames.push(fileName);
+      sessions.push(...data.sessions);
+    }
+
+    return { sessions, loadedFileNames, skippedFiles };
   }
 
   return {
@@ -140,31 +170,24 @@ export function traceApiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/extract/npc — combined npc extraction across every trace file
-        if (req.url === "/api/extract/npc") {
-          const loadedFileNames: string[] = [];
-          const skippedFiles: { name: string; error: string }[] = [];
-          const allSessions: TraceFile["sessions"] = [];
-
-          for (const fileName of traceFileNames) {
-            const data = getOrLoad(fileName);
-            if (!data) {
-              skippedFiles.push({
-                name: fileName,
-                error: loadErrors.get(fileName) ?? "Unknown error",
-              });
-              continue;
-            }
-            loadedFileNames.push(fileName);
-            allSessions.push(...data.sessions);
+        // GET /api/extract/{npc|quest|item|object} — combined extraction across every trace file
+        const extractMatch = req.url.match(/^\/api\/extract\/([^/]+)$/);
+        if (extractMatch) {
+          const entity = decodeURIComponent(extractMatch[1]);
+          const factBundleField = EXTRACT_ENTITY_TO_FACT_BUNDLE_FIELD[entity];
+          if (!factBundleField) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: `Unknown extract entity "${entity}"` }));
+            return;
           }
 
-          const { npcFixes } = extractAll(allSessions, { sourceFileNames: loadedFileNames });
+          const { sessions, loadedFileNames, skippedFiles } = loadAllSessions();
+          const bundle = extractAll(sessions, { sourceFileNames: loadedFileNames });
 
           res.end(
             JSON.stringify({
-              npcFixes,
-              sessionCount: allSessions.length,
+              fixes: bundle[factBundleField],
+              sessionCount: sessions.length,
               fileCount: loadedFileNames.length,
               skippedFiles,
             }),
