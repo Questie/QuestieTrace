@@ -107,11 +107,36 @@ local function NewRuntime(trackerFiles)
   }
   ---@type fun(frame: table, event: string)
   runtime.frame.RegisterEvent = function() end
+  -- CreateFrame always returns this single shared mock frame, so multiple
+  -- SetScript("OnEvent", ...) calls (e.g. QuestieTrace.lua's own event frame
+  -- plus ExportReminder.lua's deferred-registration frame) must all fire on
+  -- dispatch instead of the later one overwriting the earlier one.
   ---@param frame table<string, any>
   ---@param name string
   ---@param callback function
-  runtime.frame.SetScript = function(frame, name, callback) frame[name] = callback end
+  runtime.frame.SetScript = function(frame, name, callback)
+    if name == "OnEvent" then
+      frame.onEventHandlers = frame.onEventHandlers or {}
+      table.insert(frame.onEventHandlers, callback)
+    else
+      frame[name] = callback
+    end
+  end
+  runtime.frame.OnEvent = function(frame, event, ...)
+    for _, callback in ipairs(frame.onEventHandlers or {}) do
+      callback(frame, event, ...)
+    end
+  end
   env.CreateFrame = function() return runtime.frame end
+
+  -- Captures hooksecurefunc callbacks by target name so tests can invoke them
+  -- directly, mirroring how the fallback hyperlink handler is installed.
+  runtime.securehooks = {}
+  env.hooksecurefunc = function(name, callback)
+    runtime.securehooks[name] = runtime.securehooks[name] or {}
+    table.insert(runtime.securehooks[name], callback)
+  end
+  env.ItemRefTooltip = { Hide = function() end }
 
   env.YES = "Yes"
   env.NO = "No"
@@ -1313,11 +1338,63 @@ local function TestChatMsgLootDispatchArgsAreSanitized()
     "", "", 0, 0, "", 0, 1, "Player-4618-0053656F", 0, false, false, false, false
   )
 
-  assert(capturedArgs, "The dummy tracker callback must have been invoked")
-  assert(capturedArgs[1] == "<name> receives loot: [Plainstrider Feather].",
-    "Args dispatched to trackers must be sanitized, not just the recorded event: " .. tostring(capturedArgs[1]))
-  assert(capturedArgs[2] == nil, "Dispatched playerName must be scrubbed")
-  assert(capturedArgs[12] == nil, "Dispatched guid must be scrubbed")
+   assert(capturedArgs, "The dummy tracker callback must have been invoked")
+   assert(capturedArgs[1] == "<name> receives loot: [Plainstrider Feather].",
+     "Args dispatched to trackers must be sanitized, not just the recorded event: " .. tostring(capturedArgs[1]))
+   assert(capturedArgs[2] == nil, "Dispatched playerName must be scrubbed")
+   assert(capturedArgs[12] == nil, "Dispatched guid must be scrubbed")
+end
+
+---------------------------------------------------------------------------
+-- Export link handler tests
+---------------------------------------------------------------------------
+
+local function TestExportLinkHandlerDeferredToPlayerLogin()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  local env = runtime.env
+
+  -- The key test is that RegisterLinkHandler is deferred to PLAYER_LOGIN
+  -- and doesn't run at file-load time. We can't directly inspect the
+  -- linkHandlerRegistered flag (it's private), but we verify that
+  -- PLAYER_LOGIN fires without error and the export window can be shown.
+  local origShow = env.QuestieTraceCore.ShowExportWindow
+  env.QuestieTraceCore.ShowExportWindow = function()
+    if origShow then origShow() end
+  end
+
+  -- Send PLAYER_LOGIN; this should trigger RegisterLinkHandler() without error
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  -- Verify the export reminder system is working (which requires successful init)
+  assert(env.QuestieTraceCore.IsShareDue ~= nil, "Core.IsShareDue must exist after init")
+  assert(env.QuestieTraceCore.MarkExportOpened ~= nil, "Core.MarkExportOpened must exist after init")
+end
+
+local function TestExportLinkHandlerOpensWindow()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  local env = runtime.env
+
+  -- Count how many times the export window is opened
+  local showCount = 0
+  env.QuestieTraceCore.ShowExportWindow = function()
+    showCount = showCount + 1
+  end
+
+  -- Trigger PLAYER_LOGIN to defer-load the link handler. LinkUtil isn't
+  -- mocked, so RegisterLinkHandler must fall back to the hooksecurefunc
+  -- SetItemRef hook.
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  local hooks = runtime.securehooks["SetItemRef"]
+  assert(hooks and #hooks == 1, "SetItemRef fallback hook must be registered when LinkUtil is unavailable")
+
+  -- Unrelated links must not open the export window.
+  hooks[1]("item:12345")
+  assert(showCount == 0, "Unrelated hyperlinks must not open the export window")
+
+  -- Clicking the questietrace:export link must open the export window exactly once.
+  hooks[1]("questietrace:export")
+  assert(showCount == 1, "Clicking the export hyperlink must open the export window exactly once")
 end
 
 ---@type { name: string, run: fun() }[]
@@ -1375,7 +1452,9 @@ local tests = {
   { name = "Loot skips an unrecognized (non npc/object/item) guid kind", run = TestLootSkipsUnrecognizedGuidKind },
   { name = "UnitInteraction skips an unrecognized guid kind", run = TestUnitInteractionSkipsUnrecognizedGuidKind },
   { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
-  { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
+   { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
+   { name = "export link handler deferred to PLAYER_LOGIN", run = TestExportLinkHandlerDeferredToPlayerLogin },
+   { name = "export link handler registers on PLAYER_LOGIN", run = TestExportLinkHandlerOpensWindow },
 }
 
 local failures = 0

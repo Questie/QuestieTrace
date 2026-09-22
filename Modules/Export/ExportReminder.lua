@@ -226,8 +226,10 @@ end
 --- LinkUtil is preferred: the click is consumed, so SetItemRef never falls
 --- through to ItemRefTooltip. Clients without LinkUtil fall back to a secure
 --- hook, where the stock handler has already opened an empty tooltip for our
---- unknown link type and we hide it again. SetItemRef is never replaced,
---- which would risk taint.
+--- unknown link type and we hide it again. hooksecurefunc is a documented,
+--- taint-safe post-hook mechanism (it never introduces taint into the
+--- hooked function itself); SetItemRef is never replaced outright, which
+--- would risk taint.
 local function RegisterLinkHandler()
   if linkHandlerRegistered then return end
 
@@ -252,4 +254,13 @@ local function RegisterLinkHandler()
   end
 end
 
-RegisterLinkHandler()
+-- Defer registration to PLAYER_LOGIN to ensure LinkUtil and chat frames are
+-- reliably available. RegisterLinkHandler() is idempotent so it's safe to
+-- call multiple times.
+local loginFrame = CreateFrame("Frame")
+loginFrame:RegisterEvent("PLAYER_LOGIN")
+loginFrame:SetScript("OnEvent", function(_, event)
+  if event == "PLAYER_LOGIN" then
+    RegisterLinkHandler()
+  end
+end)
