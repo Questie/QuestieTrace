@@ -21,6 +21,7 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 describe("observeName (npc)", () => {
   it("should observe the npc's name at the same time/token as the GUID encounter", () => {
     const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
       UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Kobold Vermin", n: 2 } }] },
     });
@@ -37,7 +38,18 @@ describe("observeName (npc)", () => {
 
   it("should skip encounters where no name was observed", () => {
     const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+    });
+
+    expect(observeName(session)).toEqual([]);
+  });
+
+  it("should skip encounters with non-enUS locale", () => {
+    const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
+      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Kobold Ungeziefer", n: 2 } }] },
     });
 
     expect(observeName(session)).toEqual([]);

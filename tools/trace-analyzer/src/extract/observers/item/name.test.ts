@@ -21,6 +21,7 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 describe("observeName (item)", () => {
   it("should observe an item's id and name directly from a GetLootSlotLink item hyperlink", () => {
     const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       GetLootSlotLink: {
         "1": [{ t: 3, tp: 3, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }],
       },
@@ -38,6 +39,7 @@ describe("observeName (item)", () => {
 
   it("should observe multiple slots across multiple loot events", () => {
     const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       GetLootSlotLink: {
         "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }],
         "2": [{ t: 0, tp: 0, v: "|Hitem:2604::::::::1::::::::::|h[Kobold Mining Bag]|h[|r" }],
@@ -62,6 +64,7 @@ describe("observeName (item)", () => {
 
   it("should skip slot entries that aren't a parseable item link", () => {
     const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       GetLootSlotLink: {
         "1": [{ t: 0, tp: 0, v: null }],
       },
@@ -71,6 +74,20 @@ describe("observeName (item)", () => {
   });
 
   it("should return an empty array when no GetLootSlotLink stream exists", () => {
-    expect(observeName(makeSession({}))).toEqual([]);
+    const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+    });
+    expect(observeName(session)).toEqual([]);
+  });
+
+  it("should skip items with non-enUS locale", () => {
+    const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
+      GetLootSlotLink: {
+        "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Zähes Wolfsfleisch]|h[|r" }],
+      },
+    });
+
+    expect(observeName(session)).toEqual([]);
   });
 });

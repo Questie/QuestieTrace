@@ -78,3 +78,8 @@ export function questIdAt(session: SessionRecord, t: number): number | null {
 export function questTitleAt(session: SessionRecord, t: number): string | null {
   return asNonEmptyString(valueAt(getStream(session, "GetTitleText") ?? [], t));
 }
+
+/** `GetLocale()` at or before time `t`, e.g. "enUS", "deDE", "frFR". */
+export function getLocaleAt(session: SessionRecord, t: number): string | null {
+  return asNonEmptyString(valueAt(getStream(session, "GetLocale", "player") ?? [], t));
+}
