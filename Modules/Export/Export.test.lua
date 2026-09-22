@@ -239,6 +239,77 @@ describe("Export.currentSession inclusion", function()
   end)
 end)
 
+describe("Export.DeleteReportedSessions", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+
+  before_each(function()
+    env = {}
+    Core = LoadExportModule(env)
+    env.QuestieTrace = { settings = { autoStart = true } }
+  end)
+
+  it("should remove a reported saved session from QuestieTraceCharacter.sessions", function()
+    local reported = { name = "reported", functions = {} }
+    env.QuestieTraceCharacter = { sessions = { reported } }
+
+    Core.DeleteReportedSessions({ reported })
+
+    assert.equal(0, #env.QuestieTraceCharacter.sessions)
+  end)
+
+  it("should keep unrelated saved sessions when only one is reported", function()
+    local reported = { name = "reported", functions = {} }
+    local kept = { name = "kept", functions = {} }
+    env.QuestieTraceCharacter = { sessions = { kept, reported } }
+
+    Core.DeleteReportedSessions({ reported })
+
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
+    assert.equal("kept", env.QuestieTraceCharacter.sessions[1].name)
+  end)
+
+  it("should discard and restart the live session when it was reported", function()
+    local live = { name = "live", functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
+    env.QuestieTraceCharacter = { sessions = {}, currentSession = live }
+    local discardCalls, startCalls = 0, 0
+    Core.DiscardCapture = function()
+      discardCalls = discardCalls + 1
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function() startCalls = startCalls + 1 end
+
+    Core.DeleteReportedSessions({ live })
+
+    assert.equal(1, discardCalls)
+    assert.equal(1, startCalls)
+  end)
+
+  it("should not start a new capture after discarding when autoStart is disabled", function()
+    env.QuestieTrace.settings.autoStart = false
+    local live = { name = "live", functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
+    env.QuestieTraceCharacter = { sessions = {}, currentSession = live }
+    local startCalls = 0
+    Core.DiscardCapture = function() env.QuestieTraceCharacter.currentSession = nil end
+    Core.StartCapture = function() startCalls = startCalls + 1 end
+
+    Core.DeleteReportedSessions({ live })
+
+    assert.equal(0, startCalls)
+  end)
+
+  it("should do nothing when sourceSessions is not a table", function()
+    env.QuestieTraceCharacter = { sessions = { { name = "kept", functions = {} } } }
+
+    assert.has_no.errors(function()
+      Core.DeleteReportedSessions(nil)
+    end)
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
+  end)
+end)
+
 describe("Export.BuildExportPayload", function()
   ---@type table<string, any>
   local env

@@ -54,7 +54,6 @@ local Core = QuestieTraceCore
 ---@field events EventRecord[]
 ---@field functions table<string, FunctionStream>
 ---@field functionsDelta table<string, DeltaStream>
----@field exportedAt number? GetTime() when this session was last included in a shown export payload; absent = never exported.
 
 ---@class CaptureState
 ---@field active boolean

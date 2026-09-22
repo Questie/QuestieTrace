@@ -68,9 +68,8 @@ end
 
 --- Read the monotonic saved-session counter.
 ---
---- This counter only ever increases, unlike #sessions which is capped by
---- PruneSessionsIfNeeded(). Using the session count here would permanently
---- suppress reminders for any character sitting at maxSessions.
+--- This counter only ever increases, unlike #sessions, which shrinks whenever
+--- a reported session is deleted by Core.DeleteReportedSessions().
 ---@return number counter
 local function GetSavedSessionCounter()
   ---@type table?
@@ -84,11 +83,11 @@ local function GetSavedSessionCounter()
   return type(characterDb.sessions) == "table" and #characterDb.sessions or 0
 end
 
---- Count all saved sessions, regardless of whether Core.BuildExportPayload()
---- would actually include them (it skips ones already marked exported via
---- `exportedAt`). This is only used to gate whether *any* saved data exists
---- at all, not whether new/unexported data exists -- that's what
---- `savedSessionCounter` vs `reminder.sessionCounterAtExport` is for below.
+--- Count all saved sessions. Every saved session is guaranteed unreported,
+--- since reported ones are deleted immediately by Core.DeleteReportedSessions().
+--- This is only used to gate whether *any* saved data exists at all, not
+--- whether new data exists since the export window was last opened -- that's
+--- what `savedSessionCounter` vs `reminder.sessionCounterAtExport` is for below.
 ---@return number count
 local function GetSavedSessionCount()
   ---@type table?
@@ -99,13 +98,11 @@ local function GetSavedSessionCount()
   return #characterDb.sessions
 end
 
---- Does the live (unsaved) session hold any events Core.BuildExportPayload()
---- would actually include? Mirrors the eligibility check in
---- Core.BuildExportPayload() (has events, not already exported) so a player
---- who has been playing for hours without saving still gets prompted, and
---- doesn't lose that data to a crash before /qlt save runs.
+--- Does the live (unsaved) session hold any events? A player who has been
+--- playing for hours without saving should still get prompted, and shouldn't
+--- lose that data to a crash before /qlt save runs.
 ---@return boolean hasEvents
-local function HasUnexportedLiveSessionEvents()
+local function HasLiveSessionEvents()
   ---@type table?
   local characterDb = QuestieTraceCharacter
   if type(characterDb) ~= "table" then return false end
@@ -116,7 +113,7 @@ local function HasUnexportedLiveSessionEvents()
     return false
   end
 
-  return #currentSession.events > 0 and not currentSession.exportedAt
+  return #currentSession.events > 0
 end
 
 ---------------------------------------------------------------------------
@@ -128,13 +125,13 @@ end
 ---
 --- Sessions in QuestieTraceCharacter.sessions are gated by the saved-session
 --- counter watermark. The live (unsaved) session is checked separately: it
---- has no counter of its own, so it's due whenever it holds unexported
---- events, regardless of whether anything has been saved yet.
+--- has no counter of its own, so it's due whenever it holds events, regardless
+--- of whether anything has been saved yet.
 ---
 --- Extension point: a trace-size rule belongs here as a further condition.
 ---@return boolean due
 function Core.IsShareDue()
-  if HasUnexportedLiveSessionEvents() then
+  if HasLiveSessionEvents() then
     return true
   end
 

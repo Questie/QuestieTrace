@@ -8,7 +8,6 @@
 QuestieTrace = {
   schemaVersion = 9,
   settings = {
-    maxSessions = 20,
     autoStart = true,
   },
 }
@@ -47,9 +46,10 @@ On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is recovered as
 on fresh install or migration.
 
 `savedSessionCounter` increments on every `Core.SaveCapture()` and never decreases.
-`#sessions` is capped by `PruneSessionsIfNeeded()`, so it cannot be used as a
-"has new data been saved?" watermark; the share reminder compares this counter
-against `reminder.sessionCounterAtExport` instead (see `specs/UI_SPEC.md` section 7).
+`#sessions` shrinks whenever a reported session is deleted by
+`Core.DeleteReportedSessions()`, so it cannot be used as a "has new data been
+saved?" watermark; the share reminder compares this counter against
+`reminder.sessionCounterAtExport` instead (see `specs/UI_SPEC.md` section 5).
 
 ### Migration
 
@@ -57,30 +57,33 @@ If `schemaVersion ~= 9`, the account-level table is wiped and recreated
 with defaults. Per-character sessions from older versions are lost. There
 is no incremental migration from v8 to v9.
 
-### Session pruning
+### Session lifetime
 
-After every save, sessions exceeding `maxSessions` are removed, preferring
-already-exported sessions (oldest-first among them) over never-exported ones,
-so a session the player hasn't had a chance to share yet is not silently
-dropped in favor of one that's already been reported. Only once all
-already-exported sessions are gone does pruning fall back to the oldest
-never-exported session. Default limit is 20.
+A session lives in `QuestieTraceCharacter.sessions` until the player confirms
+they reported its data via the "I reported this" button in the export
+window, at which point `Core.DeleteReportedSessions()` removes it
+permanently (see "Export and deletion" below). This keeps SavedVariables
+small in the common case without an arbitrary cap on unreported data.
 
-### Export dedup
+As a pure size backstop for players who never open the export window,
+`Core.SaveCapture()` also prunes the oldest saved session(s) whenever
+`#sessions` exceeds `MAX_SESSIONS` (10), regardless of report status — see
+"Session pruning" in `specs/ARCHITECTURE_SPEC.md`.
 
-`Core.BuildExportPayload(includeAlreadyExported)` skips any saved session (and
-the live `currentSession`) whose `exportedAt` is set, unless
-`includeAlreadyExported = true` is passed (used by `/qlt export all`). This
-prevents the same session's data from being bundled into the export window
-twice. `Core.MarkSessionsExported(sourceSessions)` stamps `exportedAt` on every
-session in `sourceSessions` (the second return value of `Core.BuildExportPayload()`);
-`ExportUI.lua` calls it right after building and displaying the export string,
-so a session is only ever marked once it has actually been shown to the player.
+### Export and deletion
+
+`Core.BuildExportPayload()` returns every saved session (and the live
+`currentSession`, if it has events) — there is no "already exported" state to
+skip, since reported sessions are deleted rather than flagged.
+`Core.DeleteReportedSessions(sourceSessions)` is called only once the player
+explicitly confirms via "I reported this" (not merely on showing the window):
+it removes matching entries from `QuestieTraceCharacter.sessions` and, if the
+live session was included, discards it (without saving) and starts a fresh
+capture so future events land in a new, distinct session.
 
 This is a coarse, best-effort proxy — the addon cannot know whether a shown
-export string was actually copied and submitted. Opening the export window is
-treated as "handled," consistent with how the share-reminder watermark
-(`reminder.sessionCounterAtExport`) already worked before this field existed.
+export string was actually copied and submitted, only that the player
+clicked the button confirming they did.
 
 ---
 
@@ -104,12 +107,12 @@ SessionRecord = {
   events         = EventEntry[],
   functions      = table<string, FunctionStream>,
   functionsDelta = table<string, DeltaStream>,
-
-  exportedAt = 100400.000,           -- GetTime() when last included in a shown export payload; absent = never exported
 }
 ```
 
-`exportedAt` is set by `Core.MarkSessionsExported()` once a payload has actually been shown in the export window (see "Export dedup" below). It carries over when a live session (`currentSession`) that was already exported is later saved, so a session is never counted as new again just because it moved from `currentSession` into `sessions[]`.
+There is no `exportedAt` field: a reported session is deleted outright by
+`Core.DeleteReportedSessions()` rather than flagged and kept around (see
+"Export and deletion" above).
 
 ### Recording contract
 

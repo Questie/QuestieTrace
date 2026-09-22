@@ -104,7 +104,6 @@ Tracker routing is separate: `Core._trackerCallbacks[event]` controls which trac
 QuestieTrace = {
   schemaVersion = 9,
   settings = {
-    maxSessions = 20,
     autoStart = true,
     dataCollectionConsent = nil, -- tri-state: nil = undecided, true = accepted, false = declined
   },
@@ -138,12 +137,11 @@ QuestieTraceCharacter = {
 
 `currentSession` is a direct reference to the in-memory `capture.session` table established by `Core.StartCapture()`. Since trackers mutate the table in place, no periodic sync is needed — the reference remains valid for the session's lifetime. It is cleared by `Core.SaveCapture()` (session moved to `sessions[]`). On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is automatically finalized into `sessions[]` immediately, so no lingering unsaved state ever remains.
 
-Each `SessionRecord` (saved or live) may also carry `exportedAt`, set once it has actually been shown in the export window — see "Export dedup" in `specs/SCHEMA_SPEC.md`. This prevents the same session's data from being bundled into the export payload twice.
+There is no `exportedAt` field or similar marker on `SessionRecord`: a session is only ever kept around while unreported. See "Export and deletion" in `specs/SCHEMA_SPEC.md`.
 
 ### Migration behavior
 
 - If `QuestieTrace` is missing or has a non-v9 schema, the account settings table is recreated with defaults.
-- Missing/invalid `settings.maxSessions` resets to 20.
 - Missing `settings.autoStart` defaults to `true`.
 - `settings.dataCollectionConsent` is intentionally left untouched (`nil`) when absent; unlike other settings it must NOT be defaulted to a boolean, since `nil` is the "not yet asked" signal that triggers the consent popup on the next `PLAYER_LOGIN`.
 - `QuestieTraceDumps` and its `dumps` table are ensured.
@@ -154,10 +152,13 @@ Each `SessionRecord` (saved or live) may also carry `exportedAt`, set once it ha
 
 ---
 
-## 5) Session pruning and naming
+## 5) Session lifetime, pruning, and naming
 
-After every save, sessions over `QuestieTrace.settings.maxSessions` are pruned, preferring already-exported sessions (oldest-first among them) over
-never-exported ones — see "Session pruning" in `specs/SCHEMA_SPEC.md`. If no name is supplied at start, sessions use `date("%Y-%m-%d_%H-%M-%S")`.
+A session is deleted outright by `Core.DeleteReportedSessions()` once the player confirms they reported it — see "Session lifetime" and "Export and deletion" in `specs/SCHEMA_SPEC.md`. If no name is supplied at start, sessions use `date("%Y-%m-%d_%H-%M-%S")`.
+
+### Session pruning
+
+`Core.SaveCapture()` also enforces `MAX_SESSIONS` (10) as a pure size backstop for players who never open the export window: whenever `#QuestieTraceCharacter.sessions` exceeds this cap, the oldest session(s) are dropped, oldest-first, regardless of report status. Unlike the export-driven deletion above, this is unconditional — it protects against unbounded SavedVariables growth, at the cost of losing the oldest unreported data once the cap is exceeded. There is no "prefer evicting already-reported sessions" tie-break to consider, since reported sessions are already gone by the time pruning runs.
 
 ---
 
@@ -168,7 +169,7 @@ never-exported ones — see "Session pruning" in `specs/SCHEMA_SPEC.md`. If no n
 - **When ON**: Capture starts automatically at `PLAYER_LOGIN` (and immediately if toggled on via `/qlt tracking` while logged in).
 - **When OFF**: No capture runs; toggling off mid-capture immediately finalizes and saves the running session.
 
-This is the sole user-facing control for the data collection lifecycle. All other capture state transitions (finalization on logout, finalization on export) happen automatically and silently.
+This is the sole user-facing control for the data collection lifecycle. All other capture state transitions (finalization on logout, discard-and-restart on export confirmation) happen automatically and silently.
 
 ---
 
@@ -188,8 +189,7 @@ Slash command aliases are `/questietrace` and `/qlt`:
 |---|---|
 | `/qlt status` | Print capture status |
 | `/qlt tracking` | Toggle data collection on/off, effective immediately |
-| `/qlt export` | Show the export window (never-exported sessions only) |
-| `/qlt export all` | Show the export window, forcing already-exported sessions back in (e.g. to resend after a failed submission) |
+| `/qlt export` | Show the export window |
 | `/qlt consent` | Show the data collection consent prompt (also used to change a prior decision) |
 | `/qlt dumpmap` | Run the map hierarchy dump provider |
 

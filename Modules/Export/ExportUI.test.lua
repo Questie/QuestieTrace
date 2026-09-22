@@ -22,7 +22,9 @@ local function LoadExportUIModules(env)
   env.CreateFrame = function() return NewWidgetStub() end
   env.GameTooltip = NewWidgetStub()
   env.GetTime = function() return 100 end
-  env.QuestieTraceCore.FinalizeLiveSessionIfExported = function() end
+  env.QuestieTrace = { settings = { autoStart = false } }
+  env.QuestieTraceCore.DiscardCapture = function() end
+  env.QuestieTraceCore.StartCapture = function() end
   env.QuestieTraceCore.MarkExportOpened = function() end
 
   local exportChunk = assert(loadfile("Modules/Export/Export.lua"))
@@ -51,91 +53,60 @@ describe("ExportUI.ShowExportWindow encoding state transition", function()
     env.QuestieTraceCharacter = { sessions = { session } }
   end)
 
-  it("should not mark sessions exported when the codec is unavailable", function()
+  it("should not delete sessions when the codec is unavailable", function()
     Core.EncodeExportPayload = function() return nil end
 
     Core.ShowExportWindow()
 
-    assert.is_nil(session.exportedAt)
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
   end)
 
-  it("should not mark sessions exported when the codec is unavailable even after confirming", function()
+  it("should not delete sessions when the codec is unavailable even after confirming", function()
     Core.EncodeExportPayload = function() return nil end
 
     Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
-    assert.is_nil(session.exportedAt)
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
   end)
 
-  it("should not finalize the live session when the codec is unavailable", function()
-    Core.EncodeExportPayload = function() return nil end
-    local finalizeCalls = 0
-    Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
-
-    Core.ShowExportWindow()
-    Core.ConfirmExportReported()
-
-    assert.equal(0, finalizeCalls)
-  end)
-
-  it("should not mark sessions exported just by opening the window", function()
+  it("should not delete sessions just by opening the window", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
 
     Core.ShowExportWindow()
 
-    assert.is_nil(session.exportedAt)
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
   end)
 
-  it("should not finalize the live session just by opening the window", function()
-    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
-    local finalizeCalls = 0
-    Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
-
-    Core.ShowExportWindow()
-
-    assert.equal(0, finalizeCalls)
-  end)
-
-  it("should mark sessions exported once the player confirms they reported it", function()
+  it("should delete the reported session once the player confirms they reported it", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
 
     Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
-    assert.equal(100, session.exportedAt)
+    assert.equal(0, #env.QuestieTraceCharacter.sessions)
   end)
 
-  it("should finalize the live session once the player confirms they reported it", function()
+  it("should not error on a second confirm without reopening", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
-    local finalizeCalls = 0
-    Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
 
     Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
-    assert.equal(1, finalizeCalls)
+    assert.has_no.errors(function()
+      Core.ConfirmExportReported()
+    end)
+    assert.equal(0, #env.QuestieTraceCharacter.sessions)
   end)
 
-  it("should not mark sessions exported again on a second confirm without reopening", function()
-    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
-    local finalizeCalls = 0
-    Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
-
-    Core.ShowExportWindow()
-    Core.ConfirmExportReported()
-    Core.ConfirmExportReported()
-
-    assert.equal(1, finalizeCalls)
+  it("should not error when confirming without ever opening the window", function()
+    assert.has_no.errors(function()
+      Core.ConfirmExportReported()
+    end)
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
   end)
 
-  it("should not mark sessions exported when confirming without ever opening the window", function()
-    Core.ConfirmExportReported()
-
-    assert.is_nil(session.exportedAt)
-  end)
-
-  it("should not mark sessions exported when reopening into a codec failure after a prior pending confirm", function()
+  it("should not delete sessions when reopening into a codec failure after a prior pending confirm", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
     Core.ShowExportWindow()
 
@@ -143,17 +114,67 @@ describe("ExportUI.ShowExportWindow encoding state transition", function()
     Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
-    assert.is_nil(session.exportedAt)
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
   end)
 
-  it("should not mark sessions exported when reopening with nothing left to export after a prior pending confirm", function()
+  it("should not error when reopening with nothing left to export after a prior pending confirm", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
     Core.ShowExportWindow()
 
     env.QuestieTraceCharacter.sessions = {}
     Core.ShowExportWindow()
+
+    assert.has_no.errors(function()
+      Core.ConfirmExportReported()
+    end)
+  end)
+end)
+
+describe("ExportUI.ConfirmExportReported live session handling", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+
+  before_each(function()
+    env = {}
+    Core = LoadExportUIModules(env)
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+  end)
+
+  it("should discard and restart the live session once reported", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+    local discardCalls, startCalls = 0, 0
+    Core.DiscardCapture = function()
+      discardCalls = discardCalls + 1
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function() startCalls = startCalls + 1 end
+    env.QuestieTrace.settings.autoStart = true
+
+    Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
-    assert.is_nil(session.exportedAt)
+    assert.equal(1, discardCalls)
+    assert.equal(1, startCalls)
+  end)
+
+  it("should not restart the live session when autoStart is disabled", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+    local startCalls = 0
+    Core.DiscardCapture = function() env.QuestieTraceCharacter.currentSession = nil end
+    Core.StartCapture = function() startCalls = startCalls + 1 end
+    env.QuestieTrace.settings.autoStart = false
+
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.equal(0, startCalls)
   end)
 end)

@@ -27,7 +27,6 @@ Aliases: `/questietrace` and `/qlt`.
 | `/qlt debug` | Toggle debug prints |
 | `/qlt consent` | Show the data collection consent dialog |
 | `/qlt export` | Show the export window (see section 4) |
-| `/qlt export all` | Force re-show export window, including already-exported sessions |
 | `/qlt dumpmap` | Run map hierarchy dump provider, when registered |
 
 ### Behaviors
@@ -54,15 +53,13 @@ This replaces the old "start/stop/save" manual workflow. Tracking is now a singl
 
 `Export/Export.lua` and `Export/ExportUI.lua` are strictly separate:
 
-- **`Export/Export.lua`** — data only. `Core.BuildExportPayload()` returns a deep-copied, privacy-scrubbed table of all saved sessions for the current character (`{ exportVersion, generatedAt, sessions }`). `Core.BuildExportString()` encodes it via CBOR + Deflate compression + print-safe encoding (LibDeflate:EncodeForPrint), producing a compact binary string suitable for copy-paste sharing. The string is prefixed with a plaintext version marker (`!QuestieTrace:<n>!`) so the export format/version is visible without decoding the payload. Scrubbing removes the `player` token from the `UnitName` and `UnitGUID` function streams so the player's own name/realm never leaves the client; NPC identity data is unaffected.
+- **`Export/Export.lua`** — data only. `Core.BuildExportPayload()` returns a deep-copied, privacy-scrubbed table of every saved session for the current character plus the live session if it has events (`{ exportVersion, generatedAt, sessions }`). There is no "already exported" state to filter — reported sessions are deleted outright rather than flagged, so every saved session is by definition unreported. `Core.BuildExportString()` encodes it via CBOR + Deflate compression + print-safe encoding (LibDeflate:EncodeForPrint), producing a compact binary string suitable for copy-paste sharing. The string is prefixed with a plaintext version marker (`!QuestieTrace:<n>!`) so the export format/version is visible without decoding the payload. Scrubbing removes the `player` token from the `UnitName` and `UnitGUID` function streams so the player's own name/realm never leaves the client; NPC identity data is unaffected.
 
 - **`Export/ExportUI.lua`** — UI only. `Core.ShowExportWindow()` lazily builds a movable frame with a multiline, scrollable, read-only-by-convention edit box. On show, it calls `Core.BuildExportString()` and populates the edit box, focuses it, and highlights all text so the user can immediately `Ctrl+A` / `Ctrl+C`. It never touches SavedVariables or session data itself.
 
-- **Explicit confirmation, not auto-dismissal**: Opening or closing the window never marks anything exported. Two buttons make the outcome explicit: **Close** just hides the window (data remains pending and will be offered again next time), and **"I reported this"** calls `Core.ConfirmExportReported()`, which marks the sessions shown exported via `Core.MarkSessionsExported()`, calls `Core.FinalizeLiveSessionIfExported()` to immediately save any live session that was just exported (preventing accidental re-bundling of later events into the same payload), and then hides the window. Both buttons carry a tooltip clarifying this distinction. "I reported this" is hidden whenever there is nothing valid to confirm (no exportable data, or the codec is unavailable so the shown text is only an error message) — the source sessions for the currently displayed string are tracked in a module-local `pendingSourceSessions`, cleared once confirmed.
+- **Explicit confirmation, not auto-dismissal**: Opening or closing the window never deletes anything. Two buttons make the outcome explicit: **Close** just hides the window (data remains pending and will be offered again next time), and **"I reported this"** calls `Core.ConfirmExportReported()`, which calls `Core.DeleteReportedSessions()` on the sessions shown — removing saved ones from `QuestieTraceCharacter.sessions` and, if the live session was included, discarding it (without saving) and starting a fresh capture — then hides the window. Both buttons carry a tooltip clarifying this distinction. "I reported this" is hidden whenever there is nothing valid to confirm (no exportable data, or the codec is unavailable so the shown text is only an error message) — the source sessions for the currently displayed string are tracked in a module-local `pendingSourceSessions`, cleared once confirmed.
 
-- **Deduplication**: A session is only marked with an `exportedAt` timestamp once the player explicitly confirms via "I reported this". `Core.BuildExportPayload()` skips any session with `exportedAt` already set (unless `/qlt export all` is used to force re-inclusion). This prevents duplicate data in submissions while ensuring data is never lost just because the window was dismissed.
-
-- **Finalization**: If the live (running) session was included in the export, `Core.FinalizeLiveSessionIfExported()` immediately saves it to `sessions[]` and (if tracking is enabled) starts a fresh capture, so new events go into a new, distinct session with its own export opportunity.
+- **Deletion, not flagging**: A session is only ever removed once the player explicitly confirms via "I reported this". Since reported sessions are deleted rather than marked, `Core.BuildExportPayload()` needs no dedup filtering — everything it returns is guaranteed unreported. This keeps SavedVariables small and ensures data is never lost just because the window was dismissed without confirming.
 
 - Triggered by `/qlt export` or by the share-reminder chat link (section 5).
 
@@ -91,10 +88,10 @@ The bracketed text is a `|Hquestietrace:export|h` hyperlink, printed via `DEFAUL
 
 ### Eligibility
 
-`Core.IsShareDue()` returns true when there is unshared data. This includes:
+`Core.IsShareDue()` returns true when there is unreported data. This includes:
 
-1. Any saved session in `QuestieTraceCharacter.sessions` that lacks an `exportedAt` timestamp.
-2. A live (running) session with at least one event and no `exportedAt` timestamp.
+1. Any saved session in `QuestieTraceCharacter.sessions` — every entry there is guaranteed unreported, since reported sessions are deleted outright rather than flagged.
+2. A live (running) session with at least one event.
 
 This is a cheap metadata check (no full payload build). Both cases are exportable, and both should prompt the player to share.
 

@@ -25,8 +25,8 @@ local exportFrame
 --- exportFrame.editBox (second return value of Core.BuildExportPayload()).
 --- Set (to a value, or explicitly to nil) on every Core.ShowExportWindow()
 --- call, and cleared once the player confirms via the "I reported this"
---- button. Not marked exported until that explicit confirmation happens, so
---- merely opening or closing the window can never make the data unrecoverable.
+--- button. Not deleted until that explicit confirmation happens, so merely
+--- opening or closing the window can never make the data unrecoverable.
 ---@type SessionRecord[]?
 local pendingSourceSessions
 
@@ -142,21 +142,17 @@ local function BuildExportFrame()
 end
 
 --- Confirm that the data currently shown in the export window has actually
---- been copied and submitted at the URL. This is the only path that marks
---- sessions exported and finalizes the live session -- merely opening or
---- closing the window never does either, so a player who dismisses the
---- window without submitting can always get the same data back later.
---- No-op if there is nothing pending (window never shown, no exportable
---- data, or the codec is unavailable).
+--- been copied and submitted at the URL. This is the only path that deletes
+--- the reported sessions -- merely opening or closing the window never does,
+--- so a player who dismisses the window without submitting can always get
+--- the same data back later. No-op if there is nothing pending (window never
+--- shown, no exportable data, or the codec is unavailable).
 function Core.ConfirmExportReported()
   if not pendingSourceSessions then
     return
   end
 
-  Core.MarkSessionsExported(pendingSourceSessions)
-  -- Finalize and restart the live session (if it was exported) so new events
-  -- don't get added to an already-exported record.
-  Core.FinalizeLiveSessionIfExported()
+  Core.DeleteReportedSessions(pendingSourceSessions)
   pendingSourceSessions = nil
 
   if exportFrame then
@@ -167,19 +163,14 @@ end
 
 --- Show the export window, populated with the current export string.
 --- If there is nothing to export, displays a warning and hides the input elements.
----
---- By default, sessions already shown in a previous export are left out so
---- the same data is never bundled twice. Pass includeAlreadyExported = true
---- to force everything back in (e.g. to resend after a failed submission).
----@param includeAlreadyExported boolean?
-function Core.ShowExportWindow(includeAlreadyExported)
+function Core.ShowExportWindow()
   if (not exportFrame) then
     exportFrame = BuildExportFrame()
   end
 
   -- Build once: reused for the hasExportableData check, the encoded string,
-  -- and marking sessions exported, so all three agree on the same data.
-  local payload, sourceSessions = Core.BuildExportPayload(includeAlreadyExported)
+  -- and deleting reported sessions, so all three agree on the same data.
+  local payload, sourceSessions = Core.BuildExportPayload()
   local hasData = payload.hasExportableData
 
   if hasData then

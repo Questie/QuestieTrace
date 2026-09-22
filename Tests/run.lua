@@ -87,7 +87,7 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 11, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 11, settings = { autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   runtime.printedMessages = {}
   env.print = function(...)
@@ -275,7 +275,7 @@ local function TestSessionContract()
   local settings = env.QuestieTrace.settings
   env.QuestieTraceCharacter.sessions[1] = legacy
   SendEvent(runtime, "VARIABLES_LOADED")
-  assert(env.QuestieTrace.settings == settings and settings.maxSessions == 7 and settings.autoStart == false,
+  assert(env.QuestieTrace.settings == settings and settings.autoStart == false,
     "Recording contract must not reset existing settings")
 
   runtime.core.StartCapture("new capture")
@@ -343,10 +343,10 @@ end
 
 --- The payload handed to the encoder (i.e. what Core.BuildExportString
 --- actually serializes) must never contain the real, unscrubbed source
---- session tables or bookkeeping fields like exportedAt -- only the second
---- return value (sourceSessions) may reference them, and that must never be
---- nested inside the payload table itself.
-local function TestExportPayloadNeverExposesSourceSessionsOrExportedAt()
+--- session tables -- only the second return value (sourceSessions) may
+--- reference them, and that must never be nested inside the payload table
+--- itself.
+local function TestExportPayloadNeverExposesSourceSessions()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
   runtime.core.StartCapture("s1")
   local session = Session(runtime)
@@ -359,11 +359,8 @@ local function TestExportPayloadNeverExposesSourceSessionsOrExportedAt()
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
-  runtime.core.MarkSessionsExported(sourceSessions)
 
   assert(payload.sourceSessions == nil, "The payload table must never carry the real session references")
-  assert(payload.sessions[1].exportedAt == nil, "exportedAt must be stripped from the exported copy")
-  assert(sourceSessions[1].exportedAt ~= nil, "MarkSessionsExported must still stamp the real source session")
 
   -- Simulate what the encoder actually sees: only `payload` is ever passed to
   -- Core.EncodeExportPayload()/serialization, never `sourceSessions`.
@@ -377,9 +374,12 @@ local function TestExportPayloadNeverExposesSourceSessionsOrExportedAt()
   end
   ScanForPlayerGuid(payload)
   assert(not sawPlayerGuid, "The scrubbed player GUID must not be reachable from the payload passed to the encoder")
+
+  runtime.core.DeleteReportedSessions(sourceSessions)
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "DeleteReportedSessions must remove the real source session")
 end
 
-local function TestExportPayloadExcludesAlreadyExportedSessions()
+local function TestExportPayloadExcludesDeletedSessions()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
   runtime.core.StartCapture("s1")
   runtime.core.SaveCapture()
@@ -388,14 +388,12 @@ local function TestExportPayloadExcludesAlreadyExportedSessions()
   assert(#payload.sessions == 1, "First build must include the freshly saved session")
   assert(payload.hasExportableData == true, "hasExportableData must be true when a session is included")
 
-  runtime.core.MarkSessionsExported(sourceSessions)
+  runtime.core.DeleteReportedSessions(sourceSessions)
 
   local secondPayload = runtime.core.BuildExportPayload()
-  assert(#secondPayload.sessions == 0, "A session already marked exported must not be bundled again")
+  assert(#secondPayload.sessions == 0, "A reported session must be deleted, not bundled again")
   assert(secondPayload.hasExportableData == false, "hasExportableData must be false once nothing new remains")
-
-  local forcedPayload = runtime.core.BuildExportPayload(true)
-  assert(#forcedPayload.sessions == 1, "includeAlreadyExported = true must force previously-exported sessions back in")
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "Reported session must be permanently removed from SavedVariables")
 end
 
 local function TestExportPayloadIncludesOnlyNewSessionsAfterExport()
@@ -403,95 +401,77 @@ local function TestExportPayloadIncludesOnlyNewSessionsAfterExport()
   runtime.core.StartCapture("s1")
   runtime.core.SaveCapture()
   local _, firstSourceSessions = runtime.core.BuildExportPayload()
-  runtime.core.MarkSessionsExported(firstSourceSessions)
+  runtime.core.DeleteReportedSessions(firstSourceSessions)
 
   runtime.core.StartCapture("s2")
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
-  assert(#payload.sessions == 1, "Only the newly saved session must be included")
-  assert(sourceSessions[1].name == "s2", "The included session must be the new one, not the already-exported one")
+  assert(#payload.sessions == 1, "Only the remaining saved session must be included")
+  assert(sourceSessions[1].name == "s2", "The included session must be the new one, not the deleted one")
 end
 
-local function TestExportPayloadLiveSessionExportedOnce()
+--- A pure size backstop for players who never report/export: unreported
+--- sessions must still be capped so SavedVariables can't grow forever.
+local function TestSaveCapturePrunesOldestSessionsPastCap()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
-  runtime.core.StartCapture("live")
-  local session = Session(runtime)
-  session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
 
-  local payload, sourceSessions = runtime.core.BuildExportPayload()
-  assert(#payload.sessions == 1, "A live session with events must be included once")
-
-  runtime.core.MarkSessionsExported(sourceSessions)
-
-  local secondPayload = runtime.core.BuildExportPayload()
-  assert(#secondPayload.sessions == 0, "The live session must not be re-bundled after being marked exported")
-
-  -- Saving it afterwards must not resurrect it into future payloads either,
-  -- since the exportedAt marker carries over onto the saved record.
-  runtime.core.SaveCapture()
-  local thirdPayload = runtime.core.BuildExportPayload()
-  assert(#thirdPayload.sessions == 0, "A saved session that was already exported while live must stay excluded")
-end
-
-local function TestExportFinalizesAndRestartsLiveSession()
-  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
-  runtime.env.QuestieTrace.settings.autoStart = true
-
-  -- Start a capture and add events
-  runtime.core.StartCapture("test session")
-  local oldSession = Session(runtime)
-  oldSession.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
-
-  -- Export it (marks it exported)
-  local payload, sourceSessions = runtime.core.BuildExportPayload()
-  assert(#payload.sessions == 1, "Live session with events should be in export payload")
-  runtime.core.MarkSessionsExported(sourceSessions)
-
-  -- Finalize it (what happens after ShowExportWindow marks sessions exported)
-  runtime.core.FinalizeLiveSessionIfExported()
-
-  -- The old session should now be saved
-  assert(#runtime.env.QuestieTraceCharacter.sessions == 1, "Finalized session should be saved")
-  local savedSession = runtime.env.QuestieTraceCharacter.sessions[1]
-  assert(savedSession == oldSession, "Saved session must be the same table reference")
-  assert(savedSession.exportedAt ~= nil, "Saved session must retain exportedAt")
-
-  -- A fresh capture should now be running
-  local newSession = Session(runtime)
-  assert(newSession ~= oldSession, "Fresh capture must be a different session object")
-  assert(runtime.core.GetCaptureState() == "running", "After finalize, must be running a fresh capture")
-  assert(#newSession.events == 0, "Fresh session must start empty")
-
-  -- The old session should not be re-exported
-  local secondPayload = runtime.core.BuildExportPayload()
-  assert(#secondPayload.sessions == 0, "Old exported session must not be re-exported after finalize+restart")
-end
-
-local function TestPruneRemovesExportedSessionsFirst()
-  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
-  local maxSessions = runtime.env.QuestieTrace.settings.maxSessions
-  for i = 1, maxSessions do
+  for i = 1, 12 do
     runtime.core.StartCapture("s" .. i)
     runtime.core.SaveCapture()
   end
 
   local sessions = runtime.env.QuestieTraceCharacter.sessions
-  -- Mark the 3rd and 5th sessions (not the oldest) as already exported.
-  sessions[3].exportedAt = 1
-  sessions[5].exportedAt = 1
+  assert(#sessions == 10, "Sessions must be capped at 10 even though none were reported")
+  assert(sessions[1].name == "s3", "The oldest sessions must be dropped first")
+  assert(sessions[10].name == "s12", "The newest session must always be kept")
 
-  -- Saving one more session pushes the list over the cap and triggers pruning.
-  runtime.core.StartCapture("overflow")
-  runtime.core.SaveCapture()
+  -- The monotonic saved-session counter must be unaffected by pruning, same
+  -- as it is unaffected by deletion via Core.DeleteReportedSessions().
+  assert(runtime.env.QuestieTraceCharacter.savedSessionCounter == 12,
+    "Pruning must not roll back the monotonic saved-session counter")
+end
 
-  assert(#sessions == maxSessions, "Pruning must still cap the session list")
+local function TestExportPayloadLiveSessionDeletedAndRestarted()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  runtime.env.QuestieTrace.settings.autoStart = true
 
-  local names = {}
-  for i = 1, #sessions do names[sessions[i].name] = true end
-  assert(names["s3"] == nil, "An already-exported session must be pruned before never-exported ones")
-  assert(names["s1"] == true, "Never-exported sessions must be kept over already-exported ones")
-  assert(names["overflow"] == true, "The newly saved session must be present")
+  -- Start a capture and add events
+  runtime.core.StartCapture("live")
+  local oldSession = Session(runtime)
+  oldSession.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
+
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 1, "A live session with events must be included once")
+
+  -- Report it: the live session must be discarded (never saved), and a fresh
+  -- capture must start immediately.
+  runtime.core.DeleteReportedSessions(sourceSessions)
+
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A reported live session must never be saved to sessions[]")
+
+  local newSession = Session(runtime)
+  assert(newSession ~= oldSession, "Fresh capture must be a different session object")
+  assert(runtime.core.GetCaptureState() == "running", "After reporting, must be running a fresh capture")
+  assert(#newSession.events == 0, "Fresh session must start empty")
+
+  -- The old session must never resurface
+  local secondPayload = runtime.core.BuildExportPayload()
+  assert(#secondPayload.sessions == 0, "A reported live session must not be re-exportable after discard+restart")
+end
+
+local function TestExportDoesNotRestartLiveSessionWhenAutoStartDisabled()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  runtime.env.QuestieTrace.settings.autoStart = false
+
+  runtime.core.StartCapture("live")
+  local session = Session(runtime)
+  session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
+
+  local _, sourceSessions = runtime.core.BuildExportPayload()
+  runtime.core.DeleteReportedSessions(sourceSessions)
+
+  assert(runtime.core.GetCaptureState() == "idle", "Must not auto-restart capture when tracking is disabled")
 end
 
 local function TestExportSerializationRoundTrips()
@@ -501,7 +481,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 11, settings = { maxSessions = 7, autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 11, settings = { autoStart = false, dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -811,23 +791,23 @@ local function TestShareReminderResumesAfterNewSave()
   assert(runtime.core.IsShareDue() == true, "New data after an export must re-arm the reminder")
 end
 
-local function TestShareReminderSurvivesSessionPruning()
+local function TestShareReminderSurvivesSessionDeletion()
   local runtime = NewRuntime(REMINDER_FILES)
   SendEvent(runtime, "VARIABLES_LOADED")
   local env = runtime.env
-  ---@type number
-  local maxSessions = env.QuestieTrace.settings.maxSessions
 
-  -- Fill to the prune cap, then acknowledge, then save more. #sessions stops
-  -- growing here, so only the monotonic counter can still detect new data.
-  SaveSessions(runtime, maxSessions)
+  -- Save some sessions, then simulate the player reporting (and thus
+  -- deleting) all of them -- #sessions drops back to 0, but the monotonic
+  -- counter must still detect any newly saved data afterwards.
+  SaveSessions(runtime, 3)
+  env.QuestieTraceCharacter.sessions = {}
   runtime.core.MarkExportOpened()
   SaveSessions(runtime, 2)
 
-  assert(#env.QuestieTraceCharacter.sessions == maxSessions, "Pruning must still cap the session list")
-  assert(env.QuestieTraceCharacter.savedSessionCounter == maxSessions + 2,
-    "The saved-session counter must keep counting past the prune cap")
-  assert(runtime.core.IsShareDue() == true, "Pruning must not permanently suppress reminders")
+  assert(#env.QuestieTraceCharacter.sessions == 2, "Only the newly saved sessions must remain")
+  assert(env.QuestieTraceCharacter.savedSessionCounter == 5,
+    "The saved-session counter must keep counting even though #sessions shrank")
+  assert(runtime.core.IsShareDue() == true, "Session deletion must not permanently suppress reminders")
 end
 
 local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
@@ -1329,12 +1309,12 @@ local tests = {
   { name = "session contract preserves legacy saves", run = TestSessionContract },
   { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
   { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },
-  { name = "export payload never exposes sourceSessions or exportedAt", run = TestExportPayloadNeverExposesSourceSessionsOrExportedAt },
-  { name = "export excludes already-exported sessions", run = TestExportPayloadExcludesAlreadyExportedSessions },
+  { name = "export payload never exposes sourceSessions", run = TestExportPayloadNeverExposesSourceSessions },
+  { name = "export excludes deleted (reported) sessions", run = TestExportPayloadExcludesDeletedSessions },
   { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
-  { name = "export live session is exported only once", run = TestExportPayloadLiveSessionExportedOnce },
-  { name = "export finalizes and restarts live session after export", run = TestExportFinalizesAndRestartsLiveSession },
-  { name = "prune removes exported sessions first", run = TestPruneRemovesExportedSessionsFirst },
+  { name = "SaveCapture prunes oldest sessions past the cap", run = TestSaveCapturePrunesOldestSessionsPastCap },
+  { name = "export deletes and restarts live session after report", run = TestExportPayloadLiveSessionDeletedAndRestarted },
+  { name = "export does not restart live session when autoStart is disabled", run = TestExportDoesNotRestartLiveSessionWhenAutoStartDisabled },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
@@ -1357,7 +1337,7 @@ local tests = {
   { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
   { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
   { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
-  { name = "share reminder survives session pruning", run = TestShareReminderSurvivesSessionPruning },
+  { name = "share reminder survives session deletion", run = TestShareReminderSurvivesSessionDeletion },
   { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
   { name = "ParseGUIDKind classifies GUID prefixes", run = TestParseGUIDKindClassifiesPrefixes },
   { name = "SanitizeText redacts local player's own name", run = TestSanitizeTextRedactsLocalPlayerName },
