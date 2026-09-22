@@ -223,12 +223,13 @@ end
 
 --- Install the questietrace: hyperlink handler.
 ---
---- LinkUtil is the preferred and taint-safe method: it handles the hyperlink
---- click before SetItemRef, consuming the event so it doesn't bubble up to
---- ItemRefTooltip. OnHyperlinkClick is a fallback for clients where LinkUtil
---- isn't available yet at load time (though it's always available eventually).
---- Both approaches avoid hooking secure globals, which would taint Edit Mode
---- and other secure UIs.
+--- LinkUtil is preferred: the click is consumed, so SetItemRef never falls
+--- through to ItemRefTooltip. Clients without LinkUtil fall back to a secure
+--- hook, where the stock handler has already opened an empty tooltip for our
+--- unknown link type and we hide it again. hooksecurefunc is a documented,
+--- taint-safe post-hook mechanism (it never introduces taint into the
+--- hooked function itself); SetItemRef is never replaced outright, which
+--- would risk taint.
 local function RegisterLinkHandler()
   if linkHandlerRegistered then return end
 
@@ -243,20 +244,14 @@ local function RegisterLinkHandler()
     return
   end
 
-  -- Fallback: hook the OnHyperlinkClick script on chat frames to intercept
-  -- our custom hyperlinks before they reach SetItemRef. This avoids tainting
-  -- the secure execution path since OnHyperlinkClick is a frame script, not
-  -- a hooksecurefunc on a global.
-  for i = 1, NUM_CHAT_WINDOWS do
-    local frame = _G["ChatFrame" .. i]
-    if type(frame) == "table" then
-      frame:HookScript("OnHyperlinkClick", function(_, link)
-        HandleExportLink(link)
-      end)
-    end
+  if type(hooksecurefunc) == "function" then
+    hooksecurefunc("SetItemRef", function(link)
+      if HandleExportLink(link) and type(ItemRefTooltip) == "table" then
+        ItemRefTooltip:Hide()
+      end
+    end)
+    linkHandlerRegistered = true
   end
-
-  linkHandlerRegistered = true
 end
 
 -- Defer registration to PLAYER_LOGIN to ensure LinkUtil and chat frames are
