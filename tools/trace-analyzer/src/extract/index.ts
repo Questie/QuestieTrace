@@ -14,7 +14,7 @@ import { npcKeys } from "./schema/questie-keys";
 import { writeQuestieLua } from "./schema/lua-writer";
 
 export interface ExtractOptions {
-  sourceFileName: string;
+  sourceFileNames: string[];
   /** Injectable for deterministic tests; defaults to `new Date()`. */
   now?: Date;
 }
@@ -25,7 +25,7 @@ export interface FactBundle {
 
 export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
   const header = {
-    sourceFileName: options.sourceFileName,
+    sourceFileNames: options.sourceFileNames,
     sessionCount: sessions.length,
     generatedAt: options.now ?? new Date(),
   };
