@@ -110,7 +110,7 @@ local function BuildExportFrame()
 
   local closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate") --[[@as Button]]
   closeButton:SetSize(100, 22)
-  closeButton:SetPoint("BOTTOMLEFT", 16, 12)
+  closeButton:SetPoint("BOTTOMRIGHT", -16, 12)
   closeButton:SetText(l10n("Close"))
   closeButton:SetScript("OnClick", function() frame:Hide() end)
   closeButton:SetScript("OnEnter", function(self)
@@ -122,7 +122,7 @@ local function BuildExportFrame()
 
   local reportedButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate") --[[@as Button]]
   reportedButton:SetSize(150, 22)
-  reportedButton:SetPoint("BOTTOMRIGHT", -16, 12)
+  reportedButton:SetPoint("BOTTOM", 0, 12)
   reportedButton:SetText(l10n("I reported this"))
   reportedButton:SetScript("OnClick", function() Core.ConfirmExportReported() end)
   reportedButton:SetScript("OnEnter", function(self)
