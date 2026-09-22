@@ -14,15 +14,15 @@ interface EntitySection {
 }
 
 const SECTIONS: EntitySection[] = [
-  { key: "npc", label: "NPC Fixes", downloadName: "ForeverTraceNpcFixes.lua" },
-  { key: "quest", label: "Quest Fixes", downloadName: "ForeverTraceQuestFixes.lua" },
-  { key: "item", label: "Item Fixes", downloadName: "ForeverTraceItemFixes.lua" },
-  { key: "object", label: "Object Fixes", downloadName: "ForeverTraceObjectFixes.lua" },
+  { key: "npc", label: "NPC", downloadName: "ForeverTraceNpcFixes.lua" },
+  { key: "quest", label: "Quest", downloadName: "ForeverTraceQuestFixes.lua" },
+  { key: "item", label: "Item", downloadName: "ForeverTraceItemFixes.lua" },
+  { key: "object", label: "Object", downloadName: "ForeverTraceObjectFixes.lua" },
 ];
 
 type Status =
   | { kind: "idle" }
-  | { kind: "loading" }
+  | { kind: "loading"; entity?: EntitySection["key"] }
   | { kind: "done"; results: Record<EntitySection["key"], ExtractResult> }
   | { kind: "error"; message: string };
 
@@ -44,8 +44,9 @@ type Status =
  */
 export function ExtractView() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [activeTab, setActiveTab] = useState<EntitySection["key"]>("npc");
 
-  const handleGenerate = () => {
+  const handleGenerateAll = () => {
     setStatus({ kind: "loading" });
     Promise.all(
       SECTIONS.map((section) =>
@@ -64,6 +65,28 @@ export function ExtractView() {
       .catch((e) => setStatus({ kind: "error", message: e.message }));
   };
 
+  const handleGenerateEntity = (entity: EntitySection["key"]) => {
+    setStatus({ kind: "loading", entity });
+    fetch(`/api/extract/${entity}`)
+      .then((r) => r.json())
+      .then((data: ExtractResult & { error?: string }) => {
+        if (data.error) throw new Error(data.error);
+        if (status.kind === "done") {
+          setStatus({ kind: "done", results: { ...status.results, [entity]: data } });
+        } else {
+          const result = { [entity]: data } as Record<EntitySection["key"], ExtractResult>;
+          // Fill in missing entities with placeholder data (so tabs all exist)
+          for (const section of SECTIONS) {
+            if (!(section.key in result)) {
+              result[section.key] = { fixes: "", sessionCount: 0, fileCount: 0, skippedFiles: [] };
+            }
+          }
+          setStatus({ kind: "done", results: result });
+        }
+      })
+      .catch((e) => setStatus({ kind: "error", message: e.message }));
+  };
+
   const handleCopy = (fixes: string) => {
     navigator.clipboard.writeText(fixes);
   };
@@ -78,17 +101,23 @@ export function ExtractView() {
     URL.revokeObjectURL(url);
   };
 
+  const isLoading = status.kind === "loading";
+  const isDone = status.kind === "done";
+  const activeResult = isDone ? status.results[activeTab] : null;
+  const isGeneratingEntity = status.kind === "loading" && status.entity !== undefined ? status.entity : null;
+  const hasResults = isDone;
+
   return (
     <div className="extract-view">
       <div className="extract-toolbar">
-        <button onClick={handleGenerate} disabled={status.kind === "loading"}>
-          {status.kind === "loading" ? "Generating..." : "Generate"}
+        <button onClick={handleGenerateAll} disabled={isLoading}>
+          {isLoading && !status.entity ? "Generating all..." : "Generate all"}
         </button>
       </div>
 
       {status.kind === "error" && <div className="error-msg">Error: {status.message}</div>}
 
-      {status.kind === "done" && (
+      {hasResults && (
         <>
           <div className="extract-summary">
             {status.results.npc.sessionCount} session(s) from {status.results.npc.fileCount} trace file(s)
@@ -105,23 +134,63 @@ export function ExtractView() {
               </ul>
             </div>
           )}
-          {SECTIONS.map((section) => {
-            const result = status.results[section.key];
-            return (
-              <div className="extract-section" key={section.key}>
-                <div className="extract-section-header">
-                  <h3>{section.label}</h3>
-                  <button onClick={() => handleCopy(result.fixes)}>Copy to clipboard</button>
-                  <button onClick={() => handleDownload(result.fixes, section.downloadName)}>
-                    Download {section.downloadName}
-                  </button>
-                </div>
-                <pre className="extract-output">{result.fixes}</pre>
-              </div>
-            );
-          })}
         </>
       )}
+
+      <div className="extract-tabs">
+        <div className="extract-tab-list">
+          {SECTIONS.map((section) => (
+            <button
+              key={section.key}
+              className={`extract-tab ${activeTab === section.key ? "active" : ""}`}
+              onClick={() => setActiveTab(section.key)}
+            >
+              {section.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="extract-tab-content">
+          {activeResult ? (
+            <>
+              <div className="extract-tab-header">
+                <button
+                  onClick={() => handleGenerateEntity(activeTab)}
+                  disabled={isGeneratingEntity === activeTab}
+                >
+                  {isGeneratingEntity === activeTab ? "Generating..." : "Generate"}
+                </button>
+                <button onClick={() => handleCopy(activeResult.fixes)} disabled={!activeResult.fixes}>
+                  Copy to clipboard
+                </button>
+                <button
+                  onClick={() => handleDownload(activeResult.fixes, SECTIONS.find((s) => s.key === activeTab)!.downloadName)}
+                  disabled={!activeResult.fixes}
+                >
+                  Download
+                </button>
+              </div>
+              <pre className="extract-output">{activeResult.fixes || "(No data — click Generate to extract)"}</pre>
+            </>
+          ) : (
+            <>
+              <div className="extract-tab-header">
+                <button
+                  onClick={() => handleGenerateEntity(activeTab)}
+                  disabled={isGeneratingEntity === activeTab}
+                >
+                  {isGeneratingEntity === activeTab ? "Generating..." : "Generate"}
+                </button>
+              </div>
+              <div className="extract-tab-placeholder">
+                <p>Click "Generate all" to extract from all trace files,</p>
+                <p>or use the per-entity "Generate" button after selecting a tab.</p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
+
