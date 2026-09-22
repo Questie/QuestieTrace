@@ -197,11 +197,19 @@ end
 --- reported. Call this only once the payload has actually been handed to the
 --- user AND they confirmed submitting it -- not merely on showing it.
 ---
---- Saved sessions are removed from QuestieTraceCharacter.sessions[]. If the
---- live (running or stopped-unsaved) session was included, it is discarded
---- (never saved) and a fresh capture is started immediately (if tracking is
---- enabled), so future events land in a new, distinct session rather than one
---- that no longer exists.
+--- Saved sessions are removed from QuestieTraceCharacter.sessions[]. If a live
+--- (running or stopped-unsaved) session was included in the payload, it is
+--- discarded (never saved) and a fresh capture is started immediately (if
+--- tracking is enabled), so future events land in a new, distinct session
+--- rather than one that no longer exists.
+---
+--- Note: Core.ShowExportWindow() already rotates the live session when encoding
+--- succeeds, so the live session at deletion time is typically a fresh one that
+--- was started after the payload snapshot. The equality check at line 225
+--- (session == liveSession) will typically fail for the old session in the
+--- payload, so DiscardCapture() is usually not called again here. This is
+--- correct: the new live session has fresh events and should be preserved.
+--- The check still exists for safety, in case rotation was skipped or failed.
 ---@param sourceSessions SessionRecord[] Second return value of Core.BuildExportPayload()
 function Core.DeleteReportedSessions(sourceSessions)
   if type(sourceSessions) ~= "table" then return end

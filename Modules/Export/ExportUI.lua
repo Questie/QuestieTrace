@@ -163,6 +163,12 @@ end
 
 --- Show the export window, populated with the current export string.
 --- If there is nothing to export, displays a warning and hides the input elements.
+--- After successfully encoding the payload, the live session is rotated (if present)
+--- so that subsequent events land in a new session rather than the one being shown
+--- to the user. The old session is discarded (never saved) and a new one is started
+--- (if autoStart is enabled), ensuring that future events don't mutate the payload
+--- snapshot that was encoded and displayed. This guarantees that DeleteReportedSessions()
+--- will delete only the exact data that was shown, not a version polluted by later events.
 function Core.ShowExportWindow()
   if (not exportFrame) then
     exportFrame = BuildExportFrame()
@@ -190,6 +196,19 @@ function Core.ShowExportWindow()
     -- data. If the codec is unavailable, `text` is just an error message --
     -- there is nothing real to confirm as reported.
     if ok then
+      -- After successful encoding, rotate the live session so new events land
+      -- in a fresh session rather than mutating the one currently on-screen.
+      -- This ensures DeleteReportedSessions() deletes the exact snapshot that
+      -- was encoded, not a version polluted by events that arrived while the
+      -- window was open.
+      local liveSession = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter.currentSession or nil
+      if liveSession then
+        Core.DiscardCapture()
+        if QuestieTrace.settings.autoStart then
+          Core.StartCapture()
+        end
+      end
+
       pendingSourceSessions = sourceSessions
       exportFrame.reportedButton:Show()
     else
