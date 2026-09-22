@@ -16,9 +16,19 @@ local l10n = Core.l10n
 ---@field urlEditBox EditBox
 ---@field hint FontString
 ---@field warningText FontString
+---@field reportedButton Button
 
 ---@type ExportFrame?
 local exportFrame
+
+--- Source sessions backing the export string currently shown in
+--- exportFrame.editBox (second return value of Core.BuildExportPayload()).
+--- Set (to a value, or explicitly to nil) on every Core.ShowExportWindow()
+--- call, and cleared once the player confirms via the "I reported this"
+--- button. Not marked exported until that explicit confirmation happens, so
+--- merely opening or closing the window can never make the data unrecoverable.
+---@type SessionRecord[]?
+local pendingSourceSessions
 
 --- Build the export window frame (lazy; created on first use).
 ---@return ExportFrame
@@ -99,17 +109,60 @@ local function BuildExportFrame()
   warningText:Hide()
 
   local closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate") --[[@as Button]]
-  closeButton:SetSize(80, 22)
-  closeButton:SetPoint("BOTTOM", 0, 12)
+  closeButton:SetSize(100, 22)
+  closeButton:SetPoint("BOTTOMLEFT", 16, 12)
   closeButton:SetText(l10n("Close"))
   closeButton:SetScript("OnClick", function() frame:Hide() end)
+  closeButton:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(l10n("Closes this window without marking the data as reported. You can reopen it later to submit the same data."), nil, nil, nil, nil, true)
+    GameTooltip:Show()
+  end)
+  closeButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+  local reportedButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate") --[[@as Button]]
+  reportedButton:SetSize(150, 22)
+  reportedButton:SetPoint("BOTTOMRIGHT", -16, 12)
+  reportedButton:SetText(l10n("I reported this"))
+  reportedButton:SetScript("OnClick", function() Core.ConfirmExportReported() end)
+  reportedButton:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(l10n("Only click this after you have copied the text above and submitted it at the URL. This marks the data as reported so it will not be shown again."), nil, nil, nil, nil, true)
+    GameTooltip:Show()
+  end)
+  reportedButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
   frame.editBox = editBox
   frame.scrollFrame = scrollFrame
   frame.urlEditBox = urlEditBox
   frame.hint = hint
   frame.warningText = warningText
+  frame.reportedButton = reportedButton
   return frame
+end
+
+--- Confirm that the data currently shown in the export window has actually
+--- been copied and submitted at the URL. This is the only path that marks
+--- sessions exported and finalizes the live session -- merely opening or
+--- closing the window never does either, so a player who dismisses the
+--- window without submitting can always get the same data back later.
+--- No-op if there is nothing pending (window never shown, no exportable
+--- data, or the codec is unavailable).
+function Core.ConfirmExportReported()
+  if not pendingSourceSessions then
+    return
+  end
+
+  Core.MarkSessionsExported(pendingSourceSessions)
+  -- Finalize and restart the live session (if it was exported) so new events
+  -- don't get added to an already-exported record.
+  Core.FinalizeLiveSessionIfExported()
+  pendingSourceSessions = nil
+
+  if exportFrame then
+    exportFrame:Hide()
+    GameTooltip:Hide()
+  end
 end
 
 --- Show the export window, populated with the current export string.
@@ -142,16 +195,15 @@ function Core.ShowExportWindow(includeAlreadyExported)
     exportFrame.warningText:Hide()
     exportFrame.editBox:SetFocus()
 
-    -- Only treat this as "shown to the player" if the string actually
-    -- contains encoded data. If the codec is unavailable, `text` is just an
-    -- error message -- marking sessions exported here would make that data
-    -- unrecoverable since it would never be offered again.
+    -- Only offer "I reported this" if the string actually contains encoded
+    -- data. If the codec is unavailable, `text` is just an error message --
+    -- there is nothing real to confirm as reported.
     if ok then
-      Core.MarkSessionsExported(sourceSessions)
-
-      -- Finalize and restart the live session (if it was exported) so new events
-      -- don't get added to an already-exported record.
-      Core.FinalizeLiveSessionIfExported()
+      pendingSourceSessions = sourceSessions
+      exportFrame.reportedButton:Show()
+    else
+      pendingSourceSessions = nil
+      exportFrame.reportedButton:Hide()
     end
   else
     -- Show warning, hide export data
@@ -161,6 +213,8 @@ function Core.ShowExportWindow(includeAlreadyExported)
     exportFrame.urlEditBox:Hide()
     exportFrame.hint:Hide()
     exportFrame.scrollFrame:Hide()
+    exportFrame.reportedButton:Hide()
+    pendingSourceSessions = nil
   end
 
   exportFrame:Show()
