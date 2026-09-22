@@ -20,6 +20,7 @@ local function LoadExportUIModules(env)
   env._G = env
   env.QuestieTraceCore = { l10n = function(s) return s end }
   env.CreateFrame = function() return NewWidgetStub() end
+  env.GameTooltip = NewWidgetStub()
   env.GetTime = function() return 100 end
   env.QuestieTraceCore.FinalizeLiveSessionIfExported = function() end
   env.QuestieTraceCore.MarkExportOpened = function() end
@@ -58,8 +59,36 @@ describe("ExportUI.ShowExportWindow encoding state transition", function()
     assert.is_nil(session.exportedAt)
   end)
 
+  it("should not mark sessions exported when the codec is unavailable even after confirming", function()
+    Core.EncodeExportPayload = function() return nil end
+
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.is_nil(session.exportedAt)
+  end)
+
   it("should not finalize the live session when the codec is unavailable", function()
     Core.EncodeExportPayload = function() return nil end
+    local finalizeCalls = 0
+    Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
+
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.equal(0, finalizeCalls)
+  end)
+
+  it("should not mark sessions exported just by opening the window", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+
+    Core.ShowExportWindow()
+
+    assert.is_nil(session.exportedAt)
+  end)
+
+  it("should not finalize the live session just by opening the window", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
     local finalizeCalls = 0
     Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
 
@@ -68,11 +97,63 @@ describe("ExportUI.ShowExportWindow encoding state transition", function()
     assert.equal(0, finalizeCalls)
   end)
 
-  it("should mark sessions exported once the codec succeeds", function()
+  it("should mark sessions exported once the player confirms they reported it", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
 
     Core.ShowExportWindow()
+    Core.ConfirmExportReported()
 
     assert.equal(100, session.exportedAt)
+  end)
+
+  it("should finalize the live session once the player confirms they reported it", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+    local finalizeCalls = 0
+    Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
+
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.equal(1, finalizeCalls)
+  end)
+
+  it("should not mark sessions exported again on a second confirm without reopening", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+    local finalizeCalls = 0
+    Core.FinalizeLiveSessionIfExported = function() finalizeCalls = finalizeCalls + 1 end
+
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+    Core.ConfirmExportReported()
+
+    assert.equal(1, finalizeCalls)
+  end)
+
+  it("should not mark sessions exported when confirming without ever opening the window", function()
+    Core.ConfirmExportReported()
+
+    assert.is_nil(session.exportedAt)
+  end)
+
+  it("should not mark sessions exported when reopening into a codec failure after a prior pending confirm", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+    Core.ShowExportWindow()
+
+    Core.EncodeExportPayload = function() return nil end
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.is_nil(session.exportedAt)
+  end)
+
+  it("should not mark sessions exported when reopening with nothing left to export after a prior pending confirm", function()
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+    Core.ShowExportWindow()
+
+    env.QuestieTraceCharacter.sessions = {}
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.is_nil(session.exportedAt)
   end)
 end)
