@@ -31,14 +31,15 @@ Export your session with `/qlt export` to get a shareable string, then submit it
 
 ## Slash Commands
 
-| Command | Description |
-|---|---|
-| `/qlt` or `/qlt help` | Print the command list |
-| `/qlt status` | Show capture status |
-| `/qlt tracking` | Toggle auto-start on login |
-| `/qlt debug` | Toggle debug prints |
-| `/qlt export` | Open the export window |
-| `/qlt dumpmap` | Refresh the static map hierarchy dump |
+| Command               | Description                           |
+|-----------------------|---------------------------------------|
+| `/qlt` or `/qlt help` | Print the command list                |
+| `/qlt status`         | Show capture status                   |
+| `/qlt tracking`       | Toggle auto-start on login            |
+| `/qlt consent`        | Open the consent pop-up               |
+| `/qlt debug`          | Toggle debug prints                   |
+| `/qlt export [all]`   | Open the export window                |
+| `/qlt dumpmap`        | Refresh the static map hierarchy dump |
 
 ## Contributing
 
