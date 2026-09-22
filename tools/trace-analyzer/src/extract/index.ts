@@ -1,9 +1,10 @@
 // Top-level orchestration: sessions -> per-entity Questie "Forever...Fixes"
 // correction modules.
 //
-// Currently wires up the npc entity kind only (name/minLevel/maxLevel fields).
-// Quest/item/object entities, and the remaining npc fields, follow the same
-// shape and will be added incrementally (see observers/<entity>/ + emit/<entity>.ts).
+// Wires up all four entity kinds (npc/quest/item/object), each currently only
+// their `name` field (plus npc's minLevel/maxLevel stubs). More fields follow
+// the same shape and will be added incrementally (see observers/<entity>/ +
+// emit/<entity>.ts).
 //
 // This produces CORRECTIONS layered on top of Questie's base DB (matching
 // `Database/Custom/Fixes/foreverNPCFixes.lua`'s shape), not a full DB dump:
@@ -11,10 +12,16 @@
 
 import type { SessionRecord } from "../core/types";
 import { aggregateField } from "./aggregate";
+import { emitItemRecords } from "./emit/item";
 import { emitNpcRecords } from "./emit/npc";
+import { emitObjectRecords } from "./emit/object";
+import { emitQuestRecords } from "./emit/quest";
+import { observeName as observeItemName } from "./observers/item/name";
 import { observeMaxLevel } from "./observers/npc/maxLevel";
 import { observeMinLevel } from "./observers/npc/minLevel";
-import { observeName } from "./observers/npc/name";
+import { observeName as observeNpcName } from "./observers/npc/name";
+import { observeName as observeObjectName } from "./observers/object/name";
+import { observeName as observeQuestName } from "./observers/quest/name";
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 
 export interface ExtractOptions {
@@ -25,6 +32,9 @@ export interface ExtractOptions {
 
 export interface FactBundle {
   npcFixes: string;
+  questFixes: string;
+  itemFixes: string;
+  objectFixes: string;
 }
 
 export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
@@ -34,17 +44,25 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     generatedAt: options.now ?? new Date(),
   };
 
-  const nameObservations = sessions.flatMap(observeName);
-  const minLevelObservations = sessions.flatMap(observeMinLevel);
-  const maxLevelObservations = sessions.flatMap(observeMaxLevel);
-
   const npcRecords = emitNpcRecords({
-    name: aggregateField(nameObservations),
-    minLevel: aggregateField(minLevelObservations),
-    maxLevel: aggregateField(maxLevelObservations),
+    name: aggregateField(sessions.flatMap(observeNpcName)),
+    minLevel: aggregateField(sessions.flatMap(observeMinLevel)),
+    maxLevel: aggregateField(sessions.flatMap(observeMaxLevel)),
+  });
+  const questRecords = emitQuestRecords({
+    name: aggregateField(sessions.flatMap(observeQuestName)),
+  });
+  const itemRecords = emitItemRecords({
+    name: aggregateField(sessions.flatMap(observeItemName)),
+  });
+  const objectRecords = emitObjectRecords({
+    name: aggregateField(sessions.flatMap(observeObjectName)),
   });
 
-  const npcFixes = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", npcRecords, header);
-
-  return { npcFixes };
+  return {
+    npcFixes: writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", npcRecords, header),
+    questFixes: writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", questRecords, header),
+    itemFixes: writeQuestieCorrectionsLua("ForeverTraceItemFixes", "itemKeys", itemRecords, header),
+    objectFixes: writeQuestieCorrectionsLua("ForeverTraceObjectFixes", "objectKeys", objectRecords, header),
+  };
 }
