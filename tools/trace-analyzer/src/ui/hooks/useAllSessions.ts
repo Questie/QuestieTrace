@@ -28,7 +28,7 @@ export function useAllSessions(fileName: string | null) {
         if (summaries.error) throw new Error(summaries.error);
         return Promise.all(
           summaries.map((s) =>
-            fetch(`/api/file/${encodeURIComponent(fileName)}/session/${encodeURIComponent(s.name)}`).then((r) =>
+            fetch(`/api/file/${encodeURIComponent(fileName)}/session/${s.index}`).then((r) =>
               r.json(),
             ),
           ),

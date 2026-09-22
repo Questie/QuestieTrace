@@ -49,20 +49,20 @@ export function useSessionList(fileName: string | null) {
   return { sessions, loading, error };
 }
 
-export function useSession(fileName: string | null, sessionName: string | null) {
+export function useSession(fileName: string | null, sessionIndex: number | null) {
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!fileName || !sessionName) {
+    if (!fileName || sessionIndex === null) {
       setSession(null);
       return;
     }
     setLoading(true);
     setError(null);
     fetch(
-      `/api/file/${encodeURIComponent(fileName)}/session/${encodeURIComponent(sessionName)}`
+      `/api/file/${encodeURIComponent(fileName)}/session/${sessionIndex}`
     )
       .then((r) => r.json())
       .then((data) => {
@@ -71,7 +71,7 @@ export function useSession(fileName: string | null, sessionName: string | null) 
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [fileName, sessionName]);
+  }, [fileName, sessionIndex]);
 
   return { session, loading, error };
 }

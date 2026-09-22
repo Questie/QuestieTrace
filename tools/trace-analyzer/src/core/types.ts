@@ -62,18 +62,26 @@ export interface FunctionStreamMap {
 
 export type FunctionStream = FunctionStreamEntry[] | FunctionStreamMap;
 
-/** A complete session recording */
+/**
+ * A complete session recording.
+ *
+ * `name`/`stoppedAt`/`stoppedAtPrecise`/`duration`/`durationPrecise` are only
+ * set once a session has been explicitly stopped/saved (see
+ * QuestieTrace.lua). Exports also bundle the in-progress `currentSession`
+ * (if any), which has none of those fields yet - callers must not assume
+ * they're present.
+ */
 export interface SessionRecord {
   schemaVersion: number;
   /** 1 = observed raw API streams; absent = legacy/unknown recording contract. */
   recordingContractVersion?: number;
-  name: string;
+  name?: string;
   startedAt: number;
   startedAtPrecise: number;
-  stoppedAt: number;
-  stoppedAtPrecise: number;
-  duration: number;
-  durationPrecise: number;
+  stoppedAt?: number;
+  stoppedAtPrecise?: number;
+  duration?: number;
+  durationPrecise?: number;
   events: EventEntry[];
   functions: Record<string, FunctionStream>;
   functionsDelta: Record<string, DeltaStream>;
@@ -92,10 +100,17 @@ export interface TraceFileSummary {
   error: string | null;
 }
 
-/** Summary sent to browser for session list */
+/**
+ * Summary sent to browser for session list.
+ *
+ * `index` is the session's position in the file's `sessions` array and is
+ * the stable identifier used to address it (`name` may be absent - see
+ * `SessionRecord`).
+ */
 export interface SessionSummary {
-  name: string;
-  duration: number;
+  index: number;
+  name: string | null;
+  duration: number | null;
   startedAt: number;
   eventCount: number;
   functionCount: number;

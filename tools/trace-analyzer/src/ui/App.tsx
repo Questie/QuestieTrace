@@ -7,10 +7,15 @@ import { StreamViewer } from "./components/StreamViewer.js";
 import { EventLog } from "./components/EventLog.js";
 import { PositionPlot } from "./components/PositionPlot.js";
 import { ExtractView } from "./components/ExtractView.js";
-import type { SessionRecord } from "../core/types.js";
+import type { SessionRecord, SessionSummary } from "../core/types.js";
 import "./App.css";
 
 type Tab = "streams" | "events" | "position" | "extract";
+
+/** In-progress sessions bundled via Core.BuildExportPayload() have no `name` yet. */
+function sessionLabel(s: SessionSummary): string {
+  return s.name ?? `Session ${s.index + 1} (unsaved)`;
+}
 
 function PlayerIdentity({ session, t }: { session: SessionRecord; t: number }) {
   const info = useMemo(() => {
@@ -49,7 +54,7 @@ function PlayerIdentity({ session, t }: { session: SessionRecord; t: number }) {
 export function App() {
   const { files, loading: filesLoading, error: filesError } = useTraceFiles();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null);
+  const [selectedSessionIndex, setSelectedSessionIndex] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("streams");
 
   const {
@@ -61,7 +66,7 @@ export function App() {
     session,
     loading: sessionLoading,
     error: sessionError,
-  } = useSession(selectedFile, selectedSessionName);
+  } = useSession(selectedFile, selectedSessionIndex);
 
   // Auto-select first file if only one
   useEffect(() => {
@@ -73,9 +78,9 @@ export function App() {
   // Auto-select first session when file changes
   useEffect(() => {
     if (sessions.length > 0) {
-      setSelectedSessionName(sessions[0].name);
+      setSelectedSessionIndex(sessions[0].index);
     } else {
-      setSelectedSessionName(null);
+      setSelectedSessionIndex(null);
     }
   }, [sessions]);
 
@@ -99,7 +104,7 @@ export function App() {
           value={selectedFile ?? ""}
           onChange={(e) => {
             setSelectedFile(e.target.value || null);
-            setSelectedSessionName(null);
+            setSelectedSessionIndex(null);
           }}
         >
           {files.length > 1 && <option value="">Select file...</option>}
@@ -113,20 +118,20 @@ export function App() {
         {/* Session selector */}
         {sessions.length > 1 && (
           <select
-            value={selectedSessionName ?? ""}
-            onChange={(e) => setSelectedSessionName(e.target.value || null)}
+            value={selectedSessionIndex ?? ""}
+            onChange={(e) => setSelectedSessionIndex(e.target.value === "" ? null : Number(e.target.value))}
           >
             <option value="">Select session...</option>
             {sessions.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name} ({formatTime(s.duration)})
+              <option key={s.index} value={s.index}>
+                {sessionLabel(s)} ({formatTime(s.duration ?? 0)})
               </option>
             ))}
           </select>
         )}
         {sessions.length === 1 && (
           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#888" }}>
-            {selectedSessionName}
+            {sessionLabel(sessions[0])}
           </span>
         )}
 

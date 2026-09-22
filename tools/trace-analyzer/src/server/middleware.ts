@@ -93,9 +93,10 @@ export function traceApiPlugin(): Plugin {
             );
             return;
           }
-          const summaries: SessionSummary[] = data.sessions.map((s) => ({
-            name: s.name,
-            duration: s.duration,
+          const summaries: SessionSummary[] = data.sessions.map((s, index) => ({
+            index,
+            name: s.name ?? null,
+            duration: s.duration ?? null,
             startedAt: s.startedAt,
             eventCount: s.events.length,
             functionCount: Object.keys(s.functions).length,
@@ -104,13 +105,13 @@ export function traceApiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/file/:filename/session/:sessionName
+        // GET /api/file/:filename/session/:index
         const sessionMatch = req.url.match(
-          /^\/api\/file\/([^/]+)\/session\/(.+)$/
+          /^\/api\/file\/([^/]+)\/session\/(\d+)$/
         );
         if (sessionMatch) {
           const fileName = decodeURIComponent(sessionMatch[1]);
-          const sessionName = decodeURIComponent(sessionMatch[2]);
+          const sessionIndex = Number(sessionMatch[2]);
           if (!traceFileNames.includes(fileName)) {
             res.statusCode = 404;
             res.end(JSON.stringify({ error: `File "${fileName}" not found` }));
@@ -124,12 +125,12 @@ export function traceApiPlugin(): Plugin {
             );
             return;
           }
-          const session = data.sessions.find((s) => s.name === sessionName);
+          const session = data.sessions[sessionIndex];
           if (!session) {
             res.statusCode = 404;
             res.end(
               JSON.stringify({
-                error: `Session "${sessionName}" not found in ${fileName}`,
+                error: `Session ${sessionIndex} not found in ${fileName}`,
               })
             );
             return;
