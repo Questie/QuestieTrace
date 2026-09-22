@@ -213,7 +213,7 @@ export function App() {
             )}
           </>
         )}
-        {activeTab === "extract" && selectedFile && <ExtractView fileName={selectedFile} />}
+        {activeTab === "extract" && <ExtractView />}
       </div>
     </>
   );
