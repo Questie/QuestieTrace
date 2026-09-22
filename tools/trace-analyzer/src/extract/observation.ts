@@ -27,3 +27,8 @@ export interface Observation<T> {
  * NPC seen multiple times in one session).
  */
 export type FieldObserver<T> = (session: import("../core/types").SessionRecord) => Observation<T>[];
+
+/** `session.name` is optional (see core/types.ts); observers use this for `Provenance.session`. */
+export function sessionLabel(session: import("../core/types").SessionRecord): string {
+  return session.name ?? "(unnamed session)";
+}
