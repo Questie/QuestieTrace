@@ -63,12 +63,14 @@ A session lives in `QuestieTraceCharacter.sessions` until the player confirms
 they reported its data via the "I reported this" button in the export
 window, at which point `Core.DeleteReportedSessions()` removes it
 permanently (see "Export and deletion" below). This keeps SavedVariables
-small in the common case without an arbitrary cap on unreported data.
+small in the common case: reported sessions are deleted immediately, not
+retained with a flag.
 
 As a pure size backstop for players who never open the export window,
 `Core.SaveCapture()` also prunes the oldest saved session(s) whenever
-`#sessions` exceeds `MAX_SESSIONS` (10), regardless of report status — see
-"Session pruning" in `specs/ARCHITECTURE_SPEC.md`.
+`#sessions` exceeds `MAX_SESSIONS` (10), regardless of report status.
+This ensures a fixed upper bound on disk usage even for users who ignore
+the export reminder indefinitely.
 
 ### Export and deletion
 
