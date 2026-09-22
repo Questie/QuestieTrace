@@ -17,3 +17,7 @@ tools/decoder/output/*
 !tools/decoder/output/.gitkeep
 
 tools/trace-analyzer/node_modules/
+
+# Vendored Questie DB reference data, used only as a one-time manual reference
+# for deriving tools/trace-analyzer/src/extract/schema/questie-keys.ts.
+tools/classic-data/

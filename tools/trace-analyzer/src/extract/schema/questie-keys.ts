@@ -1,8 +1,9 @@
 // Questie Classic Era DB field schema.
 //
-// Mirrors the `*Keys` tables from the real Questie Classic DB files vendored at
-// `tools/classic-data/{classicNpcDB,classicQuestDB,classicItemDB,classicObjectDB}.lua`
+// Mirrors the `*Keys` tables from the real Questie Classic DB files (from
+// github.com/Questie/Questie `Database/Classic/{npcDB,questDB,itemDB,objectDB}.lua`)
 // (field name, 1-based positional index, and type comment - copied verbatim).
+// Not vendored in this repo (one-time reference only, not read by any code here).
 //
 // `default` values are NOT hand-authored. They were mechanically derived by sampling
 // every row of the real `*Data` tables in those files and measuring how often each
