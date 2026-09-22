@@ -7,8 +7,12 @@ local Core = QuestieTraceCore
 local ADDON_NAME = "QuestieTrace"
 ---@type number
 local SCHEMA_VERSION = 11
----@type number
-local DEFAULT_MAX_SESSIONS = 20
+---@type number Safety cap on QuestieTraceCharacter.sessions -- a pure size
+--- backstop for players who never open the export window, not a substitute
+--- for reporting. Oldest sessions are dropped first; there is no
+--- "already-exported" concept to prefer evicting, since reported sessions
+--- are deleted immediately by Core.DeleteReportedSessions().
+local MAX_SESSIONS = 10
 
 ---------------------------------------------------------------------------
 -- Capture state
@@ -263,16 +267,11 @@ local function EnsureSavedVariables()
   if type(globalDb) ~= "table" or globalDb.schemaVersion ~= SCHEMA_VERSION then
     QuestieTrace = {
       schemaVersion = SCHEMA_VERSION,
-      settings = {
-        maxSessions = DEFAULT_MAX_SESSIONS,
-      },
+      settings = {},
     }
   end
 
   QuestieTrace.settings = type(QuestieTrace.settings) == "table" and QuestieTrace.settings or {}
-  if type(QuestieTrace.settings.maxSessions) ~= "number" or QuestieTrace.settings.maxSessions < 1 then
-    QuestieTrace.settings.maxSessions = DEFAULT_MAX_SESSIONS
-  end
 
   if QuestieTrace.settings.autoStart == nil then
     QuestieTrace.settings.autoStart = true
@@ -298,7 +297,8 @@ local function EnsureSavedVariables()
   -- Share-reminder state. Lives on the per-character table, which is shape-checked
   -- rather than schema-gated, so no SCHEMA_VERSION bump is needed (a bump would
   -- reset every user's settings). savedSessionCounter is monotonic: it must not be
-  -- replaced with #sessions, which PruneSessionsIfNeeded caps at maxSessions.
+  -- replaced with #sessions, which shrinks whenever a reported session is
+  -- deleted or an old one is pruned by MAX_SESSIONS.
   if type(QuestieTraceCharacter.savedSessionCounter) ~= "number" then
     QuestieTraceCharacter.savedSessionCounter = #QuestieTraceCharacter.sessions
   end
@@ -327,31 +327,6 @@ local function EnsureSavedVariables()
       -- Consent not granted (declined or undecided): discard the recovered session
       QuestieTraceCharacter.currentSession = nil
     end
-  end
-end
-
---- Remove oldest sessions if the count exceeds the configured maximum.
----
---- Already-exported sessions are removed first (oldest-first among them),
---- since their data has already been shared. Only once those are exhausted
---- does pruning fall back to removing never-exported sessions, so a slow or
---- infrequent exporter doesn't lose data they haven't had a chance to share.
-local function PruneSessionsIfNeeded()
-  ---@type number
-  local maxSessions = QuestieTrace.settings.maxSessions
-  ---@type SessionRecord[]
-  local sessions = QuestieTraceCharacter.sessions
-
-  while #sessions > maxSessions do
-    ---@type number?
-    local removeIndex
-    for i = 1, #sessions do
-      if sessions[i].exportedAt then
-        removeIndex = i
-        break
-      end
-    end
-    table.remove(sessions, removeIndex or 1)
   end
 end
 
@@ -488,6 +463,17 @@ function Core.DiscardCapture()
   QuestieTraceCharacter.currentSession = nil
 end
 
+--- Drop the oldest saved sessions once the count exceeds MAX_SESSIONS.
+--- A pure size backstop for players who never report/export -- reported
+--- sessions are already deleted immediately by Core.DeleteReportedSessions(),
+--- so there is no "prefer evicting already-exported sessions" tie-break here.
+local function PruneSessionsIfNeeded()
+  local sessions = QuestieTraceCharacter.sessions
+  while #sessions > MAX_SESSIONS do
+    table.remove(sessions, 1)
+  end
+end
+
 --- Save the current capture session to SavedVariables.
 ---@param nameOverride string? Optional name override for the session
 function Core.SaveCapture(nameOverride)
@@ -515,25 +501,14 @@ function Core.SaveCapture(nameOverride)
   -- populated in-place by the trackers. No serialization step needed.
   QuestieTraceCharacter.sessions[#QuestieTraceCharacter.sessions + 1] = session
   QuestieTraceCharacter.lastSavedSession = session.name
-  -- Monotonic across pruning; the share reminder compares it to its watermark.
+  -- Monotonic even though sessions[] shrinks as reported sessions are deleted;
+  -- the share reminder compares it to its watermark.
   QuestieTraceCharacter.savedSessionCounter = (QuestieTraceCharacter.savedSessionCounter or 0) + 1
 
   PruneSessionsIfNeeded()
 
   capture.session = nil
   QuestieTraceCharacter.currentSession = nil
-end
-
---- Finalize and restart a live session if it was just exported.
---- Called after an export to save the just-exported session and immediately
---- start a fresh one, so new events don't get added to an already-exported record.
-function Core.FinalizeLiveSessionIfExported()
-  if capture.session and capture.session.exportedAt then
-    Core.SaveCapture()
-    if QuestieTrace.settings.autoStart then
-      Core.StartCapture()
-    end
-  end
 end
 
 ---------------------------------------------------------------------------
@@ -598,7 +573,6 @@ local function PrintHelp()
   print("/qlt consent - Show the data collection consent prompt")
   print("/qlt debug - Toggle debug prints")
   print("/qlt export - Show the export window")
-  print("/qlt export all - Re-show the export window including previously exported sessions (e.g. if a submission failed)")
   if Core.GetDumpHelpLines then
     local dumpHelpLines = Core.GetDumpHelpLines()
     for i = 1, #dumpHelpLines do
@@ -639,11 +613,7 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
     QuestieTrace.settings.debug = not QuestieTrace.settings.debug
     Core.Print("Debug prints:", QuestieTrace.settings.debug and "enabled" or "disabled")
   elseif action == "export" then
-    if string.lower(Trim(argument)) == "all" then
-      Core.ShowExportWindow(true)
-    else
-      Core.ShowExportWindow()
-    end
+    Core.ShowExportWindow()
   elseif Core.RunDumpBySlash(action, argument) then
     -- handled by dump provider
   else

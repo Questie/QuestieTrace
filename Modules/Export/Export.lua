@@ -141,10 +141,9 @@ end
 --- sessions array and hasExportableData = false, letting the UI display an
 --- appropriate warning.
 ---
---- By default, sessions already marked as exported (`exportedAt` set) are
---- skipped so the same data is never bundled twice. Pass
---- includeAlreadyExported = true to force everything back in (e.g. a failed
---- submission that needs to be resent).
+--- Every saved session is included: reported sessions are deleted by
+--- Core.DeleteReportedSessions() rather than kept around with a marker, so
+--- anything still in QuestieTraceCharacter.sessions is guaranteed unreported.
 ---
 --- The payload itself only ever contains scrubbed, deep-copied data safe to
 --- serialize and send off-device. The real (non-copied) session tables
@@ -152,12 +151,11 @@ end
 --- parallel to `payload.sessions` -- NOT as a field of the payload, so it can
 --- never accidentally end up inside the string handed to the encoder. Callers
 --- that actually hand the payload off (e.g. by showing it in the export
---- window) should pass `sourceSessions` to Core.MarkSessionsExported()
---- afterwards so those sessions are not bundled again next time.
----@param includeAlreadyExported boolean? Force-include sessions already marked exported
+--- window) should pass `sourceSessions` to Core.DeleteReportedSessions()
+--- afterwards so that data is not offered again next time.
 ---@return table payload
 ---@return SessionRecord[] sourceSessions Real session tables backing `payload.sessions`, in the same order.
-function Core.BuildExportPayload(includeAlreadyExported)
+function Core.BuildExportPayload()
   ---@type SessionRecord[]
   local sessions = {}
   ---@type SessionRecord[]
@@ -171,21 +169,16 @@ function Core.BuildExportPayload(includeAlreadyExported)
   for i = 1, #savedSessions do
     ---@type SessionRecord
     local source = savedSessions[i]
-    if includeAlreadyExported or not source.exportedAt then
-      local session = DeepCopy(source)
-      session.exportedAt = nil
-      ScrubFunctions(session.functions)
-      sessions[#sessions + 1] = session
-      sourceSessions[#sourceSessions + 1] = source
-    end
+    local session = DeepCopy(source)
+    ScrubFunctions(session.functions)
+    sessions[#sessions + 1] = session
+    sourceSessions[#sourceSessions + 1] = source
   end
 
   ---@type SessionRecord?
   local currentSession = type(characterDb) == "table" and characterDb.currentSession or nil
-  if type(currentSession) == "table" and type(currentSession.events) == "table" and #currentSession.events > 0
-      and (includeAlreadyExported or not currentSession.exportedAt) then
+  if type(currentSession) == "table" and type(currentSession.events) == "table" and #currentSession.events > 0 then
     local session = DeepCopy(currentSession)
-    session.exportedAt = nil
     ScrubFunctions(session.functions)
     sessions[#sessions + 1] = session
     sourceSessions[#sourceSessions + 1] = currentSession
@@ -199,18 +192,43 @@ function Core.BuildExportPayload(includeAlreadyExported)
   }, sourceSessions
 end
 
---- Mark every session in `sourceSessions` (the second return value of
---- Core.BuildExportPayload()) as exported, so Core.BuildExportPayload() will
---- not bundle it again. Call this once the payload has actually been handed
---- to the user (e.g. shown in the export window), not before.
+--- Permanently delete every session in `sourceSessions` (the second return
+--- value of Core.BuildExportPayload()) now that its data has actually been
+--- reported. Call this only once the payload has actually been handed to the
+--- user AND they confirmed submitting it -- not merely on showing it.
+---
+--- Saved sessions are removed from QuestieTraceCharacter.sessions[]. If the
+--- live (running or stopped-unsaved) session was included, it is discarded
+--- (never saved) and a fresh capture is started immediately (if tracking is
+--- enabled), so future events land in a new, distinct session rather than one
+--- that no longer exists.
 ---@param sourceSessions SessionRecord[] Second return value of Core.BuildExportPayload()
-function Core.MarkSessionsExported(sourceSessions)
+function Core.DeleteReportedSessions(sourceSessions)
   if type(sourceSessions) ~= "table" then return end
 
-  ---@type number
-  local now = GetTime()
+  ---@type table?
+  local characterDb = QuestieTraceCharacter
+  ---@type SessionRecord[]?
+  local savedSessions = type(characterDb) == "table" and characterDb.sessions or nil
+  ---@type SessionRecord?
+  local liveSession = type(characterDb) == "table" and characterDb.currentSession or nil
+
   for i = 1, #sourceSessions do
-    sourceSessions[i].exportedAt = now
+    ---@type SessionRecord
+    local session = sourceSessions[i]
+    if session == liveSession then
+      Core.DiscardCapture()
+      if QuestieTrace.settings.autoStart then
+        Core.StartCapture()
+      end
+    elseif savedSessions then
+      for j = #savedSessions, 1, -1 do
+        if savedSessions[j] == session then
+          table.remove(savedSessions, j)
+          break
+        end
+      end
+    end
   end
 end
 
