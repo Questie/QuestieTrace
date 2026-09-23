@@ -17,6 +17,8 @@ import { emitNpcRecords } from "./emit/npc";
 import { emitObjectRecords } from "./emit/object";
 import { emitQuestRecords } from "./emit/quest";
 import { observeName as observeItemName } from "./observers/item/name";
+import { observeNpcDrops, observeObjectDrops } from "./observers/item/npcDrops";
+import { mergeNpcDrops, mergeObjectDrops } from "./observers/item/dropsMerge";
 import {
   observeMaxLevel,
   observeMinLevel,
@@ -99,6 +101,14 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   });
   const itemRecords = emitItemRecords({
     name: aggregateField(sessions.flatMap(observeItemName)),
+    npcDrops: aggregateField(
+      sessions.flatMap(observeNpcDrops),
+      mergeNpcDrops,
+    ),
+    objectDrops: aggregateField(
+      sessions.flatMap(observeObjectDrops),
+      mergeObjectDrops,
+    ),
   });
   const objectRecords = emitObjectRecords({
     name: aggregateField(sessions.flatMap(observeObjectName)),
