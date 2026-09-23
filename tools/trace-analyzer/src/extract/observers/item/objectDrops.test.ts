@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../../../core/types";
-import { observeObjectDrops } from "./npcDrops";
+import { observeObjectDrops } from "./objectDrops";
 
 function makeSession(
   functions: Partial<SessionRecord["functions"]>,

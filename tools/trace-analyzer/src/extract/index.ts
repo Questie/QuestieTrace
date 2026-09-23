@@ -17,7 +17,8 @@ import { emitNpcRecords } from "./emit/npc";
 import { emitObjectRecords } from "./emit/object";
 import { emitQuestRecords } from "./emit/quest";
 import { observeName as observeItemName } from "./observers/item/name";
-import { observeNpcDrops, observeObjectDrops } from "./observers/item/npcDrops";
+import { observeNpcDrops } from "./observers/item/npcDrops";
+import { observeObjectDrops } from "./observers/item/objectDrops";
 import { mergeNpcDrops, mergeObjectDrops } from "./observers/item/dropsMerge";
 import {
   observeMaxLevel,
@@ -37,7 +38,6 @@ import {
   mergeSpawns as mergeObjectSpawns,
   mergeZoneID as mergeObjectZoneID,
 } from "./observers/object";
-import type { TaggedSpawnObservation } from "./observers/object/spawnsMerge";
 import { observeQuestStarts as observeObjectQuestStarts, mergeQuestStarts as mergeObjectQuestStarts } from "./observers/object/questStarts";
 import { observeQuestEnds as observeObjectQuestEnds, mergeQuestEnds as mergeObjectQuestEnds } from "./observers/object/questEnds";
 import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, observeFinishedBy, mergeFinishedBy } from "./observers/quest";
