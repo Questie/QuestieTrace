@@ -91,11 +91,11 @@ The bracketed text is a `|Hquestietrace:export|h` hyperlink, printed via `DEFAUL
 `Core.IsShareDue()` returns true when there is unreported data. This includes:
 
 1. Any saved session in `QuestieTraceCharacter.sessions` — every entry there is guaranteed unreported, since reported sessions are deleted outright rather than flagged.
-2. A live (running) session with at least one event.
+2. A live (running) session with at least one event that started at least 900 seconds (15 minutes) ago (`LIVE_SESSION_MIN_AGE`).
 
 This is a cheap metadata check (no full payload build). Both cases are exportable, and both should prompt the player to share.
 
-> **Consequence:** with default settings a capture auto-starts at login and auto-saves only on `PLAYER_LOGOUT`, so a brand-new character has zero saved sessions for their entire first play session and sees no reminder until their second login. A long-running unsaved live session also triggers a reminder on its own (no minimum-age threshold needed).
+> **Consequence:** with default settings a capture auto-starts at login and auto-saves only on `PLAYER_LOGOUT`, so a brand-new character has zero saved sessions for their entire first play session. A live session triggers a reminder only once it is at least 15 minutes old: auto-start records `PLAYER_LOGIN`/`PLAYER_ENTERING_WORLD` immediately, so without the age threshold every login (including a brand-new character) would be reminded at the 10-second check. Thus the first-play-session reminder occurs at the 30-minute check.
 
 ### Hyperlink handling
 

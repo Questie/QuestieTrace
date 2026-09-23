@@ -764,7 +764,34 @@ local function TestShareReminderDueWithUnsavedLiveSessionEvents()
   runtime.core.StartCapture("live only")
   local currentSession = runtime.env.QuestieTraceCharacter.currentSession
   currentSession.events[#currentSession.events + 1] = { t = 0, tp = 0, e = "SOME_EVENT", a = { n = 0 } }
-  assert(runtime.core.IsShareDue() == true, "An unsaved live session with events must trigger a reminder")
+  assert(runtime.core.IsShareDue() == false, "A live session younger than the minimum age must not trigger a reminder")
+
+  AdvanceTo(runtime, 899)
+  assert(runtime.core.IsShareDue() == false, "A live session just under the minimum age must stay silent")
+
+  AdvanceTo(runtime, 900)
+  assert(runtime.core.IsShareDue() == true, "An unsaved live session with events past the minimum age must trigger a reminder")
+end
+
+local function TestShareReminderSilentOnFreshCharacterLogin()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  -- Consent is account-wide, so a brand-new alt already has it granted, and
+  -- auto-start is on by default.
+  runtime.env.QuestieTrace.settings.autoStart = true
+  SendEvent(runtime, "VARIABLES_LOADED")
+
+  -- Auto-start records PLAYER_LOGIN into the live session immediately.
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+  local currentSession = runtime.env.QuestieTraceCharacter.currentSession
+  assert(currentSession ~= nil and #currentSession.events > 0, "Auto-start must have recorded login events")
+
+  AdvanceTo(runtime, 10)
+  assert(#messages == 0, "A freshly logged-in character must not be reminded at the login check")
+
+  AdvanceTo(runtime, 1810)
+  assert(#messages == 1, "A live session that has been played for 30 minutes must be reminded")
 end
 
 local function TestShareReminderDueAfterSave()
@@ -1334,6 +1361,7 @@ local tests = {
   { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
   { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
   { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },
+  { name = "share reminder silent on fresh character login", run = TestShareReminderSilentOnFreshCharacterLogin },
   { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
   { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
   { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
