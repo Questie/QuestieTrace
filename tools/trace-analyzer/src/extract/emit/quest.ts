@@ -4,8 +4,10 @@ import type { Fact } from "../aggregate";
 import { emitRecords } from "./records";
 
 export interface QuestFacts {
-  [field: string]: Map<number, Fact<string>>;
+  [field: string]: Map<number, Fact<unknown>>;
   name: Map<number, Fact<string>>;
+  questLevel: Map<number, Fact<number>>;
+  requiredLevel: Map<number, Fact<number>>;
 }
 
 export function emitQuestRecords(facts: QuestFacts): Map<number, Record<string, unknown>> {
