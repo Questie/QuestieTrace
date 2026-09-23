@@ -10,10 +10,11 @@ import type { Fact } from "../aggregate";
 import { emitRecords } from "./records";
 
 export interface NpcFacts {
-  [field: string]: Map<number, Fact<string>> | Map<number, Fact<number>>;
+  [field: string]: Map<number, Fact<unknown>>;
   name: Map<number, Fact<string>>;
   minLevel: Map<number, Fact<number>>;
   maxLevel: Map<number, Fact<number>>;
+  questStarts: Map<number, Fact<number[]>>;
 }
 
 export function emitNpcRecords(facts: NpcFacts): Map<number, Record<string, unknown>> {

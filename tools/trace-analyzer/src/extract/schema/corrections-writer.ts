@@ -15,6 +15,21 @@ export interface CorrectionsWriterHeader {
   generatedAt: Date;
 }
 
+/** Renders an object key as a Lua table constructor key, e.g. `["creatures"]` or `[7]`. */
+function luaKey(key: string): string {
+  return /^\d+$/.test(key) ? `[${key}]` : `[${luaValue(key)}]`;
+}
+
+/** Checks if value is a startedBy/finishedBy-like object with positional arrays. */
+function isStarterTypeTable(
+  value: unknown,
+): value is { creatures?: number[]; objects?: number[]; items?: number[] } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  // Known starter types for startedBy/finishedBy
+  return keys.every((k) => ["creatures", "objects", "items"].includes(k));
+}
+
 function luaValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "nil";
@@ -27,6 +42,25 @@ function luaValue(value: unknown): string {
   }
   if (typeof value === "string") {
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "nil" : `{${value.map(luaValue).join(",")}}`;
+  }
+  if (typeof value === "object") {
+    // Special case: startedBy/finishedBy use positional tables
+    // { creatures: [...], objects: [...], items: [...] } → {{...},{...},{...}}
+    // Omit trailing empty arrays (render as nil) to match Questie convention
+    if (isStarterTypeTable(value)) {
+      const pos = [value.creatures ?? [], value.objects ?? [], value.items ?? []];
+      // Omit trailing empty arrays
+      while (pos.length > 0 && pos[pos.length - 1].length === 0) {
+        pos.pop();
+      }
+      if (pos.length === 0) return "nil";
+      return `{${pos.map(luaValue).join(",")}}`;
+    }
+    const entries = Object.entries(value as Record<string, unknown>);
+    return `{${entries.map(([key, entryValue]) => `${luaKey(key)}=${luaValue(entryValue)}`).join(",")}}`;
   }
   throw new Error(`luaValue: unsupported value type ${typeof value} (${JSON.stringify(value)})`);
 }

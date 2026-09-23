@@ -9,13 +9,13 @@ describe("writeQuestieCorrectionsLua", () => {
 
     const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", records, header);
 
-    expect(lua).toContain('---@class ForeverTraceNpcFixes');
+    expect(lua).toContain("---@class ForeverTraceNpcFixes");
     expect(lua).toContain('local ForeverTraceNpcFixes = QuestieLoader:CreateModule("ForeverTraceNpcFixes")');
     expect(lua).toContain('local QuestieDB = QuestieLoader:ImportModule("QuestieDB")');
     expect(lua).toContain("function ForeverTraceNpcFixes:Load()");
     expect(lua).toContain("    local npcKeys = QuestieDB.npcKeys");
-    expect(lua).toContain('        [823] = {');
-    expect(lua).toContain('            [npcKeys.name] = "Deputy Willem",');
+    expect(lua).toContain("[823] = {");
+    expect(lua).toContain('[npcKeys.name] = "Deputy Willem",');
     expect(lua).toContain("    }\nend");
   });
 
@@ -62,6 +62,29 @@ describe("writeQuestieCorrectionsLua", () => {
     expect(lua).toContain("[npcKeys.minLevel] = 12,");
     expect(lua).toContain("[npcKeys.flag] = true,");
     expect(lua).toContain("[npcKeys.missing] = nil,");
+  });
+
+  it("should render array and nested object values as Lua table constructors", () => {
+    const records = new Map([
+      [
+        1,
+        {
+          breadcrumbs: [33, 45],
+          startedBy: { creatures: [33], objects: [], items: [45] },
+          finishedBy: { creatures: [40], objects: [12] },
+          allEmpty: { creatures: [], objects: [], items: [] },
+        },
+      ],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", records, header);
+
+    expect(lua).toContain("[questKeys.breadcrumbs] = {33,45},");
+    // startedBy/finishedBy use positional table format with no spaces, trailing empty arrays omitted
+    expect(lua).toContain("[questKeys.startedBy] = {{33},nil,{45}},");
+    expect(lua).toContain("[questKeys.finishedBy] = {{40},{12}},");
+    // All empty becomes nil
+    expect(lua).toContain("[questKeys.allEmpty] = nil,");
   });
 
   it("should return an empty table body when there are no records", () => {

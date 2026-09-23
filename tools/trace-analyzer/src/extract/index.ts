@@ -20,10 +20,12 @@ import { observeName as observeItemName } from "./observers/item/name";
 import { observeMaxLevel } from "./observers/npc/maxLevel";
 import { observeMinLevel } from "./observers/npc/minLevel";
 import { observeName as observeNpcName } from "./observers/npc/name";
+import { observeQuestStarts as observeNpcQuestStarts, mergeQuestStarts as mergeNpcQuestStarts } from "./observers/npc/questStarts";
 import { observeName as observeObjectName } from "./observers/object/name";
-import { observeName as observeQuestName } from "./observers/quest/name";
-import { observeQuestLevel } from './observers/quest';
-import { observeRequiredLevel } from './observers/quest';
+import { observeQuestStarts as observeObjectQuestStarts, mergeQuestStarts as mergeObjectQuestStarts } from "./observers/object/questStarts";
+import { observeName as observeQuestName, observeStartedBy, mergeStartedBy } from "./observers/quest";
+import { observeQuestLevel } from "./observers/quest/questLevel";
+import { observeRequiredLevel } from "./observers/quest/requiredLevel";
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 
 export interface ExtractOptions {
@@ -50,17 +52,29 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     name: aggregateField(sessions.flatMap(observeNpcName)),
     minLevel: aggregateField(sessions.flatMap(observeMinLevel)),
     maxLevel: aggregateField(sessions.flatMap(observeMaxLevel)),
+    questStarts: aggregateField(
+      sessions.flatMap(observeNpcQuestStarts),
+      mergeNpcQuestStarts,
+    ),
   });
   const questRecords = emitQuestRecords({
     name: aggregateField(sessions.flatMap(observeQuestName)),
     questLevel: aggregateField(sessions.flatMap(observeQuestLevel)),
     requiredLevel: aggregateField(sessions.flatMap(observeRequiredLevel)),
+    startedBy: aggregateField(
+      sessions.flatMap(observeStartedBy),
+      mergeStartedBy,
+    ),
   });
   const itemRecords = emitItemRecords({
     name: aggregateField(sessions.flatMap(observeItemName)),
   });
   const objectRecords = emitObjectRecords({
     name: aggregateField(sessions.flatMap(observeObjectName)),
+    questStarts: aggregateField(
+      sessions.flatMap(observeObjectQuestStarts),
+      mergeObjectQuestStarts,
+    ),
   });
 
   return {

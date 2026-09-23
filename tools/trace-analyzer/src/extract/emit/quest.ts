@@ -8,6 +8,7 @@ export interface QuestFacts {
   name: Map<number, Fact<string>>;
   questLevel: Map<number, Fact<number>>;
   requiredLevel: Map<number, Fact<number>>;
+  startedBy: Map<number, Fact<{ creatures: number[]; objects: number[]; items: number[] }>>;
 }
 
 export function emitQuestRecords(facts: QuestFacts): Map<number, Record<string, unknown>> {

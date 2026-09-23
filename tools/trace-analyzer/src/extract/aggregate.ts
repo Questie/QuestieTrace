@@ -72,11 +72,21 @@ function mergeScalar<T>(
 /**
  * Aggregates all Observations for one field (across every session) into one
  * Fact per entity id.
+ *
+ * When `customMerge` is provided, it receives all observations for one entity
+ * and returns the merged value. The return type R may differ from the
+ * observation value type T (e.g. observations carry individual pieces, merge
+ * combines them into an array or compound object).
  */
-export function aggregateField<T>(
+export function aggregateField<T>(observations: Observation<T>[]): Map<number, Fact<T>>;
+export function aggregateField<T, R>(
   observations: Observation<T>[],
-  customMerge?: (observationsForEntity: Observation<T>[]) => T,
-): Map<number, Fact<T>> {
+  customMerge: (observationsForEntity: Observation<T>[]) => R,
+): Map<number, Fact<R>>;
+export function aggregateField<T, R>(
+  observations: Observation<T>[],
+  customMerge?: (observationsForEntity: Observation<T>[]) => R,
+): Map<number, Fact<T> | Fact<R>> {
   const byEntity = new Map<number, Observation<T>[]>();
   for (const obs of observations) {
     const list = byEntity.get(obs.entityId);
@@ -87,7 +97,7 @@ export function aggregateField<T>(
     }
   }
 
-  const facts = new Map<number, Fact<T>>();
+  const facts = new Map<number, Fact<T> | Fact<R>>();
   for (const [entityId, entityObservations] of byEntity) {
     if (customMerge) {
       facts.set(entityId, {

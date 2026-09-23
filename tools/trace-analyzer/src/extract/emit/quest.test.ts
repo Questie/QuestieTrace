@@ -8,12 +8,17 @@ function fact<T>(entityId: number, value: T): Fact<T> {
 
 describe("emitQuestRecords", () => {
   it("should only set fields that were actually extracted", () => {
-    const records = emitQuestRecords({ name: new Map([[96659, fact(96659, "A Threat Within")]]), questLevel: new Map(), requiredLevel: new Map() });
+    const records = emitQuestRecords({
+      name: new Map([[96659, fact(96659, "A Threat Within")]]),
+      questLevel: new Map(),
+      requiredLevel: new Map(),
+      startedBy: new Map(),
+    });
     expect(records.get(96659)).toEqual({ name: "A Threat Within" });
   });
 
   it("should return an empty map when no facts were observed", () => {
-    const records = emitQuestRecords({ name: new Map(), questLevel: new Map(), requiredLevel: new Map() });
+    const records = emitQuestRecords({ name: new Map(), questLevel: new Map(), requiredLevel: new Map(), startedBy: new Map() });
     expect(records.size).toBe(0);
   });
 });
