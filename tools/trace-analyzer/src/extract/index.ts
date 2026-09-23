@@ -17,8 +17,14 @@ import { emitNpcRecords } from "./emit/npc";
 import { emitObjectRecords } from "./emit/object";
 import { emitQuestRecords } from "./emit/quest";
 import { observeName as observeItemName } from "./observers/item/name";
-import { observeMaxLevel } from './observers/npc';
-import { observeMinLevel } from './observers/npc';
+import {
+  observeMaxLevel,
+  observeMinLevel,
+  observeSpawns,
+  observeZoneID,
+  mergeSpawns,
+  mergeZoneID,
+} from './observers/npc';
 import { observeName as observeNpcName } from "./observers/npc/name";
 import { observeQuestStarts as observeNpcQuestStarts, mergeQuestStarts as mergeNpcQuestStarts } from "./observers/npc/questStarts";
 import { observeQuestEnds as observeNpcQuestEnds, mergeQuestEnds as mergeNpcQuestEnds } from "./observers/npc/questEnds";
@@ -54,6 +60,14 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     name: aggregateField(sessions.flatMap(observeNpcName)),
     minLevel: aggregateField(sessions.flatMap(observeMinLevel)),
     maxLevel: aggregateField(sessions.flatMap(observeMaxLevel)),
+    spawns: aggregateField(
+      sessions.flatMap(observeSpawns),
+      mergeSpawns,
+    ),
+    zoneID: aggregateField(
+      sessions.flatMap(observeZoneID),
+      mergeZoneID,
+    ),
     questStarts: aggregateField(
       sessions.flatMap(observeNpcQuestStarts),
       mergeNpcQuestStarts,

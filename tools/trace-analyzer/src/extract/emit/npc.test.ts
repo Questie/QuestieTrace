@@ -12,10 +12,29 @@ describe("emitNpcRecords", () => {
       name: new Map([[823, fact(823, "Deputy Willem")]]),
       minLevel: new Map([[823, fact(823, 18)]]),
       maxLevel: new Map(),
+      spawns: new Map(),
+      zoneID: new Map(),
       questStarts: new Map(),
       questEnds: new Map(),
     });
     expect(records.get(823)).toEqual({ name: "Deputy Willem", minLevel: 18 });
+  });
+
+  it("should include spawns and zoneID when present", () => {
+    const records = emitNpcRecords({
+      name: new Map([[823, fact(823, "Old Murk-Eye")]]),
+      minLevel: new Map(),
+      maxLevel: new Map(),
+      spawns: new Map([[823, fact(823, { 40: [[30.01, 86.02]] })]]),
+      zoneID: new Map([[823, fact(823, 40)]]),
+      questStarts: new Map(),
+      questEnds: new Map(),
+    });
+    expect(records.get(823)).toEqual({
+      name: "Old Murk-Eye",
+      spawns: { 40: [[30.01, 86.02]] },
+      zoneID: 40,
+    });
   });
 
   it("should union entity ids across all fields, including ids only seen in one field", () => {
@@ -23,6 +42,8 @@ describe("emitNpcRecords", () => {
       name: new Map([[1, fact(1, "Only Named")]]),
       minLevel: new Map([[2, fact(2, 5)]]),
       maxLevel: new Map(),
+      spawns: new Map(),
+      zoneID: new Map(),
       questStarts: new Map(),
       questEnds: new Map(),
     });
@@ -36,6 +57,8 @@ describe("emitNpcRecords", () => {
       name: new Map(),
       minLevel: new Map(),
       maxLevel: new Map(),
+      spawns: new Map(),
+      zoneID: new Map(),
       questStarts: new Map(),
       questEnds: new Map(),
     });
