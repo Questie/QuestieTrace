@@ -20,15 +20,22 @@ import { observeName as observeItemName } from "./observers/item/name";
 import {
   observeMaxLevel,
   observeMinLevel,
-  observeSpawns,
-  observeZoneID,
-  mergeSpawns,
-  mergeZoneID,
+  observeSpawns as observeNpcSpawns,
+  observeZoneID as observeNpcZoneID,
+  mergeSpawns as mergeNpcSpawns,
+  mergeZoneID as mergeNpcZoneID,
 } from './observers/npc';
 import { observeName as observeNpcName } from "./observers/npc/name";
 import { observeQuestStarts as observeNpcQuestStarts, mergeQuestStarts as mergeNpcQuestStarts } from "./observers/npc/questStarts";
 import { observeQuestEnds as observeNpcQuestEnds, mergeQuestEnds as mergeNpcQuestEnds } from "./observers/npc/questEnds";
 import { observeName as observeObjectName } from "./observers/object/name";
+import {
+  observeSpawns as observeObjectSpawns,
+  observeZoneID as observeObjectZoneID,
+  mergeSpawns as mergeObjectSpawns,
+  mergeZoneID as mergeObjectZoneID,
+} from "./observers/object";
+import type { TaggedSpawnObservation } from "./observers/object/spawnsMerge";
 import { observeQuestStarts as observeObjectQuestStarts, mergeQuestStarts as mergeObjectQuestStarts } from "./observers/object/questStarts";
 import { observeQuestEnds as observeObjectQuestEnds, mergeQuestEnds as mergeObjectQuestEnds } from "./observers/object/questEnds";
 import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, observeFinishedBy, mergeFinishedBy } from "./observers/quest";
@@ -61,12 +68,12 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     minLevel: aggregateField(sessions.flatMap(observeMinLevel)),
     maxLevel: aggregateField(sessions.flatMap(observeMaxLevel)),
     spawns: aggregateField(
-      sessions.flatMap(observeSpawns),
-      mergeSpawns,
+      sessions.flatMap(observeNpcSpawns),
+      mergeNpcSpawns,
     ),
     zoneID: aggregateField(
-      sessions.flatMap(observeZoneID),
-      mergeZoneID,
+      sessions.flatMap(observeNpcZoneID),
+      mergeNpcZoneID,
     ),
     questStarts: aggregateField(
       sessions.flatMap(observeNpcQuestStarts),
@@ -95,6 +102,14 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   });
   const objectRecords = emitObjectRecords({
     name: aggregateField(sessions.flatMap(observeObjectName)),
+    spawns: aggregateField(
+      sessions.flatMap(observeObjectSpawns),
+      mergeObjectSpawns,
+    ),
+    zoneID: aggregateField(
+      sessions.flatMap(observeObjectZoneID),
+      mergeObjectZoneID,
+    ),
     questStarts: aggregateField(
       sessions.flatMap(observeObjectQuestStarts),
       mergeObjectQuestStarts,

@@ -21,8 +21,11 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () => {
   it("should produce a paste-ready ForeverTraceNpcFixes.lua correction for an npc encountered in the session", () => {
     const session = makeSession({
-      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 2 } }] },
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 30.01, y: 86.02 } }] },
     });
 
     const { npcFixes } = extractAll([session], {
@@ -39,7 +42,8 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
   it("should only emit fields that were actually observed, not every schema field", () => {
     const session = makeSession({
       UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 2 } }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 30.01, y: 86.02 } }] },
     });
 
     const { npcFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
@@ -56,6 +60,11 @@ describe("extractAll (quest/item/object entities)", () => {
     const session = makeSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       GetTitleText: [{ t: 3, tp: 3, v: "A Threat Within" }],
+      GetLocale: { player: [{ t: 3, tp: 3, v: "enUS" }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 30.01, y: 86.02 } }] },
+      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", 2: "", n: 2 } }] },
     });
 
     const { questFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
@@ -68,6 +77,9 @@ describe("extractAll (quest/item/object entities)", () => {
   it("should produce a paste-ready ForeverTraceItemFixes.lua correction for a looted item", () => {
     const session = makeSession({
       GetLootSlotLink: { "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 0, tp: 0, v: 40 }] },
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 0, tp: 0, v: { x: 30.01, y: 86.02 } }] },
     });
 
     const { itemFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
@@ -79,8 +91,11 @@ describe("extractAll (quest/item/object entities)", () => {
 
   it("should produce a paste-ready ForeverTraceObjectFixes.lua correction for a GameObject encountered in the session", () => {
     const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
-      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Suspicious Chest", n: 2 } }] },
+      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Suspicious Chest", n: 1 } }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 30.01, y: 86.02 } }] },
     });
 
     const { objectFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
