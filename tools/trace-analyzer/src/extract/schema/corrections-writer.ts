@@ -20,14 +20,28 @@ function luaKey(key: string): string {
   return /^\d+$/.test(key) ? `[${key}]` : `[${luaValue(key)}]`;
 }
 
-/** Checks if value is a startedBy/finishedBy-like object with positional arrays. */
-function isStarterTypeTable(
-  value: unknown,
-): value is { creatures?: number[]; objects?: number[]; items?: number[] } {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const keys = Object.keys(value);
-  // Known starter types for startedBy/finishedBy
-  return keys.every((k) => ["creatures", "objects", "items"].includes(k));
+/** Checks if value looks like a starter/finisher type table with positional arrays. */
+function getPositionalArrays(value: unknown): { arrays: number[][]; type: string } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value).sort();
+
+  // Check for startedBy pattern: creatures, items, objects
+  if (keys.length >= 1 && keys.length <= 3) {
+    const validKeys = new Set(["creatures", "items", "objects"]);
+    if (keys.every((k) => validKeys.has(k))) {
+      const obj = value as { creatures?: number[]; objects?: number[]; items?: number[] };
+      // Could be startedBy (3 positions) or questEnds/finishedBy (2 positions)
+      if (keys.includes("items")) {
+        // Has items -> startedBy pattern
+        return { arrays: [obj.creatures ?? [], obj.objects ?? [], obj.items ?? []], type: "startedBy" };
+      } else {
+        // No items -> finishedBy/questEnds pattern
+        return { arrays: [obj.creatures ?? [], obj.objects ?? []], type: "finishedBy" };
+      }
+    }
+  }
+
+  return null;
 }
 
 function luaValue(value: unknown): string {
@@ -44,20 +58,21 @@ function luaValue(value: unknown): string {
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
   if (Array.isArray(value)) {
-    return value.length === 0 ? "nil" : `{${value.map(luaValue).join(",")}}`;
+    return value.length === 0 ? "nil" : `{${value.map((v) => luaValue(v)).join(",")}}`;
   }
   if (typeof value === "object") {
-    // Special case: startedBy/finishedBy use positional tables
+    // Special case: positional tables for starter/finisher types
     // { creatures: [...], objects: [...], items: [...] } → {{...},{...},{...}}
     // Omit trailing empty arrays (render as nil) to match Questie convention
-    if (isStarterTypeTable(value)) {
-      const pos = [value.creatures ?? [], value.objects ?? [], value.items ?? []];
+    const positional = getPositionalArrays(value);
+    if (positional) {
+      const pos = [...positional.arrays];
       // Omit trailing empty arrays
       while (pos.length > 0 && pos[pos.length - 1].length === 0) {
         pos.pop();
       }
       if (pos.length === 0) return "nil";
-      return `{${pos.map(luaValue).join(",")}}`;
+      return `{${pos.map((arr) => luaValue(arr)).join(",")}}`;
     }
     const entries = Object.entries(value as Record<string, unknown>);
     return `{${entries.map(([key, entryValue]) => `${luaKey(key)}=${luaValue(entryValue)}`).join(",")}}`;

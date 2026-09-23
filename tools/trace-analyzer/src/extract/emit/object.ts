@@ -7,6 +7,7 @@ export interface ObjectFacts {
   [field: string]: Map<number, Fact<unknown>>;
   name: Map<number, Fact<string>>;
   questStarts: Map<number, Fact<number[]>>;
+  questEnds: Map<number, Fact<number[]>>;
 }
 
 export function emitObjectRecords(facts: ObjectFacts): Map<number, Record<string, unknown>> {

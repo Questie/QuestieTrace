@@ -72,7 +72,7 @@ describe("writeQuestieCorrectionsLua", () => {
           breadcrumbs: [33, 45],
           startedBy: { creatures: [33], objects: [], items: [45] },
           finishedBy: { creatures: [40], objects: [12] },
-          allEmpty: { creatures: [], objects: [], items: [] },
+          startedByEmpty: { creatures: [], objects: [], items: [] },
         },
       ],
     ]);
@@ -83,8 +83,38 @@ describe("writeQuestieCorrectionsLua", () => {
     // startedBy/finishedBy use positional table format with no spaces, trailing empty arrays omitted
     expect(lua).toContain("[questKeys.startedBy] = {{33},nil,{45}},");
     expect(lua).toContain("[questKeys.finishedBy] = {{40},{12}},");
-    // All empty becomes nil
-    expect(lua).toContain("[questKeys.allEmpty] = nil,");
+    // All empty startedBy becomes nil (all 3 positions empty)
+    expect(lua).toContain("[questKeys.startedByEmpty] = nil,");
+  });
+
+  it("should handle finishedBy/questEnds with 2-position positional tables (creatures, objects only)", () => {
+    const records = new Map([
+      [1, { finishedBy: { creatures: [10, 20], objects: [30] } }],
+      [2, { questEnds: { creatures: [40], objects: [] } }],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", records, header);
+
+    expect(lua).toContain("[1] = {");
+    expect(lua).toContain("[questKeys.finishedBy] = {{10,20},{30}},");
+    expect(lua).toContain("[2] = {");
+    expect(lua).toContain("[questKeys.questEnds] = {{40}},");
+  });
+
+  it("should handle npc/object questEnds with 2-position positional tables", () => {
+    const npcRecords = new Map([
+      [1, { name: "Test NPC", questEnds: { creatures: [10], objects: [20, 30] } }],
+      [2, { questEnds: { creatures: [], objects: [50] } }],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", npcRecords, header);
+
+    expect(lua).toContain("[1] = {");
+    expect(lua).toContain('[npcKeys.name] = "Test NPC",');
+    expect(lua).toContain("[npcKeys.questEnds] = {{10},{20,30}},");
+    expect(lua).toContain("[2] = {");
+    // Empty creatures array becomes nil
+    expect(lua).toContain("[npcKeys.questEnds] = {nil,{50}},");
   });
 
   it("should return an empty table body when there are no records", () => {

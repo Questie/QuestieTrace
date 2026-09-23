@@ -3,3 +3,4 @@
 
 export { observeName } from "./name";
 export { observeQuestStarts, mergeQuestStarts } from "./questStarts";
+export { observeQuestEnds, mergeQuestEnds } from "./questEnds";

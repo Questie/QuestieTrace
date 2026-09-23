@@ -17,15 +17,17 @@ import { emitNpcRecords } from "./emit/npc";
 import { emitObjectRecords } from "./emit/object";
 import { emitQuestRecords } from "./emit/quest";
 import { observeName as observeItemName } from "./observers/item/name";
-import { observeMaxLevel } from "./observers/npc/maxLevel";
-import { observeMinLevel } from "./observers/npc/minLevel";
+import { observeMaxLevel } from './observers/npc';
+import { observeMinLevel } from './observers/npc';
 import { observeName as observeNpcName } from "./observers/npc/name";
 import { observeQuestStarts as observeNpcQuestStarts, mergeQuestStarts as mergeNpcQuestStarts } from "./observers/npc/questStarts";
+import { observeQuestEnds as observeNpcQuestEnds, mergeQuestEnds as mergeNpcQuestEnds } from "./observers/npc/questEnds";
 import { observeName as observeObjectName } from "./observers/object/name";
 import { observeQuestStarts as observeObjectQuestStarts, mergeQuestStarts as mergeObjectQuestStarts } from "./observers/object/questStarts";
-import { observeName as observeQuestName, observeStartedBy, mergeStartedBy } from "./observers/quest";
-import { observeQuestLevel } from "./observers/quest/questLevel";
-import { observeRequiredLevel } from "./observers/quest/requiredLevel";
+import { observeQuestEnds as observeObjectQuestEnds, mergeQuestEnds as mergeObjectQuestEnds } from "./observers/object/questEnds";
+import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, observeFinishedBy, mergeFinishedBy } from "./observers/quest";
+import { observeQuestLevel } from './observers/quest';
+import { observeRequiredLevel } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 
 export interface ExtractOptions {
@@ -56,6 +58,10 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
       sessions.flatMap(observeNpcQuestStarts),
       mergeNpcQuestStarts,
     ),
+    questEnds: aggregateField(
+      sessions.flatMap(observeNpcQuestEnds),
+      mergeNpcQuestEnds,
+    ),
   });
   const questRecords = emitQuestRecords({
     name: aggregateField(sessions.flatMap(observeQuestName)),
@@ -64,6 +70,10 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     startedBy: aggregateField(
       sessions.flatMap(observeStartedBy),
       mergeStartedBy,
+    ),
+    finishedBy: aggregateField(
+      sessions.flatMap(observeFinishedBy),
+      mergeFinishedBy,
     ),
   });
   const itemRecords = emitItemRecords({
@@ -74,6 +84,10 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     questStarts: aggregateField(
       sessions.flatMap(observeObjectQuestStarts),
       mergeObjectQuestStarts,
+    ),
+    questEnds: aggregateField(
+      sessions.flatMap(observeObjectQuestEnds),
+      mergeObjectQuestEnds,
     ),
   });
 
