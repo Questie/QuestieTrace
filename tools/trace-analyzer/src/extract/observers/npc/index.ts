@@ -5,3 +5,4 @@ export { observeName } from "./name";
 export { observeMinLevel } from "./minLevel";
 export { observeMaxLevel } from "./maxLevel";
 export { observeQuestStarts, mergeQuestStarts } from "./questStarts";
+export { observeQuestEnds, mergeQuestEnds } from "./questEnds";

@@ -5,3 +5,4 @@ export { observeName } from "./name";
 export { observeQuestLevel } from "./questLevel";
 export { observeRequiredLevel } from "./requiredLevel";
 export { observeStartedBy, mergeStartedBy } from "./startedBy";
+export { observeFinishedBy, mergeFinishedBy } from "./finishedBy";

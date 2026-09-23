@@ -15,6 +15,7 @@ export interface NpcFacts {
   minLevel: Map<number, Fact<number>>;
   maxLevel: Map<number, Fact<number>>;
   questStarts: Map<number, Fact<number[]>>;
+  questEnds: Map<number, Fact<number[]>>;
 }
 
 export function emitNpcRecords(facts: NpcFacts): Map<number, Record<string, unknown>> {

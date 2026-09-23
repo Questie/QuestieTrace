@@ -13,12 +13,19 @@ describe("emitQuestRecords", () => {
       questLevel: new Map(),
       requiredLevel: new Map(),
       startedBy: new Map(),
+      finishedBy: new Map(),
     });
     expect(records.get(96659)).toEqual({ name: "A Threat Within" });
   });
 
   it("should return an empty map when no facts were observed", () => {
-    const records = emitQuestRecords({ name: new Map(), questLevel: new Map(), requiredLevel: new Map(), startedBy: new Map() });
+    const records = emitQuestRecords({
+      name: new Map(),
+      questLevel: new Map(),
+      requiredLevel: new Map(),
+      startedBy: new Map(),
+      finishedBy: new Map(),
+    });
     expect(records.size).toBe(0);
   });
 });
