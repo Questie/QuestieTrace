@@ -12,6 +12,7 @@ describe("emitNpcRecords", () => {
       name: new Map([[823, fact(823, "Deputy Willem")]]),
       minLevel: new Map([[823, fact(823, 18)]]),
       maxLevel: new Map(),
+      questStarts: new Map(),
     });
     expect(records.get(823)).toEqual({ name: "Deputy Willem", minLevel: 18 });
   });
@@ -21,6 +22,7 @@ describe("emitNpcRecords", () => {
       name: new Map([[1, fact(1, "Only Named")]]),
       minLevel: new Map([[2, fact(2, 5)]]),
       maxLevel: new Map(),
+      questStarts: new Map(),
     });
     expect([...records.keys()].sort()).toEqual([1, 2]);
     expect(records.get(1)).toEqual({ name: "Only Named" });
@@ -28,7 +30,7 @@ describe("emitNpcRecords", () => {
   });
 
   it("should return an empty map when no facts were observed", () => {
-    const records = emitNpcRecords({ name: new Map(), minLevel: new Map(), maxLevel: new Map() });
+    const records = emitNpcRecords({ name: new Map(), minLevel: new Map(), maxLevel: new Map(), questStarts: new Map() });
     expect(records.size).toBe(0);
   });
 });
