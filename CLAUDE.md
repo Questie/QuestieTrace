@@ -1,3 +1,12 @@
+# QuestieTrace
+
+@AGENTS.md
+
+`AGENTS.md` is the canonical source for repository orientation.
+
+Keep instructions in `AGENTS.md` rather than duplicating them here, so every agent harness
+reads the same source.
+
 # Instructions
 
 ## Privacy (CRITICAL)
