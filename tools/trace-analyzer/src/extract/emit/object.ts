@@ -6,6 +6,8 @@ import { emitRecords } from "./records";
 export interface ObjectFacts {
   [field: string]: Map<number, Fact<unknown>>;
   name: Map<number, Fact<string>>;
+  spawns: Map<number, Fact<Record<number, Array<[number, number]>>>>;
+  zoneID: Map<number, Fact<number>>;
   questStarts: Map<number, Fact<number[]>>;
   questEnds: Map<number, Fact<number[]>>;
 }
