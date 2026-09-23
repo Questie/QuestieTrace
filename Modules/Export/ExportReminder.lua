@@ -23,6 +23,10 @@ local ADDON_NAME = "QuestieTrace"
 local LOGIN_DELAY = 10
 ---@type number Seconds between reminder checks while playing.
 local REMINDER_INTERVAL = 1800
+---@type number Minimum age in seconds before a live (unsaved) session counts as
+--- shareable. Auto-start records login events immediately, so without this a
+--- freshly logged-in character would be reminded 10 seconds after login.
+local LIVE_SESSION_MIN_AGE = 900
 ---@type string Custom chat hyperlink type owned by this addon.
 local LINK_TYPE = "questietrace"
 ---@type string Hyperlink option identifying the export action.
@@ -98,11 +102,13 @@ local function GetSavedSessionCount()
   return #characterDb.sessions
 end
 
---- Does the live (unsaved) session hold any events? A player who has been
---- playing for hours without saving should still get prompted, and shouldn't
---- lose that data to a crash before /qlt save runs.
----@return boolean hasEvents
-local function HasLiveSessionEvents()
+--- Has the live (unsaved) session been running long enough, with events, to
+--- be worth sharing? A player who has been playing for hours without saving
+--- should still get prompted, and shouldn't lose that data to a crash before
+--- /qlt save runs. Sessions younger than LIVE_SESSION_MIN_AGE only hold login
+--- noise and must not trigger a reminder.
+---@return boolean shareable
+local function IsLiveSessionShareable()
   ---@type table?
   local characterDb = QuestieTraceCharacter
   if type(characterDb) ~= "table" then return false end
@@ -113,7 +119,11 @@ local function HasLiveSessionEvents()
     return false
   end
 
-  return #currentSession.events > 0
+  if #currentSession.events == 0 or type(currentSession.startedAt) ~= "number" then
+    return false
+  end
+
+  return GetTime() - currentSession.startedAt >= LIVE_SESSION_MIN_AGE
 end
 
 ---------------------------------------------------------------------------
@@ -125,13 +135,13 @@ end
 ---
 --- Sessions in QuestieTraceCharacter.sessions are gated by the saved-session
 --- counter watermark. The live (unsaved) session is checked separately: it
---- has no counter of its own, so it's due whenever it holds events, regardless
---- of whether anything has been saved yet.
+--- has no counter of its own, so it's due once it holds events and has run for
+--- at least LIVE_SESSION_MIN_AGE, regardless of whether anything has been saved.
 ---
 --- Extension point: a trace-size rule belongs here as a further condition.
 ---@return boolean due
 function Core.IsShareDue()
-  if HasLiveSessionEvents() then
+  if IsLiveSessionShareable() then
     return true
   end
 
