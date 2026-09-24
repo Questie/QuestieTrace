@@ -104,6 +104,64 @@ describe("observeStartedBy", () => {
     expect(results.map((r) => r.value)).toContainEqual({ itemId: 750 });
   });
 
+  it("should read the quest ID from the one-argument QUEST_ACCEPTED form", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 96659, n: 1 } }]
+    );
+
+    expect(observeStartedBy(session)).toEqual([
+      {
+        entityId: 96659,
+        value: { creatureId: 197 },
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should read the quest ID from argument 2 for the two-argument QUEST_ACCEPTED form", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 3, tp: 3, v: 11111 }],
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 11111, 2: 96659, n: 2 } }]
+    );
+
+    expect(observeStartedBy(session)).toEqual([
+      {
+        entityId: 96659,
+        value: { creatureId: 197 },
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it.each([{ 1: 0, n: 1 }, { 1: "96659", n: 1 }, { n: 0 }])(
+    "should ignore invalid QUEST_ACCEPTED payload %#",
+    (args) => {
+      const session = makeSession(
+        {
+          GetQuestID: [{ t: 3, tp: 3, v: 11111 }],
+          UnitGUID: {
+            questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          },
+        },
+        [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: args }]
+      );
+
+      expect(observeStartedBy(session)).toEqual([]);
+    }
+  );
+
   it("should capture multiple creature starters across different quest events", () => {
     const session = makeSession(
       {
