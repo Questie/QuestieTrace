@@ -13,7 +13,7 @@
 import type { SessionRecord } from "../../../core/types";
 import type { FieldObserver, Observation } from "../../observation";
 import { objectEncounters } from "./_encounters";
-import { playerZoneAt, playerPosAt } from "../../probes";
+import { playerZoneAt, playerPosAt, toQuestieMapPosition } from "../../probes";
 
 export interface SpawnObservationValue {
   zoneID: number;
@@ -36,13 +36,14 @@ export const observeSpawns: FieldObserver<SpawnObservationValue> = (session) => 
 
     const pos = playerPosAt(session, encounter.t);
     if (pos === null) continue;
+    const questiePos = toQuestieMapPosition(pos);
 
     observations.push({
       entityId: encounter.objectID,
       value: {
         zoneID,
-        x: pos.x,
-        y: pos.y,
+        x: questiePos.x,
+        y: questiePos.y,
       },
       confidence: "high",
       provenance: {

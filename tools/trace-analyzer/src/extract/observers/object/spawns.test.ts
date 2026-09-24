@@ -19,7 +19,7 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 }
 
 describe("observeSpawns (object)", () => {
-  it("should emit one observation per object encounter with zone + position", () => {
+  it("should convert normalized map coordinates to Questie percentages", () => {
     const session = makeSession({
       UnitGUID: {
         target: [
@@ -30,14 +30,14 @@ describe("observeSpawns (object)", () => {
         player: [{ t: 10, tp: 10, v: 40 }],
       },
       "C_Map.GetPlayerMapPosition": {
-        player: [{ t: 10, tp: 10, v: { x: 30.01, y: 86.02 } }],
+        player: [{ t: 10, tp: 10, v: { x: 0.5611, y: 0.6164 } }],
       },
     });
 
     expect(observeSpawns(session)).toEqual([
       {
         entityId: 2843,
-        value: { zoneID: 40, x: 30.01, y: 86.02 },
+        value: { zoneID: 40, x: 56.11, y: 61.64 },
         confidence: "high",
         provenance: { session: "test-session", t: 10 },
         token: "target",
@@ -56,7 +56,7 @@ describe("observeSpawns (object)", () => {
         player: [],
       },
       "C_Map.GetPlayerMapPosition": {
-        player: [{ t: 10, tp: 10, v: { x: 30.01, y: 86.02 } }],
+        player: [{ t: 10, tp: 10, v: { x: 0.3001, y: 0.8602 } }],
       },
     });
 

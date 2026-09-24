@@ -19,7 +19,7 @@ function makeSession(functions: SessionRecord["functions"], events: SessionRecor
 }
 
 describe("observeSpawns", () => {
-  it("should emit one observation per npc encounter with zone + position", () => {
+  it("should convert normalized map coordinates to Questie percentages", () => {
     const session = makeSession({
       UnitGUID: {
         npc: [
@@ -30,14 +30,14 @@ describe("observeSpawns", () => {
         player: [{ t: 10, tp: 10, v: 40 }],
       },
       "C_Map.GetPlayerMapPosition": {
-        player: [{ t: 10, tp: 10, v: { x: 30.01, y: 86.02 } }],
+        player: [{ t: 10, tp: 10, v: { x: 0.5611, y: 0.6164 } }],
       },
     });
 
     expect(observeSpawns(session)).toEqual([
       {
         entityId: 823,
-        value: { zoneID: 40, x: 30.01, y: 86.02 },
+        value: { zoneID: 40, x: 56.11, y: 61.64 },
         confidence: "high",
         provenance: { session: "test-session", t: 10 },
         token: "npc",
@@ -56,7 +56,7 @@ describe("observeSpawns", () => {
         player: [],
       },
       "C_Map.GetPlayerMapPosition": {
-        player: [{ t: 10, tp: 10, v: { x: 30.01, y: 86.02 } }],
+        player: [{ t: 10, tp: 10, v: { x: 0.3001, y: 0.8602 } }],
       },
     });
 
@@ -97,8 +97,8 @@ describe("observeSpawns", () => {
       },
       "C_Map.GetPlayerMapPosition": {
         player: [
-          { t: 10, tp: 10, v: { x: 30.01, y: 86.02 } },
-          { t: 20, tp: 20, v: { x: 47.46, y: 62.18 } },
+          { t: 10, tp: 10, v: { x: 0.3001, y: 0.8602 } },
+          { t: 20, tp: 20, v: { x: 0.4746, y: 0.6218 } },
         ],
       },
     });
@@ -142,7 +142,7 @@ describe("observeSpawns", () => {
         player: [{ t: 5, tp: 5, v: 12 }],
       },
       "C_Map.GetPlayerMapPosition": {
-        player: [{ t: 5, tp: 5, v: { x: 47.46, y: 62.18 } }],
+        player: [{ t: 5, tp: 5, v: { x: 0.4746, y: 0.6218 } }],
       },
     });
 
