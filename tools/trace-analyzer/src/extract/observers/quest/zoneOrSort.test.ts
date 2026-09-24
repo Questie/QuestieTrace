@@ -21,7 +21,6 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 describe("observeZoneOrSort", () => {
   it("should map a quest-log zone header to its AreaTable ID", () => {
     const session = makeSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: {
         "96659": [{ t: 2, tp: 2, v: "Westfall" }],
       },
@@ -32,14 +31,40 @@ describe("observeZoneOrSort", () => {
         entityId: 96659,
         value: 40,
         confidence: "medium",
-        provenance: { session: "test-session", t: 3 },
+        provenance: { session: "test-session", t: 2 },
+      },
+    ]);
+  });
+
+  it("should process every quest-log entry and skip nonnumeric quest keys", () => {
+    const session = makeSession({
+      QuestLogZone: {
+        "96659": [
+          { t: 2, tp: 2, v: "Westfall" },
+          { t: 7, tp: 7, v: "Epic" },
+        ],
+        "not-a-quest": [{ t: 4, tp: 4, v: "Westfall" }],
+      },
+    });
+
+    expect(observeZoneOrSort(session)).toEqual([
+      {
+        entityId: 96659,
+        value: 40,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 2 },
+      },
+      {
+        entityId: 96659,
+        value: -1,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 7 },
       },
     ]);
   });
 
   it("should map a quest-log special header to a negative QuestSort ID", () => {
     const session = makeSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: {
         "96659": [{ t: 2, tp: 2, v: "Epic" }],
       },
@@ -50,7 +75,6 @@ describe("observeZoneOrSort", () => {
 
   it("should skip unknown or missing header titles", () => {
     const session = makeSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: {
         "96659": [{ t: 2, tp: 2, v: "Not a DB2 header" }],
       },

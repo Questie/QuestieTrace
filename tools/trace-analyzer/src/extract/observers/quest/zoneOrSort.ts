@@ -5,28 +5,34 @@
 // QuestSort name for special groups. Convert that title back to the signed DB2
 // ID expected by Questie.
 
-import { getStream, valueAt } from "../../../core/emulator";
+import { getParamKeys, getStream } from "../../../core/emulator";
 import { zoneOrSortIdForName } from "../../resources/zone-or-sort";
-import { questEncounters } from "./_encounters";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 
 export const observeZoneOrSort: FieldObserver<number> = (session) => {
   const observations: Observation<number>[] = [];
 
-  for (const encounter of questEncounters(session)) {
-    const zoneStream = getStream(session, "QuestLogZone", encounter.questID);
-    const headerTitle = valueAt(zoneStream ?? [], encounter.t);
-    const zoneOrSort = zoneOrSortIdForName(headerTitle);
-    if (zoneOrSort === null) continue;
+  const root = session.functions["QuestLogZone"];
+  if (!root || Array.isArray(root)) return observations;
 
-    observations.push({
-      entityId: encounter.questID,
-      value: zoneOrSort,
-      // The quest-log association is observed, but the ID is resolved through
-      // the bundled DB2 name lookup rather than returned directly by WoW.
-      confidence: "medium",
-      provenance: { session: sessionLabel(session), t: encounter.t },
-    });
+  for (const questIdKey of getParamKeys(root)) {
+    const questID = Number(questIdKey);
+    if (!Number.isFinite(questID)) continue;
+
+    const stream = getStream(session, "QuestLogZone", questIdKey) ?? [];
+    for (const entry of stream) {
+      const zoneOrSort = zoneOrSortIdForName(entry.v);
+      if (zoneOrSort === null) continue;
+
+      observations.push({
+        entityId: questID,
+        value: zoneOrSort,
+        // The quest-log association is observed, but the ID is resolved through
+        // the bundled DB2 name lookup rather than returned directly by WoW.
+        confidence: "medium",
+        provenance: { session: sessionLabel(session), t: entry.t },
+      });
+    }
   }
 
   return observations;
