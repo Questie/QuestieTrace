@@ -79,6 +79,13 @@ export function questTitleAt(session: SessionRecord, t: number): string | null {
   return asNonEmptyString(valueAt(getStream(session, "GetTitleText") ?? [], t));
 }
 
+/** `C_QuestLog.GetInfo(questID).title` at or before time `t`. */
+export function questInfoTitleAt(session: SessionRecord, questID: number, t: number): string | null {
+  const value = valueAt(getStream(session, "C_QuestLog.GetInfo", questID) ?? [], t);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return asNonEmptyString((value as Record<string, unknown>).title);
+}
+
 /** `GetLocale()` at or before time `t`, e.g. "enUS", "deDE", "frFR". */
 export function getLocaleAt(session: SessionRecord, t: number): string | null {
   return asNonEmptyString(valueAt(getStream(session, "GetLocale", "player") ?? [], t));
