@@ -44,6 +44,7 @@ import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, obse
 import { observeQuestLevel } from './observers/quest';
 import { observeRequiredLevel } from './observers/quest';
 import { observeZoneOrSort } from './observers/quest';
+import { observeObjectives, mergeQuestObjectives } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 
 export interface ExtractOptions {
@@ -92,6 +93,10 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     questLevel: aggregateField(sessions.flatMap(observeQuestLevel)),
     requiredLevel: aggregateField(sessions.flatMap(observeRequiredLevel)),
     zoneOrSort: aggregateField(sessions.flatMap(observeZoneOrSort)),
+    objectives: aggregateField(
+      sessions.flatMap(observeObjectives),
+      mergeQuestObjectives,
+    ),
     startedBy: aggregateField(
       sessions.flatMap(observeStartedBy),
       mergeStartedBy,
