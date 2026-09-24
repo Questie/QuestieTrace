@@ -181,12 +181,16 @@ local function ProbeLootSlot(t, tp, slot)
   -- to an unrecognized GUID kind.
   local sourceOk, source = SafePackedCall(GetLootSourceInfo, slot)
   if sourceOk and source and IsLootSourceAllowed(source) then
-    AppendPackedIfChanged(streams.source, t, tp, source)
+    -- Keep every successful source sample: link and source streams are
+    -- correlated by exact timestamp, so an unchanged source must still be
+    -- present when the link changes (and vice versa).
+    streams.source[#streams.source + 1] = { t = t, tp = tp, v = source }
   end
 
   local linkOk, link = SafeScalarCall(GetLootSlotLink, slot)
   if linkOk then
-    AppendScalarIfChanged(streams.link, t, tp, link)
+    -- Likewise preserve every successful link sample for exact-time matching.
+    streams.link[#streams.link + 1] = { t = t, tp = tp, v = link }
   end
 
   local typeOk, slotType = SafeScalarCall(GetLootSlotType, slot)
