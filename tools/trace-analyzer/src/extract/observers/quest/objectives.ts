@@ -119,25 +119,21 @@ function collectItemEvidence(session: SessionRecord): Evidence[] {
   if (!linkStreams) return [];
 
   // Older traces stored these as one flat stream. Newer traces may store them
-  // as streams keyed by loot slot, so support both representations.
-  const linkGroups: FunctionStreamEntry[][] = Array.isArray(linkStreams)
-    ? [linkStreams]
-    : getParamKeys(linkStreams)
-        .map((slot) => getStream(session, "GetLootSlotLink", slot) ?? [])
-        .filter((entries) => entries.length > 0);
+  // as streams keyed by loot slot, so support both representations. Keyed
+  // streams must be paired by the same slot; filtering each root separately
+  // would shift info from another slot onto links with no matching samples.
   const infoRoot = session.functions["GetLootSlotInfo"];
-  const infoGroups: FunctionStreamEntry[][] = !infoRoot
-    ? []
-    : Array.isArray(infoRoot)
-      ? [infoRoot]
-      : getParamKeys(infoRoot)
-          .map((slot) => getStream(session, "GetLootSlotInfo", slot) ?? [])
-          .filter((entries) => entries.length > 0);
+  const linkGroups: Array<{ links: FunctionStreamEntry[]; infos: FunctionStreamEntry[] }> = Array.isArray(linkStreams)
+    ? [{ links: linkStreams, infos: Array.isArray(infoRoot) ? infoRoot : [] }]
+    : getParamKeys(linkStreams)
+        .map((slot) => ({
+          links: getStream(session, "GetLootSlotLink", slot) ?? [],
+          infos: infoRoot && !Array.isArray(infoRoot) ? getStream(session, "GetLootSlotInfo", slot) ?? [] : [],
+        }))
+        .filter(({ links }) => links.length > 0);
 
   const evidence: Evidence[] = [];
-  for (let groupIndex = 0; groupIndex < linkGroups.length; groupIndex++) {
-    const linkEntries = linkGroups[groupIndex];
-    const infoEntries = infoGroups[groupIndex] ?? [];
+  for (const { links: linkEntries, infos: infoEntries } of linkGroups) {
     for (const linkEntry of linkEntries) {
       if (typeof linkEntry.v !== "string") continue;
       const parsed = parseItemLink(linkEntry.v);

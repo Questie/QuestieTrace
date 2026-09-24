@@ -51,6 +51,23 @@ describe("observeObjectives", () => {
     ]);
   });
 
+  it("should pair keyed loot streams by slot and leave missing info streams empty", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
+      },
+      GetLootSlotLink: {
+        "1": [{ t: 4, tp: 4, v: itemLink }],
+        "2": [{ t: 5, tp: 5, v: itemLink }],
+      },
+      GetLootSlotInfo: {
+        "2": [{ t: 5, tp: 5, v: { 2: "Tough Wolf Meat", 6: true, 7: 99, n: 8 } }],
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(750);
+  });
+
   it("should match monster and object objectives (real prefix-progress + kill-suffix format) to UnitName plus UnitGUID", () => {
     const session = makeSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
