@@ -26,13 +26,18 @@ export const observeQuestStarts: FieldObserver<number> = (session) => {
     const ev = session.events[i];
     let questID: number | null = null;
 
-    if (ev.e === "QUEST_DETAIL" || ev.e === "QUEST_ACCEPTED") {
+    if (ev.e === "QUEST_DETAIL") {
       const v = valueAt(getStream(session, "GetQuestID") ?? [], ev.t);
       questID = typeof v === "number" && v !== 0 ? v : null;
-      if (questID === null) continue;
+    } else if (ev.e === "QUEST_ACCEPTED") {
+      // QUEST_ACCEPTED has both one-argument (questID) and two-argument
+      // (questID, ...) forms across supported clients.
+      const v = ev.a.n === 1 ? ev.a[1] : ev.a[2];
+      questID = typeof v === "number" && v !== 0 ? v : null;
     } else {
       continue;
     }
+    if (questID === null) continue;
 
     // Check questnpc token first, then npc token
     const questnpcGuid = valueAt(getStream(session, "UnitGUID", "questnpc") ?? [], ev.t);

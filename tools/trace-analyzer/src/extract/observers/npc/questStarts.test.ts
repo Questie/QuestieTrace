@@ -45,7 +45,6 @@ describe("observeQuestStarts (npc)", () => {
   it("should map a quest to the npcID that started it via npc GUID", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
         UnitGUID: {
           npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
         },
@@ -63,6 +62,40 @@ describe("observeQuestStarts (npc)", () => {
         provenance: { session: "test-session", t: 3 },
       },
     ]);
+  });
+
+  it("should read the quest ID from argument 2 for the two-argument QUEST_ACCEPTED form", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 3, tp: 3, v: 11111 }],
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 11111, 2: 96659, n: 2 } }]
+    );
+
+    expect(observeQuestStarts(session)).toEqual([
+      {
+        entityId: 197,
+        value: 96659,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should ignore QUEST_ACCEPTED with a zero quest ID", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 0, n: 1 } }]
+    );
+
+    expect(observeQuestStarts(session)).toEqual([]);
   });
 
   it("should handle multiple quests started by the same NPC", () => {
