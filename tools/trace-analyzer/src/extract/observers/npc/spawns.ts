@@ -15,7 +15,7 @@
 import type { SessionRecord } from "../../../core/types";
 import type { FieldObserver, Observation } from "../../observation";
 import { npcEncounters } from "./_encounters";
-import { playerZoneAt, playerPosAt } from "../../probes";
+import { playerZoneAt, playerPosAt, toQuestieMapPosition } from "../../probes";
 
 /** Token priority for spawn positioning: questnpc > npc > target.
  *
@@ -52,13 +52,14 @@ export const observeSpawns: FieldObserver<SpawnObservationValue> = (session) => 
 
     const pos = playerPosAt(session, encounter.t);
     if (pos === null) continue;
+    const questiePos = toQuestieMapPosition(pos);
 
     observations.push({
       entityId: encounter.npcID,
       value: {
         zoneID,
-        x: pos.x,
-        y: pos.y,
+        x: questiePos.x,
+        y: questiePos.y,
       },
       confidence: "high",
       provenance: {

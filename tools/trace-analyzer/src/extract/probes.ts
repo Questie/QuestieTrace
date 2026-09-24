@@ -11,6 +11,14 @@ export interface MapPosition {
   y: number;
 }
 
+/** Convert C_Map's normalized 0-1 coordinates to Questie's 0-100 percentages. */
+export function toQuestieMapPosition(position: MapPosition): MapPosition {
+  return {
+    x: Math.round(position.x * 10_000) / 100,
+    y: Math.round(position.y * 10_000) / 100,
+  };
+}
+
 function asNumber(v: unknown): number | null {
   return typeof v === "number" ? v : null;
 }

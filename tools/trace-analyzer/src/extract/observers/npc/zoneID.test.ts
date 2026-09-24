@@ -30,7 +30,7 @@ describe("observeZoneID", () => {
         player: [{ t: 10, tp: 10, v: 40 }],
       },
       "C_Map.GetPlayerMapPosition": {
-        player: [{ t: 10, tp: 10, v: { x: 30.01, y: 86.02 } }],
+        player: [{ t: 10, tp: 10, v: { x: 0.3001, y: 0.8602 } }],
       },
     });
 
