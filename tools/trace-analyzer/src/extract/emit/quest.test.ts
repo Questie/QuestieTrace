@@ -12,6 +12,7 @@ describe("emitQuestRecords", () => {
       name: new Map([[96659, fact(96659, "A Threat Within")]]),
       questLevel: new Map(),
       requiredLevel: new Map(),
+      zoneOrSort: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
     });
@@ -23,6 +24,7 @@ describe("emitQuestRecords", () => {
       name: new Map(),
       questLevel: new Map(),
       requiredLevel: new Map(),
+      zoneOrSort: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
     });

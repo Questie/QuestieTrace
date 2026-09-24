@@ -59,6 +59,7 @@ describe("extractAll (quest/item/object entities)", () => {
   it("should produce a paste-ready ForeverTraceQuestFixes.lua correction for a quest encountered in the session", () => {
     const session = makeSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+      QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
       GetTitleText: [{ t: 3, tp: 3, v: "A Threat Within" }],
       GetLocale: { player: [{ t: 3, tp: 3, v: "enUS" }] },
       "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
@@ -72,6 +73,7 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questFixes).toContain("function ForeverTraceQuestFixes:Load()");
     expect(questFixes).toContain("[96659] = {");
     expect(questFixes).toContain('[questKeys.name] = "A Threat Within",');
+    expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
   });
 
   it("should produce a paste-ready ForeverTraceItemFixes.lua correction for a looted item", () => {

@@ -8,6 +8,7 @@ export interface QuestFacts {
   name: Map<number, Fact<string>>;
   questLevel: Map<number, Fact<number>>;
   requiredLevel: Map<number, Fact<number>>;
+  zoneOrSort: Map<number, Fact<number>>;
   startedBy: Map<number, Fact<{ creatures: number[]; objects: number[]; items: number[] }>>;
   finishedBy: Map<number, Fact<{ creatures: number[]; objects: number[] }>>;
 }
