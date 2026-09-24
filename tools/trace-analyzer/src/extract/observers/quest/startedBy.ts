@@ -4,7 +4,7 @@
 //
 // Sources:
 //   - QUEST_DETAIL event: questStartItemID (item starter) + GetQuestID() at same t (quest)
-//   - QUEST_ACCEPTED event: questId + GetQuestID() at same t (quest)
+//   - QUEST_ACCEPTED event: questId from the event payload
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → creature starter
 //   - At same times, UnitGUID for GameObject tokens → object starter
 //
@@ -73,7 +73,8 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
       // Get the questID from GetQuestID() at this time
       questID = questIdAt(session, ev.t);
     } else if (ev.e === "QUEST_ACCEPTED") {
-      questID = questIdAt(session, ev.t);
+      const v = ev.a.n === 1 ? ev.a[1] : ev.a[2];
+      questID = typeof v === "number" && v !== 0 ? v : null;
     }
 
     if (questID === null) continue;
