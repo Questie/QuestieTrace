@@ -29,20 +29,21 @@ export const observeQuestEnds: FieldObserver<number> = (session) => {
     const questID = typeof v === "number" && v !== 0 ? v : null;
     if (questID === null) continue;
 
-    // Check target token (common for objects), then npc token
-    const targetGuid = valueAt(getStream(session, "UnitGUID", "target") ?? [], ev.t);
-    const npcGuid = valueAt(getStream(session, "UnitGUID", "npc") ?? [], ev.t);
-
-    for (const guid of [targetGuid, npcGuid]) {
-      if (typeof guid !== "string") continue;
-      const parsed = parseGuid(guid);
-      if (parsed?.kind === "object" && parsed.id) {
-        observations.push({
-          entityId: parsed.id,
-          value: questID,
-          confidence: "low",
-          provenance: { session: sessionLabel(session), t: ev.t },
-        });
+    // A token's last value can be stale. Require an event-synchronous GUID sample
+    // so only objects observed during QUEST_COMPLETE can be identified as finishers.
+    for (const token of ["target", "npc"] as const) {
+      const stream = getStream(session, "UnitGUID", token) ?? [];
+      for (const entry of stream) {
+        if (entry.t !== ev.t || typeof entry.v !== "string") continue;
+        const parsed = parseGuid(entry.v);
+        if (parsed?.kind === "object" && parsed.id) {
+          observations.push({
+            entityId: parsed.id,
+            value: questID,
+            confidence: "low",
+            provenance: { session: sessionLabel(session), t: ev.t },
+          });
+        }
       }
     }
   }

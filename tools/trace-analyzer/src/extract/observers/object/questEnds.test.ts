@@ -101,6 +101,22 @@ describe("observeQuestEnds (object)", () => {
     ]);
   });
 
+  it.each(["target", "npc"] as const)("should reject a stale %s GUID from a prior encounter", (token) => {
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        UnitGUID: {
+          [token]: [{ t: 2, tp: 2, v: "GameObject-0-5208-0-7-2843-0000399" }],
+        },
+      },
+      [
+        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+      ]
+    );
+
+    expect(observeQuestEnds(session)).toEqual([]);
+  });
+
   it("should return empty when no object GUID is active at event time", () => {
     const session = makeSession(
       {
