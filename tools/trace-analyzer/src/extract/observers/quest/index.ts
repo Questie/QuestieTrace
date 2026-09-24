@@ -6,5 +6,6 @@ export { observeQuestLevel } from "./questLevel";
 export { observeRequiredLevel } from "./requiredLevel";
 export { observeZoneOrSort } from "./zoneOrSort";
 export { observeObjectives, mergeQuestObjectives } from "./objectives";
+export { observeTriggerEnd, mergeQuestTriggerEnds, type QuestTriggerEndValue } from "./triggerEnd";
 export { observeStartedBy, mergeStartedBy } from "./startedBy";
 export { observeFinishedBy, mergeFinishedBy } from "./finishedBy";

@@ -14,6 +14,7 @@ describe("emitQuestRecords", () => {
       requiredLevel: new Map(),
       zoneOrSort: new Map(),
       objectives: new Map(),
+      triggerEnd: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
     });
@@ -27,6 +28,7 @@ describe("emitQuestRecords", () => {
       requiredLevel: new Map(),
       zoneOrSort: new Map(),
       objectives: new Map(),
+      triggerEnd: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
     });

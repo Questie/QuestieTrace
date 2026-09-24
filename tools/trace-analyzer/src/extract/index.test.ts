@@ -62,7 +62,16 @@ describe("extractAll (quest/item/object entities)", () => {
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
       "C_QuestLog.GetQuestObjectives": {
-        "96659": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
+        "96659": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { type: "item", text: "Tough Wolf Meat: 0/8" },
+              { type: "event", text: "Light the campfire", finished: true },
+            ],
+          },
+        ],
       },
       GetLootSlotLink: {
         "1": [{ t: 4, tp: 4, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }],
@@ -85,7 +94,7 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questFixes).toContain('[questKeys.name] = "A Threat Within",');
     expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
     expect(questFixes).toContain("[questKeys.objectives] = {[3]={750}},");
-  });
+    expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{30.01,86.02}}}},');  });
 
   it("should produce a paste-ready ForeverTraceItemFixes.lua correction for a looted item", () => {
     const session = makeSession({
