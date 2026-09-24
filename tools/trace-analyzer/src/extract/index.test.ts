@@ -60,6 +60,15 @@ describe("extractAll (quest/item/object entities)", () => {
     const session = makeSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
+      "C_QuestLog.GetQuestObjectives": {
+        "96659": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
+      },
+      GetLootSlotLink: {
+        "1": [{ t: 4, tp: 4, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }],
+      },
+      GetLootSlotInfo: {
+        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 6: true, 7: 96659, n: 8 } }],
+      },
       GetTitleText: [{ t: 3, tp: 3, v: "A Threat Within" }],
       GetLocale: { player: [{ t: 3, tp: 3, v: "enUS" }] },
       "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
@@ -74,6 +83,7 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questFixes).toContain("[96659] = {");
     expect(questFixes).toContain('[questKeys.name] = "A Threat Within",');
     expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
+    expect(questFixes).toContain("[questKeys.objectives] = {[3]={750}},");
   });
 
   it("should produce a paste-ready ForeverTraceItemFixes.lua correction for a looted item", () => {
