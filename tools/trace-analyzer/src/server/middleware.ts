@@ -2,7 +2,7 @@
 // Vite dev server middleware: serves trace data as JSON API
 // ============================================================
 
-import type { Plugin } from "vite";
+import type { Connect, Plugin } from "vite";
 import { resolve } from "path";
 import { readdirSync } from "fs";
 import { loadTraceFile } from "../core/loader.js";
@@ -86,7 +86,11 @@ export function traceApiPlugin(): Plugin {
         `[trace-api] Found ${traceFileNames.length} trace file(s) in ${traceDir}`
       );
 
-      server.middlewares.use(async (req, res, next) => {
+      const handleRequest = async (
+        req: Connect.IncomingMessage,
+        res: Parameters<Connect.NextHandleFunction>[1],
+        next: Connect.NextFunction,
+      ) => {
         if (!req.url?.startsWith("/api/")) return next();
 
         res.setHeader("Content-Type", "application/json");
@@ -212,6 +216,10 @@ export function traceApiPlugin(): Plugin {
 
         res.statusCode = 404;
         res.end(JSON.stringify({ error: "Not found" }));
+      };
+
+      server.middlewares.use((req, res, next) => {
+        void handleRequest(req, res, next).catch(next);
       });
     },
   };
