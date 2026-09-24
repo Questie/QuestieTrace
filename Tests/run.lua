@@ -1186,6 +1186,24 @@ local function TestLootRecordsNpcSourcedGuid()
     "An npc-sourced loot GUID must be recorded")
 end
 
+local function TestLootKeepsUnchangedCorrelatedSamples()
+  local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" })
+  runtime.env.GetNumLootItems = function() return 1 end
+  runtime.env.GetLootSlotInfo = function() return "icon", "Item", 1, 0, 1, false, false, 0, true end
+  runtime.env.GetLootSourceInfo = function() return "Creature-0-6783-1-269-2980-00002C50D7", 1 end
+  runtime.env.GetLootSlotLink = function() return "itemlink" end
+  runtime.env.GetLootSlotType = function() return 1 end
+
+  runtime.core.StartCapture("loot repeated samples")
+  SendEvent(runtime, "LOOT_READY")
+  AdvanceTo(runtime, 1)
+  SendEvent(runtime, "LOOT_READY")
+
+  local session = Session(runtime)
+  assert(#session.functions.GetLootSourceInfo[1] == 2, "Every successful source probe must be retained for timestamp correlation")
+  assert(#session.functions.GetLootSlotLink[1] == 2, "Every successful link probe must be retained for timestamp correlation")
+end
+
 local function TestLootAllowsMultiPairAllNpcSourceTuple()
   local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" })
   runtime.env.GetNumLootItems = function() return 1 end
@@ -1350,6 +1368,7 @@ local tests = {
   { name = "UnitInteraction still records an npc target's guid/name", run = TestUnitInteractionRecordsNpcTarget },
   { name = "Loot skips a player-sourced loot guid", run = TestLootSkipsPlayerSourcedGuid },
   { name = "Loot still records an npc-sourced loot guid", run = TestLootRecordsNpcSourcedGuid },
+  { name = "Loot retains repeated source and link probes for timestamp correlation", run = TestLootKeepsUnchangedCorrelatedSamples },
   { name = "Loot allows a multi-pair all-npc source tuple", run = TestLootAllowsMultiPairAllNpcSourceTuple },
   { name = "Loot skips a multi-pair source tuple with any player guid", run = TestLootSkipsMultiPairSourceTupleWithAnyPlayerGuid },
   { name = "Loot skips an unrecognized (non npc/object/item) guid kind", run = TestLootSkipsUnrecognizedGuidKind },
