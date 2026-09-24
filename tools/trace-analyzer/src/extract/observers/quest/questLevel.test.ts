@@ -59,6 +59,33 @@ describe("observeQuestLevel", () => {
     ]);
   });
 
+  it("should read questLevel for a quest that never produced a GetQuestID encounter", () => {
+    const session = makeSession({
+      "C_QuestLog.GetInfo": {
+        "98013": [{ t: 2, tp: 2, v: { questID: 98013, level: 80, title: "Swelling Forces" } }],
+      },
+    });
+
+    expect(observeQuestLevel(session)).toEqual([
+      {
+        entityId: 98013,
+        value: 80,
+        confidence: "high",
+        provenance: { session: "test-session", t: 2 },
+      },
+    ]);
+  });
+
+  it("should read legacy questLevel for a quest that never produced a GetQuestID encounter", () => {
+    const session = makeSession({
+      GetQuestLogTitle: {
+        "98013": [{ t: 2, tp: 2, v: { 1: "Swelling Forces", 2: 80, 8: 98013, n: 8 } }],
+      },
+    });
+
+    expect(observeQuestLevel(session)[0]).toMatchObject({ entityId: 98013, value: 80 });
+  });
+
   it("should prefer C_QuestLog.GetInfo over GetQuestLogTitle when both exist", () => {
     const session = makeSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],

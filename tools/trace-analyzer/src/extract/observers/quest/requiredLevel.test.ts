@@ -83,6 +83,23 @@ describe("observeRequiredLevel", () => {
     ]);
   });
 
+  it("should derive requiredLevel for a quest-log quest without a GetQuestID encounter", () => {
+    const session = makeSession({
+      "C_QuestLog.GetInfo": {
+        "98013": [{ t: 2, tp: 2, v: { questID: 98013, level: 80, title: "Swelling Forces" } }],
+      },
+    });
+
+    expect(observeRequiredLevel(session)).toEqual([
+      {
+        entityId: 98013,
+        value: 80,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 0 },
+      },
+    ]);
+  });
+
   it("should derive requiredLevel from C_QuestLog.GetInfo when available", () => {
     const session = makeSession({
       GetQuestID: [

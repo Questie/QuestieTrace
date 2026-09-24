@@ -2,52 +2,84 @@
 // Read from two possible streams, both keyed by questID:
 //   - GetQuestLogTitle(questId) tuple position 2 (the "level" field)
 //   - C_QuestLog.GetInfo(questId).level (modern API, table return)
-// The questID parameter is the same questID from the encounter anchor.
+//
+// These are quest-log streams, not only quest-dialog encounters. Quests can
+// appear in a log without GetQuestID() ever being sampled, so the streams are
+// observed directly.
 
-import { emulate, getStream, valueAt } from "../../../core/emulator";
-import { questEncounters } from "./_encounters";
+import { emulate, getParamKeys, getStream } from "../../../core/emulator";
+import type { SessionRecord } from "../../../core/types";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 
-function readLevelFromGetQuestLogTitle(session: any, questID: number, t: number): number | null {
-  const stream = getStream(session, "GetQuestLogTitle", questID);
-  if (!stream || stream.length === 0) return null;
+function readLevel(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (!value || typeof value !== "object") return null;
 
-  const entry = stream[stream.length - 1];
-  const tuple = emulate(entry.v);
-  if (!Array.isArray(tuple) || tuple.length < 2) return null;
-
-  const level = tuple[1]; // position 2 (0-indexed: 1) = level
+  const level = (value as Record<string, unknown>).level;
   return typeof level === "number" && Number.isFinite(level) ? level : null;
 }
 
-function readLevelFromGetInfo(session: any, questID: number, t: number): number | null {
-  const stream = getStream(session, "C_QuestLog.GetInfo", questID);
-  if (!stream || stream.length === 0) return null;
+function readLevelFromGetQuestLogTitleEntry(value: unknown): number | null {
+  const tuple = emulate(value);
+  if (!Array.isArray(tuple) || tuple.length < 2) return null;
+  return readLevel(tuple[1]); // position 2 (0-indexed: 1) = level
+}
 
-  // valueAt gives us the most recent value at or before time t
-  const v = valueAt(stream, t);
-  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+function readLevelFromGetInfoEntry(value: unknown): number | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return readLevel((value as Record<string, unknown>).level);
+}
 
-  const level = (v as Record<string, unknown>).level;
-  return typeof level === "number" && Number.isFinite(level) ? level : null;
+function appendStreamLevels(
+  session: SessionRecord,
+  observations: Observation<number>[],
+  functionName: string,
+  readEntry: (value: unknown) => number | null,
+  skipKeys: ReadonlySet<string> = new Set<string>(),
+): Set<string> {
+  const observedKeys = new Set<string>();
+  const root = session.functions[functionName];
+  if (!root || Array.isArray(root)) return observedKeys;
+
+  const pending: Observation<number>[] = [];
+  for (const questIdKey of getParamKeys(root)) {
+    if (skipKeys.has(questIdKey)) continue;
+    const questID = Number(questIdKey);
+    if (!Number.isFinite(questID)) continue;
+
+    let hasLevel = false;
+    const stream = getStream(session, functionName, questIdKey) ?? [];
+    for (const entry of stream) {
+      const questLevel = readEntry(entry.v);
+      if (questLevel === null) continue;
+      hasLevel = true;
+      pending.push({
+        entityId: questID,
+        value: questLevel,
+        confidence: "high",
+        provenance: { session: sessionLabel(session), t: entry.t },
+      });
+    }
+    if (hasLevel) observedKeys.add(questIdKey);
+  }
+
+  pending.sort((a, b) => a.provenance.t - b.provenance.t);
+  observations.push(...pending);
+  return observedKeys;
 }
 
 export const observeQuestLevel: FieldObserver<number> = (session) => {
   const observations: Observation<number>[] = [];
-  for (const encounter of questEncounters(session)) {
-    // Try C_QuestLog.GetInfo first (modern API), fall back to GetQuestLogTitle
-    let questLevel = readLevelFromGetInfo(session, encounter.questID, encounter.t);
-    if (questLevel === null) {
-      questLevel = readLevelFromGetQuestLogTitle(session, encounter.questID, encounter.t);
-    }
-    if (questLevel === null) continue;
 
-    observations.push({
-      entityId: encounter.questID,
-      value: questLevel,
-      confidence: "high",
-      provenance: { session: sessionLabel(session), t: encounter.t },
-    });
-  }
+  // Prefer the modern API when both APIs recorded the same quest ID.
+  const modernKeys = appendStreamLevels(session, observations, "C_QuestLog.GetInfo", readLevelFromGetInfoEntry);
+  appendStreamLevels(
+    session,
+    observations,
+    "GetQuestLogTitle",
+    readLevelFromGetQuestLogTitleEntry,
+    modernKeys,
+  );
+
   return observations;
 };
