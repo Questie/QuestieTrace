@@ -6,7 +6,7 @@ import type { Plugin } from "vite";
 import { resolve } from "path";
 import { readdirSync } from "fs";
 import { loadTraceFile } from "../core/loader.js";
-import { extractAll, type FactBundle } from "../extract/index.js";
+import type { FactBundle } from "../extract/index.js";
 import type { TraceFile, SessionRecord, SessionSummary, TraceFileSummary } from "../core/types.js";
 
 const EXTRACT_ENTITY_TO_FACT_BUNDLE_FIELD: Record<string, keyof FactBundle> = {
@@ -86,7 +86,7 @@ export function traceApiPlugin(): Plugin {
         `[trace-api] Found ${traceFileNames.length} trace file(s) in ${traceDir}`
       );
 
-      server.middlewares.use((req, res, next) => {
+      server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith("/api/")) return next();
 
         res.setHeader("Content-Type", "application/json");
@@ -182,6 +182,10 @@ export function traceApiPlugin(): Plugin {
           }
 
           const { sessions, loadedFileNames, skippedFiles } = loadAllSessions();
+          // Load through Vite so import.meta.glob in the extractor can resolve
+          // the bundled DBC resources. A regular static import would be bundled
+          // into vite.config.ts, where import.meta.glob is unavailable.
+          const { extractAll } = await server.ssrLoadModule("/src/extract/index.ts");
           const bundle = extractAll(sessions, { sourceFileNames: loadedFileNames });
 
           res.end(
