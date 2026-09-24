@@ -65,6 +65,40 @@ describe("observeQuestStarts (object)", () => {
     ]);
   });
 
+  it("should read the quest ID from argument 2 for the two-argument QUEST_ACCEPTED form", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 3, tp: 3, v: 11111 }],
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+        },
+      },
+      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 11111, 2: 96659, n: 2 } }]
+    );
+
+    expect(observeQuestStarts(session)).toEqual([
+      {
+        entityId: 2843,
+        value: 96659,
+        confidence: "low",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should ignore QUEST_ACCEPTED with a zero quest ID", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+        },
+      },
+      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 0, n: 1 } }]
+    );
+
+    expect(observeQuestStarts(session)).toEqual([]);
+  });
+
   it("should handle multiple quests started by the same object", () => {
     const session = makeSession(
       {
