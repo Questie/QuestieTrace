@@ -264,6 +264,32 @@ local function TestGreetingRestart()
   assert(#oldSession.functions.GetAvailableTitle[2] == 1, "Stopped capture must not receive delayed writes")
 end
 
+local function TestProgressAndRewardText()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  local env = runtime.env
+  env.UnitName = function(token)
+    if token == "player" then return "Cruxdruid" end
+    return nil
+  end
+  env.GetProgressText = function() return "Slay boars, Cruxdruid: 5/10" end
+  local rewardText = nil
+  env.GetRewardText = function() return rewardText end
+  runtime.core.StartCapture("progress and reward")
+  SendEvent(runtime, "QUEST_PROGRESS")
+  local functions = Session(runtime).functions
+  local progress = functions.GetProgressText
+  assert(progress and #progress >= 1, "QUEST_PROGRESS must sample GetProgressText")
+  assert(progress[#progress].v == "Slay boars, <name>: 5/10",
+    "Progress text must be sanitized, got: " .. tostring(progress[#progress].v))
+
+  rewardText = "Take this reward, Cruxdruid"
+  SendEvent(runtime, "QUEST_COMPLETE")
+  local reward = functions.GetRewardText
+  assert(reward and #reward >= 1, "QUEST_COMPLETE must sample GetRewardText")
+  assert(reward[#reward].v == "Take this reward, <name>",
+    "Reward text must be sanitized, got: " .. tostring(reward[#reward].v))
+end
+
 local function TestSessionContract()
   local runtime = NewRuntime({})
   ---@type SessionRecord
@@ -1351,6 +1377,7 @@ local tests = {
   { name = "greeting retries failed calls", run = function() TestGreetingRetry("error") end },
   { name = "greeting close cancels delayed samples", run = TestGreetingClose },
   { name = "greeting capture restart resets probes", run = TestGreetingRestart },
+  { name = "progress and reward text sampled and sanitized", run = TestProgressAndRewardText },
   { name = "session contract preserves legacy saves", run = TestSessionContract },
   { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
   { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },
