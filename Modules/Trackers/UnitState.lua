@@ -5,7 +5,7 @@ local Core = QuestieTraceCore
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
 -- UnitLevel(unit)           -> number (or -1 for "??")
--- UnitClassification(unit)  -> string ("normal", "elite", "rare", "rareelite", "worldboss")
+-- UnitClassification(unit)  -> string ("normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus")
 -- UnitReaction(unit, unit)  -> number 1..8 (or nil)
 ---------------------------------------------------------------------------
 

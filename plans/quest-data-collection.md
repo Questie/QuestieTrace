@@ -76,7 +76,7 @@ From `Questie/Database/Classic/classicQuestDB.lua` (`QuestieDB.questKeys`):
 | 23 | `questFlags` | partial | `GetQuestLogTitle` frequency/isTask/etc | **none** (partial, exists) |
 | 24 | `specialFlags` | partial | frequency (daily/weekly) + repeatable observation | **none** (partial) |
 | 25 | `parentQuest` | offline | availability graph | **none** |
-| 26 | `reputationReward` | yes | reward factions at turn-in (`GetQuestLogRewardFactions`/`GetNumQuestLogRewardFactions`) | **new** |
+| 26 | `reputationReward` | yes | reward factions at turn-in (`GetQuestLogRewardFactionInfo` / `C_QuestLog.GetQuestLogMajorFactionReputationRewards`) | **new** |
 | 27 | `breadcrumbForQuestId` | offline | availability graph | **none** |
 | 28 | `breadcrumbs` | offline | availability graph | **none** |
 | 29 | `extraObjectives` | **NO source** | Questie-specific hidden objectives | **gap** |
@@ -134,7 +134,9 @@ across enough traces — so they are "aggregate", not a hard gap.
   that has no natural host (none identified here).
 - Stream keys are **API name → literal argument** (usually the quest ID or an index). Reward
   factions are `functions["GetQuestLogRewardFactions"][questId]` etc.; giver-scoped available
-  lists are keyed by the giver GUID (raw), not a parsed npcId.
+  lists are keyed by the giver GUID (raw), not a parsed npcId. Reward factions use the
+  client-specific APIs named in Step 4 (`GetQuestLogRewardFactionInfo` on Classic;
+  `C_QuestLog.GetQuestLogMajorFactionReputationRewards` on mainline).
 - Raw API values only, append-on-change via `Core.DeepCompare`, `pcall`-guarded, reusing the
   `SafeScalarCall`/`SafePackedCall`/`ProbeQuest*` helpers already in `QuestLog.lua`.
 - New/changed streams documented in `specs/SCHEMA_SPEC.md` §9 and `specs/TRACKER_SPEC.md` §7;
@@ -189,12 +191,19 @@ Questie fields (givers + graph); Steps 3–5 fill concrete reward/starter gaps.
 - Tests: active quest with a special item → stream recorded; quest without → nothing.
 
 ### Step 4 — `reputationReward` (#26)
-- At turn-in / while a quest offers reputation rewards, capture reward factions:
-  - `GetNumQuestLogRewardFactions(questId)` and `GetQuestLogRewardFactions(index, questId)`
-    when they exist (retail-era) — add as raw streams in `QuestLog` reward probing, mirroring
-    the existing `GetQuestLogRewardInfo[rewardIndex][questId]` nesting.
-  - On the dialog side, `GetNumRewardFactions()` / `GetRewardFactions(index)` at
-    `QUEST_COMPLETE` — add to `QuestDialog` flat/indexed streams when present.
+- At turn-in / while a quest offers reputation rewards, capture reward factions with the
+  client-specific APIs (do **not** use `GetQuestLogRewardFactions(index, questId)` — that
+  signature does not exist, and legacy results must not be correlated by quest ID):
+  - **Classic:** `GetNumQuestLogRewardFactions()` (no arguments) then
+    `GetQuestLogRewardFactionInfo(index)` per index (no questId argument; returns
+    `factionID, rewardAmount`) — add as raw streams in `QuestLog` reward probing.
+  - **Mainline:** `C_QuestLog.GetQuestLogMajorFactionReputationRewards(questId)`
+    (returns `QuestRewardReputationInfo[]` with `factionID` + `rewardAmount`), keyed by
+    questId like the existing `GetQuestLogRewardInfo[rewardIndex][questId]` nesting.
+  - On the dialog/offer side: `GetNumRewardFactions()` / `GetRewardFactions(index)` at
+    `QUEST_COMPLETE` when present; on modern clients, additionally
+    `C_QuestOffer.GetQuestOfferMajorFactionReputationRewards()` (no arguments) at
+    `QUEST_DETAIL` — add to `QuestDialog` flat/indexed streams when present.
 - These APIs are version-gated; use `HasMethod`/`type(_G[...]) == "function"` guards like
   existing code so absent APIs create no empty streams.
 - Offline joins reward-faction id + value → `reputationReward`. (Reputation *changes* on
