@@ -127,4 +127,38 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(objectFixes).toContain('[objectKeys.name] = "Suspicious Chest",');
     expect(objectFixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");
   });
+
+  it("should export triggerEnd for the quest's zoneOrSort zone with a single coordinate pair", () => {
+    // The event objective is completed twice: once in Elwynn Forest (uiMapID
+    // 1429 -> areaID 12) and once in Westfall (uiMapID 1436 -> areaID 40).
+    // The quest log header says Westfall, so the Westfall sample must win even
+    // though the Elwynn sample is the more recent one.
+    const session = makeSession({
+      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+      QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
+      "C_QuestLog.GetQuestObjectives": {
+        "96659": [
+          { t: 12, tp: 12, v: [{ type: "event", text: "Light the campfire", finished: true }] },
+          { t: 20, tp: 20, v: [{ type: "event", text: "Light the campfire", finished: true }] },
+        ],
+      },
+      "C_Map.GetBestMapForUnit": {
+        player: [
+          { t: 12, tp: 12, v: 1429 }, // Elwynn Forest at first completion
+          { t: 20, tp: 20, v: 1436 }, // Westfall at second completion
+        ],
+      },
+      "C_Map.GetPlayerMapPosition": {
+        player: [
+          { t: 12, tp: 12, v: { x: 0.4746, y: 0.6218 } },
+          { t: 20, tp: 20, v: { x: 0.5611, y: 0.6164 } },
+        ],
+      },
+    });
+
+    const { questFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
+
+    expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
+    expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{56.11,61.64}}}},');
+  });
 });
