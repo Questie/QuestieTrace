@@ -413,7 +413,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitLevel` | scalar (number) | -1 indicates "??" (skull boss); UnitState tracker |
-| `UnitClassification` | scalar (string) | "normal", "elite", "rare", "rareelite", "worldboss"; UnitState tracker |
+| `UnitClassification` | scalar (string) | "normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus"; UnitState tracker; raw value recorded verbatim — treat as an open string in consumers |
 
 ### Nested parameterized by native arguments (UnitReaction)
 

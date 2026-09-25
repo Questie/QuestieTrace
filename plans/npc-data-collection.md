@@ -94,9 +94,14 @@ synchronization gap.
   order: `functions["UnitReaction"]["player"]["target"]` (schema already supports nested
   parameter maps, SCHEMA_SPEC §5).
 - Only sample when the token unit is a **non-player creature**: guard with
-  `UnitExists(token) and not UnitIsPlayer(token)`. Do **not** parse the GUID to decide;
-  store the raw `UnitGUID` and let offline reject non-creatures. (The player/pet guard is a
-  sampling optimization, not interpretation.)
+  `UnitExists(token) and not UnitIsPlayer(token)` (the player/pet guard is a sampling
+  optimization, not interpretation).
+- Any `UnitGUID` value stored for these tokens **must** be classified with
+  `Core.ParseGUIDKind` first (see `Modules/globals.lua` and the AGENTS.md privacy rules):
+  only retain GUIDs whose kind is `"npc"`; discard player, object, item, vehicle, and
+  unrecognized kinds entirely. Apply the same npc-only allowlist during offline joins, so
+  no non-NPC GUID ever feeds the NPC DB. (Record a `nil` GUID — no unit — as a state
+  transition, matching `UnitInteraction`.)
 - 2-space indent, double quotes, LuaCATS annotations, `pcall`-guarded API calls.
 - New tracker added to **all** `*.toc` files and covered by tests in `Tests/run.lua`
   (and/or a `*.test.lua`). Update `specs/SCHEMA_SPEC.md`, `specs/TRACKER_SPEC.md`,
@@ -125,7 +130,7 @@ Steps 1, 4–6 are small and optional-order after Step 3.
 - Streams (raw, append-on-change), keyed by token:
   - `functions["UnitLevel"][token]` → number (feeds #4/#5; record `-1` for "??" raw).
   - `functions["UnitClassification"][token]` → string ("normal"/"elite"/"rare"/
-    "rareelite"/"worldboss") (feeds #6).
+    "rareelite"/"worldboss"/"trivial"/"minus") (feeds #6).
 - Tests: target an NPC (level + classification recorded); mouseover an NPC; target the
   player (nothing recorded); classification/level change appends once.
 - TOC: add `Modules/Trackers/UnitState.lua`. Update SCHEMA_SPEC §9 + TRACKER_SPEC §7 table.
@@ -136,7 +141,16 @@ Steps 1, 4–6 are small and optional-order after Step 3.
   (Native argument order: `UnitReaction("player", token)`.)
 - Player faction already comes from PlayerIdentity (`UnitFactionGroup["player"]`); do not
   duplicate. Offline joins reaction + player faction → `friendlyToFaction` (#13).
-- Tests: NPC with known reaction recorded under `["player"][token]`; no player sampling.
+- **Identity-aware sampling:** streams are append-on-change per token, but a token's
+  identity can change (target A → target B). To keep scalar streams attributable to the
+  right NPC, emit a sample for the new identity whenever `UnitGUID[token]` changes, even
+  when level/classification/reaction are unchanged from the previous NPC's values.
+  (Alternative, if that proves too chatty: leave streams append-on-change and make the
+  offline `valueAt` join identity-aware — resolve `UnitGUID[token]` first and never reuse a
+  prior NPC's scalar values across a GUID change. Pick one; do not ship both.)
+- Tests: NPC with known reaction recorded under `["player"][token]`; no player sampling;
+  switching between two NPCs with identical level/classification/reaction still records
+  the identity change (or the offline join is documented as identity-aware).
 - Update SCHEMA_SPEC nested-parameterized section + TRACKER_SPEC row.
 
 ### Step 4 — `subName` via tooltip scan (the only synthetic stream; get sign-off)
