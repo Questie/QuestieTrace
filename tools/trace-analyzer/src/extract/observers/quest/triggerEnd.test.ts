@@ -30,7 +30,7 @@ describe("observeTriggerEnd", () => {
           },
         ],
       },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 10, tp: 10, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 10, tp: 10, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 10, tp: 10, v: { x: 0.5611, y: 0.6164 } }] },
     });
 
@@ -58,7 +58,7 @@ describe("observeTriggerEnd", () => {
           },
         ],
       },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 10, tp: 10, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 10, tp: 10, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 10, tp: 10, v: { x: 0.5, y: 0.5 } }] },
     });
 
@@ -71,7 +71,7 @@ describe("observeTriggerEnd", () => {
       "C_QuestLog.GetQuestObjectives": {
         "33": [{ t: 10, tp: 10, v: [{ type: "event", text: "Das Lagerfeuer anzünden", finished: true }] }],
       },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 10, tp: 10, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 10, tp: 10, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 10, tp: 10, v: { x: 0.5, y: 0.5 } }] },
     });
 

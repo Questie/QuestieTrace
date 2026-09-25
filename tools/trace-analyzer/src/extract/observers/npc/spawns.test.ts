@@ -27,7 +27,7 @@ describe("observeSpawns", () => {
         ],
       },
       "C_Map.GetBestMapForUnit": {
-        player: [{ t: 10, tp: 10, v: 40 }],
+        player: [{ t: 10, tp: 10, v: 1436 }], // uiMapID 1436 = Westfall (area 40)
       },
       "C_Map.GetPlayerMapPosition": {
         player: [{ t: 10, tp: 10, v: { x: 0.5611, y: 0.6164 } }],
@@ -71,7 +71,7 @@ describe("observeSpawns", () => {
         ],
       },
       "C_Map.GetBestMapForUnit": {
-        player: [{ t: 10, tp: 10, v: 40 }],
+        player: [{ t: 10, tp: 10, v: 1436 }],
       },
       "C_Map.GetPlayerMapPosition": {
         player: [],
@@ -91,8 +91,8 @@ describe("observeSpawns", () => {
       },
       "C_Map.GetBestMapForUnit": {
         player: [
-          { t: 10, tp: 10, v: 40 },
-          { t: 20, tp: 20, v: 12 },
+          { t: 10, tp: 10, v: 1436 }, // Westfall -> area 40
+          { t: 20, tp: 20, v: 1429 }, // Elwynn Forest -> area 12
         ],
       },
       "C_Map.GetPlayerMapPosition": {
@@ -139,7 +139,7 @@ describe("observeSpawns", () => {
         ],
       },
       "C_Map.GetBestMapForUnit": {
-        player: [{ t: 5, tp: 5, v: 12 }],
+        player: [{ t: 5, tp: 5, v: 1429 }], // Elwynn Forest -> area 12
       },
       "C_Map.GetPlayerMapPosition": {
         player: [{ t: 5, tp: 5, v: { x: 0.4746, y: 0.6218 } }],

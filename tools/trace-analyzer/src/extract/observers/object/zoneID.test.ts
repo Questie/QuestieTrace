@@ -27,7 +27,7 @@ describe("observeZoneID (object)", () => {
         ],
       },
       "C_Map.GetBestMapForUnit": {
-        player: [{ t: 10, tp: 10, v: 40 }],
+        player: [{ t: 10, tp: 10, v: 1436 }], // uiMapID 1436 = Westfall (area 40)
       },
       "C_Map.GetPlayerMapPosition": {
         player: [{ t: 10, tp: 10, v: { x: 0.3001, y: 0.8602 } }],

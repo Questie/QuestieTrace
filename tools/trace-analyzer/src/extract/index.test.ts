@@ -24,7 +24,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
       UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
     });
 
@@ -43,7 +43,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
   it("should only emit fields that were actually observed, not every schema field", () => {
     const session = makeSession({
       UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
     });
 
@@ -81,7 +81,7 @@ describe("extractAll (quest/item/object entities)", () => {
       },
       GetTitleText: [{ t: 3, tp: 3, v: "A Threat Within" }],
       GetLocale: { player: [{ t: 3, tp: 3, v: "enUS" }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
       UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
       UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", 2: "", n: 2 } }] },
@@ -100,7 +100,7 @@ describe("extractAll (quest/item/object entities)", () => {
     const session = makeSession({
       GetLootSlotLink: { "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 0, tp: 0, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 0, tp: 0, v: 1436 }] },
       "C_Map.GetPlayerMapPosition": { player: [{ t: 0, tp: 0, v: { x: 0.3001, y: 0.8602 } }] },
     });
 
@@ -116,7 +116,7 @@ describe("extractAll (quest/item/object entities)", () => {
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
       UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Suspicious Chest", n: 1 } }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 40 }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
     });
 
