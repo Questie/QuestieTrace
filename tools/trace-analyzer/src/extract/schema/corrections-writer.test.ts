@@ -64,6 +64,20 @@ describe("writeQuestieCorrectionsLua", () => {
     expect(lua).toContain("[npcKeys.missing] = nil,");
   });
 
+  it("should escape control characters in strings as Lua escape sequences", () => {
+    // WoW API text can embed raw \r\n (gossip option names, some NPC names seen
+    // in traces); a raw newline inside the emitted "..." literal would corrupt
+    // the generated corrections file.
+    const records = new Map([[1, { name: "Telenos \nLeafwhisper" }]]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", records, header);
+
+    expect(lua).toContain('[npcKeys.name] = "Telenos \\nLeafwhisper",');
+    // The emitted line must still be a single line - no raw line breaks in strings.
+    const nameLine = lua.split("\n").find((l) => l.includes("npcKeys.name"));
+    expect(nameLine).toBe('            [npcKeys.name] = "Telenos \\nLeafwhisper",');
+  });
+
   it("should render array and nested object values as Lua table constructors", () => {
     const records = new Map([
       [

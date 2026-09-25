@@ -74,12 +74,17 @@ export function unitGuidAt(session: SessionRecord, token: string, t: number): st
  *
  * UnitName returns packed args (name, realm) - `emulate()` unpacks the packed
  * `{1: name, 2: realm, n: 2}` shape into `[name, realm]` so we can take the name.
+ *
+ * The WoW client returns a few NPC names with embedded line breaks (observed in
+ * traces as `"Telenos \<newline>Leafwhisper"`); strip those breaks out entirely
+ * (the name text around them is intact, usually with a space before the break).
  */
 export function unitNameAt(session: SessionRecord, token: string, t: number): string | null {
   const raw = valueAt(getStream(session, "UnitName", token) ?? [], t);
   const unpacked = emulate(raw);
   const name = Array.isArray(unpacked) ? unpacked[0] : raw;
-  return asNonEmptyString(name);
+  if (typeof name !== "string") return null;
+  return asNonEmptyString(name.replace(/[\r\n]+/g, "").trim());
 }
 
 /** `GetQuestID()` at or before time `t` (0 means "no active quest frame", normalized to null). */

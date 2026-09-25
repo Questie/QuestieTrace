@@ -17,7 +17,7 @@ export interface CorrectionsWriterHeader {
 
 /** Renders an object key as a Lua table constructor key, e.g. `["creatures"]` or `[7]`. */
 function luaKey(key: string): string {
-  return /^\d+$/.test(key) ? `[${key}]` : `[${luaValue(key)}]`;
+  return /^\d+$/.test(key) ? `[${key}]` : `[${luaString(key)}]`;
 }
 
 /** Checks if value looks like a starter/finisher type table with positional arrays. */
@@ -44,6 +44,28 @@ function getPositionalArrays(value: unknown): { arrays: number[][]; type: string
   return null;
 }
 
+/** Escapes a string as a Lua 5.1 string literal body, including control
+ * characters (e.g. the embedded \r\n the WoW client returns for some NPC names
+ * and gossip text) that would otherwise break the emitted file. Lua 5.1 has no
+ * \xHH escape, so unmapped control chars use zero-padded decimal form. */
+function luaString(value: string): string {
+  const escaped = value
+    .replace(/[\\"]/g, "\\$&")
+    .replace(/[\b\f\n\r\t\v]/g, (ch) => {
+      switch (ch) {
+        case "\b": return "\\b";
+        case "\f": return "\\f";
+        case "\n": return "\\n";
+        case "\r": return "\\r";
+        case "\t": return "\\t";
+        default: return "\\v";
+      }
+    })
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0006\u000e-\u001f\u007f]/g, (ch) => `\\${ch.charCodeAt(0).toString().padStart(3, "0")}`);
+  return `"${escaped}"`;
+}
+
 function luaValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "nil";
@@ -55,7 +77,7 @@ function luaValue(value: unknown): string {
     return value ? "true" : "false";
   }
   if (typeof value === "string") {
-    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    return luaString(value);
   }
   if (Array.isArray(value)) {
     return value.length === 0 ? "nil" : `{${value.map((v) => luaValue(v)).join(",")}}`;

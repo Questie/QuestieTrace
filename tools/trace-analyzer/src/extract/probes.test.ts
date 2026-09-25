@@ -81,6 +81,23 @@ describe("probes", () => {
     expect(unitNameAt(session, "target", 5)).toBe("Kobold Vermin");
   });
 
+  it("should strip embedded line breaks from UnitName results entirely", () => {
+    // Some NPCs (e.g. "Telenos \<newline>Leafwhisper" seen in traces) are returned
+    // by the client with an embedded line break; the display name has none.
+    const session = makeSession({
+      UnitName: {
+        target: [
+          { t: 0, tp: 0, v: { 1: "Telenos \nLeafwhisper", n: 2 } },
+          { t: 5, tp: 5, v: { 1: "Maelgwyn \r\nShadowtale", n: 2 } },
+          { t: 10, tp: 10, v: { 1: "  Padded   Name  ", n: 2 } },
+        ],
+      },
+    });
+    expect(unitNameAt(session, "target", 1)).toBe("Telenos Leafwhisper");
+    expect(unitNameAt(session, "target", 6)).toBe("Maelgwyn Shadowtale");
+    expect(unitNameAt(session, "target", 11)).toBe("Padded   Name");
+  });
+
   it("should normalize GetQuestID's 0 (no active quest frame) to null", () => {
     const session = makeSession({
       GetQuestID: [
