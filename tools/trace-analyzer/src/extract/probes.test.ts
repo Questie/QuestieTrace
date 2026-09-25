@@ -28,23 +28,34 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 }
 
 describe("probes", () => {
-  it("should read the player's zone at or before a given time", () => {
+  it("should read the player's zone at or before a given time, translated to areaIDs", () => {
     const session = makeSession({
       "C_Map.GetBestMapForUnit": {
+        // uiMapIDs as reported by the API: 1429 = Elwynn Forest (area 12),
+        // 1436 = Westfall (area 40).
         player: [
           { t: 0, tp: 0, v: 1429 },
-          { t: 10, tp: 10, v: 40 },
+          { t: 10, tp: 10, v: 1436 },
         ],
       },
     });
-    expect(playerZoneAt(session, 5)).toBe(1429);
+    expect(playerZoneAt(session, 5)).toBe(12);
     expect(playerZoneAt(session, 10)).toBe(40);
+  });
+
+  it("should return null for uiMapIDs without a Questie area (continents, dungeons)", () => {
+    const session = makeSession({
+      "C_Map.GetBestMapForUnit": {
+        player: [{ t: 0, tp: 0, v: 1415 }], // Eastern Kingdoms (continent)
+      },
+    });
+    expect(playerZoneAt(session, 5)).toBeNull();
   });
 
   it("should find the player's zone nearest a given time within the window", () => {
     const session = makeSession({
       "C_Map.GetBestMapForUnit": {
-        player: [{ t: 20, tp: 20, v: 12 }],
+        player: [{ t: 20, tp: 20, v: 1429 }],
       },
     });
     expect(playerZoneNear(session, 22)).toBe(12);

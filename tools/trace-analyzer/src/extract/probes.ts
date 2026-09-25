@@ -5,6 +5,7 @@
 import { emulate, getStream, valueAt } from "../core/emulator";
 import type { SessionRecord } from "../core/types";
 import { nearestByTime } from "./correlate";
+import { areaIdForUiMapId } from "./resources/ui-map-to-area";
 
 export interface MapPosition {
   x: number;
@@ -34,9 +35,14 @@ function asMapPosition(v: unknown): MapPosition | null {
   return { x: obj.x, y: obj.y };
 }
 
-/** `C_Map.GetBestMapForUnit("player")` at or before time `t`. */
+/**
+ * `C_Map.GetBestMapForUnit("player")` at or before time `t`, translated to the
+ * AreaTable areaID the Questie export keys zones by (the API reports uiMapIDs,
+ * e.g. Elwynn Forest is uiMapID 1429 but areaID 12). Returns null when the
+ * uiMapID has no corresponding area (continents, dungeons, unknown ids).
+ */
 export function playerZoneAt(session: SessionRecord, t: number): number | null {
-  return asNumber(valueAt(getStream(session, "C_Map.GetBestMapForUnit", "player") ?? [], t));
+  return areaIdForUiMapId(asNumber(valueAt(getStream(session, "C_Map.GetBestMapForUnit", "player") ?? [], t)));
 }
 
 /**
@@ -45,7 +51,7 @@ export function playerZoneAt(session: SessionRecord, t: number): number | null {
  * (e.g. NPC/object spawn zone ~= player zone at interaction time).
  */
 export function playerZoneNear(session: SessionRecord, t: number, windowSeconds?: number): number | null {
-  return asNumber(nearestByTime(getStream(session, "C_Map.GetBestMapForUnit", "player"), t, windowSeconds));
+  return areaIdForUiMapId(asNumber(nearestByTime(getStream(session, "C_Map.GetBestMapForUnit", "player"), t, windowSeconds)));
 }
 
 /** `C_Map.GetPlayerMapPosition("player")` at or before time `t`. */
