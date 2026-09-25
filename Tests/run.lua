@@ -1378,6 +1378,34 @@ local function TestUnitInteractionMouseover()
     "UnitName[mouseover] value must match mocked name")
 end
 
+local function TestUnitInteractionMouseoverPlayerIsSkipped()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local env = runtime.env
+
+  -- Mock WoW API for a mouseover unit that is another player
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitGUID = function(token)
+    if token == "mouseover" then return "Player-4620-00572164" end
+    return nil
+  end
+  env.UnitName = function(token)
+    if token == "mouseover" then return "SomeOtherPlayer", "Realm" end
+    return nil
+  end
+
+  runtime.core.StartCapture("mouseover player privacy")
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify neither the player GUID nor its name leaked into the mouseover streams
+  assert(functions.UnitGUID and functions.UnitGUID.mouseover, "UnitGUID[mouseover] stream must exist")
+  assert(#functions.UnitGUID.mouseover == 0, "A mouseover player's GUID must never be recorded")
+  assert(functions.UnitName and functions.UnitName.mouseover, "UnitName[mouseover] stream must exist")
+  assert(#functions.UnitName.mouseover == 0, "A mouseover player's name must never be recorded")
+end
+
 local function TestUnitStateTracker()
   local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
   local env = runtime.env
@@ -1513,6 +1541,7 @@ local tests = {
   { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
   { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },
   { name = "unit interaction mouseover records GUID and name", run = TestUnitInteractionMouseover },
+  { name = "UnitInteraction skips a mouseover player's guid/name", run = TestUnitInteractionMouseoverPlayerIsSkipped },
   { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
 }
 
