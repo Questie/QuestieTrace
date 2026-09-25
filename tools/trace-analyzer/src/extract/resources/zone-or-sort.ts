@@ -3,8 +3,22 @@ const csvResources = import.meta.glob("./*.csv", {
   query: "?raw",
   import: "default",
 });
-const areaTableCsv = csvResources["./AreaTable.1.60.1.69977.csv"] ?? "";
-const questSortCsv = csvResources["./QuestSort.1.60.1.69977.csv"] ?? "";
+
+/**
+ * Resolve the raw CSV for a table by filename prefix, ignoring the version
+ * suffix in the filename (e.g. "AreaTable.1.60.1.69977.csv"). Exactly one CSV
+ * per table is expected, so the first match wins.
+ */
+function csvFor(table: string): string {
+  const prefix = `./${table}.`;
+  for (const key of Object.keys(csvResources)) {
+    if (key.startsWith(prefix) && typeof csvResources[key] === "string") return csvResources[key] as string;
+  }
+  return "";
+}
+
+const areaTableCsv = csvFor("AreaTable");
+const questSortCsv = csvFor("QuestSort");
 const zoneOrSortByName = new Map<string, number>();
 addNames(zoneOrSortByName, areaTableCsv, ["AreaName_lang", "ZoneName"], 1);
 addNames(zoneOrSortByName, questSortCsv, ["SortName_lang"], -1);
