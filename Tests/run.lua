@@ -878,8 +878,10 @@ local function TestConsentAcceptImmediatelyStartsCapture()
   assert(WasPrinted(runtime, "gameplay data is being collected"), "Accepting must print the consent reminder")
   Session(runtime).events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
   AdvanceTo(runtime, 10)
+  assert(#messages == 0, "Newly accepted captures must honor the minimum live-session age")
+  AdvanceTo(runtime, 1810)
   assert(#messages == 1 and messages[1]:find("|Hquestietrace:export|h", 1, true),
-    "Accepting must start share reminders for collected data")
+    "Accepting must schedule share reminders once collected data is eligible")
 end
 
 local function TestConsentPromptReopensWithoutChangingConsent()
