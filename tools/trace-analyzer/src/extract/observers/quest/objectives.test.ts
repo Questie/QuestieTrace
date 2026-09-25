@@ -131,6 +131,65 @@ describe("observeObjectives", () => {
     });
   });
 
+  it("should match unit evidence whose GetQuestID attribution differs from the quest (weak signal, tie-break only)", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [{ t: 3, tp: 3, v: [{ type: "monster", text: "0/1 Kobold Vermin slain" }] }],
+      },
+      // GetQuestID reported some other quest at the kill's timestamp; the
+      // objective name still matches exactly, so the match is accepted.
+      GetQuestID: [{ t: 3, tp: 3, v: 999 }],
+      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-299-000123" }] },
+      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Kobold Vermin", n: 1 } }] },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]).toEqual({
+      kind: "monster",
+      name: "Kobold Vermin",
+      text: "0/1 Kobold Vermin slain",
+      id: 299,
+    });
+  });
+
+  it("should prefer same-quest unit evidence over cross-quest evidence, breaking remaining ties by lowest id", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [{ t: 3, tp: 3, v: [{ type: "monster", text: "0/1 Kobold Vermin slain" }] }],
+      },
+      GetQuestID: [
+        { t: 3, tp: 3, v: 33 },
+        { t: 5, tp: 5, v: 999 },
+      ],
+      // Both units match the objective name; the one attributed to quest 33
+      // (id 299) must win over the cross-quest one (id 300).
+      UnitGUID: {
+        target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-299-000123" }],
+        npc: [{ t: 5, tp: 5, v: "Creature-0-5208-0-7-300-000456" }],
+      },
+      UnitName: {
+        target: [{ t: 3, tp: 3, v: { 1: "Kobold Vermin", n: 1 } }],
+        npc: [{ t: 5, tp: 5, v: { 1: "Kobold Vermin", n: 1 } }],
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(299);
+  });
+
+  it("should reject item evidence whose loot-slot quest id differs from the quest (authoritative attribution)", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
+      },
+      GetLootSlotLink: { "1": [{ t: 4, tp: 4, v: itemLink }] },
+      GetLootSlotInfo: {
+        // Loot slot reports quest 99, not 33 - only the quest-99 item remains.
+        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 6: true, 7: 99, n: 8 } }],
+      },
+    });
+
+    expect(observeObjectives(session)).toEqual([]);
+  });
+
   it("should support legacy flat loot streams and traces without GetLocale", () => {
     const session = makeSession({
       "C_QuestLog.GetQuestObjectives": {
