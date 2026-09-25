@@ -88,18 +88,19 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
       mergeNpcQuestEnds,
     ),
   });
+  const zoneOrSortFacts = aggregateField(sessions.flatMap(observeZoneOrSort));
   const questRecords = emitQuestRecords({
     name: aggregateField(sessions.flatMap(observeQuestName)),
     questLevel: aggregateField(sessions.flatMap(observeQuestLevel)),
     requiredLevel: aggregateField(sessions.flatMap(observeRequiredLevel)),
-    zoneOrSort: aggregateField(sessions.flatMap(observeZoneOrSort)),
+    zoneOrSort: zoneOrSortFacts,
     objectives: aggregateField(
       sessions.flatMap(observeObjectives),
       mergeQuestObjectives,
     ),
     triggerEnd: aggregateField(
       sessions.flatMap(observeTriggerEnd),
-      mergeQuestTriggerEnds,
+      (observations) => mergeQuestTriggerEnds(observations, zoneOrSortFacts.get(observations[0]?.entityId)?.value),
     ),
     startedBy: aggregateField(
       sessions.flatMap(observeStartedBy),
