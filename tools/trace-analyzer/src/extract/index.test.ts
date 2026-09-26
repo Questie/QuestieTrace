@@ -93,7 +93,7 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questFixes).toContain("[96659] = {");
     expect(questFixes).toContain('[questKeys.name] = "A Threat Within",');
     expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
-    expect(questFixes).toContain("[questKeys.objectives] = {[3]={{750}}},");
+    expect(questFixes).toContain("[questKeys.objectives] = {nil,nil,{{750}}},");
     expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{30.01,86.02}}}},');  });
 
   it("should produce a paste-ready ForeverTraceItemFixes.lua correction for a looted item", () => {

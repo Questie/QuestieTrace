@@ -152,7 +152,25 @@ export function writeQuestieCorrectionsLua(
 
     lines.push(`        [${id}] = {`);
     for (const fieldName of fieldNames) {
-      lines.push(`            [${keysLocalName}.${fieldName}] = ${luaValue(record![fieldName])},`);
+      const value = record![fieldName];
+      let rendered: string;
+      // Quest objectives use a positional 3-element table: {creatureObj, objectObj, itemObj}.
+      // Missing positions become nil so indices line up (e.g. only items → {nil,nil,{{id}}}).
+      if (fieldName === "objectives" && typeof value === "object" && value !== null && !Array.isArray(value)) {
+        const obj = value as Record<number, number[]>;
+        const positions: (number[] | null)[] = [obj[1] ?? null, obj[2] ?? null, obj[3] ?? null];
+        // Drop trailing nulls only if at least one position is filled
+        while (positions.length > 1 && positions[positions.length - 1] === null) {
+          positions.pop();
+        }
+        const renderedPositions = positions.map((p) =>
+          p === null ? "nil" : `{{${p.join(",")}}}`,
+        );
+        rendered = `{${renderedPositions.join(",")}}`;
+      } else {
+        rendered = luaValue(value);
+      }
+      lines.push(`            [${keysLocalName}.${fieldName}] = ${rendered},`);
     }
     lines.push("        },");
   }
