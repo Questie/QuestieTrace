@@ -1,4 +1,4 @@
-# UI Spec (v9)
+# UI Spec (v10)
 
 Slash command interface for QuestieTrace, with separate consent and export dialogs.
 
@@ -125,27 +125,27 @@ Used only by `/qlt status` to print a human-readable status line. No UI elements
 
 ## 7) Consent dialog
 
-`Widgets/Dialog.xml` defines the addon-owned virtual `QuestieTraceDialogTemplate` and `QuestieTraceDialogButtonTemplate`. They reproduce the visual subset of Blizzard's popup without inheriting its popup mixins or handlers. `Widgets/Dialog.lua` defines `QuestieTraceDialogMixin`, independent of `QuestieTraceCore`, settings, localization, and consent. Its `OnLoad`, `OnShow`, and `OnUpdate` methods own art/font selection, layout, and popup avoidance; XML binds these methods to each frame instance. Widget tests live alongside it in `Widgets/Dialog.test.lua`.
+`Widgets/Dialog.lua` builds anonymous frames entirely in Lua and stores its interface on WoW's per-addon private table as `addon.Dialog`. Each addon owns its definitions, callbacks, frame construction, and sizing. There are no widget globals, mixins, or XML templates shared between Questie and QuestieTrace. Only positioning is shared through `LibPopupStack-1.0`, a LibStub library whose compatible upgrades retain registered frames and the single positioning driver.
 
-The default layout matches the observed Forever popup: 420-unit width, 290-unit centered text column, 36-unit warning icon, and 120-by-21 buttons with a 10-unit gap. Modern clients use the `UI-DiamondDialogBox-Border` and `UI-DialogBox-Background-Dark` atlases and available user-scaled fonts. Clients missing either atlas use the standard dialog backdrop instead.
+`Modules/Consent.lua` registers `QUESTIETRACE_DATA_COLLECTION_CONSENT` after localization and the widget files load. There is no dedicated consent XML frame. `Core.ShowConsentPrompt()` returns the existing visible decision or shows the registered definition. Repeated requests preserve the pending frame and its data.
 
-`Modules/Consent.xml` instantiates this template. It loads after `Modules/Consent.lua`, whose `Core.OnConsentFrameLoad` binds localized text and the button actions. The template's show handler owns layout; consent handling does not replace it.
+The alert layout starts at 420 units wide with a 290-unit centered text column, a 36-unit warning icon, and buttons at least 120-by-21 units with a 10-unit gap. Wrapped body text and button labels determine the final dimensions. Layout is checked when shown, on the next frame, and by the existing 0.1-second visible-dialog driver so delayed font measurements and UI-scale changes do not leave stale dimensions. Cached measurements avoid rewriting unchanged geometry. Modern clients use the `UI-DiamondDialogBox-Border` and `UI-DialogBox-Background-Dark` atlases and available user-scaled fonts. Clients missing either atlas use the standard dialog backdrop instead. Generic layout and lifecycle tests live in `Widgets/Dialog.test.lua`; consent tests exercise the real library with native-control stand-ins in `Tests/PopupUIHarness.lua`.
 
 - Unanswered consent (`QuestieTrace.settings.dataCollectionConsent == nil`) shows the dialog at login. `/qlt consent` can reopen it at any time.
 - Yes grants consent, starts capture if idle, and starts share reminders. An existing active capture is preserved.
-- No declines consent and stops/discards any active or unsaved capture. It does not delete previously saved sessions.
+- Only an explicit No (`OnCancel` reason `"clicked"`) declines consent and stops/discards any active or unsaved capture. It does not delete previously saved sessions. Replacement and programmatic dismissal have no consent side effects.
 - Opening or hiding the frame does not change consent. It has no timeout or Escape-key dismissal, matching the previous prompt.
 
-The frame uses its own `Show`/`Hide` methods. Do not register it with `StaticPopupDialogs`, `StaticPopupSpecial_Show`, or another shared popup manager: reading addon-owned entries in Blizzard's popup lists can taint subsequent Edit Mode operations.
+The consumer calls the private widget's `Show`/`Hide`, never Blizzard popup registration. Frame show/hide and size changes use the coordinator's `Register`, `Unregister`, and `RequestLayout` methods. Do not register it with `StaticPopupDialogs` or `StaticPopupSpecial_Show`: reading addon-owned entries in Blizzard's popup lists can taint subsequent Edit Mode operations.
 
 ### Coexisting with Blizzard popups
 
-On show and every 0.1 seconds while visible, the dialog uses `StaticPopup_ForEachShownDialog` to enumerate normal and special popups, including Edit Mode's new-layout dialog. The callback reads native visibility/rectangle getters and updates local bounds only. Clients without the iterator fall back to scanning `StaticPopup1` through `StaticPopup4`. It positions itself below their combined bounds with a 10-unit gap, or above/right/left if there is not enough room below. With no visible popups it returns to its normal top-center position. If none of the candidate positions fit, it uses the normal position rather than hiding the consent choices; overlap is unavoidable in that case.
+On show and every 0.1 seconds while visible, the shared stack uses `StaticPopup_ForEachShownDialog` to enumerate normal and special popups, including Edit Mode's new-layout dialog. The callback reads native visibility/rectangle getters and updates local bounds only. Clients without the iterator fall back to scanning `StaticPopup1` through `StaticPopup4`. It positions itself below their combined bounds with a 10-unit gap, or above/right/left if there is not enough room below. With no visible popups it returns to its normal top-center position. If none of the candidate positions fit, it uses the normal position rather than hiding the consent choices; overlap is unavoidable in that case.
 
 Coordinates are converted to the dialog's effective scale and anchored relative to `UIParent`, never to a Blizzard popup. Only the addon-owned frame is repositioned, and only when the destination changes. Secret visibility/coordinates, forbidden frames, or unresolved geometry leave its current placement unchanged. The watcher runs in combat because the dialog is unprotected, and stops naturally when the frame is hidden. It does not cover windows outside Blizzard's shared popup list; the older-client fallback covers normal popups only.
 
 ### In-client validation
 
-Lua mocks cannot enforce WoW's taint rules or load its XML templates. After a clean reload, show the consent dialog, leave it open, enter Edit Mode, create a new layout, and exit Edit Mode. Verify there is no secret-value error and that `PartyFrame.settingMap` and `CompactPartyFrameMember1.optionTable` remain secure. Also check text wrapping and both consent choices; test No only with disposable capture data.
+Lua mocks cannot enforce WoW's taint rules or reproduce native rendering and input. After a clean reload, show the consent dialog, leave it open, enter Edit Mode, create a new layout, and exit Edit Mode. Verify there is no secret-value error and that `PartyFrame.settingMap` and `CompactPartyFrameMember1.optionTable` remain secure. Also check text wrapping and both consent choices; test No only with disposable capture data.
 
 With the consent dialog visible, show/dismiss a normal Blizzard popup and Edit Mode's new-layout dialog and check that ours moves below each and returns afterward. Repeat in combat where the Blizzard dialog is available, and with multiple popups. Check low-screen-space placement and different UI scales without moving or modifying Blizzard's frames.

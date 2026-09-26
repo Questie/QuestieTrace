@@ -31,6 +31,7 @@
 ## X-Curse-Project-ID: 1695789
 
 Libs/LibStub/LibStub.lua
+Libs/LibPopupStack-1.0/LibPopupStack-1.0.lua
 Libs/LibDeflate/LibDeflate.lua
 
 Modules/globals.lua
@@ -42,9 +43,7 @@ Modules/Localization/Translations/ExportReminder.lua
 Modules/Localization/Translations/ExportUI.lua
 
 Widgets/Dialog.lua
-Widgets/Dialog.xml
 Modules/Consent.lua
-Modules/Consent.xml
 
 Modules/Trackers/PlayerIdentity.lua
 Modules/Trackers/UnitLevel.lua
