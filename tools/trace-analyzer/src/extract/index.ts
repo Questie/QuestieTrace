@@ -47,10 +47,21 @@ import { observeZoneOrSort } from './observers/quest';
 import { observeObjectives, mergeQuestObjectives, observeTriggerEnd, mergeQuestTriggerEnds } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 
+const MAX_IDS = {
+    npc: 268558,
+    quest: 9665,
+    item: 25818,
+    object: 300142,
+};
+
 export interface ExtractOptions {
   sourceFileNames: string[];
   /** Injectable for deterministic tests; defaults to `new Date()`. */
   now?: Date;
+  /** Maximum known IDs per entity from classic data. Entities at or below
+   * these thresholds are skipped -- only "new Forever IDs" are exported.
+   * Injectable for tests. */
+  maxIds?: Partial<typeof MAX_IDS>;
 }
 
 export interface FactBundle {
@@ -66,6 +77,18 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     sessionCount: sessions.length,
     generatedAt: options.now ?? new Date(),
   };
+
+  const effectiveMaxIds = { ...MAX_IDS, ...options.maxIds };
+
+  function filterBelowMax(records: Map<number, Record<string, unknown>>, entity: keyof typeof MAX_IDS): Map<number, Record<string, unknown>> {
+    const filtered = new Map<number, Record<string, unknown>>();
+    const threshold = effectiveMaxIds[entity];
+    if (threshold === undefined) return records;
+    for (const [id, record] of records) {
+      if (id > threshold) filtered.set(id, record);
+    }
+    return filtered;
+  }
 
   const npcRecords = emitNpcRecords({
     name: aggregateField(sessions.flatMap(observeNpcName)),
@@ -143,9 +166,9 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   });
 
   return {
-    npcFixes: writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", npcRecords, header),
-    questFixes: writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", questRecords, header),
-    itemFixes: writeQuestieCorrectionsLua("ForeverTraceItemFixes", "itemKeys", itemRecords, header),
-    objectFixes: writeQuestieCorrectionsLua("ForeverTraceObjectFixes", "objectKeys", objectRecords, header),
+    npcFixes: writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", filterBelowMax(npcRecords, "npc"), header),
+    questFixes: writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", filterBelowMax(questRecords, "quest"), header),
+    itemFixes: writeQuestieCorrectionsLua("ForeverTraceItemFixes", "itemKeys", filterBelowMax(itemRecords, "item"), header),
+    objectFixes: writeQuestieCorrectionsLua("ForeverTraceObjectFixes", "objectKeys", filterBelowMax(objectRecords, "object"), header),
   };
 }

@@ -31,6 +31,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
     const { npcFixes } = extractAll([session], {
       sourceFileNames: ["test.lua"],
       now: new Date("2020-01-01T00:00:00.000Z"),
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
     });
 
     expect(npcFixes).toContain("function ForeverTraceNpcFixes:Load()");
@@ -87,7 +88,9 @@ describe("extractAll (quest/item/object entities)", () => {
       UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", 2: "", n: 2 } }] },
     });
 
-    const { questFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
+    const { questFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
+
+    expect(questFixes).toContain("function ForeverTraceQuestFixes:Load()");
 
     expect(questFixes).toContain("function ForeverTraceQuestFixes:Load()");
     expect(questFixes).toContain("[96659] = {");
@@ -104,7 +107,7 @@ describe("extractAll (quest/item/object entities)", () => {
       "C_Map.GetPlayerMapPosition": { player: [{ t: 0, tp: 0, v: { x: 0.3001, y: 0.8602 } }] },
     });
 
-    const { itemFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
+    const { itemFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
 
     expect(itemFixes).toContain("function ForeverTraceItemFixes:Load()");
     expect(itemFixes).toContain("[750] = {");
@@ -120,7 +123,7 @@ describe("extractAll (quest/item/object entities)", () => {
       "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
     });
 
-    const { objectFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
+    const { objectFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
 
     expect(objectFixes).toContain("function ForeverTraceObjectFixes:Load()");
     expect(objectFixes).toContain("[2843] = {");
@@ -158,7 +161,7 @@ describe("extractAll (quest/item/object entities)", () => {
       "C_Map.GetPlayerMapPosition": { player: [{ t: 20, tp: 20, v: { x: 0.5611, y: 0.6164 } }] },
     });
 
-    const { questFixes } = extractAll([sessionInElwynn, sessionInWestfall], { sourceFileNames: ["test.lua"] });
+    const { questFixes } = extractAll([sessionInElwynn, sessionInWestfall], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
 
     expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
     expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{56.11,61.64}}}},');
