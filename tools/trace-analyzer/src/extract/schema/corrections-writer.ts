@@ -97,7 +97,19 @@ function luaValue(value: unknown): string {
       return `{${pos.map((arr) => luaValue(arr)).join(",")}}`;
     }
     const entries = Object.entries(value as Record<string, unknown>);
-    return `{${entries.map(([key, entryValue]) => `${luaKey(key)}=${luaValue(entryValue)}`).join(",")}}`;
+    if (entries.length === 0) {
+      return "nil";
+    }
+
+    return `{${entries.map(([key, entryValue]) => {
+      const rendered = luaValue(entryValue);
+      // Flat arrays of numbers (e.g. quest objectives IDs) must be wrapped in an
+      // extra table layer so Questie reads them as {[idx] = {{id1, id2, ...}}}.
+      if (Array.isArray(entryValue) && entryValue.every((v) => typeof v === "number")) {
+        return `${luaKey(key)}={${rendered}}`;
+      }
+      return `${luaKey(key)}=${rendered}`;
+    }).join(",")}}`;
   }
   throw new Error(`luaValue: unsupported value type ${typeof value} (${JSON.stringify(value)})`);
 }
