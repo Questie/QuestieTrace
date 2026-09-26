@@ -14,10 +14,10 @@ interface EntitySection {
 }
 
 const SECTIONS: EntitySection[] = [
-  { key: "npc", label: "NPC", downloadName: "ForeverTraceNpcFixes.lua" },
-  { key: "quest", label: "Quest", downloadName: "ForeverTraceQuestFixes.lua" },
-  { key: "item", label: "Item", downloadName: "ForeverTraceItemFixes.lua" },
-  { key: "object", label: "Object", downloadName: "ForeverTraceObjectFixes.lua" },
+  { key: "npc", label: "NPC", downloadName: "foreverTraceNpcFixes.lua" },
+  { key: "quest", label: "Quest", downloadName: "foreverTraceQuestFixes.lua" },
+  { key: "item", label: "Item", downloadName: "foreverTraceItemFixes.lua" },
+  { key: "object", label: "Object", downloadName: "foreverTraceObjectFixes.lua" },
 ];
 
 type Status =

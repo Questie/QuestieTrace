@@ -187,7 +187,7 @@ describe("ExtractView", () => {
     const anchor = createElementSpy.mock.results.find((r) => r.value instanceof HTMLAnchorElement)?.value as
       | HTMLAnchorElement
       | undefined;
-    expect(anchor?.download).toBe("ForeverTraceQuestFixes.lua");
+    expect(anchor?.download).toBe("foreverTraceQuestFixes.lua");
     expect(clickSpy).toHaveBeenCalled();
   });
 
