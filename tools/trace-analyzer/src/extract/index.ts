@@ -1,4 +1,4 @@
-// Top-level orchestration: sessions -> per-entity Questie "Forever...Fixes"
+// Top-level orchestration: sessions -> per-entity Questie "forever*Traces"
 // correction modules.
 //
 // Wires up all four entity kinds (npc/quest/item/object), each currently only
@@ -9,6 +9,9 @@
 // This produces CORRECTIONS layered on top of Questie's base DB (matching
 // `Database/Custom/Fixes/foreverNPCFixes.lua`'s shape), not a full DB dump:
 // only fields we actually have an aggregated Fact for are emitted.
+//
+// Only sessions from WoW Forever builds (interfaceVersion starting with "16")
+// are processed. See PlayerIdentity.lua for how interfaceVersion is captured:
 
 import type { SessionRecord } from "../core/types";
 import { aggregateField } from "./aggregate";
@@ -48,7 +51,7 @@ import { observeObjectives, mergeQuestObjectives, observeTriggerEnd, mergeQuestT
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 
 const MAX_IDS = {
-    npc: 268558,
+    npc: 18199,
     quest: 9665,
     item: 25818,
     object: 300142,
@@ -71,14 +74,50 @@ export interface FactBundle {
   objectFixes: string;
 }
 
+/**
+ * Extracts the interfaceVersion from a session's GetBuildInfo capture.
+ * Returns undefined if the session has no GetBuildInfo data.
+ *
+ * The function stream structure is always: { player: [ { t: 0, tp: 0, v: 16001 } ] }
+ * as captured by PlayerIdentity.lua.
+ */
+function getInterfaceVersion(session: SessionRecord): number | undefined {
+  const buildInfo = session.functions["GetBuildInfo"];
+  if (!buildInfo || typeof buildInfo !== "object" || Array.isArray(buildInfo)) {
+    return undefined;
+  }
+  const playerStream = buildInfo["player"];
+  if (!Array.isArray(playerStream) || playerStream.length === 0) return undefined;
+  const firstEntry = playerStream[0];
+  if (!firstEntry || typeof firstEntry !== "object") return undefined;
+  return typeof firstEntry.v === "number" ? firstEntry.v : undefined;
+}
+
+/**
+ * Checks if an interfaceVersion is from a WoW Forever build.
+ * Forever builds have interfaceVersion starting with "16" (e.g. 16001, 16002, etc.)
+ * TBC had 10xxx, WotLK had 11xxx, Cata had 12xxx, etc.
+ */
+function isForeverBuild(interfaceVersion: number | undefined): boolean {
+  if (interfaceVersion === undefined) return false;
+  return String(interfaceVersion).startsWith("16");
+}
+
 export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
+  const foreverSessions = sessions.filter((session) => {
+    const version = getInterfaceVersion(session);
+    return isForeverBuild(version);
+  });
+
   const header = {
     sourceFileNames: options.sourceFileNames,
-    sessionCount: sessions.length,
+    sessionCount: foreverSessions.length,
     generatedAt: options.now ?? new Date(),
   };
 
   const effectiveMaxIds = { ...MAX_IDS, ...options.maxIds };
+
+  const sessionsToProcess = foreverSessions;
 
   function filterBelowMax(records: Map<number, Record<string, unknown>>, entity: keyof typeof MAX_IDS): Map<number, Record<string, unknown>> {
     const filtered = new Map<number, Record<string, unknown>>();
@@ -91,76 +130,76 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   }
 
   const npcRecords = emitNpcRecords({
-    name: aggregateField(sessions.flatMap(observeNpcName)),
-    minLevel: aggregateField(sessions.flatMap(observeMinLevel)),
-    maxLevel: aggregateField(sessions.flatMap(observeMaxLevel)),
+    name: aggregateField(sessionsToProcess.flatMap(observeNpcName)),
+    minLevel: aggregateField(sessionsToProcess.flatMap(observeMinLevel)),
+    maxLevel: aggregateField(sessionsToProcess.flatMap(observeMaxLevel)),
     spawns: aggregateField(
-      sessions.flatMap(observeNpcSpawns),
+      sessionsToProcess.flatMap(observeNpcSpawns),
       mergeNpcSpawns,
     ),
     zoneID: aggregateField(
-      sessions.flatMap(observeNpcZoneID),
+      sessionsToProcess.flatMap(observeNpcZoneID),
       mergeNpcZoneID,
     ),
     questStarts: aggregateField(
-      sessions.flatMap(observeNpcQuestStarts),
+      sessionsToProcess.flatMap(observeNpcQuestStarts),
       mergeNpcQuestStarts,
     ),
     questEnds: aggregateField(
-      sessions.flatMap(observeNpcQuestEnds),
+      sessionsToProcess.flatMap(observeNpcQuestEnds),
       mergeNpcQuestEnds,
     ),
   });
-  const zoneOrSortFacts = aggregateField(sessions.flatMap(observeZoneOrSort));
+  const zoneOrSortFacts = aggregateField(sessionsToProcess.flatMap(observeZoneOrSort));
   const questRecords = emitQuestRecords({
-    name: aggregateField(sessions.flatMap(observeQuestName)),
-    questLevel: aggregateField(sessions.flatMap(observeQuestLevel)),
-    requiredLevel: aggregateField(sessions.flatMap(observeRequiredLevel)),
+    name: aggregateField(sessionsToProcess.flatMap(observeQuestName)),
+    questLevel: aggregateField(sessionsToProcess.flatMap(observeQuestLevel)),
+    requiredLevel: aggregateField(sessionsToProcess.flatMap(observeRequiredLevel)),
     zoneOrSort: zoneOrSortFacts,
     objectives: aggregateField(
-      sessions.flatMap(observeObjectives),
+      sessionsToProcess.flatMap(observeObjectives),
       mergeQuestObjectives,
     ),
     triggerEnd: aggregateField(
-      sessions.flatMap(observeTriggerEnd),
+      sessionsToProcess.flatMap(observeTriggerEnd),
       (observations) => mergeQuestTriggerEnds(observations, zoneOrSortFacts.get(observations[0]?.entityId)?.value),
     ),
     startedBy: aggregateField(
-      sessions.flatMap(observeStartedBy),
+      sessionsToProcess.flatMap(observeStartedBy),
       mergeStartedBy,
     ),
     finishedBy: aggregateField(
-      sessions.flatMap(observeFinishedBy),
+      sessionsToProcess.flatMap(observeFinishedBy),
       mergeFinishedBy,
     ),
   });
   const itemRecords = emitItemRecords({
-    name: aggregateField(sessions.flatMap(observeItemName)),
+    name: aggregateField(sessionsToProcess.flatMap(observeItemName)),
     npcDrops: aggregateField(
-      sessions.flatMap(observeNpcDrops),
+      sessionsToProcess.flatMap(observeNpcDrops),
       mergeNpcDrops,
     ),
     objectDrops: aggregateField(
-      sessions.flatMap(observeObjectDrops),
+      sessionsToProcess.flatMap(observeObjectDrops),
       mergeObjectDrops,
     ),
   });
   const objectRecords = emitObjectRecords({
-    name: aggregateField(sessions.flatMap(observeObjectName)),
+    name: aggregateField(sessionsToProcess.flatMap(observeObjectName)),
     spawns: aggregateField(
-      sessions.flatMap(observeObjectSpawns),
+      sessionsToProcess.flatMap(observeObjectSpawns),
       mergeObjectSpawns,
     ),
     zoneID: aggregateField(
-      sessions.flatMap(observeObjectZoneID),
+      sessionsToProcess.flatMap(observeObjectZoneID),
       mergeObjectZoneID,
     ),
     questStarts: aggregateField(
-      sessions.flatMap(observeObjectQuestStarts),
+      sessionsToProcess.flatMap(observeObjectQuestStarts),
       mergeObjectQuestStarts,
     ),
     questEnds: aggregateField(
-      sessions.flatMap(observeObjectQuestEnds),
+      sessionsToProcess.flatMap(observeObjectQuestEnds),
       mergeObjectQuestEnds,
     ),
   });

@@ -18,9 +18,25 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
   };
 }
 
+/** Creates a session with a Forever interfaceVersion (16001) */
+function makeForeverSession(functions: SessionRecord["functions"]): SessionRecord {
+  return makeSession({
+    ...functions,
+    GetBuildInfo: { player: [{ t: 0, tp: 0, v: 16001 }] },
+  });
+}
+
+/** Creates a session with a TBC interfaceVersion (10xxx) */
+function makeTBCSession(functions: SessionRecord["functions"]): SessionRecord {
+  return makeSession({
+    ...functions,
+    GetBuildInfo: { player: [{ t: 0, tp: 0, v: 10102 }] },
+  });
+}
+
 describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () => {
   it("should produce a paste-ready foreverNpcTraces.lua correction for an npc encountered in the session", () => {
-    const session = makeSession({
+    const session = makeForeverSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
       UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
@@ -42,7 +58,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
   });
 
   it("should only emit fields that were actually observed, not every schema field", () => {
-    const session = makeSession({
+    const session = makeForeverSession({
       UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
       "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
       "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
@@ -59,7 +75,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
 
 describe("extractAll (quest/item/object entities)", () => {
   it("should produce a paste-ready foreverQuestTraces.lua correction for a quest encountered in the session", () => {
-    const session = makeSession({
+    const session = makeForeverSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
       "C_QuestLog.GetQuestObjectives": {
@@ -100,7 +116,7 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{30.01,86.02}}}},');  });
 
   it("should produce a paste-ready foreverItemTraces.lua correction for a looted item", () => {
-    const session = makeSession({
+    const session = makeForeverSession({
       GetLootSlotLink: { "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       "C_Map.GetBestMapForUnit": { player: [{ t: 0, tp: 0, v: 1436 }] },
@@ -115,7 +131,7 @@ describe("extractAll (quest/item/object entities)", () => {
   });
 
   it("should produce a paste-ready foreverObjectTraces.lua correction for a GameObject encountered in the session", () => {
-    const session = makeSession({
+    const session = makeForeverSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
       UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Suspicious Chest", n: 1 } }] },
@@ -136,7 +152,7 @@ describe("extractAll (quest/item/object entities)", () => {
     // one incomplete->complete transition): in Elwynn Forest (uiMapID 1429 ->
     // areaID 12) and in Westfall (uiMapID 1436 -> areaID 40). The quest log
     // header says Westfall, so the Westfall completion must win.
-    const sessionInElwynn = makeSession({
+    const sessionInElwynn = makeForeverSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
       "C_QuestLog.GetQuestObjectives": {
@@ -148,7 +164,7 @@ describe("extractAll (quest/item/object entities)", () => {
       "C_Map.GetBestMapForUnit": { player: [{ t: 12, tp: 12, v: 1429 }] },
       "C_Map.GetPlayerMapPosition": { player: [{ t: 12, tp: 12, v: { x: 0.4746, y: 0.6218 } }] },
     });
-    const sessionInWestfall = makeSession({
+    const sessionInWestfall = makeForeverSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
       "C_QuestLog.GetQuestObjectives": {
@@ -165,5 +181,122 @@ describe("extractAll (quest/item/object entities)", () => {
 
     expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
     expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{56.11,61.64}}}},');
+  });
+});
+
+describe("extractAll interfaceVersion filtering", () => {
+  it("should skip sessions without GetBuildInfo (no interfaceVersion)", () => {
+    const sessionWithoutBuildInfo = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+    });
+
+    const { npcFixes } = extractAll([sessionWithoutBuildInfo], {
+      sourceFileNames: ["test.lua"],
+      now: new Date("2020-01-01T00:00:00.000Z"),
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    // Session without GetBuildInfo should be filtered out
+    expect(npcFixes).toContain("function ForeverNpcTraces:Load()");
+    expect(npcFixes).toContain("    return {\n    }");
+    expect(npcFixes).not.toContain("[823]");
+  });
+
+  it("should skip sessions with TBC interfaceVersion (10xxx)", () => {
+    const tbcSession = makeTBCSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+    });
+
+    const { npcFixes } = extractAll([tbcSession], {
+      sourceFileNames: ["test.lua"],
+      now: new Date("2020-01-01T00:00:00.000Z"),
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    // TBC session should be filtered out
+    expect(npcFixes).toContain("function ForeverNpcTraces:Load()");
+    expect(npcFixes).toContain("    return {\n    }");
+    expect(npcFixes).not.toContain("[823]");
+  });
+
+  it("should skip sessions with WotLK interfaceVersion (11xxx)", () => {
+    const wotlkSession = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+      GetBuildInfo: { player: [{ t: 0, tp: 0, v: 11883 }] },
+    });
+
+    const { npcFixes } = extractAll([wotlkSession], {
+      sourceFileNames: ["test.lua"],
+      now: new Date("2020-01-01T00:00:00.000Z"),
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    // WotLK session should be filtered out
+    expect(npcFixes).toContain("function ForeverNpcTraces:Load()");
+    expect(npcFixes).toContain("    return {\n    }");
+    expect(npcFixes).not.toContain("[823]");
+  });
+
+  it("should process sessions with Forever interfaceVersion (16xxx)", () => {
+    const foreverSession = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+    });
+
+    const { npcFixes } = extractAll([foreverSession], {
+      sourceFileNames: ["test.lua"],
+      now: new Date("2020-01-01T00:00:00.000Z"),
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    // Forever session should be processed
+    expect(npcFixes).toContain("[823] = {");
+    expect(npcFixes).toContain('[npcKeys.name] = "Deputy Willem",');
+  });
+
+  it("should process mixed sessions, only including Forever builds", () => {
+    const foreverSession = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+    });
+    const tbcSession = makeTBCSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-999999" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "TBC NPC", n: 1 } }] },
+    });
+
+    const { npcFixes } = extractAll([tbcSession, foreverSession], {
+      sourceFileNames: ["test.lua"],
+      now: new Date("2020-01-01T00:00:00.000Z"),
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    // Only the Forever session's data should appear (ID 823, not 999999)
+    expect(npcFixes).toContain("[823] = {");
+    expect(npcFixes).toContain('[npcKeys.name] = "Deputy Willem",');
+    expect(npcFixes).not.toContain("[999999]");
+    expect(npcFixes).not.toContain("TBC NPC");
+  });
+
+  it("should report correct session count for mixed Forever/non-Forever sessions", () => {
+    const foreverSession1 = makeForeverSession({ GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] } });
+    const foreverSession2 = makeForeverSession({ GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] } });
+    const tbcSession = makeTBCSession({ GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] } });
+
+    const { npcFixes } = extractAll([foreverSession1, tbcSession, foreverSession2], {
+      sourceFileNames: ["test.lua"],
+      now: new Date("2020-01-01T00:00:00.000Z"),
+    });
+
+    // Should report 2 sessions, not 3
+    expect(npcFixes).toContain("-- Sessions aggregated: 2");
   });
 });
