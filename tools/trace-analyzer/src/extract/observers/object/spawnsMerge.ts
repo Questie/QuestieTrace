@@ -20,9 +20,40 @@ function tokenPriority(token: string): number {
 export function mergeSpawns(
   observations: Observation<SpawnObservationValue>[],
 ): Record<number, Array<[number, number]>> {
+  const tagged = observations as TaggedSpawnObservation[];
+
+  // Check if any questnpc observations exist for this object
+  const hasQuestnpc = tagged.some((obs) => obs.token === "questnpc");
+
+  if (hasQuestnpc) {
+    // questnpc overrides everything: only keep questnpc coordinates
+    const byZone = new Map<number, Array<[number, number]>>();
+    for (const obs of tagged) {
+      if (obs.token !== "questnpc") continue;
+      const { zoneID, x, y } = obs.value;
+      const coords = byZone.get(zoneID);
+      if (coords) {
+        // Deduplicate identical coordinates within a zone
+        if (!coords.some((c) => c[0] === x && c[1] === y)) {
+          coords.push([x, y]);
+        }
+      } else {
+        byZone.set(zoneID, [[x, y]]);
+      }
+    }
+
+    const result: Record<number, Array<[number, number]>> = {};
+    for (const [zoneID, coords] of byZone) {
+      coords.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      result[zoneID] = coords;
+    }
+    return result;
+  }
+
+  // No questnpc observations: fall back to per-coordinate priority merging
   const bestPerCoord = new Map<string, TaggedSpawnObservation>();
 
-  for (const obs of observations as TaggedSpawnObservation[]) {
+  for (const obs of tagged) {
     const { zoneID, x, y } = obs.value;
     const key = `${zoneID}:${x.toFixed(4)},${y.toFixed(4)}`;
     const existing = bestPerCoord.get(key);

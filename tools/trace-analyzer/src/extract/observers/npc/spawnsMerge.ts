@@ -20,18 +20,56 @@ function tokenPriority(token: string): number {
  * Merges individual spawn observations into the Questie spawns table shape:
  *   {[zoneID]: {{x,y}, {x,y}, ...}, ...}
  *
- * When the same coordinate is observed via different tokens (e.g. once via
- * questnpc and once via target), the questnpc observation wins because the
- * NPC is guaranteed adjacent to the player during quest interactions.
+ * When the same NPC has observations via different tokens at different
+ * coordinates, questnpc observations overrule ALL others. Only questnpc
+ * coordinates are kept when questnpc observations exist for that NPC.
+ *
+ * This is because questnpc fires during quest interactions when the player
+ * must be adjacent to the NPC, giving us the true spawn location. Target/npc
+ * tokens can fire from a distance and give inaccurate positions.
+ *
+ * When no questnpc observations exist, falls back to keeping the best
+ * coordinate per (zoneID, x, y) based on token priority.
  */
 export function mergeSpawns(
   observations: Observation<SpawnObservationValue>[],
 ): Record<number, Array<[number, number]>> {
+  const tagged = observations as TaggedSpawnObservation[];
+
+  // Check if any questnpc observations exist for this NPC
+  const hasQuestnpc = tagged.some((obs) => obs.token === "questnpc");
+
+  if (hasQuestnpc) {
+    // questnpc overrides everything: only keep questnpc coordinates
+    const byZone = new Map<number, Array<[number, number]>>();
+    for (const obs of tagged) {
+      if (obs.token !== "questnpc") continue;
+      const { zoneID, x, y } = obs.value;
+      const coords = byZone.get(zoneID);
+      if (coords) {
+        // Deduplicate identical coordinates within a zone
+        if (!coords.some((c) => c[0] === x && c[1] === y)) {
+          coords.push([x, y]);
+        }
+      } else {
+        byZone.set(zoneID, [[x, y]]);
+      }
+    }
+
+    const result: Record<number, Array<[number, number]>> = {};
+    for (const [zoneID, coords] of byZone) {
+      coords.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      result[zoneID] = coords;
+    }
+    return result;
+  }
+
+  // No questnpc observations: fall back to per-coordinate priority merging
   // For each zone+coordinate pair, keep only the observation with the highest
   // token priority (questnpc > npc > target).
   const bestPerCoord = new Map<string, TaggedSpawnObservation>();
 
-  for (const obs of observations as TaggedSpawnObservation[]) {
+  for (const obs of tagged) {
     const { zoneID, x, y } = obs.value;
     const key = `${zoneID}:${x.toFixed(4)},${y.toFixed(4)}`;
     const existing = bestPerCoord.get(key);

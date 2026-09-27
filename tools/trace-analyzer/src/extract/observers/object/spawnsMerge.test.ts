@@ -61,6 +61,40 @@ describe("mergeSpawns (object)", () => {
     });
   });
 
+  it("should override ALL coordinates when questnpc exists (even different coords)", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // Different coordinates via lower-priority tokens
+      obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 10, "target"),
+      obs(2843, { zoneID: 12, x: 47.46, y: 62.18 }, 20, "npc"),
+      // questnpc at a different location
+      obs(2843, { zoneID: 40, x: 50.0, y: 70.0 }, 30, "questnpc"),
+    ];
+
+    // Only questnpc coordinates should survive
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[50.0, 70.0]],
+    });
+  });
+
+  it("should keep all questnpc coordinates when multiple exist", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // Multiple questnpc observations at different coords
+      obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 10, "questnpc"),
+      obs(2843, { zoneID: 40, x: 31.0, y: 87.0 }, 20, "questnpc"),
+      obs(2843, { zoneID: 12, x: 47.46, y: 62.18 }, 30, "questnpc"),
+      // Lower priority observations should be discarded
+      obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 40, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [
+        [30.01, 86.02],
+        [31.0, 87.0],
+      ],
+      12: [[47.46, 62.18]],
+    });
+  });
+
   it("should handle multiple zones with multiple coordinates each", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 1),
