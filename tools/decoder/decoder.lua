@@ -302,9 +302,10 @@ local function RunBatch(inputDir, outputDir)
     return
   end
 
+  local total = #files
   local succeeded, failed = 0, 0
   local usedOutputPaths = {}
-  for _, name in ipairs(files) do
+  for i, name in ipairs(files) do
     local inputPath = inputDir .. "/" .. name
     local serialized, err = DecodeFile(inputPath)
     if not serialized then
@@ -327,6 +328,10 @@ local function RunBatch(inputDir, outputDir)
           succeeded = succeeded + 1
         end
       end
+    end
+
+    if total > 0 and i % 100 == 0 or i == total then
+      io.stderr:write(string.format("decode: %d / %d\n", i, total))
     end
   end
 

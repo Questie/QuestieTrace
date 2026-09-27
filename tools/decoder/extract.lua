@@ -108,8 +108,9 @@ local function Main()
   local jsonFiles = ListJsonFilesRecursive(traceDataDir)
   table.sort(jsonFiles)
 
+  local total = #jsonFiles
   local written, skipped = 0, 0
-  for _, jsonPath in ipairs(jsonFiles) do
+  for i, jsonPath in ipairs(jsonFiles) do
     local raw = ReadFile(jsonPath)
     if not raw then
       io.stderr:write("warn: cannot read '" .. jsonPath .. "'\n")
@@ -125,6 +126,10 @@ local function Main()
         WriteToFile(exportString, inputDir .. "/" .. id .. ".txt")
         written = written + 1
       end
+    end
+
+    if total > 0 and i % 100 == 0 or i == total then
+      io.stderr:write(string.format("extract: %d / %d\n", i, total))
     end
   end
 
