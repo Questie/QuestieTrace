@@ -73,7 +73,6 @@ local function BuildExportFrame()
     self:SetText("https://questie.dev/trace")
     self:HighlightText()
   end)
-  urlEditBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
   local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   hint:SetPoint("TOP", urlEditBox, "BOTTOM", 0, -10)
