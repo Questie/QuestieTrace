@@ -7,12 +7,12 @@ describe("writeQuestieCorrectionsLua", () => {
   it("should emit a Load() function returning corrections keyed by npcKeys field lookups", () => {
     const records = new Map([[823, { name: "Deputy Willem" }]]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", records, header);
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", records, header);
 
-    expect(lua).toContain("---@class ForeverTraceNpcFixes");
-    expect(lua).toContain('local ForeverTraceNpcFixes = QuestieLoader:CreateModule("ForeverTraceNpcFixes")');
+    expect(lua).toContain("---@class ForeverNpcTraces");
+    expect(lua).toContain('local ForeverNpcTraces = QuestieLoader:CreateModule("ForeverNpcTraces")');
     expect(lua).toContain('local QuestieDB = QuestieLoader:ImportModule("QuestieDB")');
-    expect(lua).toContain("function ForeverTraceNpcFixes:Load()");
+    expect(lua).toContain("function ForeverNpcTraces:Load()");
     expect(lua).toContain("    local npcKeys = QuestieDB.npcKeys");
     expect(lua).toContain("[823] = {");
     expect(lua).toContain('[npcKeys.name] = "Deputy Willem",');
@@ -22,7 +22,7 @@ describe("writeQuestieCorrectionsLua", () => {
   it("should only emit fields actually present on a record, not every schema field", () => {
     const records = new Map([[823, { name: "Deputy Willem", minLevel: 10 }]]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", records, header);
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", records, header);
 
     expect(lua).toContain("[npcKeys.name]");
     expect(lua).toContain("[npcKeys.minLevel] = 10,");
@@ -35,14 +35,14 @@ describe("writeQuestieCorrectionsLua", () => {
       [2, { name: "Has Data" }],
     ]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", records, header);
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", records, header);
 
     expect(lua).not.toContain("[1] = {");
     expect(lua).toContain("[2] = {");
   });
 
   it("should include the header comment with file/session counts and timestamp", () => {
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", new Map(), {
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", new Map(), {
       sourceFileNames: ["a.lua", "b.lua"],
       sessionCount: 5,
       generatedAt: new Date("2020-01-01T00:00:00.000Z"),
@@ -56,7 +56,7 @@ describe("writeQuestieCorrectionsLua", () => {
   it("should escape strings and format nil/number/boolean values correctly", () => {
     const records = new Map([[1, { name: 'Say "Hi"', minLevel: 12, flag: true, missing: null }]]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", records, header);
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", records, header);
 
     expect(lua).toContain('[npcKeys.name] = "Say \\"Hi\\"",');
     expect(lua).toContain("[npcKeys.minLevel] = 12,");
@@ -70,7 +70,7 @@ describe("writeQuestieCorrectionsLua", () => {
     // the generated corrections file.
     const records = new Map([[1, { name: "Telenos \nLeafwhisper" }]]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", records, header);
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", records, header);
 
     expect(lua).toContain('[npcKeys.name] = "Telenos \\nLeafwhisper",');
     // The emitted line must still be a single line - no raw line breaks in strings.
@@ -91,7 +91,7 @@ describe("writeQuestieCorrectionsLua", () => {
       ],
     ]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", records, header);
+    const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header);
 
     expect(lua).toContain("[questKeys.breadcrumbs] = {33,45},");
     // startedBy/finishedBy use positional table format with no spaces, trailing empty arrays omitted
@@ -107,7 +107,7 @@ describe("writeQuestieCorrectionsLua", () => {
       [2, { questEnds: { creatures: [40], objects: [] } }],
     ]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", records, header);
+    const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header);
 
     expect(lua).toContain("[1] = {");
     expect(lua).toContain("[questKeys.finishedBy] = {{10,20},{30}},");
@@ -121,7 +121,7 @@ describe("writeQuestieCorrectionsLua", () => {
       [2, { questEnds: { creatures: [], objects: [50] } }],
     ]);
 
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", npcRecords, header);
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", npcRecords, header);
 
     expect(lua).toContain("[1] = {");
     expect(lua).toContain('[npcKeys.name] = "Test NPC",');
@@ -132,7 +132,7 @@ describe("writeQuestieCorrectionsLua", () => {
   });
 
   it("should return an empty table body when there are no records", () => {
-    const lua = writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", new Map(), header);
+    const lua = writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", new Map(), header);
 
     expect(lua).toContain("    return {\n    }\nend");
   });

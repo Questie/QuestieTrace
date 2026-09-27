@@ -166,9 +166,9 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   });
 
   return {
-    npcFixes: writeQuestieCorrectionsLua("ForeverTraceNpcFixes", "npcKeys", filterBelowMax(npcRecords, "npc"), header),
-    questFixes: writeQuestieCorrectionsLua("ForeverTraceQuestFixes", "questKeys", filterBelowMax(questRecords, "quest"), header),
-    itemFixes: writeQuestieCorrectionsLua("ForeverTraceItemFixes", "itemKeys", filterBelowMax(itemRecords, "item"), header),
-    objectFixes: writeQuestieCorrectionsLua("ForeverTraceObjectFixes", "objectKeys", filterBelowMax(objectRecords, "object"), header),
+    npcFixes: writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", filterBelowMax(npcRecords, "npc"), header),
+    questFixes: writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", filterBelowMax(questRecords, "quest"), header),
+    itemFixes: writeQuestieCorrectionsLua("ForeverItemTraces", "itemKeys", filterBelowMax(itemRecords, "item"), header),
+    objectFixes: writeQuestieCorrectionsLua("ForeverObjectTraces", "objectKeys", filterBelowMax(objectRecords, "object"), header),
   };
 }

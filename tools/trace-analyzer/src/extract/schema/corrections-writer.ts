@@ -1,4 +1,4 @@
-// Turns a per-entity record map into a paste-ready Questie "Forever...Fixes"
+// Turns a per-entity record map into a paste-ready Questie "forever*Traces"
 // corrections module - a `QuestieLoader` module exposing a single `:Load()`
 // function that returns a sparse map of entityId -> { [entityKeys.field] = value }.
 //
@@ -8,6 +8,9 @@
 // This matches how Questie's own `Database/Custom/Fixes/foreverNPCFixes.lua`
 // (etc.) is structured: a set of overrides layered on top of the base DB, not
 // a replacement for it.
+//
+// The emitted Lua module name and filename follow the pattern `Forever{Entity}Traces`
+// / `forever{Entity}Traces.lua` (e.g. `ForeverItemTraces` / `foreverItemTraces.lua`).
 
 export interface CorrectionsWriterHeader {
   sourceFileNames: string[];
@@ -115,7 +118,7 @@ function luaValue(value: unknown): string {
 }
 
 /**
- * @param moduleName e.g. "ForeverTraceNpcFixes" - becomes the QuestieLoader module name.
+ * @param moduleName e.g. "ForeverNpcTraces" - becomes the QuestieLoader module name.
  * @param keysLocalName e.g. "npcKeys" - the `QuestieDB.<keysLocalName>` field-key table used
  *   to translate each record's field names into their real Questie key lookups.
  * @param records entityId -> only the fields that were actually extracted (already sparse,

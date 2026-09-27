@@ -10,10 +10,10 @@ interface MockResult {
 }
 
 const RESULTS: Record<string, MockResult> = {
-  npc: { fixes: "function ForeverTraceNpcFixes:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
-  quest: { fixes: "function ForeverTraceQuestFixes:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
-  item: { fixes: "function ForeverTraceItemFixes:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
-  object: { fixes: "function ForeverTraceObjectFixes:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
+  npc: { fixes: "function ForeverNpcTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
+  quest: { fixes: "function ForeverQuestTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
+  item: { fixes: "function ForeverItemTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
+  object: { fixes: "function ForeverObjectTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
 };
 
 function mockSuccessFetch(overrides: Partial<Record<string, MockResult>> = {}) {
@@ -63,7 +63,7 @@ describe("ExtractView", () => {
     fireEvent.click(itemTabGenerate);
 
     waitFor(() => {
-      expect(screen.getByText(/ForeverTraceItemFixes:Load/)).toBeInTheDocument();
+      expect(screen.getByText(/ForeverItemTraces:Load/)).toBeInTheDocument();
     });
   });
 
@@ -96,7 +96,7 @@ describe("ExtractView", () => {
     render(<ExtractView />);
     fireEvent.click(screen.getByText("Generate all"));
 
-    await waitFor(() => expect(screen.getByText(/ForeverTraceNpcFixes:Load/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ForeverNpcTraces:Load/)).toBeInTheDocument());
   });
 
   it("should switch tabs when clicking on a different entity tab", async () => {
@@ -108,8 +108,8 @@ describe("ExtractView", () => {
     await waitFor(() => expect(screen.getByText("Quest")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Quest"));
 
-    await waitFor(() => expect(screen.getByText(/ForeverTraceQuestFixes:Load/)).toBeInTheDocument());
-    expect(screen.queryByText(/ForeverTraceNpcFixes:Load/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/ForeverQuestTraces:Load/)).toBeInTheDocument());
+    expect(screen.queryByText(/ForeverNpcTraces:Load/)).not.toBeInTheDocument();
   });
 
   it("should allow per-entity 'Generate' button to regenerate just one entity", async () => {
@@ -118,18 +118,18 @@ describe("ExtractView", () => {
     render(<ExtractView />);
     fireEvent.click(screen.getByText("Generate all"));
 
-    await waitFor(() => expect(screen.getByText(/ForeverTraceNpcFixes:Load/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ForeverNpcTraces:Load/)).toBeInTheDocument());
 
     // Switch to Item tab
     fireEvent.click(screen.getByText("Item"));
-    await waitFor(() => expect(screen.getByText(/ForeverTraceItemFixes:Load/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ForeverItemTraces:Load/)).toBeInTheDocument());
 
     // Click the per-entity Generate button (in the Item tab context)
     const generateButtons = screen.getAllByText("Generate");
     const itemTabGenerate = generateButtons[generateButtons.length - 1];
     fireEvent.click(itemTabGenerate);
 
-    await waitFor(() => expect(screen.getByText(/ForeverTraceItemFixes:Load/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ForeverItemTraces:Load/)).toBeInTheDocument());
   });
 
   it("should list skipped files as a warning when some trace files fail to load", async () => {
@@ -177,7 +177,7 @@ describe("ExtractView", () => {
     await waitFor(() => expect(screen.getByText("Quest")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("Quest"));
-    await waitFor(() => expect(screen.getByText(/ForeverTraceQuestFixes:Load/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ForeverQuestTraces:Load/)).toBeInTheDocument());
 
     vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:mock"), revokeObjectURL: vi.fn() });
     const createElementSpy = vi.spyOn(document, "createElement");
@@ -187,7 +187,7 @@ describe("ExtractView", () => {
     const anchor = createElementSpy.mock.results.find((r) => r.value instanceof HTMLAnchorElement)?.value as
       | HTMLAnchorElement
       | undefined;
-    expect(anchor?.download).toBe("foreverTraceQuestFixes.lua");
+    expect(anchor?.download).toBe("foreverQuestTraces.lua");
     expect(clickSpy).toHaveBeenCalled();
   });
 

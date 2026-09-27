@@ -19,7 +19,7 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
 }
 
 describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () => {
-  it("should produce a paste-ready ForeverTraceNpcFixes.lua correction for an npc encountered in the session", () => {
+  it("should produce a paste-ready foreverNpcTraces.lua correction for an npc encountered in the session", () => {
     const session = makeSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
@@ -34,7 +34,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
       maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
     });
 
-    expect(npcFixes).toContain("function ForeverTraceNpcFixes:Load()");
+    expect(npcFixes).toContain("function ForeverNpcTraces:Load()");
     expect(npcFixes).toContain("-- Source trace files: 1");
     expect(npcFixes).toContain("[823] = {");
     expect(npcFixes).toContain('[npcKeys.name] = "Deputy Willem",');
@@ -58,7 +58,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
 });
 
 describe("extractAll (quest/item/object entities)", () => {
-  it("should produce a paste-ready ForeverTraceQuestFixes.lua correction for a quest encountered in the session", () => {
+  it("should produce a paste-ready foreverQuestTraces.lua correction for a quest encountered in the session", () => {
     const session = makeSession({
       GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
       QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
@@ -90,16 +90,16 @@ describe("extractAll (quest/item/object entities)", () => {
 
     const { questFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
 
-    expect(questFixes).toContain("function ForeverTraceQuestFixes:Load()");
+    expect(questFixes).toContain("function ForeverQuestTraces:Load()");
 
-    expect(questFixes).toContain("function ForeverTraceQuestFixes:Load()");
+    expect(questFixes).toContain("function ForeverQuestTraces:Load()");
     expect(questFixes).toContain("[96659] = {");
     expect(questFixes).toContain('[questKeys.name] = "A Threat Within",');
     expect(questFixes).toContain("[questKeys.zoneOrSort] = 40,");
     expect(questFixes).toContain("[questKeys.objectives] = {nil,nil,{{750}}},");
     expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{30.01,86.02}}}},');  });
 
-  it("should produce a paste-ready ForeverTraceItemFixes.lua correction for a looted item", () => {
+  it("should produce a paste-ready foreverItemTraces.lua correction for a looted item", () => {
     const session = makeSession({
       GetLootSlotLink: { "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
@@ -109,12 +109,12 @@ describe("extractAll (quest/item/object entities)", () => {
 
     const { itemFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
 
-    expect(itemFixes).toContain("function ForeverTraceItemFixes:Load()");
+    expect(itemFixes).toContain("function ForeverItemTraces:Load()");
     expect(itemFixes).toContain("[750] = {");
     expect(itemFixes).toContain('[itemKeys.name] = "Tough Wolf Meat",');
   });
 
-  it("should produce a paste-ready ForeverTraceObjectFixes.lua correction for a GameObject encountered in the session", () => {
+  it("should produce a paste-ready foreverObjectTraces.lua correction for a GameObject encountered in the session", () => {
     const session = makeSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
@@ -125,7 +125,7 @@ describe("extractAll (quest/item/object entities)", () => {
 
     const { objectFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
 
-    expect(objectFixes).toContain("function ForeverTraceObjectFixes:Load()");
+    expect(objectFixes).toContain("function ForeverObjectTraces:Load()");
     expect(objectFixes).toContain("[2843] = {");
     expect(objectFixes).toContain('[objectKeys.name] = "Suspicious Chest",');
     expect(objectFixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");

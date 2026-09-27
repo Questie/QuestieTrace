@@ -14,10 +14,10 @@ interface EntitySection {
 }
 
 const SECTIONS: EntitySection[] = [
-  { key: "npc", label: "NPC", downloadName: "foreverTraceNpcFixes.lua" },
-  { key: "quest", label: "Quest", downloadName: "foreverTraceQuestFixes.lua" },
-  { key: "item", label: "Item", downloadName: "foreverTraceItemFixes.lua" },
-  { key: "object", label: "Object", downloadName: "foreverTraceObjectFixes.lua" },
+  { key: "npc", label: "NPC", downloadName: "foreverNpcTraces.lua" },
+  { key: "quest", label: "Quest", downloadName: "foreverQuestTraces.lua" },
+  { key: "item", label: "Item", downloadName: "foreverItemTraces.lua" },
+  { key: "object", label: "Object", downloadName: "foreverObjectTraces.lua" },
 ];
 
 type Status =
@@ -30,7 +30,7 @@ type Status =
  * "Extract" tab content: on demand, runs the full observe -> aggregate ->
  * emit -> write chain over EVERY trace file in Traces/ (server-side, one
  * request per entity kind via /api/extract/{npc,quest,item,object}) and
- * renders each resulting ForeverTrace*Fixes.lua corrections module for
+ * renders each resulting forever*Traces.lua corrections module for
  * copy/download.
  *
  * Combining across all trace files - not just the one selected in the file
