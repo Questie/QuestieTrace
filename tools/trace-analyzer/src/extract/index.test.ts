@@ -185,7 +185,10 @@ describe("extractAll (quest/item/object entities)", () => {
 });
 
 describe("extractAll interfaceVersion filtering", () => {
-  it("should skip sessions without GetBuildInfo (no interfaceVersion)", () => {
+  it("should include sessions without GetBuildInfo (early Forever beta traces)", () => {
+    // Sessions without GetBuildInfo are included because they might be from
+    // early Forever beta when PlayerIdentity.lua didn't capture interfaceVersion yet.
+    // Any Classic IDs they contain will be filtered by filterBelowMax.
     const sessionWithoutBuildInfo = makeSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
       UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
@@ -198,10 +201,10 @@ describe("extractAll interfaceVersion filtering", () => {
       maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
     });
 
-    // Session without GetBuildInfo should be filtered out
+    // Session without GetBuildInfo should be INCLUDED
     expect(npcFixes).toContain("function ForeverNpcTraces:Load()");
-    expect(npcFixes).toContain("    return {\n    }");
-    expect(npcFixes).not.toContain("[823]");
+    expect(npcFixes).toContain("[823] = {");
+    expect(npcFixes).toContain('[npcKeys.name] = "Deputy Willem",');
   });
 
   it("should skip sessions with TBC interfaceVersion (10xxx)", () => {

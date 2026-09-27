@@ -104,9 +104,18 @@ function isForeverBuild(interfaceVersion: number | undefined): boolean {
 }
 
 export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
+  // Filter out sessions from known non-Forever builds.
+  // Sessions without GetBuildInfo are INCLUDED (they might be early Forever beta
+  // traces with valuable data) - any Classic IDs they contain will be filtered out
+  // by filterBelowMax below.
   const foreverSessions = sessions.filter((session) => {
     const version = getInterfaceVersion(session);
-    return isForeverBuild(version);
+    // If we have interfaceVersion, only include Forever builds (16xxx)
+    if (version !== undefined) {
+      return isForeverBuild(version);
+    }
+    // No GetBuildInfo - include the session (might have Forever IDs)
+    return true;
   });
 
   const header = {
