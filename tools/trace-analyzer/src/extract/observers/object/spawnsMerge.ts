@@ -13,8 +13,64 @@ const TOKEN_PRIORITY: Record<string, number> = {
   target: 1,
 };
 
+const SPAWN_CLUSTER_THRESHOLD = 0.05; // 5% of map coordinate range
+const CLUSTER_EPSILON = 1e-9; // Tolerance for floating point comparisons
+
 function tokenPriority(token: string): number {
   return TOKEN_PRIORITY[token] ?? 0;
+}
+
+/**
+ * Clusters nearby spawn coordinates and averages each cluster.
+ * Two points are in the same cluster if their Euclidean distance is <= threshold.
+ */
+function clusterAndAverageCoordinatess(
+  coords: Array<[number, number]>,
+  threshold: number,
+): Array<[number, number]> {
+  if (coords.length === 0) return [];
+  if (coords.length === 1) return coords;
+
+  // Sort coords first to ensure consistent clustering order
+  coords = [...coords].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+  // Simple greedy clustering: for each point, find if it belongs to an existing cluster
+  const clusters: Array<{ points: Array<[number, number]>; sumX: number; sumY: number }> = [];
+
+  for (const [x, y] of coords) {
+    let added = false;
+    for (const cluster of clusters) {
+      // Check if this point is within threshold of any point in the cluster
+      for (const [cx, cy] of cluster.points) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= threshold + CLUSTER_EPSILON) {
+          // Add to this cluster
+          cluster.points.push([x, y]);
+          cluster.sumX += x;
+          cluster.sumY += y;
+          added = true;
+          break;
+        }
+      }
+      if (added) break;
+    }
+    if (!added) {
+      // Start a new cluster
+      clusters.push({
+        points: [[x, y]],
+        sumX: x,
+        sumY: y,
+      });
+    }
+  }
+
+  // Return the centroid of each cluster, rounded to 2 decimal places
+  return clusters.map((c) => [
+    Math.round((c.sumX / c.points.length) * 100) / 100,
+    Math.round((c.sumY / c.points.length) * 100) / 100,
+  ]);
 }
 
 export function mergeSpawns(
@@ -44,8 +100,10 @@ export function mergeSpawns(
 
     const result: Record<number, Array<[number, number]>> = {};
     for (const [zoneID, coords] of byZone) {
-      coords.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-      result[zoneID] = coords;
+      // Cluster nearby coordinates and average each cluster
+      const clustered = clusterAndAverageCoordinatess(coords, SPAWN_CLUSTER_THRESHOLD);
+      clustered.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      result[zoneID] = clustered;
     }
     return result;
   }
@@ -75,8 +133,10 @@ export function mergeSpawns(
 
   const result: Record<number, Array<[number, number]>> = {};
   for (const [zoneID, coords] of byZone) {
-    coords.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    result[zoneID] = coords;
+    // Cluster nearby coordinates and average each cluster
+    const clustered = clusterAndAverageCoordinatess(coords, SPAWN_CLUSTER_THRESHOLD);
+    clustered.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    result[zoneID] = clustered;
   }
 
   return result;

@@ -32,17 +32,19 @@ describe("mergeSpawns", () => {
     });
   });
 
-  it("should deduplicate identical coordinates within a zone", () => {
+  it("should cluster nearby coordinates and average them", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(823, { zoneID: 40, x: 30.01, y: 86.02 }, 10),
       obs(823, { zoneID: 40, x: 30.01, y: 86.02 }, 20),
-      obs(823, { zoneID: 40, x: 30.01, y: 86.03 }, 30), // slightly different
+      obs(823, { zoneID: 40, x: 30.01, y: 86.03 }, 30), // close enough to cluster
     ];
 
+    // These coordinates are within threshold and get clustered/averaged
+    // The two duplicates of (30.01, 86.02) are deduplicated first (4 decimal places)
+    // Then (86.02 + 86.03) / 2 = 86.025, which rounds to 86.03
     expect(mergeSpawns(observations)).toEqual({
       40: [
-        [30.01, 86.02],
-        [30.01, 86.03],
+        [30.01, 86.03], // rounded to 2 decimal places
       ],
     });
   });
@@ -93,6 +95,73 @@ describe("mergeSpawns", () => {
       ],
       12: [[47.46, 62.18]],
     });
+  });
+
+  it("should cluster nearby coordinates and average them", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // Multiple observations very close together (should cluster into one)
+      obs(823, { zoneID: 40, x: 21.83, y: 45.3 }, 1, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.83, y: 45.32 }, 2, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.83, y: 45.35 }, 3, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.84, y: 45.26 }, 4, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.84, y: 45.29 }, 5, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.84, y: 45.3 }, 6, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.84, y: 45.34 }, 7, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.84, y: 45.35 }, 8, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.86, y: 45.28 }, 9, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.86, y: 45.3 }, 10, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.87, y: 45.29 }, 11, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.87, y: 45.3 }, 12, "questnpc"),
+      obs(823, { zoneID: 40, x: 21.88, y: 45.31 }, 13, "questnpc"),
+    ];
+
+    const result = mergeSpawns(observations);
+    // All these points should cluster into a single spawn point
+    expect(result[40]).toHaveLength(1);
+    // The centroid should be rounded to 2 decimal places: (21.85, 45.31)
+    expect(result[40]![0][0]).toBe(21.85);
+    expect(result[40]![0][1]).toBe(45.31);
+  });
+
+  it("should keep separate clusters when points are far apart", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // Cluster 1: around (30, 86)
+      obs(823, { zoneID: 40, x: 30.0, y: 86.0 }, 1, "questnpc"),
+      obs(823, { zoneID: 40, x: 30.02, y: 86.01 }, 2, "questnpc"),
+      obs(823, { zoneID: 40, x: 30.04, y: 86.0 }, 3, "questnpc"),
+      // Cluster 2: around (47, 62) - far from cluster 1
+      obs(823, { zoneID: 40, x: 47.46, y: 62.18 }, 4, "questnpc"),
+      obs(823, { zoneID: 40, x: 47.48, y: 62.2 }, 5, "questnpc"),
+    ];
+
+    const result = mergeSpawns(observations);
+    // Should have 2 separate clusters
+    expect(result[40]).toHaveLength(2);
+  });
+
+  it("should cluster points exactly at threshold distance", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // Points exactly 0.05 apart (at threshold) - use simpler values to avoid floating point issues
+      obs(823, { zoneID: 40, x: 30.0, y: 86.0 }, 1, "questnpc"),
+      obs(823, { zoneID: 40, x: 30.05, y: 86.0 }, 2, "questnpc"),
+    ];
+
+    const result = mergeSpawns(observations);
+    // Points exactly 0.05 apart may or may not cluster due to floating point precision.
+    // The important thing is that points closer than 0.05 cluster and points farther don't.
+    expect(result[40]).toHaveLength(1);
+  });
+
+  it("should NOT cluster points just beyond threshold", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // Points 0.051 apart (just beyond threshold)
+      obs(823, { zoneID: 40, x: 30.0, y: 86.0 }, 1, "questnpc"),
+      obs(823, { zoneID: 40, x: 30.051, y: 86.0 }, 2, "questnpc"),
+    ];
+
+    const result = mergeSpawns(observations);
+    // Should NOT cluster (distance > threshold)
+    expect(result[40]).toHaveLength(2);
   });
 
   it("should prefer questnpc token for zoneID weight", () => {
