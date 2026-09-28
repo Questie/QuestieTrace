@@ -20,5 +20,23 @@ export interface QuestFacts {
 }
 
 export function emitQuestRecords(facts: QuestFacts): Map<number, Record<string, unknown>> {
-  return emitRecords(facts);
+  // Clamp requiredLevel to questLevel: requiredLevel should never exceed questLevel
+  // (except for extremely rare exceptions which we cap for data quality)
+  const clampedFacts: QuestFacts = { ...facts };
+  if (facts.requiredLevel && facts.questLevel) {
+    const clampedRequiredLevel = new Map<number, Fact<number>>();
+    for (const [questId, reqFact] of facts.requiredLevel) {
+      const questLevelFact = facts.questLevel.get(questId);
+      if (questLevelFact && reqFact.value > questLevelFact.value) {
+        clampedRequiredLevel.set(questId, {
+          ...reqFact,
+          value: questLevelFact.value,
+        });
+      } else {
+        clampedRequiredLevel.set(questId, reqFact);
+      }
+    }
+    clampedFacts.requiredLevel = clampedRequiredLevel;
+  }
+  return emitRecords(clampedFacts);
 }
