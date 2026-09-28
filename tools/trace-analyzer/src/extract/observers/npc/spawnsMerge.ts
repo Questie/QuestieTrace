@@ -28,7 +28,14 @@ function clusterAndAverageCoordinatess(
   threshold: number,
 ): Array<[number, number]> {
   if (coords.length === 0) return [];
-  if (coords.length === 1) return coords;
+  if (coords.length === 1) {
+    // Round singletons too, so every returned coordinate matches the 2-decimal
+    // precision of cluster centroids.
+    return [[
+      Math.round(coords[0][0] * 100) / 100,
+      Math.round(coords[0][1] * 100) / 100,
+    ]];
+  }
 
   // Sort coords first to ensure consistent clustering order
   coords = [...coords].sort((a, b) => a[0] - b[0] || a[1] - b[1]);

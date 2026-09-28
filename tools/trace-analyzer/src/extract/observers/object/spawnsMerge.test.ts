@@ -155,6 +155,27 @@ describe("mergeSpawns (object)", () => {
     expect(result[40]![0]).toEqual([10.01, 50.03]);
   });
 
+  it("should round singleton coordinates to 2 decimal places (questnpc branch)", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // Single 3-decimal coordinate must be rounded like a cluster centroid
+      obs(2843, { zoneID: 40, x: 30.123, y: 86.456 }, 1, "questnpc"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[30.12, 86.46]],
+    });
+  });
+
+  it("should round singleton coordinates to 2 decimal places (fallback branch)", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 47.123, y: 62.456 }, 1, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[47.12, 62.46]],
+    });
+  });
+
   it("should handle multiple zones with multiple coordinates each", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 1),
