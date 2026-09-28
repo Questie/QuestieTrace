@@ -38,7 +38,8 @@ function clusterAndAverageCoordinatess(
   const clusters: Array<{ points: Array<[number, number]>; sumX: number; sumY: number }> = [];
 
   for (const [x, y] of coords) {
-    let added = false;
+    // Find every existing cluster containing a point within threshold of (x, y)
+    const matched: Array<{ points: Array<[number, number]>; sumX: number; sumY: number }> = [];
     for (const cluster of clusters) {
       // Check if this point is within threshold of any point in the cluster
       for (const [cx, cy] of cluster.points) {
@@ -46,23 +47,31 @@ function clusterAndAverageCoordinatess(
         const dy = y - cy;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist <= threshold + CLUSTER_EPSILON) {
-          // Add to this cluster
-          cluster.points.push([x, y]);
-          cluster.sumX += x;
-          cluster.sumY += y;
-          added = true;
+          matched.push(cluster);
           break;
         }
       }
-      if (added) break;
     }
-    if (!added) {
+
+    if (matched.length === 0) {
       // Start a new cluster
       clusters.push({
         points: [[x, y]],
         sumX: x,
         sumY: y,
       });
+    } else {
+      // Merge all matched clusters into the first one, then add the new point
+      const [primary, ...others] = matched;
+      for (const cluster of others) {
+        primary.points.push(...cluster.points);
+        primary.sumX += cluster.sumX;
+        primary.sumY += cluster.sumY;
+        clusters.splice(clusters.indexOf(cluster), 1);
+      }
+      primary.points.push([x, y]);
+      primary.sumX += x;
+      primary.sumY += y;
     }
   }
 

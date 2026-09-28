@@ -139,6 +139,22 @@ describe("mergeSpawns", () => {
     expect(result[40]).toHaveLength(2);
   });
 
+  it("should merge clusters when a point is within threshold of multiple clusters", () => {
+    const observations: TaggedSpawnObservation[] = [
+      // A and B are > 0.05 apart, so they form separate clusters
+      obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "questnpc"),
+      obs(823, { zoneID: 40, x: 10.01, y: 50.06 }, 2, "questnpc"),
+      // C is within 0.05 of both A and B: it must merge the two clusters into one
+      obs(823, { zoneID: 40, x: 10.02, y: 50.03 }, 3, "questnpc"),
+    ];
+
+    const result = mergeSpawns(observations);
+    // Joining only the first match would leave 2 clusters; merging all matches yields 1
+    expect(result[40]).toHaveLength(1);
+    // Centroid of (10.00, 50.00), (10.01, 50.06), (10.02, 50.03) rounded to 2 decimals
+    expect(result[40]![0]).toEqual([10.01, 50.03]);
+  });
+
   it("should cluster points exactly at threshold distance", () => {
     const observations: TaggedSpawnObservation[] = [
       // Points exactly 0.05 apart (at threshold) - use simpler values to avoid floating point issues
