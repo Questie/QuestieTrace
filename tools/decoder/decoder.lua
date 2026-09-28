@@ -303,39 +303,46 @@ local function RunBatch(inputDir, outputDir)
   end
 
   local total = #files
-  local succeeded, failed = 0, 0
+  local succeeded, failed, skippedExisting = 0, 0, 0
   local usedOutputPaths = {}
   for i, name in ipairs(files) do
-    local inputPath = inputDir .. "/" .. name
-    local serialized, err = DecodeFile(inputPath)
-    if not serialized then
-      io.stderr:write("skip " .. name .. ": " .. err .. "\n")
-      failed = failed + 1
+    local outputName = ReplaceExtensionWithLua(name)
+    local outputPath = outputDir .. "/" .. outputName
+
+    if PathMode(outputPath) == "file" then
+      skippedExisting = skippedExisting + 1
     else
-      local outputPath = outputDir .. "/" .. ReplaceExtensionWithLua(name)
-      local clashingName = usedOutputPaths[outputPath]
-      if clashingName then
-        io.stderr:write("skip " .. name .. ": output path '" .. outputPath ..
-          "' collides with '" .. clashingName .. "'\n")
+      local inputPath = inputDir .. "/" .. name
+      io.stderr:write("decoding " .. name .. "\n")
+      local serialized, err = DecodeFile(inputPath)
+      if not serialized then
+        io.stderr:write("skip " .. name .. ": " .. err .. "\n")
         failed = failed + 1
       else
-        local ok, writeErr = WriteToFile(serialized, outputPath)
-        if not ok then
-          io.stderr:write("skip " .. name .. ": " .. writeErr .. "\n")
+        local clashingName = usedOutputPaths[outputPath]
+        if clashingName then
+          io.stderr:write("skip " .. name .. ": output path '" .. outputPath ..
+            "' collides with '" .. clashingName .. "'\n")
           failed = failed + 1
         else
-          usedOutputPaths[outputPath] = name
-          succeeded = succeeded + 1
+          local ok, writeErr = WriteToFile(serialized, outputPath)
+          if not ok then
+            io.stderr:write("skip " .. name .. ": " .. writeErr .. "\n")
+            failed = failed + 1
+          else
+            usedOutputPaths[outputPath] = name
+            succeeded = succeeded + 1
+          end
         end
       end
     end
 
     if total > 0 and i % 100 == 0 or i == total then
-      io.stderr:write(string.format("decode: %d / %d\n", i, total))
+      io.stderr:write(string.format("decode: %d / %d - skipped %d\n", i, total, skippedExisting))
     end
   end
 
-  print(string.format("decoded %d file(s), %d failed", succeeded, failed))
+  print(string.format("decoded %d file(s), %d failed, %d skipped (already in output)", succeeded, failed, skippedExisting))
   if failed > 0 then
     os.exit(1)
   end

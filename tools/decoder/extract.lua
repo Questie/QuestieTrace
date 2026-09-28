@@ -123,8 +123,13 @@ local function Main()
       else
         local id = ExtractJsonStringField(raw, "id")
           or jsonPath:match("([^/]+)%.json$")
-        WriteToFile(exportString, inputDir .. "/" .. id .. ".txt")
-        written = written + 1
+        local outputPath = inputDir .. "/" .. id .. ".txt"
+        if PathMode(outputPath) == "file" then
+          skipped = skipped + 1
+        else
+          WriteToFile(exportString, outputPath)
+          written = written + 1
+        end
       end
     end
 

@@ -27,9 +27,16 @@ else
   # decoder.lua emits "return { ... }" (a plain Lua table for reading/diffing).
   # Traces/ needs real SavedVariables-style files, i.e. "QuestieTraceCharacter
   # = { ... }", which is what tools/trace-analyzer expects as a global.
+  moved=0
   for f in "${outputFiles[@]}"; do
+    dest="$tracesDir/$(basename "$f")"
+    if [ -f "$dest" ]; then
+      echo "skip: $(basename "$f") already exists in Traces"
+      continue
+    fi
     sed '1s/^return {/QuestieTraceCharacter = {/' "$f" > "$f.tmp" && mv -f "$f.tmp" "$f"
+    mv -f "$f" "$dest"
+    ((moved++))
   done
-  mv -f "${outputFiles[@]}" "$tracesDir/"
-  echo "moved ${#outputFiles[@]} file(s) to '$tracesDir'"
+  echo "moved $moved file(s) to '$tracesDir'"
 fi
