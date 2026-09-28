@@ -19,7 +19,60 @@ function makeSession(functions: SessionRecord["functions"] = {}): SessionRecord 
 }
 
 describe("observeRequiredLevel", () => {
-  it("should derive requiredLevel as the lowest questLevel for a quest", () => {
+  it("should derive requiredLevel as the lowest acceptance level for a quest", () => {
+    const session = makeSession({
+      QuestAcceptLevel: {
+        "96659": [
+          { t: 3, tp: 3, v: 60 },
+          { t: 7, tp: 7, v: 55 },
+        ],
+      },
+    });
+
+    expect(observeRequiredLevel(session)).toEqual([
+      {
+        entityId: 96659,
+        value: 55,
+        confidence: "high",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should return no observations when no QuestAcceptLevel data exists", () => {
+    const session = makeSession({
+      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+    });
+
+    expect(observeRequiredLevel(session)).toEqual([]);
+  });
+
+  it("should compute the minimum across multiple quests in the same session", () => {
+    const session = makeSession({
+      QuestAcceptLevel: {
+        "96659": [{ t: 3, tp: 3, v: 60 }],
+        "12345": [{ t: 7, tp: 7, v: 45 }],
+      },
+    });
+
+    const result = observeRequiredLevel(session);
+    expect(result).toHaveLength(2);
+    // Order doesn't matter - check both quests are present
+    expect(result.find(r => r.entityId === 96659)).toEqual({
+      entityId: 96659,
+      value: 60,
+      confidence: "high",
+      provenance: { session: "test-session", t: 3 },
+    });
+    expect(result.find(r => r.entityId === 12345)).toEqual({
+      entityId: 12345,
+      value: 45,
+      confidence: "high",
+      provenance: { session: "test-session", t: 7 },
+    });
+  });
+
+  it("should fall back to questLevel when QuestAcceptLevel is not available (legacy traces)", () => {
     const session = makeSession({
       GetQuestID: [
         { t: 3, tp: 3, v: 96659 },
@@ -38,88 +91,7 @@ describe("observeRequiredLevel", () => {
         entityId: 96659,
         value: 55,
         confidence: "medium",
-        provenance: { session: "test-session", t: 0 },
-      },
-    ]);
-  });
-
-  it("should return no observations when no questLevel data exists", () => {
-    const session = makeSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
-    });
-
-    expect(observeRequiredLevel(session)).toEqual([]);
-  });
-
-  it("should compute the minimum across multiple quests in the same session", () => {
-    const session = makeSession({
-      GetQuestID: [
-        { t: 3, tp: 3, v: 96659 },
-        { t: 7, tp: 7, v: 12345 },
-      ],
-      GetQuestLogTitle: {
-        "96659": [
-          { t: 3, tp: 3, v: { 1: "A Threat Within", 2: 60, 8: 96659, n: 8 } },
-        ],
-        "12345": [
-          { t: 7, tp: 7, v: { 1: "Arya's Request", 2: 45, 8: 12345, n: 8 } },
-        ],
-      },
-    });
-
-    expect(observeRequiredLevel(session)).toEqual([
-      {
-        entityId: 96659,
-        value: 60,
-        confidence: "medium",
-        provenance: { session: "test-session", t: 0 },
-      },
-      {
-        entityId: 12345,
-        value: 45,
-        confidence: "medium",
-        provenance: { session: "test-session", t: 0 },
-      },
-    ]);
-  });
-
-  it("should derive requiredLevel for a quest-log quest without a GetQuestID encounter", () => {
-    const session = makeSession({
-      "C_QuestLog.GetInfo": {
-        "98013": [{ t: 2, tp: 2, v: { questID: 98013, level: 80, title: "Swelling Forces" } }],
-      },
-    });
-
-    expect(observeRequiredLevel(session)).toEqual([
-      {
-        entityId: 98013,
-        value: 80,
-        confidence: "medium",
-        provenance: { session: "test-session", t: 0 },
-      },
-    ]);
-  });
-
-  it("should derive requiredLevel from C_QuestLog.GetInfo when available", () => {
-    const session = makeSession({
-      GetQuestID: [
-        { t: 3, tp: 3, v: 96659 },
-        { t: 7, tp: 7, v: 96659 },
-      ],
-      "C_QuestLog.GetInfo": {
-        "96659": [
-          { t: 3, tp: 3, v: { questID: 96659, level: 60, title: "A Threat Within" } },
-          { t: 7, tp: 7, v: { questID: 96659, level: 50, title: "A Threat Within" } },
-        ],
-      },
-    });
-
-    expect(observeRequiredLevel(session)).toEqual([
-      {
-        entityId: 96659,
-        value: 50,
-        confidence: "medium",
-        provenance: { session: "test-session", t: 0 },
+        provenance: { session: "test-session", t: 3 },
       },
     ]);
   });
