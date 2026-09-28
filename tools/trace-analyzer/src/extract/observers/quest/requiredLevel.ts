@@ -4,15 +4,39 @@
 // (player's level at acceptance time). Take the minimum observed acceptance
 // level across all sessions.
 //
-// Fallback: If QuestAcceptLevel is not available (older traces), derive from
-// the minimum questLevel observed across all encounters — a quest's required
-// level is typically <= its own level, so the minimum observed questLevel is a
-// conservative lower bound.
+// Fallback: If QuestAcceptLevel is not available (older traces), correlate
+// QUEST_ACCEPTED events with the UnitLevel("player") stream to find the
+// player's level at acceptance time, then take the minimum across sessions.
 
-import { getParamKeys, getStream } from "../../../core/emulator";
-import { observeQuestLevel } from "./questLevel";
-import type { SessionRecord } from "../../../core/types";
+import { getParamKeys, getStream, valueAt } from "../../../core/emulator";
+import type { SessionRecord, EventEntry } from "../../../core/types";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
+
+function unpackQuestId(args: unknown): number | null {
+  if (args !== null && args !== undefined && typeof args === "object" && !Array.isArray(args)) {
+    const obj = args as Record<string, unknown>;
+    if (typeof obj.n === "number" && typeof obj[1] === "number") {
+      return obj[1] as number;
+    }
+  }
+  return null;
+}
+
+function findPlayerLevelAtTime(session: SessionRecord, targetT: number): number | null {
+  const unitLevelStream = getStream(session, "UnitLevel", "player");
+  if (!unitLevelStream || unitLevelStream.length === 0) return null;
+
+  const level = valueAt(unitLevelStream, targetT);
+  return typeof level === "number" && Number.isFinite(level) ? level : null;
+}
+
+export function mergeRequiredLevel(observations: Observation<number>[]): number {
+  let min = Infinity;
+  for (const obs of observations) {
+    if (obs.value < min) min = obs.value;
+  }
+  return min;
+}
 
 export const observeRequiredLevel: FieldObserver<number> = (session) => {
   const observations: Observation<number>[] = [];
@@ -56,32 +80,35 @@ export const observeRequiredLevel: FieldObserver<number> = (session) => {
     }
   }
 
-  // --- Fallback: questLevel (for traces without QuestAcceptLevel) ---
+  // --- Fallback: UnitLevel at QUEST_ACCEPTED event time (for traces without QuestAcceptLevel) ---
   if (observations.length > 0) {
     // Already have high-confidence data from QuestAcceptLevel
     return observations;
   }
 
-  const questLevelObs = observeQuestLevel(session);
-  if (questLevelObs.length === 0) return [];
+  // Find all QUEST_ACCEPTED events
+  const acceptedQuests = new Map<number, { level: number; t: number }>();
 
-  const minByEntity: Map<number, { level: number; t: number }> = new Map();
-  for (const obs of questLevelObs) {
-    const current = minByEntity.get(obs.entityId);
-    if (current === undefined) {
-      // First observation for this quest
-      minByEntity.set(obs.entityId, { level: obs.value, t: obs.provenance.t });
-    } else if (obs.value < current.level) {
-      // Found a new minimum - update level but keep original t for the minimum
-      minByEntity.set(obs.entityId, { level: obs.value, t: current.t });
+  for (const event of session.events) {
+    if (event.e !== "QUEST_ACCEPTED") continue;
+
+    const questId = unpackQuestId(event.a);
+    if (questId === null || questId <= 0) continue;
+
+    const playerLevel = findPlayerLevelAtTime(session, event.t);
+    if (playerLevel === null) continue;
+
+    const current = acceptedQuests.get(questId);
+    if (current === undefined || playerLevel < current.level) {
+      acceptedQuests.set(questId, { level: playerLevel, t: event.t });
     }
   }
 
-  for (const [entityId, { level, t }] of minByEntity) {
+  for (const [entityId, { level, t }] of acceptedQuests) {
     observations.push({
       entityId,
       value: level,
-      confidence: "medium", // derived from questLevel, not directly observed
+      confidence: "medium", // correlated from UnitLevel at acceptance event time
       provenance: { session: sessionLabel(session), t },
     });
   }

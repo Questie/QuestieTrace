@@ -50,6 +50,7 @@ import { observeZoneOrSort } from './observers/quest';
 import { observeObjectives, mergeQuestObjectives, observeTriggerEnd, mergeQuestTriggerEnds } from './observers/quest';
 import { observeObjectivesText } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
+import {mergeRequiredLevel} from './observers/quest/requiredLevel';
 
 const MAX_IDS = {
     npc: 18199,
@@ -164,7 +165,7 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   const questRecords = emitQuestRecords({
     name: aggregateField(sessionsToProcess.flatMap(observeQuestName)),
     questLevel: aggregateField(sessionsToProcess.flatMap(observeQuestLevel)),
-    requiredLevel: aggregateField(sessionsToProcess.flatMap(observeRequiredLevel)),
+    requiredLevel: aggregateField(sessionsToProcess.flatMap(observeRequiredLevel), mergeRequiredLevel),
     zoneOrSort: zoneOrSortFacts,
     objectives: aggregateField(
       sessionsToProcess.flatMap(observeObjectives),
