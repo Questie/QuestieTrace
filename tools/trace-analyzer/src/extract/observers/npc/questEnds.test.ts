@@ -224,4 +224,30 @@ describe("observeQuestEnds (npc)", () => {
 
     expect(observeQuestEnds(session)).toEqual([]);
   });
+
+  it("should attribute correctly even when the GUID sample is much older than the quest event (long dialog read)", () => {
+    // questnpc/npc streams are only re-written on change, so a player reading the quest text for a long
+    // time before completing leaves the last GUID sample far in the past - this must not be treated as
+    // stale.
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 60, tp: 60, v: 96659 }],
+        UnitGUID: {
+          npc: [{ t: 1, tp: 1, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [
+        { t: 60, tp: 60, e: "QUEST_COMPLETE", a: { n: 0 } },
+      ]
+    );
+
+    expect(observeQuestEnds(session)).toEqual([
+      {
+        entityId: 197,
+        value: 96659,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 60 },
+      },
+    ]);
+  });
 });

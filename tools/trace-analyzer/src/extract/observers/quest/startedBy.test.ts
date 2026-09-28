@@ -190,7 +190,23 @@ describe("observeStartedBy", () => {
     expect(results.filter((r) => r.value.itemId).map((r) => r.value.itemId)).toEqual([12345, 67890]);
   });
 
-  it("should capture an object starter from GameObject GUID at quest event time", () => {
+  it("should ignore target GUID (only questnpc and npc are used)", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        UnitGUID: {
+          target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [
+        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+      ]
+    );
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should ignore GameObject GUID on target token (only questnpc/npc used)", () => {
     const session = makeSession(
       {
         GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
@@ -203,12 +219,31 @@ describe("observeStartedBy", () => {
       ]
     );
 
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should attribute correctly even when the GUID sample is much older than the quest event (long dialog read)", () => {
+    // questnpc/npc streams are only re-written on change (see UnitInteraction.lua dedup), so a player
+    // reading gossip/quest text for a long time before accepting leaves the last GUID sample far in the
+    // past relative to the anchor event - this must not be treated as stale.
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 60, tp: 60, v: 96659 }],
+        UnitGUID: {
+          questnpc: [{ t: 1, tp: 1, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [
+        { t: 60, tp: 60, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+      ]
+    );
+
     expect(observeStartedBy(session)).toEqual([
       {
         entityId: 96659,
-        value: { objectId: 2843 },
-        confidence: "low",
-        provenance: { session: "test-session", t: 3 },
+        value: { creatureId: 197 },
+        confidence: "medium",
+        provenance: { session: "test-session", t: 60 },
       },
     ]);
   });

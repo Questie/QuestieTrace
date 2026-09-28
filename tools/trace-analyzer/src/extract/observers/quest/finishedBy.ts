@@ -6,9 +6,10 @@
 // Sources:
 //   - QUEST_COMPLETE event: questId + GetQuestID() at same t (quest)
 //   - QUEST_TURNED_IN event: questId from event payload (arg 1)
-//   - C_GossipInfo.GetActiveQuests() snapshots: questID + UnitGUID("questnpc"/"npc"/"target") at snapshot t
+//   - C_GossipInfo.GetActiveQuests() snapshots: questID + UnitGUID("questnpc"/"npc") at snapshot t
 //     (Active = in log, can be turned in/finished at this NPC)
-//   - At those times, UnitGUID("questnpc") / UnitGUID("npc") / UnitGUID("target") → finisher
+//   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → finisher
+//   - questnpc takes priority over npc (player may target something else while talking to quest NPC)
 //
 // Custom merge: set-union per finisher type across all observations.
 
@@ -60,13 +61,14 @@ function pushGuidObservations(
   t: number,
   observations: Observation<FinishedByFinisher>[],
 ): void {
-  const questnpcGuid = valueAt(getStream(session, "UnitGUID", "questnpc") ?? [], t);
-  const npcGuid = valueAt(getStream(session, "UnitGUID", "npc") ?? [], t);
-  const targetGuid = valueAt(getStream(session, "UnitGUID", "target") ?? [], t);
+  const tokens = ["questnpc", "npc"] as const;
 
-  const guidsToCheck = [questnpcGuid, npcGuid, targetGuid].filter(Boolean);
+  for (const token of tokens) {
+    const stream = getStream(session, "UnitGUID", token);
+    if (!stream) continue;
 
-  for (const guid of guidsToCheck) {
+    const guid = valueAt(stream, t);
+
     if (typeof guid !== "string") continue;
     const parsed = parseGuid(guid);
     if (!parsed || !parsed.id) continue;

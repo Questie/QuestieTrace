@@ -65,12 +65,12 @@ describe("observeFinishedBy", () => {
     ]);
   });
 
-  it("should capture an object finisher from GameObject GUID at quest completion time", () => {
+  it("should capture an object finisher from GameObject GUID on npc token", () => {
     const session = makeSession(
       {
         GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
         UnitGUID: {
-          target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
         },
       },
       [
@@ -94,7 +94,7 @@ describe("observeFinishedBy", () => {
         GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
         UnitGUID: {
           questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
-          target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
         },
       },
       [
@@ -106,6 +106,29 @@ describe("observeFinishedBy", () => {
     expect(results).toHaveLength(2);
     expect(results.map((r) => r.value)).toContainEqual({ creatureId: 197 });
     expect(results.map((r) => r.value)).toContainEqual({ objectId: 2843 });
+  });
+
+  it("should prefer questnpc over npc when both are present", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-200-000040" }],
+        },
+      },
+      [
+        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+      ]
+    );
+
+    // Both tokens produce observations; questnpc comes first in array so its observation appears first
+    const results = observeFinishedBy(session);
+    const creatures = results.filter((r) => r.value.creatureId);
+    expect(creatures).toHaveLength(2);
+    // questnpc is processed first (priority)
+    expect(creatures[0].value.creatureId).toBe(197);
+    expect(creatures[1].value.creatureId).toBe(200);
   });
 
   it("should capture multiple creature finishers across different quest events", () => {
@@ -202,7 +225,7 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
         },
       },
       [
@@ -361,5 +384,31 @@ describe("observeFinishedBy", () => {
     const result = mergeFinishedBy(obs);
     expect(result.creatures).toEqual([197]);
     expect(result.objects).toEqual([2843]);
+  });
+
+  it("should attribute correctly even when the GUID sample is much older than the quest event (long dialog read)", () => {
+    // questnpc/npc streams are only re-written on change (see UnitInteraction.lua dedup), so a player
+    // reading the quest text for a long time before completing leaves the last GUID sample far in the
+    // past relative to the anchor event - this must not be treated as stale.
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 60, tp: 60, v: 96659 }],
+        UnitGUID: {
+          questnpc: [{ t: 1, tp: 1, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [
+        { t: 60, tp: 60, e: "QUEST_COMPLETE", a: { n: 0 } },
+      ]
+    );
+
+    expect(observeFinishedBy(session)).toEqual([
+      {
+        entityId: 96659,
+        value: { creatureId: 197 },
+        confidence: "medium",
+        provenance: { session: "test-session", t: 60 },
+      },
+    ]);
   });
 });

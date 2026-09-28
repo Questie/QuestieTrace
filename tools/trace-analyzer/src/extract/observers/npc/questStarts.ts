@@ -29,10 +29,14 @@ function pushNpcObservations(
   t: number,
   observations: Observation<number>[],
 ): void {
-  const questnpcGuid = valueAt(getStream(session, "UnitGUID", "questnpc") ?? [], t);
-  const npcGuid = valueAt(getStream(session, "UnitGUID", "npc") ?? [], t);
+  const tokens = ["questnpc", "npc"] as const;
 
-  for (const guid of [questnpcGuid, npcGuid]) {
+  for (const token of tokens) {
+    const stream = getStream(session, "UnitGUID", token);
+    if (!stream) continue;
+
+    const guid = valueAt(stream, t);
+
     if (typeof guid !== "string") continue;
     const parsed = parseGuid(guid);
     if (parsed?.kind === "npc" && parsed.id) {

@@ -5,10 +5,13 @@
 // Sources:
 //   - QUEST_DETAIL event: questStartItemID (item starter) + GetQuestID() at same t (quest)
 //   - QUEST_ACCEPTED event: questId from the event payload
-//   - C_GossipInfo.GetAvailableQuests() snapshots: questID + UnitGUID("questnpc"/"npc"/"target") at snapshot t
+//   - C_GossipInfo.GetAvailableQuests() snapshots: questID + UnitGUID("questnpc"/"npc") at snapshot t
 //     (Available = can be accepted/started at this NPC)
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → creature starter
 //   - At same times, UnitGUID for GameObject tokens → object starter
+//   - questnpc takes priority over npc (player may target something else while talking to quest NPC)
+//   - "target" is intentionally excluded: unlike questnpc/npc, it can point at anything the player
+//     happens to be targeting and is not tied to the quest interaction.
 //
 // Custom merge: set-union per starter type across all observations.
 
@@ -65,13 +68,14 @@ function pushGuidObservations(
   t: number,
   observations: Observation<StartedByStarter>[],
 ): void {
-  const questnpcGuid = valueAt(getStream(session, "UnitGUID", "questnpc") ?? [], t);
-  const npcGuid = valueAt(getStream(session, "UnitGUID", "npc") ?? [], t);
-  const targetGuid = valueAt(getStream(session, "UnitGUID", "target") ?? [], t);
+  const tokens = ["questnpc", "npc"] as const;
 
-  const guidsToCheck = [questnpcGuid, npcGuid, targetGuid].filter(Boolean);
+  for (const token of tokens) {
+    const stream = getStream(session, "UnitGUID", token);
+    if (!stream) continue;
 
-  for (const guid of guidsToCheck) {
+    const guid = valueAt(stream, t);
+
     if (typeof guid !== "string") continue;
     const parsed = parseGuid(guid);
     if (!parsed || !parsed.id) continue;
