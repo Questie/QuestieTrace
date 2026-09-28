@@ -115,6 +115,32 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questFixes).toContain("[questKeys.objectives] = {nil,nil,{{750}}},");
     expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{30.01,86.02}}}},');  });
 
+  it("should export objectivesText as a line list, keeping blank separator lines", () => {
+    const session = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      "GetQuestLogQuestText": {
+        "25": [
+          {
+            t: 10,
+            tp: 10,
+            v: {
+              1: "Warlord Senta has a problem...",
+              2: "Dispatch 12 Befouled Water Elementals at Mystral Lake.\n\nScout the gazebo on Mystral Lake.\n\nReturn to Mastok Wrilehiss.",
+              n: 2,
+            },
+          },
+        ],
+      },
+    });
+
+    const { questFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
+
+    expect(questFixes).toContain(
+      '[questKeys.objectivesText] = {"Dispatch 12 Befouled Water Elementals at Mystral Lake.","","Scout the gazebo on Mystral Lake.","","Return to Mastok Wrilehiss."},',
+    );
+    expect(questFixes).not.toContain("Warlord Senta has a problem");
+  });
+
   it("should produce a paste-ready foreverItemTraces.lua correction for a looted item", () => {
     const session = makeForeverSession({
       GetLootSlotLink: { "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
