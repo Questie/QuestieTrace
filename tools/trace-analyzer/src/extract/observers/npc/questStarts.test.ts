@@ -184,4 +184,55 @@ describe("observeQuestStarts (npc)", () => {
     expect(mergeQuestStarts(obs)).toEqual(expect.arrayContaining([96659, 12345]));
     expect(mergeQuestStarts(obs)).toHaveLength(2);
   });
+
+  it("should map a quest to the npcID that started it via C_GossipInfo.GetAvailableQuests snapshot", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetAvailableQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
+            ],
+          },
+        ],
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      []
+    );
+
+    expect(observeQuestStarts(session)).toEqual([
+      {
+        entityId: 276171,
+        value: 99196,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should ignore C_GossipInfo.GetActiveQuests for questStarts (active = turn-in, not start)", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetActiveQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
+            ],
+          },
+        ],
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      []
+    );
+
+    expect(observeQuestStarts(session)).toEqual([]);
+  });
 });

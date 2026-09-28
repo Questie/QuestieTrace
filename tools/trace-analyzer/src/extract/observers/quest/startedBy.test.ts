@@ -255,6 +255,114 @@ describe("observeStartedBy", () => {
     expect(observeStartedBy(session)).toEqual([]);
   });
 
+  it("should capture a creature starter from C_GossipInfo.GetAvailableQuests snapshot", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetAvailableQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
+            ],
+          },
+        ],
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      []
+    );
+
+    expect(observeStartedBy(session)).toEqual([
+      {
+        entityId: 99196,
+        value: { creatureId: 276171 },
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should capture multiple quests from a single gossip available quests snapshot", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetAvailableQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { questID: 99196, title: "A Donation of Wool", repeatable: false },
+              { questID: 99197, title: "Another Quest", repeatable: false },
+            ],
+          },
+        ],
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      []
+    );
+
+    const results = observeStartedBy(session);
+    expect(results).toHaveLength(2);
+    expect(results.map((r) => r.entityId).sort()).toEqual([99196, 99197]);
+    expect(results.map((r) => r.value.creatureId)).toEqual([276171, 276171]);
+  });
+
+  it("should ignore gossip quest entries without valid questID", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetAvailableQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { title: "No ID here", repeatable: false },
+              { questID: 0, title: "Zero ID", repeatable: false },
+            ],
+          },
+        ],
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      []
+    );
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should produce observations from both QUEST_DETAIL and gossip for the same quest", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        "C_GossipInfo.GetAvailableQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [{ questID: 96659, title: "From Gossip", repeatable: false }],
+          },
+        ],
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        },
+      },
+      [
+        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+      ]
+    );
+
+    // Both sources produce observations; mergeStartedBy unions them by type
+    const results = observeStartedBy(session);
+    const creatures = results.filter((r) => r.value.creatureId);
+    expect(creatures).toHaveLength(2); // one from QUEST_DETAIL, one from gossip
+    // mergeStartedBy will deduplicate the creature IDs
+    const merged = mergeStartedBy(results);
+    expect(merged.creatures).toEqual([197]);
+    expect(merged.creatures).toHaveLength(1);
+  });
+
   it("should merge duplicate creature starters via mergeStartedBy", () => {
     const obs = [
       { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 3 } },

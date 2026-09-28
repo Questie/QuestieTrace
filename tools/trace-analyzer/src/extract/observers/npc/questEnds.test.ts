@@ -151,4 +151,77 @@ describe("observeQuestEnds (npc)", () => {
     expect(mergeQuestEnds(obs)).toEqual(expect.arrayContaining([96659, 12345]));
     expect(mergeQuestEnds(obs)).toHaveLength(2);
   });
+
+  it("should map a quest to the npcID that finished it via QUEST_TURNED_IN event", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      [
+        { t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 99196, n: 1 } },
+      ]
+    );
+
+    expect(observeQuestEnds(session)).toEqual([
+      {
+        entityId: 276171,
+        value: 99196,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should map a quest to the npcID that finished it via C_GossipInfo.GetActiveQuests snapshot", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetActiveQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
+            ],
+          },
+        ],
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      []
+    );
+
+    expect(observeQuestEnds(session)).toEqual([
+      {
+        entityId: 276171,
+        value: 99196,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should ignore C_GossipInfo.GetAvailableQuests for questEnds (available = start, not finish)", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetAvailableQuests": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
+            ],
+          },
+        ],
+        UnitGUID: {
+          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+        },
+      },
+      []
+    );
+
+    expect(observeQuestEnds(session)).toEqual([]);
+  });
 });

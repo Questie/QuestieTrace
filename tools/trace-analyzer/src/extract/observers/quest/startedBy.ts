@@ -5,6 +5,8 @@
 // Sources:
 //   - QUEST_DETAIL event: questStartItemID (item starter) + GetQuestID() at same t (quest)
 //   - QUEST_ACCEPTED event: questId from the event payload
+//   - C_GossipInfo.GetAvailableQuests() snapshots: questID + UnitGUID("questnpc"/"npc"/"target") at snapshot t
+//     (Available = can be accepted/started at this NPC)
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → creature starter
 //   - At same times, UnitGUID for GameObject tokens → object starter
 //
@@ -20,6 +22,10 @@ function questIdAt(session: SessionRecord, t: number): number | null {
   if (!stream) return null;
   const v = valueAt(stream, t);
   return typeof v === "number" && v !== 0 ? v : null;
+}
+
+interface GossipQuestEntry {
+  questID?: number;
 }
 
 export interface StartedByStarter {
@@ -53,24 +59,55 @@ export function mergeStartedBy(observations: Observation<StartedByStarter>[]): S
   };
 }
 
+function pushGuidObservations(
+  session: SessionRecord,
+  questID: number,
+  t: number,
+  observations: Observation<StartedByStarter>[],
+): void {
+  const questnpcGuid = valueAt(getStream(session, "UnitGUID", "questnpc") ?? [], t);
+  const npcGuid = valueAt(getStream(session, "UnitGUID", "npc") ?? [], t);
+  const targetGuid = valueAt(getStream(session, "UnitGUID", "target") ?? [], t);
 
+  const guidsToCheck = [questnpcGuid, npcGuid, targetGuid].filter(Boolean);
+
+  for (const guid of guidsToCheck) {
+    if (typeof guid !== "string") continue;
+    const parsed = parseGuid(guid);
+    if (!parsed || !parsed.id) continue;
+
+    if (parsed.kind === "npc" && parsed.id) {
+      observations.push({
+        entityId: questID,
+        value: { creatureId: parsed.id },
+        confidence: "medium",
+        provenance: { session: sessionLabel(session), t },
+      });
+    } else if (parsed.kind === "object" && parsed.id) {
+      observations.push({
+        entityId: questID,
+        value: { objectId: parsed.id },
+        confidence: "low",
+        provenance: { session: sessionLabel(session), t },
+      });
+    }
+  }
+}
 
 export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
   const observations: Observation<StartedByStarter>[] = [];
 
-  // Walk events looking for quest-start events
+  // 1) Classic quest-start events (QUEST_DETAIL, QUEST_ACCEPTED)
   for (let i = 0; i < session.events.length; i++) {
     const ev = session.events[i];
     let questID: number | null = null;
     let starterItemID: number | null = null;
 
     if (ev.e === "QUEST_DETAIL") {
-      // QUEST_DETAIL: questStartItemID (arg 1)
       const args = ev.a;
       if (args && typeof args.n === "number" && args.n >= 1) {
         starterItemID = typeof args[1] === "number" ? args[1] : null;
       }
-      // Get the questID from GetQuestID() at this time
       questID = questIdAt(session, ev.t);
     } else if (ev.e === "QUEST_ACCEPTED") {
       const v = ev.a.n === 1 ? ev.a[1] : ev.a[2];
@@ -79,42 +116,8 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
 
     if (questID === null) continue;
 
-    // At the event time, check what NPC/Object GUIDs were active
-    const t = ev.t;
+    pushGuidObservations(session, questID, ev.t, observations);
 
-    // Check questnpc token first, then npc token
-    const questnpcGuid = valueAt(getStream(session, "UnitGUID", "questnpc") ?? [], t);
-    const npcGuid = valueAt(getStream(session, "UnitGUID", "npc") ?? [], t);
-    const targetGuid = valueAt(getStream(session, "UnitGUID", "target") ?? [], t);
-
-    // Also check GameObject tokens - use the same GUID streams
-    // GameObjects appear on UnitGUID("target") or UnitGUID("npc") depending on context
-    const guidsToCheck = [questnpcGuid, npcGuid, targetGuid].filter(Boolean);
-
-    for (const guid of guidsToCheck) {
-      if (typeof guid !== "string") continue;
-      // Parse the GUID to extract entity ID and kind
-      const parsed = parseGuid(guid);
-      if (!parsed || !parsed.id) continue;
-
-      if (parsed.kind === "npc" && parsed.id) {
-        observations.push({
-          entityId: questID,
-          value: { creatureId: parsed.id },
-          confidence: "medium",
-          provenance: { session: sessionLabel(session), t: ev.t },
-        });
-      } else if (parsed.kind === "object" && parsed.id) {
-        observations.push({
-          entityId: questID,
-          value: { objectId: parsed.id },
-          confidence: "low",
-          provenance: { session: sessionLabel(session), t: ev.t },
-        });
-      }
-    }
-
-    // Quest start item from QUEST_DETAIL event
     if (starterItemID !== null && starterItemID > 0) {
       observations.push({
         entityId: questID,
@@ -125,6 +128,22 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
     }
   }
 
+  // 2) Gossip AVAILABLE quests = quests that can be STARTED (accepted) at this NPC
+  // (not Active quests - those are for turn-in, see finishedBy)
+  const availableStream = getStream(session, "C_GossipInfo.GetAvailableQuests");
+  if (availableStream) {
+    for (const entry of availableStream) {
+      const questList = entry.v as GossipQuestEntry[] | undefined;
+      if (!Array.isArray(questList)) continue;
+
+      for (const q of questList) {
+        const questID = q.questID;
+        if (typeof questID !== "number" || questID === 0) continue;
+
+        pushGuidObservations(session, questID, entry.t, observations);
+      }
+    }
+  }
+
   return observations;
 };
-

@@ -329,3 +329,89 @@ describe("extractAll interfaceVersion filtering", () => {
     expect(npcFixes).toContain("-- Sessions aggregated: 2");
   });
 });
+
+describe("extractAll (integration: no-log 'donation' style quest via gossip)", () => {
+  it("should export startedBy for a quest that only appears in C_GossipInfo.GetAvailableQuests (no QUEST_DETAIL/ACCEPTED)", () => {
+    // This reproduces the case from trace 0e7c86fe11447abb0dd0e22035b434bf.lua:
+    // Quest 99196 "A Donation of Wool" offered by NPC 276171 "Oura Stormspinner"
+    // via gossip available quests, with no QUEST_DETAIL or QUEST_ACCEPTED event.
+    const session = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      "C_GossipInfo.GetAvailableQuests": [
+        {
+          t: 2162.777,
+          tp: 2162.779501,
+          v: [
+            {
+              questID: 99196,
+              title: "A Donation of Wool",
+              questLevel: 0,
+              isIgnored: false,
+              isImportant: false,
+              isMeta: false,
+              isLegendary: false,
+              repeatable: false,
+              frequency: 0,
+            },
+          ],
+        },
+      ],
+      UnitGUID: {
+        questnpc: [{ t: 2162.777, tp: 2162.779501, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        npc: [{ t: 2162.777, tp: 2162.779501, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        target: [{ t: 2162.145, tp: 2162.1480881, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+      },
+      UnitName: {
+        target: [{ t: 2162.145, tp: 2162.1480881, v: { 1: "Oura Stormspinner", 2: "", n: 2 } }],
+      },
+    });
+
+    const { questFixes, npcFixes } = extractAll([session], {
+      sourceFileNames: ["test.lua"],
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    // Quest should have startedBy with the NPC (only creatures array, objects/items omitted)
+    expect(questFixes).toContain("[99196] = {");
+    expect(questFixes).toContain("[questKeys.startedBy] = {{276171}},");
+
+    // NPC should have questStarts with the quest
+    expect(npcFixes).toContain("[276171] = {");
+    expect(npcFixes).toContain("[npcKeys.questStarts] = {99196},");
+  });
+
+  it("should export finishedBy and questEnds when QUEST_TURNED_IN is observed (no QUEST_COMPLETE)", () => {
+    // Quest completed via QUEST_TURNED_IN (no reward selection frame / QUEST_COMPLETE)
+    const session = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: {
+        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+      },
+      UnitName: {
+        target: [{ t: 3, tp: 3, v: { 1: "Oura Stormspinner", 2: "", n: 2 } }],
+      },
+    });
+
+    // Add the QUEST_TURNED_IN event directly to the session events
+    const sessionWithTurnIn = {
+      ...session,
+      events: [
+        { t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 99196, n: 1 } },
+      ],
+    };
+
+    const { questFixes, npcFixes } = extractAll([sessionWithTurnIn], {
+      sourceFileNames: ["test.lua"],
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    // Quest should have finishedBy with the NPC (only creatures array, objects omitted)
+    expect(questFixes).toContain("[99196] = {");
+    expect(questFixes).toContain("[questKeys.finishedBy] = {{276171}},");
+
+    // NPC should have questEnds with the quest
+    expect(npcFixes).toContain("[276171] = {");
+    expect(npcFixes).toContain("[npcKeys.questEnds] = {99196},");
+  });
+});
