@@ -36,7 +36,7 @@ else
     fi
     sed '1s/^return {/QuestieTraceCharacter = {/' "$f" > "$f.tmp" && mv -f "$f.tmp" "$f"
     mv -f "$f" "$dest"
-    ((moved++))
+    ((++moved))
   done
   echo "moved $moved file(s) to '$tracesDir'"
 fi
