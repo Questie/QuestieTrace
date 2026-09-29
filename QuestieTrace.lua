@@ -264,6 +264,11 @@ end
 local function EnsureSavedVariables()
   ---@type table?
   local globalDb = QuestieTrace
+  local preservedConsent = nil
+  if type(globalDb) == "table" and type(globalDb.settings) == "table" then
+    preservedConsent = globalDb.settings.dataCollectionConsent
+  end
+
   if type(globalDb) ~= "table" or globalDb.schemaVersion ~= SCHEMA_VERSION then
     QuestieTrace = {
       schemaVersion = SCHEMA_VERSION,
@@ -279,6 +284,10 @@ local function EnsureSavedVariables()
 
   if QuestieTrace.settings.debug == nil then
     QuestieTrace.settings.debug = false
+  end
+
+  if preservedConsent ~= nil then
+    QuestieTrace.settings.dataCollectionConsent = preservedConsent
   end
 
   if type(QuestieTraceDumps) ~= "table" then

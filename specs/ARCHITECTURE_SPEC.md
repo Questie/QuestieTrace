@@ -142,8 +142,8 @@ There is no `exportedAt` field or similar marker on `SessionRecord`: a session i
 ### Migration behavior
 
 - If `QuestieTrace` is missing or has a non-v9 schema, the account settings table is recreated with defaults.
-- Missing `settings.autoStart` defaults to `true`.
-- `settings.dataCollectionConsent` is intentionally left untouched (`nil`) when absent; unlike other settings it must NOT be defaulted to a boolean, since `nil` is the "not yet asked" signal that triggers the consent popup on the next `PLAYER_LOGIN`.
+- `settings.autoStart` is not initialized with a default; capture starts automatically when consent is granted unless `settings.autoStart == false` is explicitly set.
+- `settings.dataCollectionConsent` is preserved across schema version changes. It is only left as `nil` when the setting has never been set by the user (first install), since `nil` is the "not yet asked" signal that triggers the consent popup on the next `PLAYER_LOGIN`.
 - `QuestieTraceDumps` and its `dumps` table are ensured.
 - Existing `QuestieTraceCharacter.sessions` data is preserved when it is already a table; otherwise it is initialized to an empty table.
 - Missing `QuestieTraceCharacter.savedSessionCounter` initializes to the current `#sessions`, so existing users start from their current save count.
@@ -179,9 +179,9 @@ This is the sole user-facing control for the data collection lifecycle. All othe
 
 - `nil` — undecided. On the first `PLAYER_LOGIN` after install (or after any reset of this flag), the `QUESTIETRACE_CONSENT` popup (`StaticPopupDialogs`, defined in `Modules/Consent.lua`) asks the player for permission. Answering sets the flag to `true`/`false`; the popup is not shown again once answered.
 - `true` — consented. Every `PLAYER_LOGIN` prints a friendly reminder to chat (`Core.PrintConsentReminder()`) that data is being collected locally, then `autoStart` behavior applies as before.
-- `false` — declined. No popup, no reminder, and `Core.StartCapture()` itself refuses to start (prints a short message pointing to `/qlt consent`), so toggling `/qlt tracking` on cannot bypass a decline. Declining via the popup's `OnCancel` (e.g. after reopening it with `/qlt consent`) also stops and discards any capture that was already running via `Core.DiscardCapture()`, so no session data is collected or saved past the point of declining.
+- `false` — declined. No popup; prints a chat reminder that data collection is disabled (pointing to `/qlt consent`). `Core.StartCapture()` itself refuses to start, so toggling `/qlt tracking` on cannot bypass a decline. Declining via the popup's `OnCancel` (e.g. after reopening it with `/qlt consent`) also stops and discards any capture that was already running via `Core.DiscardCapture()`, so no session data is collected or saved past the point of declining.
 
-`QuestieTrace.settings.autoStart` controls login capture *once consent is granted*. It defaults to `true` and can be toggled by `/qlt tracking`.
+`QuestieTrace.settings.autoStart` controls login capture *once consent is granted*. It is not initialized with a default; capture starts automatically when consent is granted unless `settings.autoStart == false` is explicitly set. It can be toggled by `/qlt tracking`.
 
 Slash command aliases are `/questietrace` and `/qlt`:
 
