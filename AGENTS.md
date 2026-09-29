@@ -42,7 +42,7 @@ Rules for any code that touches trackers, dumps, or raw event recording:
 busted -p ".test.lua" .
 
 # Run custom test runner (main test suite)
-lua Tests/run.lua
+lua5.1 Tests/run.lua
 ```
 
 ### Linting (Luacheck)

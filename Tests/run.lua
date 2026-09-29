@@ -98,6 +98,7 @@ local function NewRuntime(trackerFiles)
   env.GetLocale = function() return "enUS" end
   env.GetTime = function() return runtime.now end
   env.GetTimePreciseSec = env.GetTime
+  env.date = function() return "2024-01-01_12-00-00" end
   env.C_Timer = {
     ---@param delay number
     ---@param callback fun()
@@ -843,6 +844,7 @@ local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
   SendEvent(runtime, "VARIABLES_LOADED")
   SaveSessions(runtime, 1)
 
+  runtime.env.QuestieTrace.settings.autoStart = true
   SendEvent(runtime, "PLAYER_LOGIN")
   AdvanceTo(runtime, 9)
   assert(#messages == 0, "No reminder before the login delay elapses")
@@ -855,14 +857,15 @@ local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
   AdvanceTo(runtime, 1810)
   assert(#messages == 2, "The reminder must repeat 30 minutes later")
 
-  -- Opening the export window silences the next tick, without stopping the loop.
+  -- Opening the export window only silences saved-session reminders.
+  -- The live session is still running and shareable, so it fires again.
   runtime.core.MarkExportOpened()
   AdvanceTo(runtime, 3610)
-  assert(#messages == 2, "An acknowledged reminder must stay silent")
+  assert(#messages == 3, "Live session is still shareable, so reminder fires again")
 
   SaveSessions(runtime, 1)
   AdvanceTo(runtime, 5410)
-  assert(#messages == 3, "The still-running loop must fire again once new data is saved")
+  assert(#messages == 4, "The still-running loop must fire again once new data is saved")
 end
 
 ---@param runtime TestRuntime
