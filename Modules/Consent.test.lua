@@ -59,7 +59,6 @@ describe("Consent", function()
   describe("HandleConsentOnLogin", function()
     it("should show consent prompt when consent is nil (undecided)", function()
       env.QuestieTrace.settings.dataCollectionConsent = nil
-      env.QuestieTrace.settings.autoStart = true
 
       local promptShown = false
       Core.ShowConsentPrompt = function() promptShown = true end
@@ -69,9 +68,8 @@ describe("Consent", function()
       assert.is_true(promptShown)
     end)
 
-    it("should not auto-start capture when consent is nil", function()
+    it("should not start capture when consent is nil", function()
       env.QuestieTrace.settings.dataCollectionConsent = nil
-      env.QuestieTrace.settings.autoStart = true
 
       local captureStarted = false
       Core.StartCapture = function() captureStarted = true end
@@ -81,9 +79,8 @@ describe("Consent", function()
       assert.is_false(captureStarted)
     end)
 
-    it("should print reminder and auto-start when consent is true and autoStart is enabled", function()
+    it("should print reminder and start capture when consent is true", function()
       env.QuestieTrace.settings.dataCollectionConsent = true
-      env.QuestieTrace.settings.autoStart = true
 
       local reminderPrinted = false
       local captureStarted = false
@@ -96,24 +93,8 @@ describe("Consent", function()
       assert.is_true(captureStarted)
     end)
 
-    it("should print reminder but NOT auto-start when consent is true and autoStart is disabled", function()
-      env.QuestieTrace.settings.dataCollectionConsent = true
-      env.QuestieTrace.settings.autoStart = false
-
-      local reminderPrinted = false
-      local captureStarted = false
-      Core.PrintConsentReminder = function() reminderPrinted = true end
-      Core.StartCapture = function() captureStarted = true end
-
-      Core.HandleConsentOnLogin()
-
-      assert.is_true(reminderPrinted)
-      assert.is_false(captureStarted)
-    end)
-
     it("should do nothing when consent is false (declined)", function()
       env.QuestieTrace.settings.dataCollectionConsent = false
-      env.QuestieTrace.settings.autoStart = true
 
       local reminderPrinted = false
       local captureStarted = false
@@ -129,9 +110,8 @@ describe("Consent", function()
       assert.is_false(promptShown)
     end)
 
-    it("should not auto-start if capture is already running", function()
+    it("should not start capture if already running", function()
       env.QuestieTrace.settings.dataCollectionConsent = true
-      env.QuestieTrace.settings.autoStart = true
 
       local captureStarted = false
       Core.GetCaptureState = function() return "running" end
@@ -142,9 +122,8 @@ describe("Consent", function()
       assert.is_false(captureStarted)
     end)
 
-    it("should not auto-start if capture is stopped_unsaved", function()
+    it("should not start capture if stopped_unsaved", function()
       env.QuestieTrace.settings.dataCollectionConsent = true
-      env.QuestieTrace.settings.autoStart = true
 
       local captureStarted = false
       Core.GetCaptureState = function() return "stopped_unsaved" end
@@ -157,7 +136,6 @@ describe("Consent", function()
 
     it("should start share reminders when consent is true", function()
       env.QuestieTrace.settings.dataCollectionConsent = true
-      env.QuestieTrace.settings.autoStart = false
 
       local remindersStarted = false
       Core.StartShareReminders = function() remindersStarted = true end

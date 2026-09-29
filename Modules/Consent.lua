@@ -61,7 +61,7 @@ function Core.PrintConsentReminder()
 end
 
 --- Handle consent logic on PLAYER_LOGIN.
---- Shows prompt if undecided, prints reminder and auto-starts capture if consented.
+--- Shows prompt if undecided, prints reminder and starts capture if consented.
 function Core.HandleConsentOnLogin()
   local settings = QuestieTrace and QuestieTrace.settings
   local consent = settings and settings.dataCollectionConsent
@@ -78,12 +78,10 @@ function Core.HandleConsentOnLogin()
       return
     end
 
-    -- Only auto-start if no capture is running and no unsaved session exists
+    -- Only start if no capture is running and no unsaved session exists
     -- (state is "idle" means neither running nor stopped_unsaved)
     if Core.GetCaptureState() == "idle" then
-      if settings.autoStart ~= false then
-        Core.StartCapture()
-      end
+      Core.StartCapture()
     end
 
     Core.StartShareReminders()

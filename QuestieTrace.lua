@@ -278,10 +278,6 @@ local function EnsureSavedVariables()
 
   QuestieTrace.settings = type(QuestieTrace.settings) == "table" and QuestieTrace.settings or {}
 
-  if QuestieTrace.settings.autoStart == nil then
-    QuestieTrace.settings.autoStart = true
-  end
-
   if QuestieTrace.settings.debug == nil then
     QuestieTrace.settings.debug = false
   end
@@ -578,7 +574,6 @@ end
 --- Print the available slash commands to chat.
 local function PrintHelp()
   print("/qlt status - Show capture status")
-  print("/qlt tracking - Toggle data collection on login")
   print("/qlt consent - Show the data collection consent prompt")
   print("/qlt debug - Toggle debug prints")
   print("/qlt export - Show the export window")
@@ -600,22 +595,6 @@ SlashCmdList["QUESTIETRACE"] = function(msg)
     PrintHelp()
   elseif action == "status" then
     PrintStatus()
-  elseif action == "tracking" then
-    QuestieTrace.settings.autoStart = not QuestieTrace.settings.autoStart
-    print(ADDON_NAME, "Tracking:", QuestieTrace.settings.autoStart and "enabled" or "disabled")
-
-    -- Apply toggle immediately
-    if QuestieTrace.settings.autoStart then
-      -- Enable tracking: start a new capture if none is running
-      if not capture.active and not capture.session then
-        Core.StartCapture()
-      end
-    else
-      -- Disable tracking: save and stop any active capture
-      if capture.active or capture.session then
-        Core.SaveCapture()
-      end
-    end
   elseif action == "consent" then
     Core.ShowConsentPrompt()
   elseif action == "debug" then
