@@ -59,3 +59,34 @@ end
 function Core.PrintConsentReminder()
   Core.Print(l10n("Thank you for helping improve Questie! Your gameplay data is being collected locally on this device."))
 end
+
+--- Handle consent logic on PLAYER_LOGIN.
+--- Shows prompt if undecided, prints reminder and auto-starts capture if consented.
+function Core.HandleConsentOnLogin()
+  local settings = QuestieTrace and QuestieTrace.settings
+  local consent = settings and settings.dataCollectionConsent
+
+  if consent == nil then
+    -- First login: ask for permission before collecting anything.
+    Core.ShowConsentPrompt()
+  elseif consent == true then
+    Core.PrintConsentReminder()
+
+    -- Respect the autoStart opt-out: only start automatically if not explicitly disabled
+    if settings.autoStart == false then
+      Core.StartShareReminders()
+      return
+    end
+
+    -- Only auto-start if no capture is running and no unsaved session exists
+    -- (state is "idle" means neither running nor stopped_unsaved)
+    if Core.GetCaptureState() == "idle" then
+      if settings.autoStart ~= false then
+        Core.StartCapture()
+      end
+    end
+
+    Core.StartShareReminders()
+  end
+  -- consent == false: declined; do not prompt, message, or auto-start.
+end

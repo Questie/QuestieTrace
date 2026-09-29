@@ -660,27 +660,7 @@ local function OnEvent(_, event, ...)
     Core.RunDumpsForEvent(event, ...)
   end
   if event == "PLAYER_LOGIN" then
-    local settings = QuestieTrace and QuestieTrace.settings
-    local consent = settings and settings.dataCollectionConsent
-    if consent == nil then
-      -- First login: ask for permission before collecting anything.
-      if Core.ShowConsentPrompt then
-        Core.ShowConsentPrompt()
-      end
-    elseif consent == true then
-      Core.PrintConsentReminder()
-
-      -- Only auto-start if no capture is running AND no recovered session exists
-      -- (capture.session would be set by EnsureSavedVariables recovery)
-      if (not capture.active) and (not capture.session) then
-        if settings.autoStart ~= false then
-          Core.StartCapture()
-        end
-      end
-
-      Core.StartShareReminders()
-    end
-    -- consent == false: declined; do not prompt, message, or auto-start.
+    Core.HandleConsentOnLogin()
   end
 
   -- 4. Process the event (record + dispatch to trackers)
