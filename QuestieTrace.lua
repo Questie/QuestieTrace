@@ -568,7 +568,10 @@ local function PrintStatus()
   local state = Core.GetStatusData()
   ---@type string
   local running = state.isRunning and "running" or "stopped"
-  Core.Print("status:", running, "session:", state.sessionName, "events:", state.eventCount)
+  local settings = QuestieTrace and QuestieTrace.settings
+  local consent = settings and settings.dataCollectionConsent
+  local consentStr = consent == true and "granted" or consent == false and "declined" or "pending"
+  Core.Print("status:", running, "session:", state.sessionName, "events:", state.eventCount, "consent:", consentStr)
 end
 
 --- Print the available slash commands to chat.
