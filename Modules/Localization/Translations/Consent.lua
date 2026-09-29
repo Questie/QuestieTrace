@@ -29,17 +29,17 @@ local consentLocales = {
     ["zhCN"] = "感谢您帮助改进 Questie！您的游戏数据正在此设备上本地收集。", -- 🤖
     ["zhTW"] = "感謝您協助改善 Questie！您的遊戲資料正在此裝置上進行本機收集。", -- 🤖
   },
-  ["Data collection is disabled. Use /qlt consent to change this."] = {
+  ["Data collection is disabled. Use \"/qlt consent\" to change this."] = {
     ["enUS"] = true,
-    ["deDE"] = "Die Datensammlung ist deaktiviert. Verwende /qlt consent, um dies zu ändern.", -- 🤖
-    ["esES"] = "La recopilación de datos está desactivada. Usa /qlt consent para cambiar esto.", -- 🤖
-    ["esMX"] = "La recopilación de datos está desactivada. Usa /qlt consent para cambiar esto.", -- 🤖
-    ["frFR"] = "La collecte de données est désactivée. Utilisez /qlt consent pour changer cela.", -- 🤖
-    ["koKR"] = "데이터 수집이 비활성화되어 있습니다. /qlt consent 명령으로 변경할 수 있습니다.", -- 🤖
-    ["ptBR"] = "A coleta de dados está desativada. Use /qlt consent para alterar isso.", -- 🤖
-    ["ruRU"] = "Сбор данных отключён. Используйте /qlt consent, чтобы изменить это.", -- 🤖
-    ["zhCN"] = "数据收集已停用。使用 /qlt consent 可以更改此设置。", -- 🤖
-    ["zhTW"] = "資料收集已停用。使用 /qlt consent 可以變更此設定。", -- 🤖
+    ["deDE"] = "Die Datensammlung ist deaktiviert. Verwende \"/qlt consent\", um dies zu ändern.", -- 🤖
+    ["esES"] = "La recopilación de datos está desactivada. Usa \"/qlt consent\" para cambiar esto.", -- 🤖
+    ["esMX"] = "La recopilación de datos está desactivada. Usa \"/qlt consent\" para cambiar esto.", -- 🤖
+    ["frFR"] = "La collecte de données est désactivée. Utilisez \"/qlt consent\" pour changer cela.", -- 🤖
+    ["koKR"] = "데이터 수집이 비활성화되어 있습니다. \"/qlt consent\" 명령으로 변경할 수 있습니다.", -- 🤖
+    ["ptBR"] = "A coleta de dados está desativada. Use \"/qlt consent\" para alterar isso.", -- 🤖
+    ["ruRU"] = "Сбор данных отключён. Используйте \"/qlt consent\", чтобы изменить это.", -- 🤖
+    ["zhCN"] = "数据收集已停用。使用 \"/qlt consent\" 可以更改此设置。", -- 🤖
+    ["zhTW"] = "資料收集已停用。使用 \"/qlt consent\" 可以變更此設定。", -- 🤖
   },
   ["You declined data collection. If you change your mind, run \"/qlt consent\"."] = {
     ["enUS"] = true,

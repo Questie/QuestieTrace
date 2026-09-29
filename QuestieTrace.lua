@@ -399,7 +399,7 @@ function Core.StartCapture(sessionName)
 
   local settings = QuestieTrace and QuestieTrace.settings
   if not (settings and settings.dataCollectionConsent == true) then
-    Core.Print(Core.l10n("Data collection is disabled. Use /qlt consent to change this."))
+    Core.Print(Core.l10n("Data collection is disabled. Use \"/qlt consent\" to change this."))
     return
   end
 
