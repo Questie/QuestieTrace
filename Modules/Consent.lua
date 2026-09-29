@@ -86,6 +86,8 @@ function Core.HandleConsentOnLogin()
     end
 
     Core.StartShareReminders()
+  -- consent == false: declined; show reminder that data collection is disabled.
+  elseif consent == false then
+    Core.Print(l10n("Data collection is disabled (previously declined). Use \"/qlt consent\" to re-enable."))
   end
-  -- consent == false: declined; do not prompt, message, or auto-start.
 end

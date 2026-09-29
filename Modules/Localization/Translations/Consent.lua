@@ -53,6 +53,18 @@ local consentLocales = {
     ["zhCN"] = "您拒绝了数据收集。如果您改变主意，请运行 \"/qlt consent\"。", -- 🤖
     ["zhTW"] = "您拒絕了資料收集。如果您改變主意，請執行 \"/qlt consent\"。", -- 🤖
   },
+  ["Data collection is disabled (previously declined). Use \"/qlt consent\" to re-enable."] = {
+    ["enUS"] = true,
+    ["deDE"] = "Datensammlung ist deaktiviert (zuvor abgelehnt). Verwende \"/qlt consent\", um sie wieder zu aktivieren.", -- 🤖
+    ["esES"] = "La recopilación de datos está desactivada (rechazada anteriormente). Usa \"/qlt consent\" para volver a activarla.", -- 🤖
+    ["esMX"] = "La recopilación de datos está desactivada (rechazada anteriormente). Usa \"/qlt consent\" para volver a activarla.", -- 🤖
+    ["frFR"] = "La collecte de données est désactivée (refusée précédemment). Utilisez \"/qlt consent\" pour la réactiver.", -- 🤖
+    ["koKR"] = "데이터 수집이 비활성화되어 있습니다 (이전에 거부됨). \"/qlt consent\"로 다시 활성화하세요.", -- 🤖
+    ["ptBR"] = "A coleta de dados está desativada (recusada anteriormente). Use \"/qlt consent\" para reativar.", -- 🤖
+    ["ruRU"] = "Сбор данных отключён (ранее отклонён). Используйте \"/qlt consent\", чтобы включить снова.", -- 🤖
+    ["zhCN"] = "数据收集已停用（之前已拒绝）。使用 \"/qlt consent\" 可重新启用。", -- 🤖
+    ["zhTW"] = "資料收集已停用（先前已拒絕）。使用 \"/qlt consent\" 可重新啟用。", -- 🤖
+  },
 }
 
 
