@@ -50,6 +50,7 @@ Modules/Trackers/PlayerIdentity.lua
 Modules/Trackers/UnitLevel.lua
 Modules/Trackers/Position.lua
 Modules/Trackers/Loot.lua
+Modules/Trackers/Merchant.lua
 Modules/Trackers/Reputation.lua
 Modules/Trackers/QuestLog.lua
 Modules/Trackers/CompletedQuests.lua

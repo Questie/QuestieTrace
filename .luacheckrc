@@ -479,6 +479,7 @@ globals = {
     "C_MapExplorationInfo.GetExploredMapTextures",
     "C_Minimap",
     "C_MerchantFrame.GetBuybackItemID",
+    "C_MerchantFrame.GetItemInfo",
     "C_ModelInfo.AddActiveModelScene",
     "C_ModelInfo.AddActiveModelSceneActor",
     "C_ModelInfo.ClearActiveModelScene",

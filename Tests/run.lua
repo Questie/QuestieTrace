@@ -1428,6 +1428,174 @@ local function TestUnitStateTracker()
   assert(#functions.UnitReaction.player.target == 1, "Player target must not be sampled for reaction")
 end
 
+-- Merchant tracker tests
+local function TestMerchantClassicAPIRecordsItems()
+  local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
+  -- Classic API only
+  runtime.env.GetMerchantNumItems = function() return 2 end
+  runtime.env.GetMerchantItemInfo = function(index)
+    if index == 1 then
+      return "Minor Healing Potion", 133765, 5000, 1, -1, true, true, false, nil, nil
+    elseif index == 2 then
+      return "Linen Cloth", 2596, 100, 1, 20, true, true, false, nil, nil
+    end
+    return nil
+  end
+
+  runtime.core.StartCapture("merchant classic")
+  SendEvent(runtime, "MERCHANT_SHOW")
+  AdvanceTo(runtime, 1)
+  SendEvent(runtime, "MERCHANT_CLOSED")
+
+  local session = Session(runtime)
+  -- Count stream only records changes, so 1 entry (value is always 2)
+  local count = session.functions.GetMerchantNumItems and #session.functions.GetMerchantNumItems or 0
+  assert(count == 1, "GetMerchantNumItems must record initial value (1 entry since value doesn't change), got " .. count)
+  -- Legacy item streams record initial values
+  local item1 = session.functions.GetMerchantItemInfo[1]
+  local item2 = session.functions.GetMerchantItemInfo[2]
+  assert(item1 and #item1 == 1 and item1[1].v[1] == "Minor Healing Potion", "First item name must be recorded")
+  assert(item1[1].v[3] == 5000, "First item price must be recorded")
+  assert(item1[1].v[5] == -1, "First item numAvailable (-1 unlimited) must be recorded")
+  assert(item2 and #item2 == 1 and item2[1].v[1] == "Linen Cloth", "Second item name must be recorded")
+  assert(item2[1].v[5] == 20, "Second item numAvailable (limited) must be recorded")
+  -- Modern API stream should not exist when C_MerchantFrame is not available
+  assert(next(session.functions["C_MerchantFrame.GetItemInfo"]) == nil,
+    "Modern API stream should not exist when C_MerchantFrame is not available")
+end
+
+local function TestMerchantModernAPIRecordsItems()
+  local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
+  -- Both APIs available
+  runtime.env.GetMerchantNumItems = function() return 2 end
+  runtime.env.GetMerchantItemInfo = function(index)
+    if index == 1 then
+      return "Minor Healing Potion", 133765, 5000, 1, -1, true, true, false, nil, nil
+    elseif index == 2 then
+      return "Linen Cloth", 2596, 100, 1, 20, true, true, false, nil, nil
+    end
+    return nil
+  end
+  runtime.env.C_MerchantFrame = {
+    GetItemInfo = function(index)
+      if index == 1 then
+        return { name = "Minor Healing Potion", texture = 133765, price = 5000, stackCount = 1,
+                 numAvailable = -1, isPurchasable = true, isUsable = true, hasExtendedCost = false,
+                 currencyID = nil, spellID = nil, isQuestStartItem = false }
+      elseif index == 2 then
+        return { name = "Linen Cloth", texture = 2596, price = 100, stackCount = 1,
+                 numAvailable = 20, isPurchasable = true, isUsable = true, hasExtendedCost = false,
+                 currencyID = nil, spellID = nil, isQuestStartItem = false }
+      end
+      return nil
+    end,
+  }
+
+  runtime.core.StartCapture("merchant both")
+  SendEvent(runtime, "MERCHANT_SHOW")
+  AdvanceTo(runtime, 1)
+  SendEvent(runtime, "MERCHANT_CLOSED")
+
+  local session = Session(runtime)
+  -- Count stream only records changes, so 1 entry (value is always 2)
+  local count = session.functions.GetMerchantNumItems and #session.functions.GetMerchantNumItems or 0
+  assert(count == 1, "GetMerchantNumItems must record initial value (1 entry since value doesn't change), got " .. count)
+  -- Legacy item streams
+  local legacy1 = session.functions.GetMerchantItemInfo[1]
+  local legacy2 = session.functions.GetMerchantItemInfo[2]
+  assert(legacy1 and #legacy1 == 1 and legacy1[1].v[1] == "Minor Healing Potion", "Legacy: First item name must be recorded")
+  assert(legacy2 and #legacy2 == 1 and legacy2[1].v[1] == "Linen Cloth", "Legacy: Second item name must be recorded")
+  -- Modern item streams
+  local modern1 = session.functions["C_MerchantFrame.GetItemInfo"][1]
+  local modern2 = session.functions["C_MerchantFrame.GetItemInfo"][2]
+  assert(modern1 and #modern1 == 1 and modern1[1].v[1].name == "Minor Healing Potion",
+    "Modern: First item name must be recorded")
+  assert(modern1[1].v[1].price == 5000, "Modern: First item price must be recorded")
+  assert(modern1[1].v[1].numAvailable == -1, "Modern: First item numAvailable must be recorded")
+  assert(modern2 and #modern2 == 1 and modern2[1].v[1].name == "Linen Cloth",
+    "Modern: Second item name must be recorded")
+  assert(modern2[1].v[1].numAvailable == 20, "Modern: Second item numAvailable must be recorded")
+end
+
+local function TestMerchantCloseProbesKnownIndices()
+  local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
+  runtime.env.GetMerchantNumItems = function() return 2 end
+  runtime.env.GetMerchantItemInfo = function(index)
+    if index == 1 then return "Item One", 1, 100, 1, -1, true, true, false, nil, nil end
+    if index == 2 then return "Item Two", 2, 200, 1, 5, true, true, false, nil, nil end
+    return nil
+  end
+
+  runtime.core.StartCapture("merchant close probes")
+  SendEvent(runtime, "MERCHANT_SHOW")
+  -- Change item count to 1 (simulating item sold out)
+  runtime.env.GetMerchantNumItems = function() return 1 end
+  runtime.env.GetMerchantItemInfo = function(index)
+    if index == 1 then return "Item One", 1, 100, 1, -1, true, true, false, nil, nil end
+    return nil
+  end
+  SendEvent(runtime, "MERCHANT_CLOSED")
+
+  local session = Session(runtime)
+  local item1 = session.functions.GetMerchantItemInfo[1]
+  local item2 = session.functions.GetMerchantItemInfo[2]
+  -- Item 1: value doesn't change, so only 1 entry (initial)
+  assert(item1 and #item1 == 1, "First item value unchanged, only initial sample recorded")
+  -- Item 2: value changes from "Item Two" to nil at close, so 2 entries
+  assert(item2 and #item2 == 2, "Second item must have initial and close samples (value changes to nil)")
+  -- Close sample for item 2 should have nil (API returns nil for index > count)
+  assert(item2[2].v == nil or (item2[2].v and item2[2].v[1] == nil),
+    "Close sample for removed item must record the observed nil/error return")
+end
+
+local function TestMerchantRecordsChangedItems()
+  local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
+  runtime.env.GetMerchantNumItems = function() return 1 end
+  runtime.env.GetMerchantItemInfo = function(index)
+    if index == 1 then return "Minor Healing Potion", 133765, 5000, 1, -1, true, true, false, nil, nil end
+    return nil
+  end
+
+  runtime.core.StartCapture("merchant changed items")
+  SendEvent(runtime, "MERCHANT_SHOW")
+  AdvanceTo(runtime, 1)
+  -- Item changed
+  runtime.env.GetMerchantItemInfo = function(index)
+    if index == 1 then return "Major Healing Potion", 133766, 10000, 1, -1, true, true, false, nil, nil end
+    return nil
+  end
+  SendEvent(runtime, "MERCHANT_SHOW") -- Simulate update
+  AdvanceTo(runtime, 2)
+  SendEvent(runtime, "MERCHANT_CLOSED")
+
+  local session = Session(runtime)
+  local item1 = session.functions.GetMerchantItemInfo[1]
+  -- Item changes from Minor to Major at second SHOW, then no change at CLOSE
+  -- So we get: initial (Minor), update (Major) = 2 entries
+  assert(#item1 == 2, "Must record initial and update samples when item changes, got " .. #item1)
+  assert(item1[1].v[1] == "Minor Healing Potion", "First sample must be initial item")
+  assert(item1[2].v[1] == "Major Healing Potion", "Second sample must be updated item")
+end
+
+local function TestMerchantEmptyVendor()
+  local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
+  runtime.env.GetMerchantNumItems = function() return 0 end
+
+  runtime.core.StartCapture("merchant empty")
+  SendEvent(runtime, "MERCHANT_SHOW")
+  AdvanceTo(runtime, 1)
+  SendEvent(runtime, "MERCHANT_CLOSED")
+
+  local session = Session(runtime)
+  assert(session.functions.GetMerchantNumItems and #session.functions.GetMerchantNumItems >= 1,
+    "GetMerchantNumItems must be sampled even when zero")
+  assert(session.functions.GetMerchantNumItems[#session.functions.GetMerchantNumItems].v == 0,
+    "Last sample must be 0 for empty vendor")
+  -- No item streams should be created
+  assert(next(session.functions.GetMerchantItemInfo) == nil,
+    "No item streams should exist for empty vendor")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -1487,6 +1655,11 @@ local tests = {
   { name = "unit interaction mouseover records GUID and name", run = TestUnitInteractionMouseover },
   { name = "UnitInteraction skips a mouseover player's guid/name", run = TestUnitInteractionMouseoverPlayerIsSkipped },
   { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
+  { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
+  { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },
+  { name = "Merchant close probes known indices", run = TestMerchantCloseProbesKnownIndices },
+  { name = "Merchant records changed items", run = TestMerchantRecordsChangedItems },
+  { name = "Merchant empty vendor", run = TestMerchantEmptyVendor },
 }
 
 local failures = 0
