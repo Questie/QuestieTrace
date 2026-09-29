@@ -41,6 +41,18 @@ local consentLocales = {
     ["zhCN"] = "数据收集已停用。使用 /qlt consent 可以更改此设置。", -- 🤖
     ["zhTW"] = "資料收集已停用。使用 /qlt consent 可以變更此設定。", -- 🤖
   },
+  ["You declined data collection. If you change your mind, run \"/qlt consent\"."] = {
+    ["enUS"] = true,
+    ["deDE"] = "Du hast die Datensammlung abgelehnt. Wenn du deine Meinung änderst, führe \"/qlt consent\" aus.", -- 🤖
+    ["esES"] = "Has rechazado la recopilación de datos. Si cambias de opinión, ejecuta \"/qlt consent\".", -- 🤖
+    ["esMX"] = "Has rechazado la recopilación de datos. Si cambias de opinión, ejecuta \"/qlt consent\".", -- 🤖
+    ["frFR"] = "Vous avez refusé la collecte de données. Si vous changez d'avis, exécutez \"/qlt consent\".", -- 🤖
+    ["koKR"] = "데이터 수집을 거부했습니다. 생각이 바뀌면 \"/qlt consent\"를 실행하세요.", -- 🤖
+    ["ptBR"] = "Você recusou a coleta de dados. Se mudar de ideia, execute \"/qlt consent\".", -- 🤖
+    ["ruRU"] = "Вы отказались от сбора данных. Если передумаете, выполните \"/qlt consent\".", -- 🤖
+    ["zhCN"] = "您拒绝了数据收集。如果您改变主意，请运行 \"/qlt consent\"。", -- 🤖
+    ["zhTW"] = "您拒絕了資料收集。如果您改變主意，請執行 \"/qlt consent\"。", -- 🤖
+  },
 }
 
 

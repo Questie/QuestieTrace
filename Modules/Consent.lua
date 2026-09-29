@@ -45,6 +45,7 @@ function Core.OnConsentFrameLoad(frame)
     QuestieTrace.settings.dataCollectionConsent = false
     -- Revoking consent discards any active capture, rather than saving it.
     Core.DiscardCapture()
+    Core.Print(l10n("You declined data collection. If you change your mind, run \"/qlt consent\"."))
   end)
 end
 
