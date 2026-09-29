@@ -25,7 +25,7 @@
   </Button>
 
   <Frame name="QuestieTraceDialogTemplate" inherits="BackdropTemplate" mixin="QuestieTraceDialogMixin" virtual="true"
-      hidden="true" toplevel="true" frameStrata="DIALOG" enableMouse="true" clampedToScreen="true">
+      hidden="true" frameStrata="DIALOG" enableMouse="true" clampedToScreen="true">
     <Size x="420" y="136"/>
     <Anchors>
       <Anchor point="TOP" y="-135"/>
