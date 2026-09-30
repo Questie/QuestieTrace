@@ -22,7 +22,7 @@ local function LoadExportUIModules(env)
   env.CreateFrame = function() return NewWidgetStub() end
   env.GameTooltip = NewWidgetStub()
   env.GetTime = function() return 100 end
-  env.QuestieTrace = { settings = { autoStart = false } }
+  env.QuestieTrace = { settings = { dataCollectionConsent = true } }
   env.QuestieTraceCore.DiscardCapture = function() end
   env.QuestieTraceCore.StartCapture = function() end
   env.QuestieTraceCore.MarkExportOpened = function() end
@@ -153,28 +153,11 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
       env.QuestieTraceCharacter.currentSession = nil
     end
     Core.StartCapture = function() startCalls = startCalls + 1 end
-    env.QuestieTrace.settings.autoStart = true
 
     Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
     assert.equal(1, discardCalls)
     assert.equal(1, startCalls)
-  end)
-
-  it("should not restart the live session when autoStart is disabled", function()
-    env.QuestieTraceCharacter = {
-      sessions = {},
-      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
-    }
-    local startCalls = 0
-    Core.DiscardCapture = function() env.QuestieTraceCharacter.currentSession = nil end
-    Core.StartCapture = function() startCalls = startCalls + 1 end
-    env.QuestieTrace.settings.autoStart = false
-
-    Core.ShowExportWindow()
-    Core.ConfirmExportReported()
-
-    assert.equal(0, startCalls)
   end)
 end)

@@ -73,12 +73,6 @@ function Core.HandleConsentOnLogin()
   elseif consent == true then
     Core.PrintConsentReminder()
 
-    -- Respect the autoStart opt-out: only start automatically if not explicitly disabled
-    if settings.autoStart == false then
-      Core.StartShareReminders()
-      return
-    end
-
     -- Only start if no capture is running and no unsaved session exists
     -- (state is "idle" means neither running nor stopped_unsaved)
     if Core.GetCaptureState() == "idle" then

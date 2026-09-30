@@ -70,7 +70,7 @@ After bootstrap:
 
 - `PLAYER_LOGIN` first checks `QuestieTrace.settings.dataCollectionConsent` (see §4 and §6 for the consent gate):
   - `nil` (undecided, e.g. first login after install) → shows the `QUESTIETRACE_CONSENT` popup and does nothing else.
-  - `true` (consented) → prints a friendly reminder to chat via `Core.PrintConsentReminder()`, then starts capture automatically when `QuestieTrace.settings.autoStart ~= false`; this happens before event processing so `PLAYER_LOGIN` is the first event in an auto-started session.
+  - `true` (consented) → prints a friendly reminder to chat via `Core.PrintConsentReminder()`, then starts capture automatically; this happens before event processing so `PLAYER_LOGIN` is the first event in the session.
   - `false` (declined) → no popup, no chat message, no auto-start. `Core.StartCapture()` itself also refuses to start (see §7), so toggling `/qlt tracking` on is a no-op while declined.
 - `PLAYER_LOGOUT` is processed first, then an active capture is saved, so logout is included in the saved session.
 
@@ -104,7 +104,6 @@ Tracker routing is separate: `Core._trackerCallbacks[event]` controls which trac
 QuestieTrace = {
   schemaVersion = 9,
   settings = {
-    autoStart = true,
     dataCollectionConsent = nil, -- tri-state: nil = undecided, true = accepted, false = declined
   },
 }
@@ -142,7 +141,6 @@ There is no `exportedAt` field or similar marker on `SessionRecord`: a session i
 ### Migration behavior
 
 - If `QuestieTrace` is missing or has a non-v9 schema, the account settings table is recreated with defaults.
-- `settings.autoStart` is not initialized with a default; capture starts automatically when consent is granted unless `settings.autoStart == false` is explicitly set.
 - `settings.dataCollectionConsent` is preserved across schema version changes. It is only left as `nil` when the setting has never been set by the user (first install), since `nil` is the "not yet asked" signal that triggers the consent popup on the next `PLAYER_LOGIN`.
 - `QuestieTraceDumps` and its `dumps` table are ensured.
 - Existing `QuestieTraceCharacter.sessions` data is preserved when it is already a table; otherwise it is initialized to an empty table.
@@ -164,31 +162,23 @@ A session is deleted outright by `Core.DeleteReportedSessions()` once the player
 
 ## 6) Tracking toggle and lifecycle
 
-`QuestieTrace.settings.autoStart` controls whether the addon captures at login. It defaults to `true`.
-
-- **When ON**: Capture starts automatically at `PLAYER_LOGIN` (and immediately if toggled on via `/qlt tracking` while logged in).
-- **When OFF**: No capture runs; toggling off mid-capture immediately finalizes and saves the running session.
-
-This is the sole user-facing control for the data collection lifecycle. All other capture state transitions (finalization on logout, discard-and-restart on export confirmation) happen automatically and silently.
+Capture starts automatically at `PLAYER_LOGIN` when consent has been granted. There is no user-facing toggle to disable this — the only way to stop collection is to decline consent via `/qlt consent`.
 
 ---
 
 ## 7) Data collection consent, auto-start, and control surface
 
-`QuestieTrace.settings.dataCollectionConsent` gates all data collection and takes precedence over `autoStart`:
+`QuestieTrace.settings.dataCollectionConsent` gates all data collection:
 
 - `nil` — undecided. On the first `PLAYER_LOGIN` after install (or after any reset of this flag), the `QUESTIETRACE_CONSENT` popup (`StaticPopupDialogs`, defined in `Modules/Consent.lua`) asks the player for permission. Answering sets the flag to `true`/`false`; the popup is not shown again once answered.
-- `true` — consented. Every `PLAYER_LOGIN` prints a friendly reminder to chat (`Core.PrintConsentReminder()`) that data is being collected locally, then `autoStart` behavior applies as before.
-- `false` — declined. No popup; prints a chat reminder that data collection is disabled (pointing to `/qlt consent`). `Core.StartCapture()` itself refuses to start, so toggling `/qlt tracking` on cannot bypass a decline. Declining via the popup's `OnCancel` (e.g. after reopening it with `/qlt consent`) also stops and discards any capture that was already running via `Core.DiscardCapture()`, so no session data is collected or saved past the point of declining.
-
-`QuestieTrace.settings.autoStart` controls login capture *once consent is granted*. It is not initialized with a default; capture starts automatically when consent is granted unless `settings.autoStart == false` is explicitly set. It can be toggled by `/qlt tracking`.
+- `true` — consented. Every `PLAYER_LOGIN` prints a friendly reminder to chat (`Core.PrintConsentReminder()`) that data is being collected locally, then capture starts automatically.
+- `false` — declined. No popup; prints a chat reminder that data collection is disabled (pointing to `/qlt consent`). `Core.StartCapture()` itself refuses to start. Declining via the popup's `OnCancel` (e.g. after reopening it with `/qlt consent`) also stops and discards any capture that was already running via `Core.DiscardCapture()`, so no session data is collected or saved past the point of declining.
 
 Slash command aliases are `/questietrace` and `/qlt`:
 
 | Command | Purpose |
 |---|---|
 | `/qlt status` | Print capture status |
-| `/qlt tracking` | Toggle data collection on/off, effective immediately |
 | `/qlt export` | Show the export window |
 | `/qlt consent` | Show the data collection consent prompt (also used to change a prior decision) |
 | `/qlt dumpmap` | Run the map hierarchy dump provider |

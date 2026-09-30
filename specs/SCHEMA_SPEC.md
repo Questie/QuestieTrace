@@ -8,7 +8,7 @@
 QuestieTrace = {
   schemaVersion = 9,
   settings = {
-    autoStart = true,
+    dataCollectionConsent = nil, -- tri-state: nil = undecided, true = accepted, false = declined
   },
 }
 ```

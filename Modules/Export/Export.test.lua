@@ -248,7 +248,7 @@ describe("Export.DeleteReportedSessions", function()
   before_each(function()
     env = {}
     Core = LoadExportModule(env)
-    env.QuestieTrace = { settings = { autoStart = true } }
+    env.QuestieTrace = { settings = { dataCollectionConsent = true } }
   end)
 
   it("should remove a reported saved session from QuestieTraceCharacter.sessions", function()
@@ -285,19 +285,6 @@ describe("Export.DeleteReportedSessions", function()
 
     assert.equal(1, discardCalls)
     assert.equal(1, startCalls)
-  end)
-
-  it("should not start a new capture after discarding when autoStart is disabled", function()
-    env.QuestieTrace.settings.autoStart = false
-    local live = { name = "live", functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
-    env.QuestieTraceCharacter = { sessions = {}, currentSession = live }
-    local startCalls = 0
-    Core.DiscardCapture = function() env.QuestieTraceCharacter.currentSession = nil end
-    Core.StartCapture = function() startCalls = startCalls + 1 end
-
-    Core.DeleteReportedSessions({ live })
-
-    assert.equal(0, startCalls)
   end)
 
   it("should do nothing when sourceSessions is not a table", function()

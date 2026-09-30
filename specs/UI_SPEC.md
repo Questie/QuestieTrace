@@ -23,7 +23,6 @@ Aliases: `/questietrace` and `/qlt`.
 |---|---|
 | `/qlt` or `/qlt help` | Print help text |
 | `/qlt status` | Print tracking status and current event count to chat |
-| `/qlt tracking` | Toggle data collection on/off, effective immediately |
 | `/qlt debug` | Toggle debug prints |
 | `/qlt consent` | Show the data collection consent dialog |
 | `/qlt export` | Show the export window (see section 4) |
@@ -31,21 +30,16 @@ Aliases: `/questietrace` and `/qlt`.
 
 ### Behaviors
 
-- `/qlt tracking` toggles `QuestieTrace.settings.autoStart` and prints `Tracking: enabled` or `disabled`. The change takes effect immediately: toggling off stops and saves any running capture; toggling on starts a new one.
 - `/qlt status` prints human-readable status without stopping or modifying anything.
 - `/qlt debug` and `/qlt export` produce immediate feedback.
 
 ---
 
-## 3) Tracking toggle behavior
+## 3) Tracking behavior
 
-`QuestieTrace.settings.autoStart` controls whether the addon automatically starts capturing at login.
+Capture starts automatically at `PLAYER_LOGIN` when consent has been granted. The only way to disable data collection is to decline consent via `/qlt consent`.
 
-- **Default**: `true` (automatic capturing enabled).
-- **When ON**: Capture starts automatically at `PLAYER_LOGIN` (and immediately if toggled on via `/qlt tracking` while logged in).
-- **When OFF**: No capture runs. Toggling off mid-capture immediately finalizes and saves what has been collected so far, so no data is lost.
-
-This replaces the old "start/stop/save" manual workflow. Tracking is now a single toggle: always either on (capturing) or off (not capturing). There is no explicit "save" action from the player's perspective.
+There is no "tracking toggle" command. The consent decision is the sole gate for data collection.
 
 ---
 

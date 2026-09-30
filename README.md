@@ -35,7 +35,6 @@ Export your session with `/qlt export` to get a shareable string, then submit it
 |-----------------------|---------------------------------------|
 | `/qlt` or `/qlt help` | Print the command list                |
 | `/qlt status`         | Show capture status                   |
-| `/qlt tracking`       | Toggle auto-start on login            |
 | `/qlt consent`        | Open the consent pop-up               |
 | `/qlt debug`          | Toggle debug prints                   |
 | `/qlt export [all]`   | Open the export window                |

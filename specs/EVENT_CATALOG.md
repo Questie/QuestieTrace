@@ -339,7 +339,7 @@ dropped and never recorded or dispatched to trackers.
 - `ADDON_LOADED` fires for every addon. An event filter in `OnEvent`
   skips it unless `addonName == "QuestieTrace"`, so only the addon's
   own load appears in the event stream.
-- `PLAYER_LOGIN` triggers auto-start (if `autoStart` is enabled and no
+- `PLAYER_LOGIN` triggers auto-start (if consent is granted and no
   capture is active). Auto-start runs before `ProcessTrackedEvent` so
   `PLAYER_LOGIN` is recorded as the first event in the session.
 - `PLAYER_LOGOUT` triggers auto-save (if a capture is active).

@@ -165,7 +165,7 @@ end
 --- After successfully encoding the payload, the live session is rotated (if present)
 --- so that subsequent events land in a new session rather than the one being shown
 --- to the user. The old session is discarded (never saved) and a new one is started
---- (if autoStart is enabled), ensuring that future events don't mutate the payload
+--- (since consent is required for export), ensuring that future events don't mutate the payload
 --- snapshot that was encoded and displayed. This guarantees that DeleteReportedSessions()
 --- will delete only the exact data that was shown, not a version polluted by later events.
 function Core.ShowExportWindow()
@@ -203,9 +203,7 @@ function Core.ShowExportWindow()
       local liveSession = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter.currentSession or nil
       if liveSession then
         Core.DiscardCapture()
-        if QuestieTrace.settings.autoStart then
-          Core.StartCapture()
-        end
+        Core.StartCapture()
       end
 
       pendingSourceSessions = sourceSessions

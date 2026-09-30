@@ -87,7 +87,7 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 12, settings = { autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 12, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   runtime.printedMessages = {}
   env.print = function(...)
@@ -276,7 +276,7 @@ local function TestSessionContract()
   local settings = env.QuestieTrace.settings
   env.QuestieTraceCharacter.sessions[1] = legacy
   SendEvent(runtime, "VARIABLES_LOADED")
-  assert(env.QuestieTrace.settings == settings and settings.autoStart == false,
+  assert(env.QuestieTrace.settings == settings,
     "Recording contract must not reset existing settings")
 
   runtime.core.StartCapture("new capture")
@@ -435,7 +435,6 @@ end
 
 local function TestExportPayloadLiveSessionDeletedAndRestarted()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
-  runtime.env.QuestieTrace.settings.autoStart = true
 
   -- Start a capture and add events
   runtime.core.StartCapture("live")
@@ -446,7 +445,7 @@ local function TestExportPayloadLiveSessionDeletedAndRestarted()
   assert(#payload.sessions == 1, "A live session with events must be included once")
 
   -- Report it: the live session must be discarded (never saved), and a fresh
-  -- capture must start immediately.
+  -- capture must start immediately (since consent is required for export).
   runtime.core.DeleteReportedSessions(sourceSessions)
 
   assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A reported live session must never be saved to sessions[]")
@@ -461,20 +460,6 @@ local function TestExportPayloadLiveSessionDeletedAndRestarted()
   assert(#secondPayload.sessions == 0, "A reported live session must not be re-exportable after discard+restart")
 end
 
-local function TestExportDoesNotRestartLiveSessionWhenAutoStartDisabled()
-  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
-  runtime.env.QuestieTrace.settings.autoStart = false
-
-  runtime.core.StartCapture("live")
-  local session = Session(runtime)
-  session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
-
-  local _, sourceSessions = runtime.core.BuildExportPayload()
-  runtime.core.DeleteReportedSessions(sourceSessions)
-
-  assert(runtime.core.GetCaptureState() == "idle", "Must not auto-restart capture when tracking is disabled")
-end
-
 local function TestExportSerializationRoundTrips()
   local runtime = { env = {}, core = {}, now = 0, timers = {}, frame = {} }
   local env = runtime.env
@@ -482,7 +467,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 12, settings = { autoStart = false, dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 12, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -624,43 +609,6 @@ local function TestRecoverCurrentSessionOnVariablesLoaded()
   assert(env.QuestieTraceCharacter.currentSession == nil, "currentSession must be cleared after finalization")
 end
 
-local function TestAutoStartAfterRecoveryStartsFreshCapture()
-  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
-  local env = runtime.env
-  -- Simulate a leftover currentSession from a previous load
-  local leftover = {
-    schemaVersion = 10,
-    recordingContractVersion = 1,
-    name = "recovered",
-    startedAt = 100,
-    startedAtPrecise = 100,
-    events = { { t = 101, e = "TEST_EVENT" } },
-    functions = {},
-    functionsDelta = {},
-  }
-  env.QuestieTraceCharacter.currentSession = leftover
-  -- Enable autoStart
-  env.QuestieTrace.settings.autoStart = true
-
-  -- Trigger VARIABLES_LOADED (recovery auto-finalizes)
-  SendEvent(runtime, "VARIABLES_LOADED")
-
-  -- Recovered session should be saved
-  assert(#env.QuestieTraceCharacter.sessions == 1, "Recovered session must be saved")
-  local recoveredSession = env.QuestieTraceCharacter.sessions[1]
-  assert(recoveredSession == leftover, "Recovered session in array must be same reference")
-  assert(#recoveredSession.events == 1, "Recovered session events must be preserved")
-
-  -- Trigger PLAYER_LOGIN (auto-start logic should start a fresh capture)
-  SendEvent(runtime, "PLAYER_LOGIN")
-
-  -- A fresh capture should now be running, different from the recovered session
-  local currentSession = runtime.core.GetDiagnosticSession()
-  assert(currentSession ~= leftover, "Auto-start must create a fresh capture, not reuse the recovered one")
-  assert(runtime.core.GetCaptureState() == "running", "After auto-start on login, state must be running")
-  assert(#env.QuestieTraceCharacter.sessions == 1, "Sessions array must still have only the recovered one (not the new capture yet)")
-end
-
 local function TestRecoverCurrentSessionDiscardedWhenConsentDeclined()
   local runtime = NewRuntime({})
   local env = runtime.env
@@ -778,8 +726,7 @@ local function TestShareReminderSilentOnFreshCharacterLogin()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
   -- Consent is account-wide, so a brand-new alt already has it granted, and
-  -- auto-start is on by default.
-  runtime.env.QuestieTrace.settings.autoStart = true
+  -- capture starts automatically.
   SendEvent(runtime, "VARIABLES_LOADED")
 
   -- Auto-start records PLAYER_LOGIN into the live session immediately.
@@ -844,7 +791,6 @@ local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
   SendEvent(runtime, "VARIABLES_LOADED")
   SaveSessions(runtime, 1)
 
-  runtime.env.QuestieTrace.settings.autoStart = true
   SendEvent(runtime, "PLAYER_LOGIN")
   AdvanceTo(runtime, 9)
   assert(#messages == 0, "No reminder before the login delay elapses")
@@ -880,7 +826,6 @@ end
 
 local function TestConsentUndecidedShowsPromptAndDoesNotAutoStart()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
-  runtime.env.QuestieTrace.settings.autoStart = true
   runtime.env.QuestieTrace.settings.dataCollectionConsent = nil
 
   SendEvent(runtime, "PLAYER_LOGIN")
@@ -892,7 +837,6 @@ end
 
 local function TestConsentDeclinedBlocksEverything()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
-  runtime.env.QuestieTrace.settings.autoStart = true
   runtime.env.QuestieTrace.settings.dataCollectionConsent = false
 
   SendEvent(runtime, "PLAYER_LOGIN")
@@ -907,14 +851,13 @@ end
 
 local function TestConsentAcceptedPrintsReminderAndAllowsAutoStart()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
-  runtime.env.QuestieTrace.settings.autoStart = true
   runtime.env.QuestieTrace.settings.dataCollectionConsent = true
 
   SendEvent(runtime, "PLAYER_LOGIN")
 
   assert(not runtime.consentFrame.shown, "Consent dialog must not be shown once already accepted")
   assert(WasPrinted(runtime, "gameplay data is being collected"), "A reminder message must be printed every login once consented")
-  assert(runtime.core.GetCaptureState() == "running", "Capture must auto-start when consent is granted and autoStart is enabled")
+  assert(runtime.core.GetCaptureState() == "running", "Capture must auto-start when consent is granted")
 end
 
 local function TestDecliningConsentStopsAndDiscardsActiveCapture()
@@ -1499,7 +1442,6 @@ local tests = {
   { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
   { name = "SaveCapture prunes oldest sessions past the cap", run = TestSaveCapturePrunesOldestSessionsPastCap },
   { name = "export deletes and restarts live session after report", run = TestExportPayloadLiveSessionDeletedAndRestarted },
-  { name = "export does not restart live session when autoStart is disabled", run = TestExportDoesNotRestartLiveSessionWhenAutoStartDisabled },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
@@ -1516,7 +1458,6 @@ local tests = {
   { name = "dialog uses modern assets when available", run = TestDialogUsesModernAssetsWhenAvailable },
   { name = "dialog falls back when an atlas is missing", run = TestDialogFallsBackWhenAnAtlasIsMissing },
   { name = "dialog fits long labels and wrapped text", run = TestDialogFitsLongLabelsAndWrappedText },
-  { name = "autoStart after recovery starts fresh capture", run = TestAutoStartAfterRecoveryStartsFreshCapture },
   { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
   { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },
   { name = "share reminder silent on fresh character login", run = TestShareReminderSilentOnFreshCharacterLogin },
