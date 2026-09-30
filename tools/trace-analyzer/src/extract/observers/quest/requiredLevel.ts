@@ -15,8 +15,14 @@ import { sessionLabel, type FieldObserver, type Observation } from "../../observ
 function unpackQuestId(args: unknown): number | null {
   if (args !== null && args !== undefined && typeof args === "object" && !Array.isArray(args)) {
     const obj = args as Record<string, unknown>;
-    if (typeof obj.n === "number" && typeof obj[1] === "number") {
-      return obj[1] as number;
+    const n = typeof obj.n === "number" ? obj.n : 0;
+    if (n === 1) {
+      const v = obj[1];
+      return typeof v === "number" && v !== 0 ? v : null;
+    }
+    if (n === 2) {
+      const v = obj[2];
+      return typeof v === "number" && v !== 0 ? v : null;
     }
   }
   return null;

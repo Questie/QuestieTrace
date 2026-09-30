@@ -776,7 +776,10 @@ Core.RegisterTracker({
   OnEvent = function(capture, event, ...)
     if event == "QUEST_ACCEPTED" then
       local first, second = ...
-      local questId = second or first
+      local questId = second
+      if not questId and first then
+        questId = GetQuestIdAtLogIndex(first)
+      end
       if questAcceptLevelStream and type(questId) == "number" and questId > 0 then
         local t = GetTime() - capture.startedAt
         local tp = GetTimePreciseSec() - capture.startedAtPrecise

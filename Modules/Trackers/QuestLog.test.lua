@@ -210,8 +210,9 @@ describe("QuestLog tracker", function()
     local capture = NewCapture()
     tracker.Init(capture)
 
-    -- Simulate QUEST_ACCEPTED event
-    tracker.OnEvent(capture, "QUEST_ACCEPTED", 100)
+    -- Simulate QUEST_ACCEPTED event (Classic: only questLogIndex provided)
+    -- Quest is at index 1 in the mock quest log
+    tracker.OnEvent(capture, "QUEST_ACCEPTED", 1)
 
     local acceptStream = capture.session.functions["QuestAcceptLevel"]
     assert.is_not_nil(acceptStream[100], "QuestAcceptLevel stream should exist for quest 100")
@@ -222,22 +223,23 @@ describe("QuestLog tracker", function()
   it("should append new acceptance levels if player levels up and accepts another quest", function()
     env.questLogRows = {
       { title = "First Quest", questID = 100 },
+      { title = "Second Quest", questID = 101 },
     }
     env.UnitLevel = function(_unit) return 30 end
 
     local capture = NewCapture()
     tracker.Init(capture)
 
-    -- First acceptance at level 30
-    tracker.OnEvent(capture, "QUEST_ACCEPTED", 100)
+    -- First acceptance at level 30 (quest at index 1)
+    tracker.OnEvent(capture, "QUEST_ACCEPTED", 1)
 
     -- Simulate level up
     env.UnitLevel = function(_unit) return 31 end
     capture.startedAt = 100
     capture.startedAtPrecise = 100
 
-    -- Second acceptance at level 31 (different quest)
-    tracker.OnEvent(capture, "QUEST_ACCEPTED", 101)
+    -- Second acceptance at level 31 (quest at index 2)
+    tracker.OnEvent(capture, "QUEST_ACCEPTED", 2)
 
     local acceptStream = capture.session.functions["QuestAcceptLevel"]
     assert.is_not_nil(acceptStream[100])
