@@ -431,6 +431,12 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info API return |
 | `IsPassiveSpell` | scalar (number/nil) | observed passive marker return |
 
+### Parameterized by map ID (number)
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `C_QuestLog.GetQuestsOnMap` | object (QuestPOIMapInfo[]) | Raw API result; array of quest POIs on the given map |
+
 ### Parameterized by factionID
 
 | Function key | Return type | Notes |

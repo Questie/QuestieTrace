@@ -54,6 +54,7 @@ Modules/Trackers/Merchant.lua
 Modules/Trackers/Reputation.lua
 Modules/Trackers/QuestLog.lua
 Modules/Trackers/CompletedQuests.lua
+Modules/Trackers/QuestPOI.lua
 Modules/Trackers/QuestDialog.lua
 Modules/Trackers/UnitInteraction.lua
 Modules/Trackers/UnitState.lua

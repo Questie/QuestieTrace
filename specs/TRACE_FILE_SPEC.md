@@ -458,6 +458,12 @@ Called with a quest ID as the argument.
 | `GetProfessionInfo` | tuple (n=10) | Profession tab information |
 | `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
+### Parameterized by map ID (number)
+
+| Function key | Return type | Description |
+|---|---|---|
+| `C_QuestLog.GetQuestsOnMap` | object (QuestPOIMapInfo[]) | Raw API result; array of quest POIs on the given map |
+
 ### Parameterized by faction ID (number)
 
 | Function key | Return type | Description |

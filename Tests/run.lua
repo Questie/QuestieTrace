@@ -1631,6 +1631,143 @@ local function TestMerchantEmptyVendor()
     "No item streams should exist for empty vendor")
 end
 
+local function TestQuestPOTracker()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestPOI.lua" })
+  local env = runtime.env
+
+  -- Mock C_QuestLog.GetMapForQuestPOIs (returns starting map for POIs)
+  -- Mock C_QuestLog.GetQuestsOnMap (returns POIs for a given map)
+  env.C_QuestLog = {
+    GetMapForQuestPOIs = function()
+      return 1453 -- Stormwind
+    end,
+    ---@param uiMapID number
+    GetQuestsOnMap = function(uiMapID)
+      if uiMapID == 1453 then
+        return {
+          {
+            questID = 12345,
+            mapID = 1453,
+            x = 0.5,
+            y = 0.5,
+            isQuestStart = true,
+            isDaily = false,
+            isCombatAllyQuest = false,
+            isMeta = false,
+            inProgress = true,
+            isMapIndicatorQuest = false,
+            numObjectives = 2,
+            childDepth = 0,
+          },
+        }
+      end
+      return {}
+    end
+  }
+
+  runtime.core.StartCapture("quest poi test")
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify C_QuestLog.GetQuestsOnMap stream exists
+  assert(functions["C_QuestLog.GetQuestsOnMap"], "C_QuestLog.GetQuestsOnMap stream must exist")
+  assert(functions["C_QuestLog.GetQuestsOnMap"][1453], "C_QuestLog.GetQuestsOnMap[1453] stream must exist")
+  assert(#functions["C_QuestLog.GetQuestsOnMap"][1453] >= 1, "C_QuestLog.GetQuestsOnMap[1453] must have entry")
+
+  local pois = functions["C_QuestLog.GetQuestsOnMap"][1453][1].v
+  assert(#pois == 1, "Must have 1 POI")
+  assert(pois[1].questID == 12345, "POI questID must match")
+  assert(pois[1].x == 0.5, "POI x must match")
+  assert(pois[1].y == 0.5, "POI y must match")
+  assert(pois[1].isQuestStart == true, "POI isQuestStart must be true")
+end
+
+local function TestQuestPOTrackerQuestPOIUpdate()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestPOI.lua" })
+  local env = runtime.env
+
+  -- Track whether POI data should be "updated"
+  local useUpdatedPOI = false
+
+  env.C_QuestLog = {
+    GetMapForQuestPOIs = function()
+      return 1453 -- Stormwind
+    end,
+    ---@param uiMapID number
+    GetQuestsOnMap = function(uiMapID)
+      if uiMapID == 1453 then
+        if useUpdatedPOI then
+          return {
+            {
+              questID = 67890,
+              questTagType = 1,
+              numObjectives = 3,
+              mapID = 1453,
+              x = 0.7,
+              y = 0.8,
+              isQuestStart = false,
+              isDaily = true,
+              isCombatAllyQuest = false,
+              isMeta = false,
+              inProgress = false,
+              isMapIndicatorQuest = true,
+              childDepth = 0,
+            },
+          }
+        end
+        return {
+          {
+            questID = 12345,
+            questTagType = 0,
+            numObjectives = 2,
+            mapID = 1453,
+            x = 0.5,
+            y = 0.5,
+            isQuestStart = true,
+            isDaily = false,
+            isCombatAllyQuest = false,
+            isMeta = false,
+            inProgress = true,
+            isMapIndicatorQuest = false,
+            childDepth = 0,
+          },
+        }
+      end
+      return {}
+    end
+  }
+
+  runtime.core.StartCapture("quest poi update test")
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify initial POI recorded
+  assert(functions["C_QuestLog.GetQuestsOnMap"][1453], "Initial stream must exist")
+  assert(#functions["C_QuestLog.GetQuestsOnMap"][1453] == 1, "Must have 1 entry initially")
+  assert(functions["C_QuestLog.GetQuestsOnMap"][1453][1].v[1].questID == 12345, "Initial POI must match")
+
+  -- Now change the POI data and send QUEST_POI_UPDATE
+  useUpdatedPOI = true
+  SendEvent(runtime, "QUEST_POI_UPDATE")
+
+  -- Re-fetch session after event
+  session = Session(runtime)
+  functions = session.functions
+
+  -- Verify updated POI was recorded as a new entry
+  assert(functions["C_QuestLog.GetQuestsOnMap"][1453], "Stream must still exist")
+  assert(#functions["C_QuestLog.GetQuestsOnMap"][1453] == 2, "Must have 2 entries after update, got " .. #functions["C_QuestLog.GetQuestsOnMap"][1453])
+
+  local updatedPOI = functions["C_QuestLog.GetQuestsOnMap"][1453][2].v
+  assert(#updatedPOI == 1, "Must have 1 updated POI")
+  assert(updatedPOI[1].questID == 67890, "Updated POI questID must match, got " .. updatedPOI[1].questID)
+  assert(updatedPOI[1].x == 0.7, "Updated POI x must match")
+  assert(updatedPOI[1].y == 0.8, "Updated POI y must match")
+  assert(updatedPOI[1].isQuestStart == false, "Updated POI isQuestStart must be false")
+  assert(updatedPOI[1].isDaily == true, "Updated POI isDaily must be true")
+  assert(updatedPOI[1].isMapIndicatorQuest == true, "Updated POI isMapIndicatorQuest must be true")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },
@@ -1695,6 +1832,8 @@ local tests = {
   { name = "Merchant close probes known indices", run = TestMerchantCloseProbesKnownIndices },
   { name = "Merchant records changed items", run = TestMerchantRecordsChangedItems },
   { name = "Merchant empty vendor", run = TestMerchantEmptyVendor },
+  { name = "quest poi tracker records quest log pois", run = TestQuestPOTracker },
+  { name = "quest poi tracker handles QUEST_POI_UPDATE", run = TestQuestPOTrackerQuestPOIUpdate },
 }
 
 local failures = 0

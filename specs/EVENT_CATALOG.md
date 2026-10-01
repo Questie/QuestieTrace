@@ -212,6 +212,18 @@ tracked independently whenever that API exists.
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
 - `SPELLS_CHANGED` *(login-time sampling)*
 
+### QuestPOI tracker
+
+Triggers quest POI (map marker) sampling for the player's current map.
+Captures regular quest POIs via `C_QuestLog.GetQuestsOnMap` when that API
+exists on the client. Uses delayed re-samples at `{ 0, 0.10, 0.35, 0.55, 0.75, 1.00 }`
+seconds to catch server-side data settling.
+
+- `QUEST_POI_UPDATE`
+- `QUEST_LOG_UPDATE`
+- `ZONE_CHANGED_NEW_AREA`
+- `PLAYER_ENTERING_WORLD`
+
 ### SpellBook tracker
 
 Triggers raw player-spellbook sampling and `PlayerKnownSpells` delta
