@@ -60,17 +60,17 @@ export const observeRequiredLevel: FieldObserver<number> = (session) => {
       if (stream.length === 0) continue;
 
       let minLevel: number | null = null;
-      let firstT = 0;
+      let firstT: number | null = null;
       for (const entry of stream) {
         const level = typeof entry.v === "number" ? entry.v : null;
         if (level === null) continue;
         if (minLevel === null || level < minLevel) {
           minLevel = level;
         }
-        if (firstT === 0) firstT = entry.t;
+        if (firstT === null) firstT = entry.t;
       }
 
-      if (minLevel !== null) {
+      if (minLevel !== null && firstT !== null) {
         acceptObs.set(questID, { level: minLevel, t: firstT });
       }
     }
