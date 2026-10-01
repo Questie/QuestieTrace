@@ -402,6 +402,8 @@ globals = {
     "C_GossipInfo.GetOptions",
     "C_GossipInfo.SelectActiveQuest",
     "C_GossipInfo.SelectAvailableQuest",
+    "TooltipDataProcessor",
+    "TooltipDataProcessor.AddTooltipPostCall",
     "C_GuildInfo.CanSpeakInGuildChat",
     "C_GuildInfo.GetGuildRankOrder",
     "C_GuildInfo.GuildControlGetRankFlags",
