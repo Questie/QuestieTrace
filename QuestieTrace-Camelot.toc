@@ -57,6 +57,7 @@ Modules/Trackers/CompletedQuests.lua
 Modules/Trackers/QuestPOI.lua
 Modules/Trackers/QuestDialog.lua
 Modules/Trackers/UnitInteraction.lua
+Modules/Trackers/GameObject.lua
 Modules/Trackers/UnitState.lua
 Modules/Trackers/GroupState.lua
 Modules/Trackers/SkillLines.lua

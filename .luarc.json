@@ -67,6 +67,7 @@
     }
   },
   "diagnostics.globals": [
+    "issecretvalue",
     // External Addons
     "QuestLogEx", // From another AddOn (Some kind of questlog extended addon)
     "QuestLogExFrame",
@@ -107,6 +108,8 @@
     "QuestLogFrame",
     // Target
     "TargetFrame",
+
+    "TooltipDataProcessor",
 
     // Gossip functions
     // These are deprecated in later versions of WoW, but still exist in Classic and TBC.

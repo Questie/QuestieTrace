@@ -2109,6 +2109,110 @@ local function TestRestrictedLootSourcePreservesOtherLootData()
   assert(functions.GetLootSourceInfo[1][1].v[1] == guid, "Readable source must resume recording")
 end
 
+local function TestGameObjectTrackerRecordsObjectName()
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  runtime.env.TooltipDataProcessor = {
+    AddTooltipPostCall = function(tooltipType, callback)
+      -- Simulate the callback being called with Object tooltip data
+      if tooltipType == 4 then -- Enum.TooltipDataType.Object
+        callback(nil, {
+          type = 4, -- Enum.TooltipDataType.Object
+          -- Note: Object tooltips don't include GUID in practice
+          guid = nil,
+          lines = {
+            { type = 2, leftText = "Copper Vein", rightText = "" }, -- Enum.TooltipDataLineType.UnitName
+            { type = 1, leftText = "Requires Mining (1)", rightText = "" },
+          },
+        })
+      end
+    end,
+  }
+  runtime.env.Enum = {
+    TooltipDataType = { Object = 4 },
+    TooltipDataLineType = { UnitName = 2 },
+  }
+
+  runtime.core.StartCapture("game object test")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- Verify GameObjectName stream recorded
+  assert(functions.GameObjectName, "GameObjectName stream must exist")
+  assert(#functions.GameObjectName >= 1, "GameObjectName must have entry")
+  assert(functions.GameObjectName[1].v == "Copper Vein", "GameObjectName must be 'Copper Vein'")
+
+  -- GameObjectGUID stream should NOT exist (tooltips don't have GUID)
+  assert(functions.GameObjectGUID == nil, "GameObjectGUID stream must not exist")
+end
+
+local function TestGameObjectTrackerSkipsUnreadableUnitNameLine()
+  local secretMarker = {}
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  -- Simulate WoW's issecretvalue for tainted data
+  runtime.env.issecretvalue = function(value) return value == secretMarker end
+
+  runtime.env.TooltipDataProcessor = {
+    AddTooltipPostCall = function(tooltipType, callback)
+      if tooltipType == 4 then -- Enum.TooltipDataType.Object
+        callback(nil, {
+          type = 4,
+          lines = {
+            -- The UnitName line is secret/tainted - name must stay unset
+            { type = 2, leftText = secretMarker, rightText = "" },
+            -- A readable description line must not be used as a fallback
+            { type = 1, leftText = "Requires Mining (1)", rightText = "" },
+          },
+        })
+      end
+    end,
+  }
+  runtime.env.Enum = {
+    TooltipDataType = { Object = 4 },
+    TooltipDataLineType = { UnitName = 2 },
+  }
+
+  runtime.core.StartCapture("game object unreadable unit name")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  -- No name must be recorded: the UnitName line exists but is unreadable,
+  -- and the description line must never be used as a stand-in for the name.
+  assert(functions.GameObjectName == nil or #functions.GameObjectName == 0,
+    "GameObjectName must not record when the UnitName line is unreadable")
+end
+
+local function TestGameObjectTrackerSkipsWhenNoUnitNameLine()
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  runtime.env.TooltipDataProcessor = {
+    AddTooltipPostCall = function(tooltipType, callback)
+      if tooltipType == 4 then -- Enum.TooltipDataType.Object
+        callback(nil, {
+          type = 4,
+          lines = {
+            -- No line is tagged UnitName (not a real-world case, but defensive).
+            { type = 1, leftText = "Rusty Chest", rightText = "" },
+            { type = 1, leftText = "Locked", rightText = "" },
+          },
+        })
+      end
+    end,
+  }
+  runtime.env.Enum = {
+    TooltipDataType = { Object = 4 },
+    TooltipDataLineType = { UnitName = 2 },
+  }
+
+  runtime.core.StartCapture("game object no unit name line")
+
+  local session = Session(runtime)
+  local functions = session.functions
+
+  assert(functions.GameObjectName == nil or #functions.GameObjectName == 0,
+    "GameObjectName must not record without a UnitName line")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "restricted unit identity does not interrupt capture", run = TestRestrictedUnitIdentityDoesNotInterruptCapture },
@@ -2185,6 +2289,9 @@ local tests = {
   { name = "Merchant empty vendor", run = TestMerchantEmptyVendor },
   { name = "quest poi tracker records quest log pois", run = TestQuestPOTracker },
   { name = "quest poi tracker handles QUEST_POI_UPDATE", run = TestQuestPOTrackerQuestPOIUpdate },
+  { name = "game object tracker records object name", run = TestGameObjectTrackerRecordsObjectName },
+  { name = "game object tracker skips unreadable UnitName line", run = TestGameObjectTrackerSkipsUnreadableUnitNameLine },
+  { name = "game object tracker skips when no UnitName line", run = TestGameObjectTrackerSkipsWhenNoUnitNameLine },
 }
 
 local failures = 0
