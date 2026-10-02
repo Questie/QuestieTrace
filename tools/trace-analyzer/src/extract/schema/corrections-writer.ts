@@ -64,6 +64,17 @@ function getQuestieFieldName(fieldName: string): string {
   return QUESTIE_FIELD_MAP[fieldName] ?? fieldName;
 }
 
+/** Set of field names to exclude from export. Internal field names. */
+const EXPORT_EXCLUDED_FIELDS: Set<string> = new Set([
+  "requiredLevel",
+  "zoneOrSort",
+]);
+
+/** Returns true if the field should be excluded from export. */
+function isFieldExcluded(fieldName: string): boolean {
+  return EXPORT_EXCLUDED_FIELDS.has(fieldName);
+}
+
 /** Escapes a string as a Lua 5.1 string literal body, including control
  * characters (e.g. the embedded \r\n the WoW client returns for some NPC names
  * and gossip text) that would otherwise break the emitted file. Lua 5.1 has no
@@ -172,6 +183,7 @@ export function writeQuestieCorrectionsLua(
 
     lines.push(`        [${id}] = {`);
     for (const fieldName of fieldNames) {
+      if (isFieldExcluded(fieldName)) continue;
       const value = record![fieldName];
       let rendered: string;
       // Quest objectives use a positional 3-element table: {creatureObj, objectObj, itemObj}.
