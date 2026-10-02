@@ -136,4 +136,78 @@ describe("writeQuestieCorrectionsLua", () => {
 
     expect(lua).toContain("    return {\n    }\nend");
   });
+
+  it("should correctly render item objectives", () => {
+    const records = new Map([
+      [
+        207,
+        {
+          objectives: {
+            3: [2005, 2006, 2007, 2008],
+          },
+        },
+      ],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header);
+
+    expect(lua).toContain("[207] = {");
+    expect(lua).toContain("[questKeys.objectives] = {nil,nil,{{2005},{2006},{2007},{2008}}},");
+  });
+
+  it("should render creature objectives with each ID wrapped", () => {
+    const records = new Map([
+      [
+        207,
+        {
+          objectives: {
+            1: [2005, 2006, 2007, 2008],
+          },
+        },
+      ],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header);
+
+    expect(lua).toContain("[207] = {");
+    expect(lua).toContain("[questKeys.objectives] = {{{2005},{2006},{2007},{2008}}},");
+  });
+
+  it("should correctly render object objectives", () => {
+    const records = new Map([
+      [
+        38,
+        {
+          objectives: {
+            2: [729, 730, 731, 732],
+          },
+        },
+      ],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header);
+
+    expect(lua).toContain("[38] = {");
+    expect(lua).toContain("[questKeys.objectives] = {nil,{{729},{730},{731},{732}}},");
+  });
+
+  it("should render quest objectives with mixed positions and nil for missing", () => {
+    const records = new Map([
+      [
+        12,
+        {
+          objectives: {
+            1: [504, 95],
+            2: [589],
+          },
+        },
+      ],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header);
+
+    expect(lua).toContain("[12] = {");
+    // Trailing nils are dropped per Questie convention (only positions 1 and 2 have data)
+    expect(lua).toContain("[questKeys.objectives] = {{{504},{95}},{{589}}},");
+  });
 });
