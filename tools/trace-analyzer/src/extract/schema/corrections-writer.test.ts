@@ -95,8 +95,8 @@ describe("writeQuestieCorrectionsLua", () => {
 
     expect(lua).toContain("[questKeys.breadcrumbs] = {33,45},");
     // startedBy/finishedBy use positional table format with no spaces, trailing empty arrays omitted
-    expect(lua).toContain("[questKeys.startedBy] = {{33},nil,{45}},");
-    expect(lua).toContain("[questKeys.finishedBy] = {{40},{12}},");
+    expect(lua).toContain("[questKeys.startedBy_add] = {{33},nil,{45}},");
+    expect(lua).toContain("[questKeys.finishedBy_add] = {{40},{12}},");
     // All empty startedBy becomes nil (all 3 positions empty)
     expect(lua).toContain("[questKeys.startedByEmpty] = nil,");
   });
@@ -110,7 +110,7 @@ describe("writeQuestieCorrectionsLua", () => {
     const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header);
 
     expect(lua).toContain("[1] = {");
-    expect(lua).toContain("[questKeys.finishedBy] = {{10,20},{30}},");
+    expect(lua).toContain("[questKeys.finishedBy_add] = {{10,20},{30}},");
     expect(lua).toContain("[2] = {");
     expect(lua).toContain("[questKeys.questEnds] = {{40}},");
   });

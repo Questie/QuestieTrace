@@ -172,7 +172,8 @@ export function writeQuestieCorrectionsLua(
         rendered = `{${renderedPositions.join(",")}}`;
       } else {rendered = luaValue(value);
       }
-      lines.push(`            [${keysLocalName}.${fieldName}] = ${rendered},`);
+      const outputFieldName = fieldName === "startedBy" ? "startedBy_add" : fieldName === "finishedBy" ? "finishedBy_add" : fieldName;
+      lines.push(`            [${keysLocalName}.${outputFieldName}] = ${rendered},`);
     }
     lines.push("        },");
   }
