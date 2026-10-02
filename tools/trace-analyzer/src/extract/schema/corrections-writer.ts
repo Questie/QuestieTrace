@@ -172,7 +172,7 @@ export function writeQuestieCorrectionsLua(
         rendered = `{${renderedPositions.join(",")}}`;
       } else {rendered = luaValue(value);
       }
-      const outputFieldName = fieldName === "startedBy" ? "startedBy_add" : fieldName === "finishedBy" ? "finishedBy_add" : fieldName;
+      const outputFieldName = fieldName === "startedBy" ? "startedBy_add" : fieldName === "finishedBy" ? "finishedBy_add" : fieldName === "questStarts" ? "questStarts_add" : fieldName === "questEnds" ? "questEnds_add" : fieldName === "npcDrops" ? "npcDrops_add" : fieldName === "objectDrops" ? "objectDrops_add" : fieldName;
       lines.push(`            [${keysLocalName}.${outputFieldName}] = ${rendered},`);
     }
     lines.push("        },");

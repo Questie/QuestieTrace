@@ -112,7 +112,7 @@ describe("writeQuestieCorrectionsLua", () => {
     expect(lua).toContain("[1] = {");
     expect(lua).toContain("[questKeys.finishedBy_add] = {{10,20},{30}},");
     expect(lua).toContain("[2] = {");
-    expect(lua).toContain("[questKeys.questEnds] = {{40}},");
+    expect(lua).toContain("[questKeys.questEnds_add] = {{40}},");
   });
 
   it("should handle npc/object questEnds with 2-position positional tables", () => {
@@ -125,10 +125,10 @@ describe("writeQuestieCorrectionsLua", () => {
 
     expect(lua).toContain("[1] = {");
     expect(lua).toContain('[npcKeys.name] = "Test NPC",');
-    expect(lua).toContain("[npcKeys.questEnds] = {{10},{20,30}},");
+    expect(lua).toContain("[npcKeys.questEnds_add] = {{10},{20,30}},");
     expect(lua).toContain("[2] = {");
     // Empty creatures array becomes nil
-    expect(lua).toContain("[npcKeys.questEnds] = {nil,{50}},");
+    expect(lua).toContain("[npcKeys.questEnds_add] = {nil,{50}},");
   });
 
   it("should return an empty table body when there are no records", () => {
@@ -209,5 +209,23 @@ describe("writeQuestieCorrectionsLua", () => {
     expect(lua).toContain("[12] = {");
     // Trailing nils are dropped per Questie convention (only positions 1 and 2 have data)
     expect(lua).toContain("[questKeys.objectives] = {{{504},{95}},{{589}}},");
+  });
+
+  it("should render item npcDrops and objectDrops with _add suffix", () => {
+    const records = new Map([
+      [
+        123,
+        {
+          npcDrops: [1001, 1002],
+          objectDrops: [2001],
+        },
+      ],
+    ]);
+
+    const lua = writeQuestieCorrectionsLua("ForeverItemTraces", "itemKeys", records, header);
+
+    expect(lua).toContain("[123] = {");
+    expect(lua).toContain("[itemKeys.npcDrops_add] = {1001,1002},");
+    expect(lua).toContain("[itemKeys.objectDrops_add] = {2001},");
   });
 });
