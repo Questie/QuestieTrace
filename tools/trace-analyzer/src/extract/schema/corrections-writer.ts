@@ -47,6 +47,23 @@ function getPositionalArrays(value: unknown): { arrays: number[][]; type: string
   return null;
 }
 
+/** Maps internal field names to QuestieDB keys table field names.
+ * Some fields use an "_add" suffix in the output to distinguish correction
+ * fields from base DB fields (e.g., startedBy vs startedBy_add). */
+const QUESTIE_FIELD_MAP: Record<string, string> = {
+  startedBy: "startedBy_add",
+  finishedBy: "finishedBy_add",
+  questStarts: "questStarts_add",
+  questEnds: "questEnds_add",
+  npcDrops: "npcDrops_add",
+  objectDrops: "objectDrops_add",
+};
+
+/** Returns the QuestieDB keys table field name for a given internal field name. */
+function getQuestieFieldName(fieldName: string): string {
+  return QUESTIE_FIELD_MAP[fieldName] ?? fieldName;
+}
+
 /** Escapes a string as a Lua 5.1 string literal body, including control
  * characters (e.g. the embedded \r\n the WoW client returns for some NPC names
  * and gossip text) that would otherwise break the emitted file. Lua 5.1 has no
@@ -172,7 +189,7 @@ export function writeQuestieCorrectionsLua(
         rendered = `{${renderedPositions.join(",")}}`;
       } else {rendered = luaValue(value);
       }
-      const outputFieldName = fieldName === "startedBy" ? "startedBy_add" : fieldName === "finishedBy" ? "finishedBy_add" : fieldName === "questStarts" ? "questStarts_add" : fieldName === "questEnds" ? "questEnds_add" : fieldName === "npcDrops" ? "npcDrops_add" : fieldName === "objectDrops" ? "objectDrops_add" : fieldName;
+      const outputFieldName = getQuestieFieldName(fieldName);
       lines.push(`            [${keysLocalName}.${outputFieldName}] = ${rendered},`);
     }
     lines.push("        },");
