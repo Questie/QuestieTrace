@@ -299,4 +299,65 @@ describe("mergeQuestObjectives", () => {
   it("should return an empty object when there are no observations", () => {
     expect(mergeQuestObjectives([])).toEqual({});
   });
+
+  it("should preserve API order of objective IDs (not sort numerically)", () => {
+    // Simulate API returning IDs in non-sorted order: 251291, 251284, 251261
+    // The merge should preserve this order, not sort to 251261, 251284, 251291
+    const matches1: ObjectiveMatch[] = [
+      { kind: "monster", name: "Mob A", text: "0/1 Mob A slain", id: 251291 },
+      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 251284 },
+      { kind: "monster", name: "Mob C", text: "0/1 Mob C slain", id: 251261 },
+    ];
+
+    const observations = [
+      { entityId: 33, value: matches1, confidence: "low" as const, provenance: { session: "s", t: 1 } },
+    ];
+
+    const result = mergeQuestObjectives(observations);
+    // Order should be preserved from API: 251291, 251284, 251261
+    expect(result[CREATURE_OBJECTIVE_INDEX]).toEqual([251291, 251284, 251261]);
+  });
+
+  it("should preserve API order across multiple observations (first occurrence wins)", () => {
+    // First observation has 300 then 200; second has 200 then 100
+    // First occurrences: 300, 200, 100
+    const matches1: ObjectiveMatch[] = [
+      { kind: "monster", name: "Mob A", text: "0/1 Mob A slain", id: 300 },
+      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 200 },
+    ];
+    const matches2: ObjectiveMatch[] = [
+      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 200 },
+      { kind: "monster", name: "Mob C", text: "0/1 Mob C slain", id: 100 },
+    ];
+
+    const observations = [
+      { entityId: 33, value: matches1, confidence: "low" as const, provenance: { session: "s", t: 1 } },
+      { entityId: 33, value: matches2, confidence: "low" as const, provenance: { session: "s", t: 2 } },
+    ];
+
+    const result = mergeQuestObjectives(observations);
+    // First occurrence order: 300, 200, 100
+    expect(result[CREATURE_OBJECTIVE_INDEX]).toEqual([300, 200, 100]);
+  });
+
+  it("should preserve API order for mixed objective types independently", () => {
+    const matches: ObjectiveMatch[] = [
+      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 200 },
+      { kind: "object", name: "Obj A", text: "0/1 Obj A", id: 100 },
+      { kind: "monster", name: "Mob A", text: "0/1 Mob A slain", id: 100 },
+      { kind: "item", name: "Item B", text: "Item B: 0/1", id: 300 },
+      { kind: "object", name: "Obj B", text: "0/1 Obj B", id: 200 },
+      { kind: "item", name: "Item A", text: "Item A: 0/1", id: 100 },
+    ];
+
+    const observations = [
+      { entityId: 33, value: matches, confidence: "low" as const, provenance: { session: "s", t: 1 } },
+    ];
+
+    const result = mergeQuestObjectives(observations);
+    // Each type preserves its own API order
+    expect(result[CREATURE_OBJECTIVE_INDEX]).toEqual([200, 100]); // Mob B, Mob A
+    expect(result[OBJECT_OBJECTIVE_INDEX]).toEqual([100, 200]);   // Obj A, Obj B
+    expect(result[ITEM_OBJECTIVE_INDEX]).toEqual([300, 100]);      // Item B, Item A
+  });
 });

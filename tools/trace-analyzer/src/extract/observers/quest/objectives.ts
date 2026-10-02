@@ -256,20 +256,39 @@ export const observeObjectives: FieldObserver<ObjectiveMatch[]> = (session) => {
 
 /** Merge matched objectives across observations into Questie's positional buckets. */
 export function mergeQuestObjectives(observations: Observation<ObjectiveMatch[]>[]): QuestObjectivesValue {
-  const creatures = new Set<number>();
-  const objects = new Set<number>();
-  const items = new Set<number>();
+  // Use arrays to preserve order from API, deduplicate while preserving first occurrence
+  const creatures: number[] = [];
+  const objects: number[] = [];
+  const items: number[] = [];
+
+  const seenCreatures = new Set<number>();
+  const seenObjects = new Set<number>();
+  const seenItems = new Set<number>();
 
   for (const observation of observations) {
     for (const match of observation.value) {
-      const target = match.kind === "monster" ? creatures : match.kind === "object" ? objects : items;
-      target.add(match.id);
+      if (match.kind === "monster") {
+        if (!seenCreatures.has(match.id)) {
+          seenCreatures.add(match.id);
+          creatures.push(match.id);
+        }
+      } else if (match.kind === "object") {
+        if (!seenObjects.has(match.id)) {
+          seenObjects.add(match.id);
+          objects.push(match.id);
+        }
+      } else if (match.kind === "item") {
+        if (!seenItems.has(match.id)) {
+          seenItems.add(match.id);
+          items.push(match.id);
+        }
+      }
     }
   }
 
   const value: QuestObjectivesValue = {};
-  if (creatures.size > 0) value[CREATURE_OBJECTIVE_INDEX] = [...creatures].sort((a, b) => a - b);
-  if (objects.size > 0) value[OBJECT_OBJECTIVE_INDEX] = [...objects].sort((a, b) => a - b);
-  if (items.size > 0) value[ITEM_OBJECTIVE_INDEX] = [...items].sort((a, b) => a - b);
+  if (creatures.length > 0) value[CREATURE_OBJECTIVE_INDEX] = creatures;
+  if (objects.length > 0) value[OBJECT_OBJECTIVE_INDEX] = objects;
+  if (items.length > 0) value[ITEM_OBJECTIVE_INDEX] = items;
   return value;
 }
