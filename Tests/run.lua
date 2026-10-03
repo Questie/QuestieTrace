@@ -426,11 +426,6 @@ local function TestSaveCapturePrunesOldestSessionsPastCap()
   assert(#sessions == 10, "Sessions must be capped at 10 even though none were reported")
   assert(sessions[1].name == "s3", "The oldest sessions must be dropped first")
   assert(sessions[10].name == "s12", "The newest session must always be kept")
-
-  -- The monotonic saved-session counter must be unaffected by pruning, same
-  -- as it is unaffected by deletion via Core.DeleteReportedSessions().
-  assert(runtime.env.QuestieTraceCharacter.savedSessionCounter == 12,
-    "Pruning must not roll back the monotonic saved-session counter")
 end
 
 local function TestExportPayloadLiveSessionDeletedAndRestarted()
@@ -745,8 +740,11 @@ end
 local function TestShareReminderDueAfterSave()
   local runtime = NewRuntime(REMINDER_FILES)
   SendEvent(runtime, "VARIABLES_LOADED")
-  SaveSessions(runtime, 1)
-  assert(runtime.core.IsShareDue() == true, "A saved session must make sharing due")
+  runtime.core.StartCapture("session 1")
+  local session = runtime.env.QuestieTraceCharacter.currentSession
+  session.events[#session.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
+  runtime.core.SaveCapture()
+  assert(runtime.core.IsShareDue() == true, "A saved session with meaningful events must make sharing due")
 end
 
 local function TestShareReminderSuppressedAfterExportOpened()
@@ -760,9 +758,15 @@ end
 local function TestShareReminderResumesAfterNewSave()
   local runtime = NewRuntime(REMINDER_FILES)
   SendEvent(runtime, "VARIABLES_LOADED")
-  SaveSessions(runtime, 1)
+  runtime.core.StartCapture("session 1")
+  local session = runtime.env.QuestieTraceCharacter.currentSession
+  session.events[#session.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
+  runtime.core.SaveCapture()
   runtime.core.MarkExportOpened()
-  SaveSessions(runtime, 1)
+  runtime.core.StartCapture("session 2")
+  local session2 = runtime.env.QuestieTraceCharacter.currentSession
+  session2.events[#session2.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_TURNED_IN", a = { n = 0 } }
+  runtime.core.SaveCapture()
   assert(runtime.core.IsShareDue() == true, "New data after an export must re-arm the reminder")
 end
 
@@ -771,17 +775,40 @@ local function TestShareReminderSurvivesSessionDeletion()
   SendEvent(runtime, "VARIABLES_LOADED")
   local env = runtime.env
 
-  -- Save some sessions, then simulate the player reporting (and thus
-  -- deleting) all of them -- #sessions drops back to 0, but the monotonic
-  -- counter must still detect any newly saved data afterwards.
-  SaveSessions(runtime, 3)
+  -- Save some sessions with meaningful events, then simulate the player
+  -- reporting (and thus deleting) all of them -- #sessions drops back to 0.
+  -- The timestamp watermark must still detect any newly saved data afterwards.
+  runtime.core.StartCapture("session 1")
+  local s1 = runtime.env.QuestieTraceCharacter.currentSession
+  s1.events[#s1.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
+  runtime.core.SaveCapture()
+
+  runtime.core.StartCapture("session 2")
+  local s2 = runtime.env.QuestieTraceCharacter.currentSession
+  s2.events[#s2.events + 1] = { t = 0, tp = 0, e = "QUEST_TURNED_IN", a = { n = 0 } }
+  runtime.core.SaveCapture()
+
+  runtime.core.StartCapture("session 3")
+  local s3 = runtime.env.QuestieTraceCharacter.currentSession
+  s3.events[#s3.events + 1] = { t = 0, tp = 0, e = "LOOT_READY", a = { n = 0 } }
+  runtime.core.SaveCapture()
+
+  -- Simulate reporting all sessions (they get deleted)
   env.QuestieTraceCharacter.sessions = {}
   runtime.core.MarkExportOpened()
-  SaveSessions(runtime, 2)
+
+  -- Save new sessions after the export
+  runtime.core.StartCapture("session 4")
+  local s4 = runtime.env.QuestieTraceCharacter.currentSession
+  s4.events[#s4.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
+  runtime.core.SaveCapture()
+
+  runtime.core.StartCapture("session 5")
+  local s5 = runtime.env.QuestieTraceCharacter.currentSession
+  s5.events[#s5.events + 1] = { t = runtime.now, tp = 0, e = "LOOT_READY", a = { n = 0 } }
+  runtime.core.SaveCapture()
 
   assert(#env.QuestieTraceCharacter.sessions == 2, "Only the newly saved sessions must remain")
-  assert(env.QuestieTraceCharacter.savedSessionCounter == 5,
-    "The saved-session counter must keep counting even though #sessions shrank")
   assert(runtime.core.IsShareDue() == true, "Session deletion must not permanently suppress reminders")
 end
 
@@ -789,7 +816,10 @@ local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
   SendEvent(runtime, "VARIABLES_LOADED")
-  SaveSessions(runtime, 1)
+  runtime.core.StartCapture("session 1")
+  local session = runtime.env.QuestieTraceCharacter.currentSession
+  session.events[#session.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
+  runtime.core.SaveCapture()
 
   SendEvent(runtime, "PLAYER_LOGIN")
   AdvanceTo(runtime, 9)
@@ -811,7 +841,10 @@ local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
   AdvanceTo(runtime, 3610)
   assert(#messages == 3, "Live session with meaningful event is shareable, so reminder fires again")
 
-  SaveSessions(runtime, 1)
+  runtime.core.StartCapture("session 2")
+  local session2 = runtime.env.QuestieTraceCharacter.currentSession
+  session2.events[#session2.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_TURNED_IN", a = { n = 0 } }
+  runtime.core.SaveCapture()
   AdvanceTo(runtime, 5410)
   assert(#messages == 4, "The still-running loop must fire again once new data is saved")
 end

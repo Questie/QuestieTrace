@@ -127,9 +127,8 @@ QuestieTraceCharacter = {
   lastSavedSession = "2026-02-10_12-34-56", -- set on save only
   currentSession = SessionRecord?,          -- live session, linked by reference; never leftover across loads
   sessions = { SessionRecord, ... },
-  savedSessionCounter = 0,                  -- monotonic count of sessions ever saved
   reminder = {
-    sessionCounterAtExport = 0,             -- savedSessionCounter when the export window was last opened
+    lastExportAt = 0,                       -- GetTime() when the export window was last opened
   },
 }
 ```
@@ -144,8 +143,7 @@ There is no `exportedAt` field or similar marker on `SessionRecord`: a session i
 - `settings.dataCollectionConsent` is preserved across schema version changes. It is only left as `nil` when the setting has never been set by the user (first install), since `nil` is the "not yet asked" signal that triggers the consent popup on the next `PLAYER_LOGIN`.
 - `QuestieTraceDumps` and its `dumps` table are ensured.
 - Existing `QuestieTraceCharacter.sessions` data is preserved when it is already a table; otherwise it is initialized to an empty table.
-- Missing `QuestieTraceCharacter.savedSessionCounter` initializes to the current `#sessions`, so existing users start from their current save count.
-- Missing `QuestieTraceCharacter.reminder.sessionCounterAtExport` initializes to `0`, so existing users with saved data are reminded on their next login.
+- Missing `QuestieTraceCharacter.reminder.lastExportAt` initializes to `0`, so existing users with saved data are reminded on their next login.
 - These per-character fields are shape-checked rather than schema-gated, so adding them required no `SCHEMA_VERSION` bump (a bump would reset every user's account settings).
 
 ---

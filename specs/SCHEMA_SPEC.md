@@ -31,9 +31,8 @@ QuestieTraceCharacter = {
   lastSavedSession = "2026-02-10_12-34-56",
   currentSession = SessionRecord?,          -- live/stopped-unsaved session, linked by reference
   sessions = { SessionRecord, ... },
-  savedSessionCounter = 0,                  -- monotonic count of sessions ever saved
   reminder = {
-    sessionCounterAtExport = 0,             -- savedSessionCounter when the export window was last opened
+    lastExportAt = 0,                       -- GetTime() when the export window was last opened
   },
 }
 ```
@@ -45,11 +44,10 @@ On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is recovered as
 `lastSavedSession` is only set on explicit save — it is not initialized
 on fresh install or migration.
 
-`savedSessionCounter` increments on every `Core.SaveCapture()` and never decreases.
-`#sessions` shrinks whenever a reported session is deleted by
-`Core.DeleteReportedSessions()`, so it cannot be used as a "has new data been
-saved?" watermark; the share reminder compares this counter against
-`reminder.sessionCounterAtExport` instead (see `specs/UI_SPEC.md` section 5).
+The share reminder uses a timestamp watermark: `reminder.lastExportAt` records
+when the export window was last opened. A saved session is considered "new"
+if its `stoppedAt` is greater than `lastExportAt` and it contains meaningful
+events. This replaces the previous monotonic counter approach.
 
 ### Migration
 

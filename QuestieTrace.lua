@@ -300,16 +300,10 @@ local function EnsureSavedVariables()
   QuestieTraceCharacter.sessions = type(QuestieTraceCharacter.sessions) == "table" and QuestieTraceCharacter.sessions or {}
 
   -- Share-reminder state. Lives on the per-character table, which is shape-checked
-  -- rather than schema-gated, so no SCHEMA_VERSION bump is needed (a bump would
-  -- reset every user's settings). savedSessionCounter is monotonic: it must not be
-  -- replaced with #sessions, which shrinks whenever a reported session is
-  -- deleted or an old one is pruned by MAX_SESSIONS.
-  if type(QuestieTraceCharacter.savedSessionCounter) ~= "number" then
-    QuestieTraceCharacter.savedSessionCounter = #QuestieTraceCharacter.sessions
-  end
+  -- rather than schema-gated, so no SCHEMA_VERSION bump is needed.
   QuestieTraceCharacter.reminder = type(QuestieTraceCharacter.reminder) == "table" and QuestieTraceCharacter.reminder or {}
-  if type(QuestieTraceCharacter.reminder.sessionCounterAtExport) ~= "number" then
-    QuestieTraceCharacter.reminder.sessionCounterAtExport = 0
+  if type(QuestieTraceCharacter.reminder.lastExportAt) ~= "number" then
+    QuestieTraceCharacter.reminder.lastExportAt = 0
   end
 
   -- Recover an unsaved session left over from a previous load (e.g. /reload
@@ -506,9 +500,6 @@ function Core.SaveCapture(nameOverride)
   -- populated in-place by the trackers. No serialization step needed.
   QuestieTraceCharacter.sessions[#QuestieTraceCharacter.sessions + 1] = session
   QuestieTraceCharacter.lastSavedSession = session.name
-  -- Monotonic even though sessions[] shrinks as reported sessions are deleted;
-  -- the share reminder compares it to its watermark.
-  QuestieTraceCharacter.savedSessionCounter = (QuestieTraceCharacter.savedSessionCounter or 0) + 1
 
   PruneSessionsIfNeeded()
 

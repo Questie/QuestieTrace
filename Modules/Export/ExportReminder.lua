@@ -95,7 +95,7 @@ local function HasMeaningfulEvents(session)
 end
 
 ---@class ReminderState
----@field sessionCounterAtExport number Value of savedSessionCounter when the export window was last opened.
+---@field lastExportAt number Timestamp (GetTime()) when the export window was last opened.
 
 ---@type boolean Set once the repeating check has been scheduled for this load.
 local scheduled = false
@@ -116,7 +116,7 @@ local function GetReminderState()
   ---@type table?
   local characterDb = QuestieTraceCharacter
   if type(characterDb) ~= "table" then
-    return { sessionCounterAtExport = 0 }
+    return { lastExportAt = 0 }
   end
 
   if type(characterDb.reminder) ~= "table" then
@@ -125,35 +125,14 @@ local function GetReminderState()
 
   ---@type ReminderState
   local reminder = characterDb.reminder
-  if type(reminder.sessionCounterAtExport) ~= "number" then
-    reminder.sessionCounterAtExport = 0
+  if type(reminder.lastExportAt) ~= "number" or reminder.lastExportAt > GetTime() then
+    reminder.lastExportAt = 0
   end
 
   return reminder
 end
 
---- Read the monotonic saved-session counter.
----
---- This counter only ever increases, unlike #sessions, which shrinks whenever
---- a reported session is deleted by Core.DeleteReportedSessions().
----@return number counter
-local function GetSavedSessionCounter()
-  ---@type table?
-  local characterDb = QuestieTraceCharacter
-  if type(characterDb) ~= "table" then return 0 end
-
-  if type(characterDb.savedSessionCounter) == "number" then
-    return characterDb.savedSessionCounter
-  end
-
-  return type(characterDb.sessions) == "table" and #characterDb.sessions or 0
-end
-
---- Count all saved sessions. Every saved session is guaranteed unreported,
---- since reported ones are deleted immediately by Core.DeleteReportedSessions().
---- This is only used to gate whether *any* saved data exists at all, not
---- whether new data exists since the export window was last opened -- that's
---- what `savedSessionCounter` vs `reminder.sessionCounterAtExport` is for below.
+--- Count all saved sessions.
 ---@return number count
 local function GetSavedSessionCount()
   ---@type table?
@@ -196,6 +175,32 @@ local function IsLiveSessionShareable()
   return true
 end
 
+--- Check if any saved session was completed after the last export window open
+--- (or if never exported, any saved session with meaningful events) and
+--- contains meaningful events.
+---@return boolean hasNewSavedData
+local function HasNewSavedData()
+  local reminder = GetReminderState()
+  local lastExportAt = reminder.lastExportAt
+
+  ---@type table?
+  local characterDb = QuestieTraceCharacter
+  if type(characterDb) ~= "table" or type(characterDb.sessions) ~= "table" then
+    return false
+  end
+
+  for _, session in ipairs(characterDb.sessions) do
+    if type(session) == "table"
+        and type(session.stoppedAt) == "number"
+        and HasMeaningfulEvents(session) then
+      if lastExportAt == 0 or session.stoppedAt > lastExportAt then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 ---------------------------------------------------------------------------
 -- Eligibility
 ---------------------------------------------------------------------------
@@ -203,10 +208,11 @@ end
 --- Is there saved data the player has not been prompted about since their
 --- last visit to the export window?
 ---
---- Sessions in QuestieTraceCharacter.sessions are gated by the saved-session
---- counter watermark. The live (unsaved) session is checked separately: it
---- has no counter of its own, so it's due once it holds events and has run for
---- at least LIVE_SESSION_MIN_AGE, regardless of whether anything has been saved.
+--- The live (unsaved) session is checked separately: it's due once it holds
+--- meaningful events and has run for at least LIVE_SESSION_MIN_AGE.
+---
+--- Saved sessions are checked by timestamp: any session with stoppedAt >
+--- lastExportAt and meaningful events is considered new.
 ---
 --- Extension point: a trace-size rule belongs here as a further condition.
 ---@return boolean due
@@ -218,13 +224,14 @@ function Core.IsShareDue()
   if GetSavedSessionCount() == 0 then
     return false
   end
-  return GetSavedSessionCounter() > GetReminderState().sessionCounterAtExport
+
+  return HasNewSavedData()
 end
 
 --- Record that the player opened the export window, pausing reminders until
---- another session is saved. Called from Core.ShowExportWindow().
+--- another session with meaningful data is saved. Called from Core.ShowExportWindow().
 function Core.MarkExportOpened()
-  GetReminderState().sessionCounterAtExport = GetSavedSessionCounter()
+  GetReminderState().lastExportAt = GetTime()
 end
 
 ---------------------------------------------------------------------------

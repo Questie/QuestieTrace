@@ -147,7 +147,8 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
       sessions = {},
       currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
     }
-    local discardCalls, startCalls = 0, 0
+    local saveCalls, discardCalls, startCalls = 0, 0, 0
+    Core.SaveCapture = function() saveCalls = saveCalls + 1 end
     Core.DiscardCapture = function()
       discardCalls = discardCalls + 1
       env.QuestieTraceCharacter.currentSession = nil
@@ -157,7 +158,8 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
+    assert.equal(1, saveCalls)
     assert.equal(1, discardCalls)
-    assert.equal(1, startCalls)
+    assert.equal(2, startCalls)
   end)
 end)
