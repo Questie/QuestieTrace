@@ -31,6 +31,68 @@ local LIVE_SESSION_MIN_AGE = 900
 local LINK_TYPE = "questietrace"
 ---@type string Hyperlink option identifying the export action.
 local LINK_ACTION = "export"
+---@type number Minimum number of meaningful (non-noise) events required for a
+--- live session to be considered shareable.
+local LIVE_SESSION_MIN_MEANINGFUL_EVENTS = 1
+
+---@type table<string, boolean> Event names that DO count as meaningful gameplay
+--- (quest, loot, combat xp/rep, NPC interaction, skill/level, zone changes,
+--- currency, trade skills).
+local MEANINGFUL_EVENTS = {
+  -- Quest events
+  QUEST_LOG_UPDATE = true,
+  QUEST_ACCEPTED = true,
+  QUEST_TURNED_IN = true,
+  QUEST_GREETING = true,
+  QUEST_DETAIL = true,
+  QUEST_PROGRESS = true,
+  QUEST_COMPLETE = true,
+  -- Loot events
+  CHAT_MSG_LOOT = true,
+  LOOT_READY = true,
+  LOOT_CLOSED = true,
+  -- Combat XP/reputation
+  CHAT_MSG_COMBAT_XP_GAIN = true,
+  CHAT_MSG_COMBAT_FACTION_CHANGE = true,
+  UPDATE_FACTION = true,
+  -- NPC interaction
+  GOSSIP_SHOW = true,
+  GOSSIP_CLOSED = true,
+  -- Skill/Level
+  CHAT_MSG_SKILL = true,
+  PLAYER_LEVEL_UP = true,
+  NEW_RECIPE_LEARNED = true,
+  -- Zone changes
+  ZONE_CHANGED = true,
+  ZONE_CHANGED_NEW_AREA = true,
+  ZONE_CHANGED_INDOORS = true,
+  -- Currency
+  CURRENCY_DISPLAY_UPDATE = true,
+  -- Trade skills
+  CHAT_MSG_TRADESKILLS = true,
+}
+
+--- Check if a session has at least the minimum number of meaningful (non-noise)
+--- events. Only meaningful events count; noise events like login, UI, map,
+--- group, achievement, item, and combat state changes are ignored.
+---@param session SessionRecord
+---@return boolean hasMeaningful
+local function HasMeaningfulEvents(session)
+  if type(session.events) ~= "table" then return false end
+  local count = 0
+  for _, eventRecord in ipairs(session.events) do
+    if type(eventRecord) == "table" and type(eventRecord.e) == "string" then
+      local eventName = eventRecord.e
+      if MEANINGFUL_EVENTS[eventName] then
+        count = count + 1
+        if count >= LIVE_SESSION_MIN_MEANINGFUL_EVENTS then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
 
 ---@class ReminderState
 ---@field sessionCounterAtExport number Value of savedSessionCounter when the export window was last opened.
@@ -123,7 +185,15 @@ local function IsLiveSessionShareable()
     return false
   end
 
-  return GetTime() - currentSession.startedAt >= LIVE_SESSION_MIN_AGE
+  if GetTime() - currentSession.startedAt < LIVE_SESSION_MIN_AGE then
+    return false
+  end
+
+  if not HasMeaningfulEvents(currentSession) then
+    return false
+  end
+
+  return true
 end
 
 ---------------------------------------------------------------------------

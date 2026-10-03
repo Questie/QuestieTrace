@@ -712,14 +712,14 @@ local function TestShareReminderDueWithUnsavedLiveSessionEvents()
   -- unprompted data.
   runtime.core.StartCapture("live only")
   local currentSession = runtime.env.QuestieTraceCharacter.currentSession
-  currentSession.events[#currentSession.events + 1] = { t = 0, tp = 0, e = "SOME_EVENT", a = { n = 0 } }
+  currentSession.events[#currentSession.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
   assert(runtime.core.IsShareDue() == false, "A live session younger than the minimum age must not trigger a reminder")
 
   AdvanceTo(runtime, 899)
   assert(runtime.core.IsShareDue() == false, "A live session just under the minimum age must stay silent")
 
   AdvanceTo(runtime, 900)
-  assert(runtime.core.IsShareDue() == true, "An unsaved live session with events past the minimum age must trigger a reminder")
+  assert(runtime.core.IsShareDue() == true, "An unsaved live session with meaningful events past the minimum age must trigger a reminder")
 end
 
 local function TestShareReminderSilentOnFreshCharacterLogin()
@@ -739,7 +739,7 @@ local function TestShareReminderSilentOnFreshCharacterLogin()
   assert(#messages == 0, "A freshly logged-in character must not be reminded at the login check")
 
   AdvanceTo(runtime, 1810)
-  assert(#messages == 1, "A live session that has been played for 30 minutes must be reminded")
+  assert(#messages == 0, "A live session with only noise events must not trigger a reminder after 30 min")
 end
 
 local function TestShareReminderDueAfterSave()
@@ -804,10 +804,12 @@ local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
   assert(#messages == 2, "The reminder must repeat 30 minutes later")
 
   -- Opening the export window only silences saved-session reminders.
-  -- The live session is still running and shareable, so it fires again.
+  -- The live session has a meaningful event, so it's still shareable and fires again.
   runtime.core.MarkExportOpened()
+  local currentSession = runtime.env.QuestieTraceCharacter.currentSession
+  currentSession.events[#currentSession.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
   AdvanceTo(runtime, 3610)
-  assert(#messages == 3, "Live session is still shareable, so reminder fires again")
+  assert(#messages == 3, "Live session with meaningful event is shareable, so reminder fires again")
 
   SaveSessions(runtime, 1)
   AdvanceTo(runtime, 5410)
