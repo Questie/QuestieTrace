@@ -140,27 +140,6 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     return filtered;
   }
 
-  const npcRecords = emitNpcRecords({
-    name: aggregateField(sessionsToProcess.flatMap(observeNpcName)),
-    minLevel: aggregateField(sessionsToProcess.flatMap(observeMinLevel)),
-    maxLevel: aggregateField(sessionsToProcess.flatMap(observeMaxLevel)),
-    spawns: aggregateField(
-      sessionsToProcess.flatMap(observeNpcSpawns),
-      mergeNpcSpawns,
-    ),
-    zoneID: aggregateField(
-      sessionsToProcess.flatMap(observeNpcZoneID),
-      mergeNpcZoneID,
-    ),
-    questStarts: aggregateField(
-      sessionsToProcess.flatMap(observeNpcQuestStarts),
-      mergeNpcQuestStarts,
-    ),
-    questEnds: aggregateField(
-      sessionsToProcess.flatMap(observeNpcQuestEnds),
-      mergeNpcQuestEnds,
-    ),
-  });
   const zoneOrSortFacts = aggregateField(sessionsToProcess.flatMap(observeZoneOrSort));
   const questRecords = emitQuestRecords({
     name: aggregateField(sessionsToProcess.flatMap(observeQuestName)),
@@ -183,6 +162,47 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     finishedBy: aggregateField(
       sessionsToProcess.flatMap(observeFinishedBy),
       mergeFinishedBy,
+    ),
+  });
+
+  // Collect NPC and object IDs referenced in quest startedBy/finishedBy
+  // to protect them from MAX_IDS filtering
+  const referencedNpcIds = new Set<number>();
+  const referencedObjectIds = new Set<number>();
+
+  for (const record of questRecords.values()) {
+    const startedBy = record.startedBy as { creatures: number[]; objects: number[]; items: number[] } | undefined;
+    const finishedBy = record.finishedBy as { creatures: number[]; objects: number[] } | undefined;
+
+    if (startedBy) {
+      for (const id of startedBy.creatures) referencedNpcIds.add(id);
+      for (const id of startedBy.objects) referencedObjectIds.add(id);
+    }
+    if (finishedBy) {
+      for (const id of finishedBy.creatures) referencedNpcIds.add(id);
+      for (const id of finishedBy.objects) referencedObjectIds.add(id);
+    }
+  }
+
+  const npcRecords = emitNpcRecords({
+    name: aggregateField(sessionsToProcess.flatMap(observeNpcName)),
+    minLevel: aggregateField(sessionsToProcess.flatMap(observeMinLevel)),
+    maxLevel: aggregateField(sessionsToProcess.flatMap(observeMaxLevel)),
+    spawns: aggregateField(
+      sessionsToProcess.flatMap(observeNpcSpawns),
+      mergeNpcSpawns,
+    ),
+    zoneID: aggregateField(
+      sessionsToProcess.flatMap(observeNpcZoneID),
+      mergeNpcZoneID,
+    ),
+    questStarts: aggregateField(
+      sessionsToProcess.flatMap(observeNpcQuestStarts),
+      mergeNpcQuestStarts,
+    ),
+    questEnds: aggregateField(
+      sessionsToProcess.flatMap(observeNpcQuestEnds),
+      mergeNpcQuestEnds,
     ),
   });
   const itemRecords = emitItemRecords({
@@ -216,10 +236,52 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     ),
   });
 
+  // Filter with protection for referenced NPCs/objects
+  // For protected IDs (below threshold but referenced in quests), only keep questStarts/questEnds
+  // Also filter quest IDs in questStarts/questEnds by MAX_IDS.quest threshold
+  function filterBelowMaxWithProtection(
+    records: Map<number, Record<string, unknown>>,
+    entity: keyof typeof MAX_IDS,
+    protectedIds: Set<number>
+  ): Map<number, Record<string, unknown>> {
+    const filtered = new Map<number, Record<string, unknown>>();
+    const threshold = effectiveMaxIds[entity];
+    const questThreshold = effectiveMaxIds.quest;
+    if (threshold === undefined) return records;
+    for (const [id, record] of records) {
+      if (id > threshold) {
+        // Above threshold: keep all fields
+        filtered.set(id, record);
+      } else if (protectedIds.has(id)) {
+        // Below threshold but referenced: only keep questStarts/questEnds with quest IDs above questThreshold
+        const protectedRecord: Record<string, unknown> = {};
+        let hasValidQuests = false;
+        if (record.questStarts !== undefined) {
+          const questStarts = (record.questStarts as number[]).filter((qid) => qid > questThreshold);
+          if (questStarts.length > 0) {
+            protectedRecord.questStarts = questStarts;
+            hasValidQuests = true;
+          }
+        }
+        if (record.questEnds !== undefined) {
+          const questEnds = (record.questEnds as number[]).filter((qid) => qid > questThreshold);
+          if (questEnds.length > 0) {
+            protectedRecord.questEnds = questEnds;
+            hasValidQuests = true;
+          }
+        }
+        if (hasValidQuests) {
+          filtered.set(id, protectedRecord);
+        }
+      }
+    }
+    return filtered;
+  }
+
   return {
-    npcFixes: writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", filterBelowMax(npcRecords, "npc"), header),
+    npcFixes: writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", filterBelowMaxWithProtection(npcRecords, "npc", referencedNpcIds), header),
     questFixes: writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", filterBelowMax(questRecords, "quest"), header),
     itemFixes: writeQuestieCorrectionsLua("ForeverItemTraces", "itemKeys", filterBelowMax(itemRecords, "item"), header),
-    objectFixes: writeQuestieCorrectionsLua("ForeverObjectTraces", "objectKeys", filterBelowMax(objectRecords, "object"), header),
+    objectFixes: writeQuestieCorrectionsLua("ForeverObjectTraces", "objectKeys", filterBelowMaxWithProtection(objectRecords, "object", referencedObjectIds), header),
   };
 }
