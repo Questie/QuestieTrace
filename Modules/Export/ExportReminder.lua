@@ -73,36 +73,7 @@ local function HasPlayedLongEnough(sessionStart)
   return GetTime() - sessionStart >= MIN_PLAY_TIME
 end
 
---- Event names that count as meaningful gameplay (not login/UI noise).
----@type table<string, boolean>
-local MEANINGFUL_EVENTS = {
-  QUEST_LOG_UPDATE = true, QUEST_ACCEPTED = true, QUEST_TURNED_IN = true,
-  QUEST_GREETING = true, QUEST_DETAIL = true, QUEST_PROGRESS = true,
-  QUEST_COMPLETE = true, CHAT_MSG_LOOT = true, LOOT_READY = true,
-  LOOT_CLOSED = true, CHAT_MSG_COMBAT_XP_GAIN = true,
-  CHAT_MSG_COMBAT_FACTION_CHANGE = true, UPDATE_FACTION = true,
-  GOSSIP_SHOW = true, GOSSIP_CLOSED = true, CHAT_MSG_SKILL = true,
-  PLAYER_LEVEL_UP = true, NEW_RECIPE_LEARNED = true, ZONE_CHANGED = true,
-  ZONE_CHANGED_NEW_AREA = true, ZONE_CHANGED_INDOORS = true,
-  CURRENCY_DISPLAY_UPDATE = true, CHAT_MSG_TRADESKILLS = true,
-}
-
---- Check if a session has at least one meaningful event.
----@param session SessionRecord
----@return boolean
-local function HasMeaningfulEvents(session)
-  if type(session.events) ~= "table" then return false end
-  for _, eventRecord in ipairs(session.events) do
-    if type(eventRecord) == "table" and type(eventRecord.e) == "string" then
-      if MEANINGFUL_EVENTS[eventRecord.e] then
-        return true
-      end
-    end
-  end
-  return false
-end
-
---- Check if there is shareable data (saved sessions or live session with meaningful events).
+--- Check if there is shareable data (saved sessions or live session with events).
 ---@return boolean
 local function HasShareableData()
   ---@type table?
@@ -114,14 +85,13 @@ local function HasShareableData()
     return true
   end
 
-  -- Check live session for meaningful events
+  -- Check live session for any events
   ---@type SessionRecord?
   local currentSession = characterDb.currentSession
   if type(currentSession) == "table"
       and type(currentSession.events) == "table"
       and #currentSession.events > 0
-      and type(currentSession.startedAt) == "number"
-      and HasMeaningfulEvents(currentSession) then
+      and type(currentSession.startedAt) == "number" then
     return true
   end
 
