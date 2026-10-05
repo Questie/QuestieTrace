@@ -32,7 +32,8 @@ QuestieTraceCharacter = {
   currentSession = SessionRecord?,          -- live/stopped-unsaved session, linked by reference
   sessions = { SessionRecord, ... },
   reminder = {
-    lastExportAt = 0,                       -- GetTime() when the export window was last opened
+    sessionStart = 0,                       -- GetTime() when the current session started (0 = no active session)
+    lastReminderAt = 0,                     -- GetTime() when the last reminder was shown (0 = never)
   },
 }
 ```
@@ -44,10 +45,12 @@ On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is recovered as
 `lastSavedSession` is only set on explicit save — it is not initialized
 on fresh install or migration.
 
-The share reminder uses a timestamp watermark: `reminder.lastExportAt` records
-when the export window was last opened. A saved session is considered "new"
-if its `stoppedAt` is greater than `lastExportAt` and it contains meaningful
-events. This replaces the previous monotonic counter approach.
+The share reminder uses a timestamp watermark: `reminder.lastReminderAt` records
+when the last reminder was shown, and `reminder.sessionStart` records when the
+current session began. A saved session is considered "new"
+if its `stoppedAt` is greater than `lastReminderAt` and it contains meaningful
+events. A live session is shareable once it has run for at least
+`LIVE_SESSION_MIN_AGE` and contains meaningful events.
 
 ### Migration
 

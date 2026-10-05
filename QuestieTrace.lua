@@ -299,12 +299,8 @@ local function EnsureSavedVariables()
   QuestieTraceCharacter = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter or {}
   QuestieTraceCharacter.sessions = type(QuestieTraceCharacter.sessions) == "table" and QuestieTraceCharacter.sessions or {}
 
-  -- Share-reminder state. Lives on the per-character table, which is shape-checked
-  -- rather than schema-gated, so no SCHEMA_VERSION bump is needed.
+  -- Share-reminder state (sessionStart, lastReminderAt). Shape-checked, no SCHEMA_VERSION bump.
   QuestieTraceCharacter.reminder = type(QuestieTraceCharacter.reminder) == "table" and QuestieTraceCharacter.reminder or {}
-  if type(QuestieTraceCharacter.reminder.lastExportAt) ~= "number" then
-    QuestieTraceCharacter.reminder.lastExportAt = 0
-  end
 
   -- Recover an unsaved session left over from a previous load (e.g. /reload
   -- or logout without explicit Save). Auto-finalize it into sessions[]
