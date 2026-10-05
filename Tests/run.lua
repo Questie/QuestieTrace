@@ -721,149 +721,168 @@ local function TestShareReminderNotDueWithoutSavedSessions()
   assert(runtime.core.IsShareDue() == false, "An unsaved live session with no events must not trigger a reminder")
 end
 
-local function TestShareReminderDueWithUnsavedLiveSessionEvents()
-  local runtime = NewRuntime(REMINDER_FILES)
-
-  -- Once the live session has recorded events, it must be shareable even
-  -- though nothing has been saved yet -- a crash shouldn't lose hours of
-  -- unprompted data.
-  runtime.core.StartCapture("live only")
-  local currentSession = runtime.env.QuestieTraceCharacter.currentSession
-  currentSession.events[#currentSession.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
-  assert(runtime.core.IsShareDue() == false, "A live session younger than the minimum age must not trigger a reminder")
-
-  AdvanceTo(runtime, 899)
-  assert(runtime.core.IsShareDue() == false, "A live session just under the minimum age must stay silent")
-
-  AdvanceTo(runtime, 900)
-  assert(runtime.core.IsShareDue() == true, "An unsaved live session with meaningful events past the minimum age must trigger a reminder")
-end
-
-local function TestShareReminderSilentOnFreshCharacterLogin()
-  local runtime = NewRuntime(REMINDER_FILES)
-  local messages = CaptureChat(runtime)
-  -- Consent is account-wide, so a brand-new alt already has it granted, and
-  -- capture starts automatically.
-  runtime.env.QuestieTraceCharacter = nil
-
-  -- Auto-start records PLAYER_LOGIN into the live session immediately.
-  SendEvent(runtime, "PLAYER_LOGIN")
-  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
-  local currentSession = runtime.env.QuestieTraceCharacter.currentSession
-  assert(currentSession ~= nil and #currentSession.events > 0, "Auto-start must have recorded login events")
-
-  AdvanceTo(runtime, 10)
-  assert(#messages == 0, "A freshly logged-in character must not be reminded at the login check")
-
-  AdvanceTo(runtime, 1810)
-  assert(#messages == 0, "A live session with only noise events must not trigger a reminder after 30 min")
-end
-
-local function TestShareReminderDueAfterSave()
-  local runtime = NewRuntime(REMINDER_FILES)
-  runtime.core.StartCapture("session 1")
-  local session = runtime.env.QuestieTraceCharacter.currentSession
-  session.events[#session.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
-  runtime.core.SaveCapture()
-  assert(runtime.core.IsShareDue() == true, "A saved session with meaningful events must make sharing due")
-end
-
 local function TestShareReminderSuppressedAfterExportOpened()
   local runtime = NewRuntime(REMINDER_FILES)
+  SendEvent(runtime, "VARIABLES_LOADED")
   SaveSessions(runtime, 1)
   runtime.core.MarkExportOpened()
   assert(runtime.core.IsShareDue() == false, "Opening the export window must pause reminders")
 end
 
-local function TestShareReminderResumesAfterNewSave()
-  local runtime = NewRuntime(REMINDER_FILES)
-  runtime.core.StartCapture("session 1")
+--- Mock IsResting() for reminder tests
+local function MockIsResting(runtime, value)
+  runtime.env.IsResting = function() return value end
+end
+
+--- Helper to set up a session with meaningful events
+local function SetupShareableSession(runtime)
+  runtime.core.StartCapture("test session")
   local session = runtime.env.QuestieTraceCharacter.currentSession
   session.events[#session.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
   runtime.core.SaveCapture()
-  runtime.core.MarkExportOpened()
-  runtime.core.StartCapture("session 2")
-  local session2 = runtime.env.QuestieTraceCharacter.currentSession
-  session2.events[#session2.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_TURNED_IN", a = { n = 0 } }
-  runtime.core.SaveCapture()
-  assert(runtime.core.IsShareDue() == true, "New data after an export must re-arm the reminder")
 end
 
-local function TestShareReminderSurvivesSessionDeletion()
-  local runtime = NewRuntime(REMINDER_FILES)
-  local env = runtime.env
-
-  -- Save some sessions with meaningful events, then simulate the player
-  -- reporting (and thus deleting) all of them -- #sessions drops back to 0.
-  -- The timestamp watermark must still detect any newly saved data afterwards.
-  runtime.core.StartCapture("session 1")
-  local s1 = runtime.env.QuestieTraceCharacter.currentSession
-  s1.events[#s1.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
-  runtime.core.SaveCapture()
-
-  runtime.core.StartCapture("session 2")
-  local s2 = runtime.env.QuestieTraceCharacter.currentSession
-  s2.events[#s2.events + 1] = { t = 0, tp = 0, e = "QUEST_TURNED_IN", a = { n = 0 } }
-  runtime.core.SaveCapture()
-
-  runtime.core.StartCapture("session 3")
-  local s3 = runtime.env.QuestieTraceCharacter.currentSession
-  s3.events[#s3.events + 1] = { t = 0, tp = 0, e = "LOOT_READY", a = { n = 0 } }
-  runtime.core.SaveCapture()
-
-  -- Simulate reporting all sessions (they get deleted)
-  env.QuestieTraceCharacter.sessions = {}
-  runtime.core.MarkExportOpened()
-
-  -- Save new sessions after the export
-  runtime.core.StartCapture("session 4")
-  local s4 = runtime.env.QuestieTraceCharacter.currentSession
-  s4.events[#s4.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
-  runtime.core.SaveCapture()
-
-  runtime.core.StartCapture("session 5")
-  local s5 = runtime.env.QuestieTraceCharacter.currentSession
-  s5.events[#s5.events + 1] = { t = runtime.now, tp = 0, e = "LOOT_READY", a = { n = 0 } }
-  runtime.core.SaveCapture()
-
-  assert(#env.QuestieTraceCharacter.sessions == 2, "Only the newly saved sessions must remain")
-  assert(runtime.core.IsShareDue() == true, "Session deletion must not permanently suppress reminders")
-end
-
-local function TestShareReminderFiresOnLoginAndAtThirtyMinutes()
+local function TestInnReminderNotDueBeforeOneHour()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
-  runtime.core.StartCapture("session 1")
-  local session = runtime.env.QuestieTraceCharacter.currentSession
-  session.events[#session.events + 1] = { t = 0, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
-  runtime.core.SaveCapture()
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SetupShareableSession(runtime)
 
+  -- Player is in an inn from the start (simulate login in inn)
+  MockIsResting(runtime, true)
   SendEvent(runtime, "PLAYER_LOGIN")
-  AdvanceTo(runtime, 9)
-  assert(#messages == 0, "No reminder before the login delay elapses")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
 
-  AdvanceTo(runtime, 10)
-  assert(#messages == 1, "The login reminder must fire once the delay elapses")
-  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil,
-    "The reminder must carry the clickable export hyperlink")
+  -- Wait 30 minutes - not enough
+  AdvanceTo(runtime, 1800)
+  assert(#messages == 0, "Must not remind before 1 hour of play, even in an inn")
 
-  AdvanceTo(runtime, 1810)
-  assert(#messages == 2, "The reminder must repeat 30 minutes later")
+  -- Wait until 1 hour - should fire now since we're in an inn
+  AdvanceTo(runtime, 3600)
+  assert(#messages == 1, "Must remind after 1 hour if already in an inn at login")
+  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
+end
 
-  -- Opening the export window only silences saved-session reminders.
-  -- The live session has a meaningful event, so it's still shareable and fires again.
+local function TestInnReminderFiresWhenEnteringInnAfterOneHour()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SetupShareableSession(runtime)
+
+  -- Player starts NOT in an inn
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play for 50 minutes, then enter inn - not enough
+  AdvanceTo(runtime, 3000)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 0, "Must not remind if played less than 1 hour")
+
+  -- Play for another 20 minutes (total 1h10m), then enter inn again
+  AdvanceTo(runtime, 4200)
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 1, "Must remind when entering inn after 1+ hour of play")
+  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
+end
+
+local function TestInnReminderFiresOnZoneChangeToInn()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SetupShareableSession(runtime)
+
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play for 1 hour
+  AdvanceTo(runtime, 3600)
+
+  -- Zone change into an inn (simulated via PLAYER_UPDATE_RESTING)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 1, "Must remind on zone change into inn after 1+ hour")
+end
+
+local function TestInnReminderResetsAfterFiring()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SetupShareableSession(runtime)
+
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play 1 hour, enter inn -> reminder fires
+  AdvanceTo(runtime, 3600)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 1, "First reminder must fire")
+
+  -- Leave inn, play another hour, enter inn again -> second reminder
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  AdvanceTo(runtime, 7200)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 2, "Second reminder must fire after another hour of play")
+end
+
+local function TestInnReminderDoesNotFireWithoutShareableData()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SendEvent(runtime, "VARIABLES_LOADED")
+
+  -- No sessions saved, no live session events
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  AdvanceTo(runtime, 3600)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 0, "Must not remind if there's no shareable data")
+end
+
+local function TestInnReminderPausedByExportWindow()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SendEvent(runtime, "VARIABLES_LOADED")
+  SetupShareableSession(runtime)
+
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play 1 hour, enter inn -> reminder fires
+  AdvanceTo(runtime, 3600)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 1, "First reminder must fire")
+
+  -- Open export window (marks last reminder time)
   runtime.core.MarkExportOpened()
-  local currentSession = runtime.env.QuestieTraceCharacter.currentSession
-  currentSession.events[#currentSession.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_ACCEPTED", a = { n = 0 } }
-  AdvanceTo(runtime, 3610)
-  assert(#messages == 3, "Live session with meaningful event is shareable, so reminder fires again")
 
-  runtime.core.StartCapture("session 2")
-  local session2 = runtime.env.QuestieTraceCharacter.currentSession
-  session2.events[#session2.events + 1] = { t = runtime.now, tp = 0, e = "QUEST_TURNED_IN", a = { n = 0 } }
-  runtime.core.SaveCapture()
-  AdvanceTo(runtime, 5410)
-  assert(#messages == 4, "The still-running loop must fire again once new data is saved")
+  -- Leave inn, re-enter immediately - should not fire again
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 1, "Must not remind again immediately after export window opened")
+
+  -- Play another hour, enter inn -> should fire again
+  AdvanceTo(runtime, 7200)
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 2, "Must remind again after another hour of play post-export")
 end
 
 ---@param runtime TestRuntime
@@ -1886,13 +1905,13 @@ local tests = {
   { name = "dialog falls back when an atlas is missing", run = TestDialogFallsBackWhenAnAtlasIsMissing },
   { name = "dialog fits long labels and wrapped text", run = TestDialogFitsLongLabelsAndWrappedText },
   { name = "share reminder silent without saved sessions", run = TestShareReminderNotDueWithoutSavedSessions },
-  { name = "share reminder due with unsaved live session events", run = TestShareReminderDueWithUnsavedLiveSessionEvents },
-  { name = "share reminder silent on fresh character login", run = TestShareReminderSilentOnFreshCharacterLogin },
-  { name = "share reminder due after a save", run = TestShareReminderDueAfterSave },
   { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
-  { name = "share reminder resumes after new save", run = TestShareReminderResumesAfterNewSave },
-  { name = "share reminder survives session deletion", run = TestShareReminderSurvivesSessionDeletion },
-  { name = "share reminder fires on login and every 30 minutes", run = TestShareReminderFiresOnLoginAndAtThirtyMinutes },
+  { name = "inn reminder not due before 1 hour of play", run = TestInnReminderNotDueBeforeOneHour },
+  { name = "inn reminder fires when entering inn after 1 hour", run = TestInnReminderFiresWhenEnteringInnAfterOneHour },
+  { name = "inn reminder fires on zone change to inn", run = TestInnReminderFiresOnZoneChangeToInn },
+  { name = "inn reminder resets after firing", run = TestInnReminderResetsAfterFiring },
+  { name = "inn reminder does not fire without shareable data", run = TestInnReminderDoesNotFireWithoutShareableData },
+  { name = "inn reminder paused by export window", run = TestInnReminderPausedByExportWindow },
   { name = "ParseGUIDKind classifies GUID prefixes", run = TestParseGUIDKindClassifiesPrefixes },
   { name = "SanitizeText redacts local player's own name", run = TestSanitizeTextRedactsLocalPlayerName },
   { name = "SanitizeText redacts group roster names", run = TestSanitizeTextRedactsGroupRosterNames },
