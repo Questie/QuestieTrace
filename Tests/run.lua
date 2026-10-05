@@ -839,8 +839,9 @@ local function TestInnReminderDoesNotFireWithoutShareableData()
   local messages = CaptureChat(runtime)
   SendEvent(runtime, "VARIABLES_LOADED")
 
-  -- No sessions saved, no live session events
-  MockIsResting(runtime, false)
+  -- No sessions saved, no capture started (consent not granted)
+  -- Simulate consent declined so no auto-start
+  runtime.env.QuestieTrace.settings.dataCollectionConsent = false
   SendEvent(runtime, "PLAYER_LOGIN")
   SendEvent(runtime, "PLAYER_ENTERING_WORLD")
 
