@@ -30,7 +30,7 @@ Core.RegisterTracker({
   OnEvent = function(capture)
     if not stream then return end
     ---@type number
-    local t  = GetTime()          - capture.startedAt
+    local t  = GetTime() - capture.startedAt
     ---@type number
     local tp = GetTimePreciseSec() - capture.startedAtPrecise
 

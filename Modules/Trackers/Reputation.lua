@@ -161,7 +161,7 @@ end
 ---@param capture CaptureState
 local function SampleReputation(capture)
   ---@type number
-  local t  = GetTime()          - capture.startedAt
+  local t  = GetTime() - capture.startedAt
   ---@type number
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
@@ -183,7 +183,7 @@ local function CollectAndSample(capture)
   local prevOrder = orderStream[#orderStream]
   if not prevOrder or not DeepCompare(prevOrder.v, ids) then
     ---@type number
-    local t  = GetTime()          - capture.startedAt
+    local t  = GetTime() - capture.startedAt
     ---@type number
     local tp = GetTimePreciseSec() - capture.startedAtPrecise
     ---@type number[]

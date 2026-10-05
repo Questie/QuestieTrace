@@ -115,7 +115,7 @@ Core.RegisterTracker({
   ---@param _event string
   OnEvent = function(capture, _event)
     ---@type number
-    local t  = GetTime()          - capture.startedAt
+    local t  = GetTime() - capture.startedAt
     ---@type number
     local tp = GetTimePreciseSec() - capture.startedAtPrecise
     SampleAll(t, tp)

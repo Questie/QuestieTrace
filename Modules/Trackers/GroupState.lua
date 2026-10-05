@@ -42,7 +42,7 @@ Core.RegisterTracker({
   OnEvent = function(capture)
     if not streamInGroup or not streamGroupSize then return end
     ---@type number
-    local t  = GetTime()          - capture.startedAt
+    local t  = GetTime() - capture.startedAt
     ---@type number
     local tp = GetTimePreciseSec() - capture.startedAtPrecise
 

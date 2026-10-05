@@ -51,7 +51,7 @@ local streamInstance, streamInstanceInfo
 ---@param capture CaptureState
 local function SampleAll(capture)
   ---@type number
-  local t  = GetTime()          - capture.startedAt
+  local t  = GetTime() - capture.startedAt
   ---@type number
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 

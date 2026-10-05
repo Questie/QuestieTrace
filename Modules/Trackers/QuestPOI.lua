@@ -101,7 +101,7 @@ local function SampleAllPOIs(capture)
   end
 
   ---@type number
-  local t  = GetTime()          - capture.startedAt
+  local t  = GetTime() - capture.startedAt
   ---@type number
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
