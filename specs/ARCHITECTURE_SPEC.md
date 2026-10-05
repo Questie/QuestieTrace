@@ -58,13 +58,11 @@ QuestieTrace.lua                      -- Entry point: session lifecycle, event b
 
 ## 2) Bootstrap sequence
 
-On `VARIABLES_LOADED`:
+On `PLAYER_LOGIN`:
 
 1. `EnsureSavedVariables()` validates/initializes saved data and settings.
    - If `QuestieTraceCharacter.currentSession` exists (leftover from a `/reload` or logout), it is recovered: stop timestamps are filled if missing, then the session is immediately finalized via `Core.SaveCapture()` into `sessions[]`. This clears `capture.session` and `capture.active = false`, so no lingering unsaved state remains.
-2. After bootstrap, when `PLAYER_LOGIN` fires, the auto-start logic checks `(not capture.active) and (not capture.session)`. Since recovery finalized the leftover session, this condition is true, and a fresh capture starts automatically.
-
-`VARIABLES_LOADED` is consumed by bootstrap and is not recorded as a normal trace event.
+2. The auto-start logic checks `Core.GetCaptureState() == "idle"` (meaning no active capture and no stopped-unsaved session). If consent is `true`, a fresh capture starts automatically; this happens before event processing so `PLAYER_LOGIN` is the first event in the session.
 
 After bootstrap:
 
@@ -134,7 +132,7 @@ QuestieTraceCharacter = {
 }
 ```
 
-`currentSession` is a direct reference to the in-memory `capture.session` table established by `Core.StartCapture()`. Since trackers mutate the table in place, no periodic sync is needed — the reference remains valid for the session's lifetime. It is cleared by `Core.SaveCapture()` (session moved to `sessions[]`). On `VARIABLES_LOADED`, if a leftover `currentSession` exists, it is automatically finalized into `sessions[]` immediately, so no lingering unsaved state ever remains.
+`currentSession` is a direct reference to the in-memory `capture.session` table established by `Core.StartCapture()`. Since trackers mutate the table in place, no periodic sync is needed — the reference remains valid for the session's lifetime. It is cleared by `Core.SaveCapture()` (session moved to `sessions[]`). On `PLAYER_LOGIN`, if a leftover `currentSession` exists, it is automatically finalized into `sessions[]` immediately, so no lingering unsaved state ever remains.
 
 There is no `exportedAt` field or similar marker on `SessionRecord`: a session is only ever kept around while unreported. See "Export and deletion" in `specs/SCHEMA_SPEC.md`.
 

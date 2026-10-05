@@ -612,7 +612,7 @@ SLASH_QUESTIETRACE2 = "/qlt"
 ---@param event string
 ---@param ... any
 local function OnEvent(_, event, ...)
-  -- 1. Initialize before login dumps and auto-start; VARIABLES_LOADED may fire later.
+  -- 1. Initialize before login dumps and auto-start on PLAYER_LOGIN.
   if event == "PLAYER_LOGIN" then
     EnsureSavedVariables()
   end

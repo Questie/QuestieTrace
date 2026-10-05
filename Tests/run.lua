@@ -570,13 +570,12 @@ local function TestSaveCaptureClearsCurrentSession()
   assert(runtime.env.QuestieTraceCharacter.sessions[1] ~= nil, "Session must be moved to sessions array")
 end
 
-local function TestLoginInitializesFreshCharacter(variablesLoadedFirst)
+local function TestLoginInitializesFreshCharacter()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   local env = runtime.env
   env.QuestieTraceCharacter = nil
   local settings = env.QuestieTrace.settings
 
-  if variablesLoadedFirst then SendEvent(runtime, "VARIABLES_LOADED") end
   SendEvent(runtime, "PLAYER_LOGIN")
 
   local session = Session(runtime)
@@ -585,11 +584,6 @@ local function TestLoginInitializesFreshCharacter(variablesLoadedFirst)
   assert(env.QuestieTraceCharacter.currentSession == session, "Login must link the live session to the character database")
   assert(session.events[1].e == "PLAYER_LOGIN", "PLAYER_LOGIN must be the first recorded event")
   assert(#env.QuestieTraceCharacter.sessions == 0, "Login must not save the new capture")
-
-  if not variablesLoadedFirst then SendEvent(runtime, "VARIABLES_LOADED") end
-  assert(runtime.core.GetCaptureState() == "running", "Late VARIABLES_LOADED must not finalize an active capture")
-  assert(env.QuestieTraceCharacter.currentSession == session, "Late VARIABLES_LOADED must preserve the live session")
-  assert(#env.QuestieTraceCharacter.sessions == 0, "Late VARIABLES_LOADED must not save the active capture")
 end
 
 local function TestRecoverCurrentSessionOnLogin()
@@ -723,7 +717,6 @@ end
 
 local function TestShareReminderSuppressedAfterExportOpened()
   local runtime = NewRuntime(REMINDER_FILES)
-  SendEvent(runtime, "VARIABLES_LOADED")
   SaveSessions(runtime, 1)
   runtime.core.MarkExportOpened()
   assert(runtime.core.IsShareDue() == false, "Opening the export window must pause reminders")
@@ -745,7 +738,6 @@ end
 local function TestInnReminderNotDueBeforeOneHour()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
-  SendEvent(runtime, "VARIABLES_LOADED")
   SetupShareableSession(runtime)
 
   -- Player is in an inn from the start (simulate login in inn)
@@ -766,7 +758,6 @@ end
 local function TestInnReminderFiresWhenEnteringInnAfterOneHour()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
-  SendEvent(runtime, "VARIABLES_LOADED")
   SetupShareableSession(runtime)
 
   -- Player starts NOT in an inn
@@ -793,7 +784,6 @@ end
 local function TestInnReminderFiresOnZoneChangeToInn()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
-  SendEvent(runtime, "VARIABLES_LOADED")
   SetupShareableSession(runtime)
 
   MockIsResting(runtime, false)
@@ -812,7 +802,6 @@ end
 local function TestInnReminderResetsAfterFiring()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
-  SendEvent(runtime, "VARIABLES_LOADED")
   SetupShareableSession(runtime)
 
   MockIsResting(runtime, false)
@@ -837,7 +826,6 @@ end
 local function TestInnReminderDoesNotFireWithoutShareableData()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
-  SendEvent(runtime, "VARIABLES_LOADED")
 
   -- No sessions saved, no capture started (consent not granted)
   -- Simulate consent declined so no auto-start
@@ -854,7 +842,6 @@ end
 local function TestInnReminderPausedByExportWindow()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
-  SendEvent(runtime, "VARIABLES_LOADED")
   SetupShareableSession(runtime)
 
   MockIsResting(runtime, false)
@@ -1890,8 +1877,7 @@ local tests = {
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
-  { name = "fresh character login before VARIABLES_LOADED", run = function() TestLoginInitializesFreshCharacter(false) end },
-  { name = "fresh character login after VARIABLES_LOADED", run = function() TestLoginInitializesFreshCharacter(true) end },
+  { name = "fresh character login initializes SavedVariables", run = TestLoginInitializesFreshCharacter },
   { name = "recover currentSession on login before auto-start", run = TestRecoverCurrentSessionOnLogin },
   { name = "recover currentSession discarded when consent declined", run = TestRecoverCurrentSessionDiscardedWhenConsentDeclined },
   { name = "recover currentSession discarded when consent undecided", run = TestRecoverCurrentSessionDiscardedWhenConsentUndecided },
