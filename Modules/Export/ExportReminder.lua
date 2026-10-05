@@ -306,15 +306,7 @@ local function HandleExportLink(link)
 end
 
 --- Install the questietrace: hyperlink handler.
----
---- LinkUtil is preferred: the click is consumed, so SetItemRef never falls
---- through to ItemRefTooltip. Clients without LinkUtil fall back to a secure
---- hook, where the stock handler has already opened an empty tooltip for our
---- unknown link type and we hide it again. SetItemRef is never replaced,
---- which would risk taint.
 local function RegisterLinkHandler()
-  if linkHandlerRegistered then return end
-
   if type(LinkUtil) == "table"
       and type(LinkUtil.RegisterLinkHandler) == "function"
       and type(LinkUtil.IsLinkHandlerRegistered) == "function"
@@ -322,7 +314,6 @@ local function RegisterLinkHandler()
     LinkUtil.RegisterLinkHandler(LINK_TYPE, function(link)
       HandleExportLink(link)
     end)
-    linkHandlerRegistered = true
     return
   end
 
@@ -332,7 +323,6 @@ local function RegisterLinkHandler()
         ItemRefTooltip:Hide()
       end
     end)
-    linkHandlerRegistered = true
   end
 end
 
