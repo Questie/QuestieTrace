@@ -73,10 +73,15 @@ The bracketed text is a `|Hquestietrace:export|h` hyperlink, printed via `DEFAUL
 
 ### Triggers
 
-| Trigger | Timing |
+The reminder is **inn-based** (resting-area triggered), not time-based:
+
+| Trigger | Behavior |
 |---|---|
-| Login | `PLAYER_LOGIN` schedules the first check 10 seconds later, so the message is not buried in login spam |
-| Repeat | Every 1800 seconds (30 minutes) thereafter, for as long as the client stays loaded |
+| Inn entry | On `PLAYER_UPDATE_RESTING` when `IsResting()` becomes true: if the player has been playing ≥ 1 hour since session start (or since last reminder), the reminder fires immediately. Otherwise, a timer is scheduled for the remaining time until the 1-hour mark. |
+| Timer expiry | When the scheduled timer fires, if the player is still in a resting area (`IsResting()`) and shareable data exists, the reminder fires. If the player left the inn before the timer fired, the callback is cancelled (token invalidation). |
+| Login in inn | `PLAYER_ENTERING_WORLD` checks `IsResting()` and triggers the same logic as inn entry. |
+
+A new timer starts after each reminder (using `lastReminderAt` as the baseline). Leaving and re-entering an inn after 60+ minutes of play triggers a new reminder.
 
 `Core.StartShareReminders()` is called from the `PLAYER_LOGIN` branch of the main event handler and is idempotent within one load. The reminder deliberately does **not** use `Core.RegisterTracker`: tracker callbacks only fire while a capture is active, which would silence the reminder exactly when the player has stopped capturing.
 
@@ -88,8 +93,6 @@ The bracketed text is a `|Hquestietrace:export|h` hyperlink, printed via `DEFAUL
 2. A live (running) session with at least one event that started at least 900 seconds (15 minutes) ago (`LIVE_SESSION_MIN_AGE`).
 
 This is a cheap metadata check (no full payload build). Both cases are exportable, and both should prompt the player to share.
-
-> **Consequence:** with default settings a capture auto-starts at login and auto-saves only on `PLAYER_LOGOUT`, so a brand-new character has zero saved sessions for their entire first play session. A live session triggers a reminder only once it is at least 15 minutes old: auto-start records `PLAYER_LOGIN`/`PLAYER_ENTERING_WORLD` immediately, so without the age threshold every login (including a brand-new character) would be reminded at the 10-second check. Thus the first-play-session reminder occurs at the 30-minute check.
 
 ### Hyperlink handling
 

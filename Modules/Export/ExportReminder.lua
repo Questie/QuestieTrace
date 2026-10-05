@@ -10,9 +10,17 @@ local l10n = Core.l10n
 -- Export reminder (inn-based, no login/interval spam)
 ---------------------------------------------------------------------------
 -- Reminds the player to export when they have been playing for at least
--- one hour AND then enter a resting area (Inn). A new timer starts after
--- each reminder. Login starts the timer; leaving and re-entering an inn
--- after 60+ minutes triggers the reminder.
+-- one hour AND are in a resting area (Inn).
+--
+-- Behavior:
+--   * On inn entry (or login in inn): if played ≥ 1h since session start
+--     (or since last reminder), fires immediately. Otherwise schedules a
+--     timer for the remaining time until the 1h mark.
+--   * Timer callback fires only if still in an inn (IsResting()).
+--   * Leaving the inn cancels any pending timer (token invalidation).
+--   * After a reminder fires, the 1h timer restarts from that moment.
+--   * Opening the export window (MarkExportOpened) updates lastReminderAt,
+--     so the next inn entry after another hour will trigger again.
 ---------------------------------------------------------------------------
 
 local C_After = C_Timer.After
@@ -155,12 +163,15 @@ end
 -- Resting state handling
 ---------------------------------------------------------------------------
 
----@type boolean True if the initial login was in a resting area (for timer scheduling).
-local loggedInAtInn = false
+---@type number Token that increments on each inn entry; callbacks verify their token is current.
+local restingToken = 0
 
 --- Called when the player enters a resting area (IsResting() becomes true).
----@param isLogin boolean True if this is the initial login
-local function OnEnterResting(isLogin)
+local function OnEnterResting()
+  -- Increment token on every inn entry to invalidate any pending timers
+  restingToken = restingToken + 1
+  local myToken = restingToken
+
   -- Check if reminder is due (uses lastReminderAt, not sessionStart)
   if Core.IsShareDue() then
     ShowReminder()
@@ -168,28 +179,27 @@ local function OnEnterResting(isLogin)
     return
   end
 
-  -- Only schedule a timer if this is the initial login in an inn
-  if isLogin then
-    loggedInAtInn = true
-    local reminder = GetReminderState()
-    local remaining = MIN_PLAY_TIME - (GetTime() - reminder.sessionStart)
-    if remaining > 0 then
-      C_After(remaining, function()
-        -- Only fire if still in a resting area and has shareable data
-        if loggedInAtInn and IsResting() and HasShareableData() then
-          if Core.IsShareDue() then
-            ShowReminder()
-            GetReminderState().lastReminderAt = GetTime()
-          end
+  -- Schedule a timer on every inn entry (login or re-entry)
+  local reminder = GetReminderState()
+  local sinceLast = reminder.lastReminderAt == 0 and reminder.sessionStart or reminder.lastReminderAt
+  local remaining = MIN_PLAY_TIME - (GetTime() - sinceLast)
+  if remaining > 0 then
+    C_After(remaining, function()
+      -- Only fire if this token is still current (no re-entry since scheduling)
+      -- and still in a resting area and has shareable data
+      if myToken == restingToken and IsResting() and HasShareableData() then
+        if Core.IsShareDue() then
+          ShowReminder()
+          GetReminderState().lastReminderAt = GetTime()
         end
-      end)
-    end
+      end
+    end)
   end
 end
 
 --- Called when the player leaves a resting area (IsResting() becomes false).
 local function OnLeaveResting()
-  loggedInAtInn = false
+  restingToken = restingToken + 1
 end
 
 --- Initialize the reminder state on login.
@@ -210,11 +220,11 @@ local function OnEvent(_, event)
   if event == "PLAYER_ENTERING_WORLD" then
     -- Check immediately in case we're already in a resting area at login
     if IsResting() then
-      OnEnterResting(true)
+      OnEnterResting()
     end
   elseif event == "PLAYER_UPDATE_RESTING" then
     if IsResting() then
-      OnEnterResting(false)
+      OnEnterResting()
     else
       OnLeaveResting()
     end

@@ -781,6 +781,28 @@ local function TestInnReminderFiresWhenEnteringInnAfterOneHour()
   assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
 end
 
+local function TestInnReminderFiresWhenEnteringInnBeforeOneHourAndStaying()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SetupShareableSession(runtime)
+
+  -- Player starts NOT in an inn
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play for 50 minutes, then enter inn
+  AdvanceTo(runtime, 3000)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 0, "Must not remind immediately when entering at 50 minutes")
+
+  -- Stay in inn for 10 more minutes (total 1 hour) - timer should fire
+  AdvanceTo(runtime, 3600)
+  assert(#messages == 1, "Must remind at 1-hour mark while still in inn")
+  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
+end
+
 local function TestInnReminderFiresOnZoneChangeToInn()
   local runtime = NewRuntime(REMINDER_FILES)
   local messages = CaptureChat(runtime)
@@ -871,6 +893,117 @@ local function TestInnReminderPausedByExportWindow()
   MockIsResting(runtime, true)
   SendEvent(runtime, "PLAYER_UPDATE_RESTING")
   assert(#messages == 2, "Must remind again after another hour of play post-export")
+end
+
+--- Test that leaving and re-entering an inn before the timer fires
+--- cancels the old timer and schedules a fresh one (token validation).
+--- Both timers target the same 1-hour mark, but only the latest executes.
+local function TestInnReminderTokenInvalidatesStaleCallbacks()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SetupShareableSession(runtime)
+
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play 50 minutes, enter inn -> schedules timer for remaining 10 minutes (fires at 3600)
+  AdvanceTo(runtime, 3000)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Leave inn after 5 minutes (at 55 min total) - increments token
+  AdvanceTo(runtime, 3300)
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Re-enter inn immediately (at 55 min) - new token, new timer also targets 3600
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Advance to 1-hour mark (3600) - BOTH timers fire, but token check allows only the fresh one
+  AdvanceTo(runtime, 3600)
+  assert(#messages == 1, "Only the fresh callback from re-entry must fire at 1-hour mark")
+  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
+end
+
+--- Test multiple rapid inn re-entries before timer fires - only latest schedules.
+--- All timers target the 1-hour mark; only the last entry's callback executes.
+local function TestInnReminderMultipleReentriesBeforeTimer()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SetupShareableSession(runtime)
+
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play 50 minutes
+  AdvanceTo(runtime, 3000)
+
+  -- Enter inn (entry 1) -> timer for 10 min remaining (fires at 3600)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Leave (51 min total)
+  AdvanceTo(runtime, 3060)
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Re-enter (entry 2) -> timer for 9 min remaining (fires at 3600)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Leave (53 min total)
+  AdvanceTo(runtime, 3180)
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Re-enter (entry 3) -> timer for 7 min remaining (fires at 3600)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Advance to 1-hour mark (3600) - all three timers fire, but only the last executes
+  AdvanceTo(runtime, 3600)
+  assert(#messages == 1, "Only the latest inn entry's timer must fire at 1-hour mark")
+  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
+end
+
+--- Test the bug where re-entering an inn after a reminder already fired
+--- incorrectly calculates remaining time from sessionStart instead of lastReminderAt.
+--- This causes negative remaining time and no timer is scheduled, so the next
+--- reminder never fires.
+local function TestInnReminderReentryAfterReminderUsesLastReminderAtBaseline()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SetupShareableSession(runtime)
+
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play 1 hour, enter inn -> reminder fires, lastReminderAt = 3600
+  AdvanceTo(runtime, 3600)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 1, "First reminder must fire at 1 hour")
+
+  -- Leave inn at 1h30m (5400)
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  AdvanceTo(runtime, 5400)
+
+  -- Re-enter inn at 1h31m (5500) - only 1900s since last reminder
+  -- Should schedule timer for 1700s remaining (to reach 3600s since last reminder)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+  assert(#messages == 1, "Must not remind immediately on re-entry at 1h31m")
+
+  -- Advance to 2 hours from session start (7200) = 3600s since last reminder
+  -- Second reminder should fire
+  AdvanceTo(runtime, 7200)
+  assert(#messages == 2, "Second reminder must fire 1 hour after last reminder")
+  assert(messages[2]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
 end
 
 ---@param runtime TestRuntime
@@ -1895,10 +2028,14 @@ local tests = {
   { name = "share reminder paused by opening export", run = TestShareReminderSuppressedAfterExportOpened },
   { name = "inn reminder not due before 1 hour of play", run = TestInnReminderNotDueBeforeOneHour },
   { name = "inn reminder fires when entering inn after 1 hour", run = TestInnReminderFiresWhenEnteringInnAfterOneHour },
+  { name = "inn reminder fires when entering inn before 1 hour and staying", run = TestInnReminderFiresWhenEnteringInnBeforeOneHourAndStaying },
   { name = "inn reminder fires on zone change to inn", run = TestInnReminderFiresOnZoneChangeToInn },
   { name = "inn reminder resets after firing", run = TestInnReminderResetsAfterFiring },
   { name = "inn reminder does not fire without shareable data", run = TestInnReminderDoesNotFireWithoutShareableData },
   { name = "inn reminder paused by export window", run = TestInnReminderPausedByExportWindow },
+  { name = "inn reminder token invalidates stale callbacks", run = TestInnReminderTokenInvalidatesStaleCallbacks },
+  { name = "inn reminder multiple reentries before timer", run = TestInnReminderMultipleReentriesBeforeTimer },
+  { name = "inn reminder reentry after reminder uses lastReminderAt baseline", run = TestInnReminderReentryAfterReminderUsesLastReminderAtBaseline },
   { name = "ParseGUIDKind classifies GUID prefixes", run = TestParseGUIDKindClassifiesPrefixes },
   { name = "SanitizeText redacts local player's own name", run = TestSanitizeTextRedactsLocalPlayerName },
   { name = "SanitizeText redacts group roster names", run = TestSanitizeTextRedactsGroupRosterNames },
