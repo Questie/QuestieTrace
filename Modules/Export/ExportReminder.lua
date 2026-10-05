@@ -7,116 +7,43 @@ local Core = QuestieTraceCore
 local l10n = Core.l10n
 
 ---------------------------------------------------------------------------
--- Share reminder (chat notification pointing at the export window)
+-- Export reminder (inn-based, no login/interval spam)
 ---------------------------------------------------------------------------
--- Eligibility and scheduling only. The export window lives in ExportUI.lua
--- and the payload in Export.lua; this module never reads or writes session
--- data, only the small per-character reminder watermark.
+-- Reminds the player to export when they have been playing for at least
+-- one hour AND then enter a resting area (Inn). A new timer starts after
+-- each reminder. Login starts the timer; leaving and re-entering an inn
+-- after 60+ minutes triggers the reminder.
 ---------------------------------------------------------------------------
 
 local C_After = C_Timer.After
 
 ---@type string
 local ADDON_NAME = "QuestieTrace"
----@type number Seconds to wait after login before the first check, so the
---- message is not buried in login and addon load spam.
-local LOGIN_DELAY = 10
----@type number Seconds between reminder checks while playing.
-local REMINDER_INTERVAL = 1800
----@type number Minimum age in seconds before a live (unsaved) session counts as
---- shareable. Auto-start records login events immediately, so without this a
---- freshly logged-in character would be reminded 10 seconds after login.
-local LIVE_SESSION_MIN_AGE = 900
+---@type number Minimum play time in seconds before a reminder can fire (1 hour).
+local MIN_PLAY_TIME = 3600
 ---@type string Custom chat hyperlink type owned by this addon.
 local LINK_TYPE = "questietrace"
 ---@type string Hyperlink option identifying the export action.
 local LINK_ACTION = "export"
----@type number Minimum number of meaningful (non-noise) events required for a
---- live session to be considered shareable.
-local LIVE_SESSION_MIN_MEANINGFUL_EVENTS = 1
-
----@type table<string, boolean> Event names that DO count as meaningful gameplay
---- (quest, loot, combat xp/rep, NPC interaction, skill/level, zone changes,
---- currency, trade skills).
-local MEANINGFUL_EVENTS = {
-  -- Quest events
-  QUEST_LOG_UPDATE = true,
-  QUEST_ACCEPTED = true,
-  QUEST_TURNED_IN = true,
-  QUEST_GREETING = true,
-  QUEST_DETAIL = true,
-  QUEST_PROGRESS = true,
-  QUEST_COMPLETE = true,
-  -- Loot events
-  CHAT_MSG_LOOT = true,
-  LOOT_READY = true,
-  LOOT_CLOSED = true,
-  -- Combat XP/reputation
-  CHAT_MSG_COMBAT_XP_GAIN = true,
-  CHAT_MSG_COMBAT_FACTION_CHANGE = true,
-  UPDATE_FACTION = true,
-  -- NPC interaction
-  GOSSIP_SHOW = true,
-  GOSSIP_CLOSED = true,
-  -- Skill/Level
-  CHAT_MSG_SKILL = true,
-  PLAYER_LEVEL_UP = true,
-  NEW_RECIPE_LEARNED = true,
-  -- Zone changes
-  ZONE_CHANGED = true,
-  ZONE_CHANGED_NEW_AREA = true,
-  ZONE_CHANGED_INDOORS = true,
-  -- Currency
-  CURRENCY_DISPLAY_UPDATE = true,
-  -- Trade skills
-  CHAT_MSG_TRADESKILLS = true,
-}
-
---- Check if a session has at least the minimum number of meaningful (non-noise)
---- events. Only meaningful events count; noise events like login, UI, map,
---- group, achievement, item, and combat state changes are ignored.
----@param session SessionRecord
----@return boolean hasMeaningful
-local function HasMeaningfulEvents(session)
-  if type(session.events) ~= "table" then return false end
-  local count = 0
-  for _, eventRecord in ipairs(session.events) do
-    if type(eventRecord) == "table" and type(eventRecord.e) == "string" then
-      local eventName = eventRecord.e
-      if MEANINGFUL_EVENTS[eventName] then
-        count = count + 1
-        if count >= LIVE_SESSION_MIN_MEANINGFUL_EVENTS then
-          return true
-        end
-      end
-    end
-  end
-  return false
-end
 
 ---@class ReminderState
----@field lastExportAt number Timestamp (GetTime()) when the export window was last opened.
+---@field sessionStart number GetTime() when the current play session began (capture started).
+---@field lastReminderAt number GetTime() when the last reminder was shown (0 = never).
 
----@type boolean Set once the repeating check has been scheduled for this load.
-local scheduled = false
----@type boolean Set once a hyperlink handler has been installed for this load.
-local linkHandlerRegistered = false
+---@type boolean Set once the event frame has been registered for this load.
+local frameRegistered = false
 
 ---------------------------------------------------------------------------
 -- Per-character state
 ---------------------------------------------------------------------------
 
 --- Read the per-character reminder state, initializing missing fields.
----
---- Returns a detached table when SavedVariables are not ready yet so callers
---- never fail; in practice EnsureSavedVariables runs at the start of PLAYER_LOGIN,
---- before reminders are scheduled.
 ---@return ReminderState
 local function GetReminderState()
   ---@type table?
   local characterDb = QuestieTraceCharacter
   if type(characterDb) ~= "table" then
-    return { lastExportAt = 0 }
+    return { sessionStart = 0, lastReminderAt = 0 }
   end
 
   if type(characterDb.reminder) ~= "table" then
@@ -125,75 +52,49 @@ local function GetReminderState()
 
   ---@type ReminderState
   local reminder = characterDb.reminder
-  if type(reminder.lastExportAt) ~= "number" or reminder.lastExportAt > GetTime() then
-    reminder.lastExportAt = 0
+  if type(reminder.sessionStart) ~= "number" or reminder.sessionStart > GetTime() then
+    reminder.sessionStart = 0
+  end
+  if type(reminder.lastReminderAt) ~= "number" or reminder.lastReminderAt > GetTime() then
+    reminder.lastReminderAt = 0
   end
 
   return reminder
 end
 
---- Count all saved sessions.
----@return number count
-local function GetSavedSessionCount()
-  ---@type table?
-  local characterDb = QuestieTraceCharacter
-  if type(characterDb) ~= "table" or type(characterDb.sessions) ~= "table" then
-    return 0
-  end
-  return #characterDb.sessions
+---------------------------------------------------------------------------
+-- Eligibility
+---------------------------------------------------------------------------
+
+--- Check if the player has been playing long enough for a reminder.
+---@param sessionStart number
+---@return boolean
+local function HasPlayedLongEnough(sessionStart)
+  return GetTime() - sessionStart >= MIN_PLAY_TIME
 end
 
---- Has the live (unsaved) session been running long enough, with events, to
---- be worth sharing? A player who has been playing for hours without saving
---- should still get prompted, and shouldn't lose that data to a crash before
---- /qlt save runs. Sessions younger than LIVE_SESSION_MIN_AGE only hold login
---- noise and must not trigger a reminder.
----@return boolean shareable
-local function IsLiveSessionShareable()
-  ---@type table?
-  local characterDb = QuestieTraceCharacter
-  if type(characterDb) ~= "table" then return false end
+--- Event names that count as meaningful gameplay (not login/UI noise).
+---@type table<string, boolean>
+local MEANINGFUL_EVENTS = {
+  QUEST_LOG_UPDATE = true, QUEST_ACCEPTED = true, QUEST_TURNED_IN = true,
+  QUEST_GREETING = true, QUEST_DETAIL = true, QUEST_PROGRESS = true,
+  QUEST_COMPLETE = true, CHAT_MSG_LOOT = true, LOOT_READY = true,
+  LOOT_CLOSED = true, CHAT_MSG_COMBAT_XP_GAIN = true,
+  CHAT_MSG_COMBAT_FACTION_CHANGE = true, UPDATE_FACTION = true,
+  GOSSIP_SHOW = true, GOSSIP_CLOSED = true, CHAT_MSG_SKILL = true,
+  PLAYER_LEVEL_UP = true, NEW_RECIPE_LEARNED = true, ZONE_CHANGED = true,
+  ZONE_CHANGED_NEW_AREA = true, ZONE_CHANGED_INDOORS = true,
+  CURRENCY_DISPLAY_UPDATE = true, CHAT_MSG_TRADESKILLS = true,
+}
 
-  ---@type SessionRecord?
-  local currentSession = characterDb.currentSession
-  if type(currentSession) ~= "table" or type(currentSession.events) ~= "table" then
-    return false
-  end
-
-  if #currentSession.events == 0 or type(currentSession.startedAt) ~= "number" then
-    return false
-  end
-
-  if GetTime() - currentSession.startedAt < LIVE_SESSION_MIN_AGE then
-    return false
-  end
-
-  if not HasMeaningfulEvents(currentSession) then
-    return false
-  end
-
-  return true
-end
-
---- Check if any saved session was completed after the last export window open
---- (or if never exported, any saved session with meaningful events) and
---- contains meaningful events.
----@return boolean hasNewSavedData
-local function HasNewSavedData()
-  local reminder = GetReminderState()
-  local lastExportAt = reminder.lastExportAt
-
-  ---@type table?
-  local characterDb = QuestieTraceCharacter
-  if type(characterDb) ~= "table" or type(characterDb.sessions) ~= "table" then
-    return false
-  end
-
-  for _, session in ipairs(characterDb.sessions) do
-    if type(session) == "table"
-        and type(session.stoppedAt) == "number"
-        and HasMeaningfulEvents(session) then
-      if lastExportAt == 0 or session.stoppedAt > lastExportAt then
+--- Check if a session has at least one meaningful event.
+---@param session SessionRecord
+---@return boolean
+local function HasMeaningfulEvents(session)
+  if type(session.events) ~= "table" then return false end
+  for _, eventRecord in ipairs(session.events) do
+    if type(eventRecord) == "table" and type(eventRecord.e) == "string" then
+      if MEANINGFUL_EVENTS[eventRecord.e] then
         return true
       end
     end
@@ -201,37 +102,55 @@ local function HasNewSavedData()
   return false
 end
 
----------------------------------------------------------------------------
--- Eligibility
----------------------------------------------------------------------------
+--- Check if there is shareable data (saved sessions or live session with meaningful events).
+---@return boolean
+local function HasShareableData()
+  ---@type table?
+  local characterDb = QuestieTraceCharacter
+  if type(characterDb) ~= "table" then return false end
 
---- Is there saved data the player has not been prompted about since their
---- last visit to the export window?
----
---- The live (unsaved) session is checked separately: it's due once it holds
---- meaningful events and has run for at least LIVE_SESSION_MIN_AGE.
----
---- Saved sessions are checked by timestamp: any session with stoppedAt >
---- lastExportAt and meaningful events is considered new.
----
---- Extension point: a trace-size rule belongs here as a further condition.
----@return boolean due
-function Core.IsShareDue()
-  if IsLiveSessionShareable() then
+  -- Check saved sessions (any saved session is shareable)
+  if type(characterDb.sessions) == "table" and #characterDb.sessions > 0 then
     return true
   end
 
-  if GetSavedSessionCount() == 0 then
+  -- Check live session for meaningful events
+  ---@type SessionRecord?
+  local currentSession = characterDb.currentSession
+  if type(currentSession) == "table"
+      and type(currentSession.events) == "table"
+      and #currentSession.events > 0
+      and type(currentSession.startedAt) == "number"
+      and HasMeaningfulEvents(currentSession) then
+    return true
+  end
+
+  return false
+end
+
+--- Is a reminder due right now?
+---@return boolean due
+function Core.IsShareDue()
+  local reminder = GetReminderState()
+
+  -- Must have played long enough since last reminder (or session start)
+  local sinceLast = reminder.lastReminderAt == 0 and reminder.sessionStart or reminder.lastReminderAt
+  if not HasPlayedLongEnough(sinceLast) then
     return false
   end
 
-  return HasNewSavedData()
+  -- Must have shareable data
+  if not HasShareableData() then
+    return false
+  end
+
+  return true
 end
 
 --- Record that the player opened the export window, pausing reminders until
---- another session with meaningful data is saved. Called from Core.ShowExportWindow().
+--- another session with meaningful data is saved.
 function Core.MarkExportOpened()
-  GetReminderState().lastExportAt = GetTime()
+  GetReminderState().lastReminderAt = GetTime()
 end
 
 ---------------------------------------------------------------------------
@@ -263,25 +182,85 @@ local function ShowReminder()
 end
 
 ---------------------------------------------------------------------------
--- Scheduling
+-- Resting state handling
 ---------------------------------------------------------------------------
 
---- Run one eligibility check and schedule the next one.
----
---- The tick reschedules unconditionally: data that is not shareable now can
---- become shareable later in the same play session.
-local function Tick()
+---@type boolean True if the initial login was in a resting area (for timer scheduling).
+local loggedInAtInn = false
+
+--- Called when the player enters a resting area (IsResting() becomes true).
+---@param isLogin boolean True if this is the initial login
+local function OnEnterResting(isLogin)
+  -- Check if reminder is due (uses lastReminderAt, not sessionStart)
   if Core.IsShareDue() then
     ShowReminder()
+    GetReminderState().lastReminderAt = GetTime()
+    return
   end
-  C_After(REMINDER_INTERVAL, Tick)
+
+  -- Only schedule a timer if this is the initial login in an inn
+  if isLogin then
+    loggedInAtInn = true
+    local reminder = GetReminderState()
+    local remaining = MIN_PLAY_TIME - (GetTime() - reminder.sessionStart)
+    if remaining > 0 then
+      C_After(remaining, function()
+        -- Only fire if still in a resting area and has shareable data
+        if loggedInAtInn and IsResting() and HasShareableData() then
+          if Core.IsShareDue() then
+            ShowReminder()
+            GetReminderState().lastReminderAt = GetTime()
+          end
+        end
+      end)
+    end
+  end
 end
 
---- Start the login and repeating share reminders. Idempotent within one load.
+--- Called when the player leaves a resting area (IsResting() becomes false).
+local function OnLeaveResting()
+  loggedInAtInn = false
+end
+
+--- Initialize the reminder state on login.
+local function InitReminderState()
+  local reminder = GetReminderState()
+  reminder.sessionStart = GetTime()
+  reminder.lastReminderAt = 0
+end
+
+---------------------------------------------------------------------------
+-- Event frame
+---------------------------------------------------------------------------
+
+local eventFrame = CreateFrame("Frame")
+
+---@param event string
+local function OnEvent(_, event)
+  if event == "PLAYER_ENTERING_WORLD" then
+    -- Check immediately in case we're already in a resting area at login
+    if IsResting() then
+      OnEnterResting(true)
+    end
+  elseif event == "PLAYER_UPDATE_RESTING" then
+    if IsResting() then
+      OnEnterResting(false)
+    else
+      OnLeaveResting()
+    end
+  end
+end
+
+--- Start the export reminder system. Idempotent within one load.
 function Core.StartShareReminders()
-  if scheduled then return end
-  scheduled = true
-  C_After(LOGIN_DELAY, Tick)
+  if frameRegistered then return end
+  frameRegistered = true
+
+  InitReminderState()
+
+  eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+  eventFrame:SetScript("OnEvent", OnEvent)
 end
 
 ---------------------------------------------------------------------------
@@ -306,7 +285,12 @@ local function HandleExportLink(link)
 end
 
 --- Install the questietrace: hyperlink handler.
+local linkHandlerRegistered = false
+
 local function RegisterLinkHandler()
+  if linkHandlerRegistered then return end
+  linkHandlerRegistered = true
+
   if type(LinkUtil) == "table"
       and type(LinkUtil.RegisterLinkHandler) == "function"
       and type(LinkUtil.IsLinkHandlerRegistered) == "function"
