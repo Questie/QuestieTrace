@@ -180,6 +180,8 @@ local function scheduleInnTimer(myToken)
         if Core.IsShareDue() then
           ShowReminder()
           GetReminderState().lastReminderAt = GetTime()
+          -- Schedule the next check so reminders continue while resting
+          scheduleInnTimer(myToken)
         else
           -- Not due yet (e.g., MarkExportOpened() updated lastReminderAt while timer was pending).
           -- Re-arm the timer with the new remaining time.
@@ -200,6 +202,8 @@ local function OnEnterResting()
   if Core.IsShareDue() then
     ShowReminder()
     GetReminderState().lastReminderAt = GetTime()
+    -- Schedule the next check so reminders continue while resting
+    scheduleInnTimer(myToken)
     return
   end
 
