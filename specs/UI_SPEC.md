@@ -87,10 +87,13 @@ A new timer starts after each reminder (using `lastReminderAt` as the baseline).
 
 ### Eligibility
 
-`Core.IsShareDue()` returns true when there is unreported data. This includes:
+`Core.IsShareDue()` returns true when **both** conditions are met:
 
-1. Any saved session in `QuestieTraceCharacter.sessions` — every entry there is guaranteed unreported, since reported sessions are deleted outright rather than flagged.
-2. A live (running) session with at least one event that started at least 900 seconds (15 minutes) ago (`LIVE_SESSION_MIN_AGE`).
+1. **Time gate**: The player has been playing for at least one hour (3600 seconds) since the last reminder (`reminder.lastReminderAt`), or since the session started (`reminder.sessionStart`) if no reminder has been shown yet.
+
+2. **Shareable data exists**: Either:
+   - Any saved session in `QuestieTraceCharacter.sessions` (every entry is unreported, since reported sessions are deleted outright), or
+   - A live (running) session with at least one event (no minimum age requirement).
 
 This is a cheap metadata check (no full payload build). Both cases are exportable, and both should prompt the player to share.
 

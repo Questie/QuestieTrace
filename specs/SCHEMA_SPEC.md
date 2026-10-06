@@ -47,10 +47,13 @@ on fresh install or migration.
 
 The share reminder uses a timestamp watermark: `reminder.lastReminderAt` records
 when the last reminder was shown, and `reminder.sessionStart` records when the
-current session began. A saved session is considered "new"
-if its `stoppedAt` is greater than `lastReminderAt` and it contains meaningful
-events. A live session is shareable once it has run for at least
-`LIVE_SESSION_MIN_AGE` and contains meaningful events.
+current session began. Eligibility is based on elapsed play time: a reminder
+is due when the player has been playing for at least one hour (3600 seconds)
+since `reminder.lastReminderAt`, or since `reminder.sessionStart` if no
+reminder has been shown yet (`lastReminderAt == 0`). This check is
+performed on inn entry (or when `StartShareReminders()` runs while the player
+is already in an inn) and on timer expiry while the player remains in a
+resting area.
 
 ### Migration
 
