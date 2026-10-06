@@ -171,6 +171,11 @@ local function Session(runtime)
   return assert(runtime.core.GetDiagnosticSession())
 end
 
+--- Mock IsResting() for reminder tests
+local function MockIsResting(runtime, value)
+  runtime.env.IsResting = function() return value end
+end
+
 ---@class GreetingFixture
 ---@field count number
 ---@field phase "live"|"stale"|"error"|"settled"
@@ -267,6 +272,7 @@ end
 
 local function TestSessionContract()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
   ---@type SessionRecord
   local legacy = {
     schemaVersion = 10, name = "legacy", startedAt = 0, startedAtPrecise = 0,
@@ -572,6 +578,7 @@ end
 
 local function TestLoginInitializesFreshCharacter()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
   local env = runtime.env
   env.QuestieTraceCharacter = nil
   local settings = env.QuestieTrace.settings
@@ -588,6 +595,7 @@ end
 
 local function TestRecoverCurrentSessionOnLogin()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
   local env = runtime.env
   -- Simulate a leftover currentSession from a previous load (e.g. /reload without Save)
   local leftover = {
@@ -720,11 +728,6 @@ local function TestShareReminderSuppressedAfterExportOpened()
   SaveSessions(runtime, 1)
   runtime.core.MarkExportOpened()
   assert(runtime.core.IsShareDue() == false, "Opening the export window must pause reminders")
-end
-
---- Mock IsResting() for reminder tests
-local function MockIsResting(runtime, value)
-  runtime.env.IsResting = function() return value end
 end
 
 --- Helper to set up a session with meaningful events
@@ -1006,6 +1009,43 @@ local function TestInnReminderReentryAfterReminderUsesLastReminderAtBaseline()
   assert(messages[2]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
 end
 
+--- Test that StartShareReminders() checks IsResting() immediately after registering
+--- events, so that if the player is already in an inn (e.g., consent accepted while
+--- in an inn), the inn logic runs and schedules the timer appropriately.
+--- This covers the case where StartShareReminders is called from the consent dialog
+--- Accept button while already in an inn, long after PLAYER_ENTERING_WORLD has fired.
+local function TestInnReminderStartsWhenInInn()
+  local runtime = NewRuntime(REMINDER_FILES)
+  local messages = CaptureChat(runtime)
+  SetupShareableSession(runtime)
+
+  -- Simulate: PLAYER_LOGIN and PLAYER_ENTERING_WORLD already happened earlier
+  -- (e.g., player logged in outside an inn, consent was undecided)
+  -- Player is NOT in an inn at login time
+  MockIsResting(runtime, false)
+  SendEvent(runtime, "PLAYER_LOGIN")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+
+  -- Play for 50 minutes
+  AdvanceTo(runtime, 3000)
+
+  -- Now player enters inn (but reminders not started yet because no consent)
+  MockIsResting(runtime, true)
+  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
+
+  -- Player grants consent via dialog (calls StartShareReminders) while in inn
+  -- This happens AFTER PLAYER_ENTERING_WORLD has already fired
+  runtime.core.StartShareReminders()
+
+  -- Should schedule timer for remaining 10 minutes (fires at 3600)
+  assert(#messages == 0, "Must not remind immediately at 50 minutes")
+
+  -- Advance to 1 hour mark - timer should fire
+  AdvanceTo(runtime, 3600)
+  assert(#messages == 1, "Must remind at 1-hour mark while still in inn")
+  assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
+end
+
 ---@param runtime TestRuntime
 ---@param needle string
 ---@return boolean
@@ -1043,6 +1083,7 @@ end
 
 local function TestConsentAcceptedPrintsReminderAndAllowsAutoStart()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
   runtime.env.QuestieTrace.settings.dataCollectionConsent = true
 
   SendEvent(runtime, "PLAYER_LOGIN")
@@ -1070,6 +1111,7 @@ end
 
 local function TestConsentAcceptImmediatelyStartsCapture()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
   runtime.env.QuestieTrace.settings.dataCollectionConsent = nil
 
   runtime.core.ShowConsentPrompt()
@@ -1148,6 +1190,7 @@ end
 
 local function TestAcceptingConsentPreservesActiveCapture()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
   runtime.core.StartCapture("in progress")
   local session = Session(runtime)
 
@@ -2036,6 +2079,7 @@ local tests = {
   { name = "inn reminder token invalidates stale callbacks", run = TestInnReminderTokenInvalidatesStaleCallbacks },
   { name = "inn reminder multiple reentries before timer", run = TestInnReminderMultipleReentriesBeforeTimer },
   { name = "inn reminder reentry after reminder uses lastReminderAt baseline", run = TestInnReminderReentryAfterReminderUsesLastReminderAtBaseline },
+  { name = "inn reminder starts reminders when StartShareReminders called while in inn", run = TestInnReminderStartsWhenInInn },
   { name = "ParseGUIDKind classifies GUID prefixes", run = TestParseGUIDKindClassifiesPrefixes },
   { name = "SanitizeText redacts local player's own name", run = TestSanitizeTextRedactsLocalPlayerName },
   { name = "SanitizeText redacts group roster names", run = TestSanitizeTextRedactsGroupRosterNames },
