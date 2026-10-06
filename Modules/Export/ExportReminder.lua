@@ -166,6 +166,30 @@ end
 ---@type number Token that increments on each inn entry; callbacks verify their token is current.
 local restingToken = 0
 
+--- Schedule or re-schedule the inn reminder timer for the given token.
+---@param myToken number The current resting token
+local function scheduleInnTimer(myToken)
+  local reminder = GetReminderState()
+  local sinceLast = reminder.lastReminderAt == 0 and reminder.sessionStart or reminder.lastReminderAt
+  local remaining = MIN_PLAY_TIME - (GetTime() - sinceLast)
+  if remaining > 0 then
+    C_After(remaining, function()
+      -- Only fire if this token is still current (no re-entry since scheduling)
+      -- and still in a resting area and has shareable data
+      if myToken == restingToken and IsResting() and HasShareableData() then
+        if Core.IsShareDue() then
+          ShowReminder()
+          GetReminderState().lastReminderAt = GetTime()
+        else
+          -- Not due yet (e.g., MarkExportOpened() updated lastReminderAt while timer was pending).
+          -- Re-arm the timer with the new remaining time.
+          scheduleInnTimer(myToken)
+        end
+      end
+    end)
+  end
+end
+
 --- Called when the player enters a resting area (IsResting() becomes true).
 local function OnEnterResting()
   -- Increment token on every inn entry to invalidate any pending timers
@@ -180,21 +204,7 @@ local function OnEnterResting()
   end
 
   -- Schedule a timer on every inn entry (login or re-entry)
-  local reminder = GetReminderState()
-  local sinceLast = reminder.lastReminderAt == 0 and reminder.sessionStart or reminder.lastReminderAt
-  local remaining = MIN_PLAY_TIME - (GetTime() - sinceLast)
-  if remaining > 0 then
-    C_After(remaining, function()
-      -- Only fire if this token is still current (no re-entry since scheduling)
-      -- and still in a resting area and has shareable data
-      if myToken == restingToken and IsResting() and HasShareableData() then
-        if Core.IsShareDue() then
-          ShowReminder()
-          GetReminderState().lastReminderAt = GetTime()
-        end
-      end
-    end)
-  end
+  scheduleInnTimer(myToken)
 end
 
 --- Called when the player leaves a resting area (IsResting() becomes false).
