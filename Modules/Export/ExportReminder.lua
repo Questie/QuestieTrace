@@ -241,6 +241,12 @@ function Core.StartShareReminders()
   eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
   eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
   eventFrame:SetScript("OnEvent", OnEvent)
+
+  -- If the player is already in a resting area (e.g., consent accepted via dialog
+  -- while in an inn, long after PLAYER_ENTERING_WORLD), run the inn-entry logic now.
+  if IsResting() then
+    OnEnterResting()
+  end
 end
 
 ---------------------------------------------------------------------------
