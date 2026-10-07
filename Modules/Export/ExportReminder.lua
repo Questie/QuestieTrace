@@ -167,8 +167,8 @@ end
 local restingToken = 0
 
 --- Schedule or re-schedule the inn reminder timer for the given token.
----@param myToken number The current resting token
-local function scheduleInnTimer(myToken)
+---@param currenToken number The current resting token
+local function scheduleInnTimer(currenToken)
   local reminder = GetReminderState()
   local sinceLast = reminder.lastReminderAt == 0 and reminder.sessionStart or reminder.lastReminderAt
   local remaining = MIN_PLAY_TIME - (GetTime() - sinceLast)
@@ -176,7 +176,7 @@ local function scheduleInnTimer(myToken)
     C_After(remaining, function()
       -- Only fire if this token is still current (no re-entry since scheduling)
       -- and still in a resting area and has shareable data
-      if myToken == restingToken and IsResting() and HasShareableData() then
+      if currenToken == restingToken and IsResting() and HasShareableData() then
         if Core.IsShareDue() then
           ShowReminder()
           GetReminderState().lastReminderAt = GetTime()
@@ -185,7 +185,7 @@ local function scheduleInnTimer(myToken)
         else
           -- Not due yet (e.g., MarkExportOpened() updated lastReminderAt while timer was pending).
           -- Re-arm the timer with the new remaining time.
-          scheduleInnTimer(myToken)
+          scheduleInnTimer(currenToken)
         end
       end
     end)
@@ -196,7 +196,7 @@ end
 local function OnEnterResting()
   -- Increment token on every inn entry to invalidate any pending timers
   restingToken = restingToken + 1
-  local myToken = restingToken
+  local currenToken = restingToken
 
   -- Check if reminder is due (uses lastReminderAt, not sessionStart)
   if Core.IsShareDue() then
@@ -208,7 +208,7 @@ local function OnEnterResting()
   end
 
   -- Schedule a timer on every inn entry (login or re-entry)
-  scheduleInnTimer(myToken)
+  scheduleInnTimer(currenToken)
 end
 
 --- Called when the player leaves a resting area (IsResting() becomes false).
