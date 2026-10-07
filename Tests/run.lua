@@ -1085,36 +1085,6 @@ local function TestInnReminderTimerRearmsAfterExportWindowOpened()
   assert(messages[1]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
 end
 
---- Test that after a reminder fires while staying in an inn, the timer callback
---- schedules the next check so subsequent reminders continue hourly without
---- requiring the player to leave and re-enter the inn.
-local function TestInnReminderContinuesWhileStayingInInn()
-  local runtime = NewRuntime(REMINDER_FILES)
-  local messages = CaptureChat(runtime)
-  SetupShareableSession(runtime)
-
-  MockIsResting(runtime, false)
-  SendEvent(runtime, "PLAYER_LOGIN")
-  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
-
-  -- Play 1 hour, enter inn -> immediate reminder fires, lastReminderAt = 3600
-  -- Timer should be scheduled for next hour (fires at 7200)
-  AdvanceTo(runtime, 3600)
-  MockIsResting(runtime, true)
-  SendEvent(runtime, "PLAYER_UPDATE_RESTING")
-  assert(#messages == 1, "First reminder must fire immediately on inn entry at 1 hour")
-
-  -- Stay in inn, advance to 2 hours (7200) - timer callback should fire second reminder
-  AdvanceTo(runtime, 7200)
-  assert(#messages == 2, "Second reminder must fire 1 hour after first while still in inn")
-  assert(messages[2]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
-
-  -- Stay in inn, advance to 3 hours (10800) - third reminder should fire
-  AdvanceTo(runtime, 10800)
-  assert(#messages == 3, "Third reminder must fire 1 hour after second while still in inn")
-  assert(messages[3]:find("|Hquestietrace:export|h", 1, true) ~= nil, "Reminder must have export link")
-end
-
 --- Test that a fresh login (new runtime/addon load) resets sessionStart, so reminder
 --- timing starts fresh. This ensures that if a player logs out and back in, the 1-hour
 --- timer is based on the new session start, not the old one.
@@ -2186,7 +2156,6 @@ local tests = {
   { name = "inn reminder reentry after reminder uses lastReminderAt baseline", run = TestInnReminderReentryAfterReminderUsesLastReminderAtBaseline },
   { name = "inn reminder starts reminders when StartShareReminders called while in inn", run = TestInnReminderStartsWhenInInn },
   { name = "inn reminder timer re-arms after export window opened", run = TestInnReminderTimerRearmsAfterExportWindowOpened },
-  { name = "inn reminder continues while staying in inn", run = TestInnReminderContinuesWhileStayingInInn },
   { name = "fresh login resets sessionStart", run = TestFreshLoginResetsSessionStart },
   { name = "ParseGUIDKind classifies GUID prefixes", run = TestParseGUIDKindClassifiesPrefixes },
   { name = "SanitizeText redacts local player's own name", run = TestSanitizeTextRedactsLocalPlayerName },
