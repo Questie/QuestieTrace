@@ -316,8 +316,20 @@ local function RunBatch(inputDir, outputDir)
       io.stderr:write("decoding " .. name .. "\n")
       local serialized, err = DecodeFile(inputPath)
       if not serialized then
-        io.stderr:write("skip " .. name .. ": " .. err .. "\n")
-        failed = failed + 1
+        -- Check for concatenated export strings (multiple exports in one file)
+        local raw, _ = ReadFile(inputPath)
+        local isConcat = false
+        if raw then
+          local startCount = 0
+          for _ in raw:gmatch("!QuestieTrace:%d+!") do startCount = startCount + 1 end
+          if startCount > 1 then isConcat = true end
+        end
+        if isConcat then
+          io.stderr:write("MANUAL_REVIEW_NEEDED (concatenated): " .. name .. "\n")
+        else
+          io.stderr:write("skip " .. name .. ": " .. err .. "\n")
+          failed = failed + 1
+        end
       else
         local clashingName = usedOutputPaths[outputPath]
         if clashingName then
