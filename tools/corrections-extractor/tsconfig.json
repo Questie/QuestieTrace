@@ -11,7 +11,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node", "vite/client"]
+    "types": ["node"]
   },
   "include": ["src", "vitest.config.ts"]
 }

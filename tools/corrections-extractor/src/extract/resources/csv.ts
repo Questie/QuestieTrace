@@ -2,17 +2,22 @@
 // (a build suffix in the filename is ignored on purpose: swapping in a newer
 // build requires no code change). Files are loaded eagerly as raw strings.
 
-const csvResources = import.meta.glob("./*.csv", {
-  eager: true,
-  query: "?raw",
-  import: "default",
-});
+import { readdirSync, readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+
+const resourceDir = dirname(fileURLToPath(import.meta.url));
+const csvResources: Record<string, string> = Object.fromEntries(
+  readdirSync(resourceDir)
+    .filter((name) => name.endsWith(".csv"))
+    .map((name) => [`./${name}`, readFileSync(join(resourceDir, name), "utf8")]),
+);
 
 /** Resolve the raw CSV for a table by filename prefix. Exactly one CSV per table is expected. */
 export function csvFor(table: string): string {
   const prefix = `./${table}.`;
   for (const key of Object.keys(csvResources)) {
-    if (key.startsWith(prefix) && typeof csvResources[key] === "string") return csvResources[key] as string;
+    if (key.startsWith(prefix)) return csvResources[key];
   }
   return "";
 }
