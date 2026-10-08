@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { traceApiPlugin } from "./middleware";
 
 afterEach(() => {
@@ -14,14 +17,13 @@ type Response = {
 type Next = ReturnType<typeof vi.fn>;
 type Middleware = (req: Request, res: Response, next: Next) => void;
 
-function setupHandler(ssrLoadModule = vi.fn()) {
+function setupHandler(root = "/__questie_trace_missing__/a/b") {
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const use = vi.fn();
   const server = {
-    config: { root: "/__questie_trace_missing__/a/b" },
+    config: { root },
     middlewares: { use },
-    ssrLoadModule,
   };
   const configureServer = traceApiPlugin().configureServer as (server: unknown) => void;
   configureServer(server);
@@ -49,16 +51,38 @@ describe("traceApiPlugin middleware", () => {
     expect(response.end).not.toHaveBeenCalled();
   });
 
-  it("should forward SSR module load rejections to Connect", async () => {
-    const error = new Error("module load failed");
-    const handler = setupHandler(vi.fn().mockRejectedValue(error));
+  it("should respond 404 with a hint when no generated corrections exist", async () => {
+    const handler = setupHandler();
     const response = makeResponse();
-    const next = vi.fn();
 
-    handler({ url: "/api/extract/npc" }, response, next);
+    handler({ url: "/api/extract/npc" }, response, vi.fn());
 
-    await vi.waitFor(() => expect(next).toHaveBeenCalledWith(error));
-    expect(response.end).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
+    expect(response.statusCode).toBe(404);
+    expect(response.end.mock.calls[0]?.[0]).toContain("npm run extract");
+  });
+
+  it("should serve generated corrections and meta from the corrections-extractor output", async () => {
+    const toolsDir = mkdtempSync(join(tmpdir(), "trace-analyzer-"));
+    const outputDir = join(toolsDir, "corrections-extractor", "output");
+    mkdirSync(outputDir, { recursive: true });
+    writeFileSync(join(outputDir, "foreverQuestTraces.lua"), "function ForeverQuestTraces:Load()\nend");
+    writeFileSync(
+      join(outputDir, "meta.json"),
+      JSON.stringify({ sessionCount: 3, fileCount: 2, skippedFiles: [{ name: "bad.lua", error: "boom" }] }),
+    );
+    const handler = setupHandler(join(toolsDir, "trace-analyzer"));
+    const response = makeResponse();
+
+    handler({ url: "/api/extract/quest" }, response, vi.fn());
+
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
+    expect(JSON.parse(response.end.mock.calls[0]?.[0])).toEqual({
+      fixes: "function ForeverQuestTraces:Load()\nend",
+      sessionCount: 3,
+      fileCount: 2,
+      skippedFiles: [{ name: "bad.lua", error: "boom" }],
+    });
   });
 
   it("should preserve normal API request handling", () => {

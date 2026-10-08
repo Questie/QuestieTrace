@@ -33,10 +33,10 @@ describe("ExtractView", () => {
     vi.unstubAllGlobals();
   });
 
-  it("should show a 'Generate all' button before generation", () => {
+  it("should show a 'Load all' button before generation", () => {
     render(<ExtractView />);
 
-    expect(screen.getByText("Generate all")).toBeInTheDocument();
+    expect(screen.getByText("Load all")).toBeInTheDocument();
     expect(screen.queryByText("3 session(s)")).not.toBeInTheDocument();
   });
 
@@ -49,39 +49,39 @@ describe("ExtractView", () => {
     expect(screen.getByText("Object")).toBeInTheDocument();
   });
 
-  it("should show placeholder text and allow per-entity Generate in idle state", () => {
+  it("should show placeholder text and allow per-entity Reload in idle state", () => {
     mockSuccessFetch();
 
     render(<ExtractView />);
     fireEvent.click(screen.getByText("Item"));
 
-    expect(screen.getByText(/Click "Generate all"/)).toBeInTheDocument();
+    expect(screen.getByText(/Run `npm run extract`/)).toBeInTheDocument();
 
-    // The per-entity Generate button should be clickable in idle state
-    const generateButtons = screen.getAllByText("Generate");
-    const itemTabGenerate = generateButtons[generateButtons.length - 1];
-    fireEvent.click(itemTabGenerate);
+    // The per-entity Reload button should be clickable in idle state
+    const reloadButtons = screen.getAllByText("Reload");
+    const itemTabReload = reloadButtons[reloadButtons.length - 1];
+    fireEvent.click(itemTabReload);
 
     waitFor(() => {
       expect(screen.getByText(/ForeverItemTraces:Load/)).toBeInTheDocument();
     });
   });
 
-  it("should show a loading state while 'Generate all' requests are in flight", () => {
+  it("should show a loading state while 'Load all' requests are in flight", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
-    expect(screen.getByText("Generating all...")).toBeInTheDocument();
-    expect(screen.getByText("Generating all...")).toBeDisabled();
+    expect(screen.getByText("Loading all...")).toBeInTheDocument();
+    expect(screen.getByText("Loading all...")).toBeDisabled();
   });
 
-  it("should render tabs for all four entities after 'Generate all'", async () => {
+  it("should render tabs for all four entities after 'Load all'", async () => {
     mockSuccessFetch();
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText("3 session(s) from 2 trace file(s)")).toBeInTheDocument());
     expect(screen.getByText("NPC")).toBeInTheDocument();
@@ -94,7 +94,7 @@ describe("ExtractView", () => {
     mockSuccessFetch();
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText(/ForeverNpcTraces:Load/)).toBeInTheDocument());
   });
@@ -103,7 +103,7 @@ describe("ExtractView", () => {
     mockSuccessFetch();
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText("Quest")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Quest"));
@@ -112,11 +112,11 @@ describe("ExtractView", () => {
     expect(screen.queryByText(/ForeverNpcTraces:Load/)).not.toBeInTheDocument();
   });
 
-  it("should allow per-entity 'Generate' button to regenerate just one entity", async () => {
+  it("should allow per-entity 'Reload' button to reload just one entity", async () => {
     mockSuccessFetch();
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText(/ForeverNpcTraces:Load/)).toBeInTheDocument());
 
@@ -124,10 +124,10 @@ describe("ExtractView", () => {
     fireEvent.click(screen.getByText("Item"));
     await waitFor(() => expect(screen.getByText(/ForeverItemTraces:Load/)).toBeInTheDocument());
 
-    // Click the per-entity Generate button (in the Item tab context)
-    const generateButtons = screen.getAllByText("Generate");
-    const itemTabGenerate = generateButtons[generateButtons.length - 1];
-    fireEvent.click(itemTabGenerate);
+    // Click the per-entity Reload button (in the Item tab context)
+    const reloadButtons = screen.getAllByText("Reload");
+    const itemTabReload = reloadButtons[reloadButtons.length - 1];
+    fireEvent.click(itemTabReload);
 
     await waitFor(() => expect(screen.getByText(/ForeverItemTraces:Load/)).toBeInTheDocument());
   });
@@ -136,7 +136,7 @@ describe("ExtractView", () => {
     mockSuccessFetch({ npc: { ...RESULTS.npc, skippedFiles: [{ name: "bad.lua", error: "unexpected token" }] } });
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText(/Skipped 1 file/)).toBeInTheDocument());
     expect(screen.getByText(/bad\.lua: unexpected token/)).toBeInTheDocument();
@@ -146,12 +146,12 @@ describe("ExtractView", () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("network down"))));
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText(/Error: network down/)).toBeInTheDocument());
 
     mockSuccessFetch();
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText("3 session(s) from 2 trace file(s)")).toBeInTheDocument());
   });
@@ -160,12 +160,12 @@ describe("ExtractView", () => {
     mockSuccessFetch({ object: { ...RESULTS.object, fixes: "" } });
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText("Object")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Object"));
 
-    await waitFor(() => expect(screen.getByText(/No data — click Generate/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/No data for this entity/)).toBeInTheDocument());
   });
 
   it("should trigger a download with the correct filename from the active tab", async () => {
@@ -173,7 +173,7 @@ describe("ExtractView", () => {
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
     await waitFor(() => expect(screen.getByText("Quest")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("Quest"));
@@ -195,7 +195,7 @@ describe("ExtractView", () => {
     mockSuccessFetch({ item: { ...RESULTS.item, fixes: "" } });
 
     render(<ExtractView />);
-    fireEvent.click(screen.getByText("Generate all"));
+    fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText("Item")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Item"));
