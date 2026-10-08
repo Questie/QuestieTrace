@@ -4,12 +4,17 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "extract": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vitest": "5.0.1"
+  },
+  "dependencies": {
+    "lua-state": "^1.3.0"
   }
 }
