@@ -105,31 +105,91 @@ function isForeverBuild(interfaceVersion: number | undefined): boolean {
   return String(interfaceVersion).startsWith("16");
 }
 
-export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
-  // Filter out sessions from known non-Forever builds.
-  // Sessions without GetBuildInfo are INCLUDED (they might be early Forever beta
-  // traces with valuable data) - any Classic IDs they contain will be filtered out
-  // by filterBelowMax below.
-  const foreverSessions = sessions.filter((session) => {
+const OBSERVERS = {
+  zoneOrSort: observeZoneOrSort,
+  questName: observeQuestName,
+  questLevel: observeQuestLevel,
+  requiredLevel: observeRequiredLevel,
+  objectives: observeObjectives,
+  objectivesText: observeObjectivesText,
+  triggerEnd: observeTriggerEnd,
+  startedBy: observeStartedBy,
+  finishedBy: observeFinishedBy,
+  npcName: observeNpcName,
+  minLevel: observeMinLevel,
+  maxLevel: observeMaxLevel,
+  npcSpawns: observeNpcSpawns,
+  npcZoneID: observeNpcZoneID,
+  npcQuestStarts: observeNpcQuestStarts,
+  npcQuestEnds: observeNpcQuestEnds,
+  itemName: observeItemName,
+  npcDrops: observeNpcDrops,
+  objectDrops: observeObjectDrops,
+  objectName: observeObjectName,
+  objectSpawns: observeObjectSpawns,
+  objectZoneID: observeObjectZoneID,
+  objectQuestStarts: observeObjectQuestStarts,
+  objectQuestEnds: observeObjectQuestEnds,
+};
+
+type ObserverKey = keyof typeof OBSERVERS;
+
+/**
+ * Observations collected so far, per field. Holding only observations (not the
+ * sessions they came from) lets callers fold in one trace file at a time.
+ */
+export interface ExtractAccumulator {
+  sessionCount: number;
+  observations: { [K in ObserverKey]: ReturnType<(typeof OBSERVERS)[K]> };
+}
+
+export function createAccumulator(): ExtractAccumulator {
+  const observations = {} as Record<ObserverKey, unknown[]>;
+  for (const key of Object.keys(OBSERVERS) as ObserverKey[]) {
+    observations[key] = [];
+  }
+  return { sessionCount: 0, observations: observations as ExtractAccumulator["observations"] };
+}
+
+/**
+ * Runs every observer over `sessions` and appends the results to `acc`.
+ *
+ * Only sessions from WoW Forever builds are observed. Sessions without
+ * GetBuildInfo are INCLUDED (they might be early Forever beta traces with
+ * valuable data) - any Classic IDs they contain are filtered out by
+ * filterBelowMax in finalize.
+ */
+export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[]): void {
+  for (const session of sessions) {
     const version = getInterfaceVersion(session);
-    // If we have interfaceVersion, only include Forever builds (16xxx)
-    if (version !== undefined) {
-      return isForeverBuild(version);
+    if (version !== undefined && !isForeverBuild(version)) continue;
+
+    acc.sessionCount++;
+    for (const key of Object.keys(OBSERVERS) as ObserverKey[]) {
+      const target = acc.observations[key] as unknown[];
+      for (const observation of OBSERVERS[key](session)) {
+        target.push(observation);
+      }
     }
-    // No GetBuildInfo - include the session (might have Forever IDs)
-    return true;
-  });
+  }
+}
+
+export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
+  const acc = createAccumulator();
+  foldSessions(acc, sessions);
+  return finalize(acc, options);
+}
+
+export function finalize(acc: ExtractAccumulator, options: ExtractOptions): FactBundle {
+  const observations = acc.observations;
 
   const header = {
     sourceFileNames: options.sourceFileNames,
-    sessionCount: foreverSessions.length,
+    sessionCount: acc.sessionCount,
     generatedAt: options.now ?? new Date(),
   };
 
   const effectiveMaxIds = { ...MAX_IDS, ...options.maxIds };
-
-  const sessionsToProcess = foreverSessions;
-
   function filterBelowMax(records: Map<number, Record<string, unknown>>, entity: keyof typeof MAX_IDS): Map<number, Record<string, unknown>> {
     const filtered = new Map<number, Record<string, unknown>>();
     const threshold = effectiveMaxIds[entity];
@@ -140,27 +200,27 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
     return filtered;
   }
 
-  const zoneOrSortFacts = aggregateField(sessionsToProcess.flatMap(observeZoneOrSort));
+  const zoneOrSortFacts = aggregateField(observations.zoneOrSort);
   const questRecords = emitQuestRecords({
-    name: aggregateField(sessionsToProcess.flatMap(observeQuestName)),
-    questLevel: aggregateField(sessionsToProcess.flatMap(observeQuestLevel)),
-    requiredLevel: aggregateField(sessionsToProcess.flatMap(observeRequiredLevel), mergeRequiredLevel),
+    name: aggregateField(observations.questName),
+    questLevel: aggregateField(observations.questLevel),
+    requiredLevel: aggregateField(observations.requiredLevel, mergeRequiredLevel),
     zoneOrSort: zoneOrSortFacts,
     objectives: aggregateField(
-      sessionsToProcess.flatMap(observeObjectives),
+      observations.objectives,
       mergeQuestObjectives,
     ),
-    objectivesText: aggregateField(sessionsToProcess.flatMap(observeObjectivesText)),
+    objectivesText: aggregateField(observations.objectivesText),
     triggerEnd: aggregateField(
-      sessionsToProcess.flatMap(observeTriggerEnd),
+      observations.triggerEnd,
       (observations) => mergeQuestTriggerEnds(observations, zoneOrSortFacts.get(observations[0]?.entityId)?.value),
     ),
     startedBy: aggregateField(
-      sessionsToProcess.flatMap(observeStartedBy),
+      observations.startedBy,
       mergeStartedBy,
     ),
     finishedBy: aggregateField(
-      sessionsToProcess.flatMap(observeFinishedBy),
+      observations.finishedBy,
       mergeFinishedBy,
     ),
   });
@@ -185,53 +245,53 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   }
 
   const npcRecords = emitNpcRecords({
-    name: aggregateField(sessionsToProcess.flatMap(observeNpcName)),
-    minLevel: aggregateField(sessionsToProcess.flatMap(observeMinLevel)),
-    maxLevel: aggregateField(sessionsToProcess.flatMap(observeMaxLevel)),
+    name: aggregateField(observations.npcName),
+    minLevel: aggregateField(observations.minLevel),
+    maxLevel: aggregateField(observations.maxLevel),
     spawns: aggregateField(
-      sessionsToProcess.flatMap(observeNpcSpawns),
+      observations.npcSpawns,
       mergeNpcSpawns,
     ),
     zoneID: aggregateField(
-      sessionsToProcess.flatMap(observeNpcZoneID),
+      observations.npcZoneID,
       mergeNpcZoneID,
     ),
     questStarts: aggregateField(
-      sessionsToProcess.flatMap(observeNpcQuestStarts),
+      observations.npcQuestStarts,
       mergeNpcQuestStarts,
     ),
     questEnds: aggregateField(
-      sessionsToProcess.flatMap(observeNpcQuestEnds),
+      observations.npcQuestEnds,
       mergeNpcQuestEnds,
     ),
   });
   const itemRecords = emitItemRecords({
-    name: aggregateField(sessionsToProcess.flatMap(observeItemName)),
+    name: aggregateField(observations.itemName),
     npcDrops: aggregateField(
-      sessionsToProcess.flatMap(observeNpcDrops),
+      observations.npcDrops,
       mergeNpcDrops,
     ),
     objectDrops: aggregateField(
-      sessionsToProcess.flatMap(observeObjectDrops),
+      observations.objectDrops,
       mergeObjectDrops,
     ),
   });
   const objectRecords = emitObjectRecords({
-    name: aggregateField(sessionsToProcess.flatMap(observeObjectName)),
+    name: aggregateField(observations.objectName),
     spawns: aggregateField(
-      sessionsToProcess.flatMap(observeObjectSpawns),
+      observations.objectSpawns,
       mergeObjectSpawns,
     ),
     zoneID: aggregateField(
-      sessionsToProcess.flatMap(observeObjectZoneID),
+      observations.objectZoneID,
       mergeObjectZoneID,
     ),
     questStarts: aggregateField(
-      sessionsToProcess.flatMap(observeObjectQuestStarts),
+      observations.objectQuestStarts,
       mergeObjectQuestStarts,
     ),
     questEnds: aggregateField(
-      sessionsToProcess.flatMap(observeObjectQuestEnds),
+      observations.objectQuestEnds,
       mergeObjectQuestEnds,
     ),
   });

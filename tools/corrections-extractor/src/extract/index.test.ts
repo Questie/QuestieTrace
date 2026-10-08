@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../core/types";
-import { extractAll } from "./index";
+import { createAccumulator, extractAll, finalize, foldSessions } from "./index";
 
 function makeSession(functions: SessionRecord["functions"]): SessionRecord {
   return {
@@ -413,5 +413,56 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     // NPC should have questEnds with the quest
     expect(npcFixes).toContain("[276171] = {");
     expect(npcFixes).toContain("[npcKeys.questEnds_add] = {99196},");
+  });
+});
+
+describe("foldSessions + finalize (incremental extraction)", () => {
+  const options = {
+    sourceFileNames: ["a.lua", "b.lua"],
+    now: new Date("2020-01-01T00:00:00.000Z"),
+    maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+  };
+
+  function westfallSession(functions: SessionRecord["functions"]): SessionRecord {
+    return makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] },
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
+      ...functions,
+    });
+  }
+
+  const fileA = [
+    westfallSession({
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+    }),
+  ];
+  const fileB = [
+    westfallSession({
+      UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
+      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Suspicious Chest", n: 1 } }] },
+      GetLootSlotLink: { "1": [{ t: 3, tp: 3, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
+    }),
+    makeTBCSession({
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-999-000031" }] },
+      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "TBC Only", n: 1 } }] },
+    }),
+  ];
+
+  it("should produce the same corrections when folding files one at a time as extracting all sessions at once", () => {
+    const acc = createAccumulator();
+    foldSessions(acc, fileA);
+    foldSessions(acc, fileB);
+
+    expect(finalize(acc, options)).toEqual(extractAll([...fileA, ...fileB], options));
+  });
+
+  it("should only count and observe sessions from Forever builds", () => {
+    const acc = createAccumulator();
+    foldSessions(acc, fileB);
+
+    expect(acc.sessionCount).toBe(1);
+    expect(finalize(acc, options).npcFixes).not.toContain("TBC Only");
   });
 });
