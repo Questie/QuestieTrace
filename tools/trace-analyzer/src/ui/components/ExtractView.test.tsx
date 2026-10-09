@@ -33,7 +33,7 @@ describe("ExtractView", () => {
     vi.unstubAllGlobals();
   });
 
-  it("should show a 'Load all' button before generation", () => {
+  it("should show a 'Load all' button before loading", () => {
     render(<ExtractView />);
 
     expect(screen.getByText("Load all")).toBeInTheDocument();

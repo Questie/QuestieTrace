@@ -156,14 +156,13 @@ export function traceApiPlugin(): Plugin {
         const extractMatch = req.url.match(/^\/api\/extract\/([^/]+)$/);
         if (extractMatch) {
           const entity = decodeURIComponent(extractMatch[1]);
-          const outputFile = EXTRACT_ENTITY_TO_OUTPUT_FILE[entity];
-          if (!outputFile) {
+          if (!Object.hasOwn(EXTRACT_ENTITY_TO_OUTPUT_FILE, entity)) {
             res.statusCode = 404;
             res.end(JSON.stringify({ error: `Unknown extract entity "${entity}"` }));
             return;
           }
 
-          const fixesPath = resolve(extractOutputDir, outputFile);
+          const fixesPath = resolve(extractOutputDir, EXTRACT_ENTITY_TO_OUTPUT_FILE[entity]);
           const metaPath = resolve(extractOutputDir, "meta.json");
           if (!existsSync(fixesPath) || !existsSync(metaPath)) {
             res.statusCode = 404;
@@ -175,7 +174,18 @@ export function traceApiPlugin(): Plugin {
             return;
           }
 
-          const meta = JSON.parse(readFileSync(metaPath, "utf8"));
+          let meta;
+          try {
+            meta = JSON.parse(readFileSync(metaPath, "utf8"));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(
+              JSON.stringify({
+                error: `Unreadable meta.json (${String(e)}). Run \`npm run extract\` in tools/corrections-extractor again.`,
+              }),
+            );
+            return;
+          }
           res.end(
             JSON.stringify({
               fixes: readFileSync(fixesPath, "utf8"),
