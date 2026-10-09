@@ -29,17 +29,27 @@ function highestConfidence(observations: Observation<unknown>[]): Confidence {
   return best;
 }
 
-function mergeScalar<T>(
-  observations: Observation<T>[],
-): { value: T; confidence: Confidence; alternativeCount: number } {
-  interface Group {
-    value: T;
-    confidence: Confidence;
-    count: number;
-    latestT: number;
-  }
-  const groups = new Map<string, Group>();
+interface ScalarGroup<T> {
+  value: T;
+  confidence: Confidence;
+  count: number;
+  latestT: number;
+}
+
+/**
+ * Per entity, the distinct values observed for a scalar field, keyed by their
+ * JSON form. Holds everything the scalar merge needs, so raw observations can
+ * be dropped as soon as they are added.
+ */
+export type ScalarSummary<T> = Map<number, Map<string, ScalarGroup<T>>>;
+
+export function addToScalarSummary<T>(summary: ScalarSummary<T>, observations: Observation<T>[]): void {
   for (const obs of observations) {
+    let groups = summary.get(obs.entityId);
+    if (!groups) {
+      groups = new Map();
+      summary.set(obs.entityId, groups);
+    }
     const key = JSON.stringify(obs.value);
     const existing = groups.get(key);
     if (!existing) {
@@ -54,19 +64,32 @@ function mergeScalar<T>(
       existing.latestT = obs.provenance.t;
     }
   }
+}
 
-  const sorted = [...groups.values()].sort((a, b) => {
-    if (CONFIDENCE_RANK[b.confidence] !== CONFIDENCE_RANK[a.confidence]) {
-      return CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
-    }
-    if (b.count !== a.count) {
-      return b.count - a.count;
-    }
-    return b.latestT - a.latestT;
-  });
+/** Picks one Fact per entity from a scalar summary (see the default merge policy above). */
+export function aggregateScalarSummary<T>(summary: ScalarSummary<T>): Map<number, Fact<T>> {
+  const facts = new Map<number, Fact<T>>();
+  for (const [entityId, groups] of summary) {
+    const sorted = [...groups.values()].sort((a, b) => {
+      if (CONFIDENCE_RANK[b.confidence] !== CONFIDENCE_RANK[a.confidence]) {
+        return CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
+      }
+      if (b.count !== a.count) {
+        return b.count - a.count;
+      }
+      return b.latestT - a.latestT;
+    });
 
-  const winner = sorted[0];
-  return { value: winner.value, confidence: winner.confidence, alternativeCount: sorted.length - 1 };
+    const winner = sorted[0];
+    facts.set(entityId, {
+      entityId,
+      value: winner.value,
+      confidence: winner.confidence,
+      observationCount: sorted.reduce((total, group) => total + group.count, 0),
+      alternativeCount: sorted.length - 1,
+    });
+  }
+  return facts;
 }
 
 /**
@@ -87,6 +110,12 @@ export function aggregateField<T, R>(
   observations: Observation<T>[],
   customMerge?: (observationsForEntity: Observation<T>[]) => R,
 ): Map<number, Fact<T> | Fact<R>> {
+  if (!customMerge) {
+    const summary: ScalarSummary<T> = new Map();
+    addToScalarSummary(summary, observations);
+    return aggregateScalarSummary(summary);
+  }
+
   const byEntity = new Map<number, Observation<T>[]>();
   for (const obs of observations) {
     const list = byEntity.get(obs.entityId);
@@ -97,26 +126,14 @@ export function aggregateField<T, R>(
     }
   }
 
-  const facts = new Map<number, Fact<T> | Fact<R>>();
+  const facts = new Map<number, Fact<R>>();
   for (const [entityId, entityObservations] of byEntity) {
-    if (customMerge) {
-      facts.set(entityId, {
-        entityId,
-        value: customMerge(entityObservations),
-        confidence: highestConfidence(entityObservations),
-        observationCount: entityObservations.length,
-        alternativeCount: 0,
-      });
-      continue;
-    }
-
-    const { value, confidence, alternativeCount } = mergeScalar(entityObservations);
     facts.set(entityId, {
       entityId,
-      value,
-      confidence,
+      value: customMerge(entityObservations),
+      confidence: highestConfidence(entityObservations),
       observationCount: entityObservations.length,
-      alternativeCount,
+      alternativeCount: 0,
     });
   }
   return facts;

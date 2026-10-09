@@ -14,7 +14,8 @@
 // are processed. See PlayerIdentity.lua for how interfaceVersion is captured:
 
 import type { SessionRecord } from "../core/types";
-import { aggregateField } from "./aggregate";
+import { aggregateField, aggregateScalarSummary, addToScalarSummary, type ScalarSummary } from "./aggregate";
+import type { Observation } from "./observation";
 import { emitItemRecords } from "./emit/item";
 import { emitNpcRecords } from "./emit/npc";
 import { emitObjectRecords } from "./emit/object";
@@ -105,34 +106,42 @@ function isForeverBuild(interfaceVersion: number | undefined): boolean {
   return String(interfaceVersion).startsWith("16");
 }
 
-const OBSERVERS = {
+/** Fields using the default scalar merge: only a per-value summary is kept. */
+const SCALAR_OBSERVERS = {
   zoneOrSort: observeZoneOrSort,
   questName: observeQuestName,
   questLevel: observeQuestLevel,
-  requiredLevel: observeRequiredLevel,
-  objectives: observeObjectives,
   objectivesText: observeObjectivesText,
-  triggerEnd: observeTriggerEnd,
-  startedBy: observeStartedBy,
-  finishedBy: observeFinishedBy,
   npcName: observeNpcName,
   minLevel: observeMinLevel,
   maxLevel: observeMaxLevel,
+  itemName: observeItemName,
+  objectName: observeObjectName,
+};
+
+/** Fields with a custom merge, which needs every raw observation. */
+const OBSERVERS = {
+  requiredLevel: observeRequiredLevel,
+  objectives: observeObjectives,
+  triggerEnd: observeTriggerEnd,
+  startedBy: observeStartedBy,
+  finishedBy: observeFinishedBy,
   npcSpawns: observeNpcSpawns,
   npcZoneID: observeNpcZoneID,
   npcQuestStarts: observeNpcQuestStarts,
   npcQuestEnds: observeNpcQuestEnds,
-  itemName: observeItemName,
   npcDrops: observeNpcDrops,
   objectDrops: observeObjectDrops,
-  objectName: observeObjectName,
   objectSpawns: observeObjectSpawns,
   objectZoneID: observeObjectZoneID,
   objectQuestStarts: observeObjectQuestStarts,
   objectQuestEnds: observeObjectQuestEnds,
 };
 
+type ScalarObserverKey = keyof typeof SCALAR_OBSERVERS;
 type ObserverKey = keyof typeof OBSERVERS;
+type ObservedValue<F extends (session: SessionRecord) => unknown> =
+  ReturnType<F> extends Observation<infer V>[] ? V : never;
 
 /**
  * Observations collected so far, per field. Holding only observations (not the
@@ -140,19 +149,28 @@ type ObserverKey = keyof typeof OBSERVERS;
  */
 export interface ExtractAccumulator {
   sessionCount: number;
+  scalars: { [K in ScalarObserverKey]: ScalarSummary<ObservedValue<(typeof SCALAR_OBSERVERS)[K]>> };
   observations: { [K in ObserverKey]: ReturnType<(typeof OBSERVERS)[K]> };
 }
 
 export function createAccumulator(): ExtractAccumulator {
+  const scalars = {} as Record<ScalarObserverKey, ScalarSummary<unknown>>;
+  for (const key of Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]) {
+    scalars[key] = new Map();
+  }
   const observations = {} as Record<ObserverKey, unknown[]>;
   for (const key of Object.keys(OBSERVERS) as ObserverKey[]) {
     observations[key] = [];
   }
-  return { sessionCount: 0, observations: observations as ExtractAccumulator["observations"] };
+  return {
+    sessionCount: 0,
+    scalars: scalars as ExtractAccumulator["scalars"],
+    observations: observations as ExtractAccumulator["observations"],
+  };
 }
 
 /**
- * Runs every observer over `sessions` and appends the results to `acc`.
+ * Runs every observer over `sessions` and adds the results to `acc`.
  *
  * Only sessions from WoW Forever builds are observed. Sessions without
  * GetBuildInfo are INCLUDED (they might be early Forever beta traces with
@@ -165,6 +183,9 @@ export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[])
     if (version !== undefined && !isForeverBuild(version)) continue;
 
     acc.sessionCount++;
+    for (const key of Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]) {
+      addToScalarSummary(acc.scalars[key] as ScalarSummary<unknown>, SCALAR_OBSERVERS[key](session));
+    }
     for (const key of Object.keys(OBSERVERS) as ObserverKey[]) {
       const target = acc.observations[key] as unknown[];
       for (const observation of OBSERVERS[key](session)) {
@@ -181,7 +202,7 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
 }
 
 export function finalize(acc: ExtractAccumulator, options: ExtractOptions): FactBundle {
-  const observations = acc.observations;
+  const { scalars, observations } = acc;
 
   const header = {
     sourceFileNames: options.sourceFileNames,
@@ -200,17 +221,17 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     return filtered;
   }
 
-  const zoneOrSortFacts = aggregateField(observations.zoneOrSort);
+  const zoneOrSortFacts = aggregateScalarSummary(scalars.zoneOrSort);
   const questRecords = emitQuestRecords({
-    name: aggregateField(observations.questName),
-    questLevel: aggregateField(observations.questLevel),
+    name: aggregateScalarSummary(scalars.questName),
+    questLevel: aggregateScalarSummary(scalars.questLevel),
     requiredLevel: aggregateField(observations.requiredLevel, mergeRequiredLevel),
     zoneOrSort: zoneOrSortFacts,
     objectives: aggregateField(
       observations.objectives,
       mergeQuestObjectives,
     ),
-    objectivesText: aggregateField(observations.objectivesText),
+    objectivesText: aggregateScalarSummary(scalars.objectivesText),
     triggerEnd: aggregateField(
       observations.triggerEnd,
       (observations) => mergeQuestTriggerEnds(observations, zoneOrSortFacts.get(observations[0]?.entityId)?.value),
@@ -245,9 +266,9 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
   }
 
   const npcRecords = emitNpcRecords({
-    name: aggregateField(observations.npcName),
-    minLevel: aggregateField(observations.minLevel),
-    maxLevel: aggregateField(observations.maxLevel),
+    name: aggregateScalarSummary(scalars.npcName),
+    minLevel: aggregateScalarSummary(scalars.minLevel),
+    maxLevel: aggregateScalarSummary(scalars.maxLevel),
     spawns: aggregateField(
       observations.npcSpawns,
       mergeNpcSpawns,
@@ -266,7 +287,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     ),
   });
   const itemRecords = emitItemRecords({
-    name: aggregateField(observations.itemName),
+    name: aggregateScalarSummary(scalars.itemName),
     npcDrops: aggregateField(
       observations.npcDrops,
       mergeNpcDrops,
@@ -277,7 +298,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     ),
   });
   const objectRecords = emitObjectRecords({
-    name: aggregateField(observations.objectName),
+    name: aggregateScalarSummary(scalars.objectName),
     spawns: aggregateField(
       observations.objectSpawns,
       mergeObjectSpawns,

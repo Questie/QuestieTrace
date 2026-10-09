@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Observation } from "./observation";
-import { aggregateField } from "./aggregate";
+import { addToScalarSummary, aggregateField, aggregateScalarSummary, type ScalarSummary } from "./aggregate";
 
 function obs<T>(entityId: number, value: T, confidence: Observation<T>["confidence"], t: number): Observation<T> {
   return { entityId, value, confidence, provenance: { session: "s", t } };
@@ -42,5 +42,27 @@ describe("aggregateField", () => {
       (observationsForEntity) => observationsForEntity.reduce((sum, o) => sum + o.value, 0),
     );
     expect(facts.get(1)).toMatchObject({ value: 30, confidence: "low", observationCount: 2, alternativeCount: 0 });
+  });
+});
+
+describe("scalar summary", () => {
+  it("should produce the same Facts when observations are added in batches as aggregateField does at once", () => {
+    const batchA = [obs(1, "common", "medium", 1), obs(2, { x: 1 }, "low", 1), obs(1, "rare", "medium", 2)];
+    const batchB = [obs(1, "common", "high", 3), obs(2, { x: 1 }, "low", 4), obs(1, "rare", "medium", 5)];
+    const summary: ScalarSummary<unknown> = new Map();
+
+    addToScalarSummary(summary, batchA);
+    addToScalarSummary(summary, batchB);
+
+    expect(aggregateScalarSummary(summary)).toEqual(aggregateField<unknown>([...batchA, ...batchB]));
+  });
+
+  it("should keep one entry per distinct value instead of every observation", () => {
+    const summary: ScalarSummary<string> = new Map();
+
+    addToScalarSummary(summary, [obs(1, "a", "high", 0), obs(1, "a", "high", 1), obs(1, "b", "low", 2)]);
+
+    expect(summary.get(1)?.size).toBe(2);
+    expect(aggregateScalarSummary(summary).get(1)).toMatchObject({ value: "a", observationCount: 3, alternativeCount: 1 });
   });
 });
