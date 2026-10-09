@@ -5,7 +5,7 @@
 // memory use is bounded by the collected observations rather than by the
 // total size of all trace files.
 
-import { mkdirSync, readdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { loadTraceFile } from "./core/loader";
 import { createAccumulator, finalize, foldSessions } from './extract';
@@ -29,9 +29,15 @@ export function extractCorrections(
   outputDir: string,
   log: (message: string) => void = console.log,
 ): ExtractMeta {
+  if (!existsSync(traceDir)) {
+    throw new Error(`Trace directory not found: ${traceDir}`);
+  }
   const fileNames = readdirSync(traceDir)
     .filter((f) => f.endsWith(".lua"))
     .sort();
+  if (fileNames.length === 0) {
+    throw new Error(`No .lua trace files found in ${traceDir}`);
+  }
 
   const acc = createAccumulator();
   const loadedFileNames: string[] = [];
@@ -51,6 +57,8 @@ export function extractCorrections(
   const bundle = finalize(acc, { sourceFileNames: loadedFileNames, now });
 
   mkdirSync(outputDir, { recursive: true });
+  // meta.json marks a complete run: remove it until all modules are written.
+  rmSync(join(outputDir, "meta.json"), { force: true });
   for (const [field, fileName] of Object.entries(OUTPUT_FILES)) {
     writeFileSync(join(outputDir, fileName), bundle[field as keyof typeof OUTPUT_FILES]);
   }
