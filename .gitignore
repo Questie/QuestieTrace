@@ -23,5 +23,5 @@ tools/corrections-extractor/output/*
 !tools/corrections-extractor/output/.gitkeep
 
 # Vendored Questie DB reference data, used only as a one-time manual reference
-# for deriving tools/trace-analyzer/src/extract/schema/questie-keys.ts.
+# for deriving tools/corrections-extractor/src/extract/schema/questie-keys.ts.
 tools/classic-data/
