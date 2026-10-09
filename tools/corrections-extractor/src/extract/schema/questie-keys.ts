@@ -14,9 +14,6 @@
 //   - a field that is *ever* `nil` in the real data (regardless of type) defaults to
 //     `nil`, matching Questie's own convention of using `nil` for "no data" on
 //     optional fields.
-//
-// See `tools/trace-analyzer/README.md` (extract section) for how to re-derive these
-// if the upstream Questie DB shape changes.
 
 export type QuestieFieldType = "string" | "int" | "bitmask" | "table";
 
