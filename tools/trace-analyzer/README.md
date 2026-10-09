@@ -24,20 +24,6 @@ cd tools/trace-analyzer
 npm ci
 ```
 
-### macOS ARM64 (Apple Silicon) Setup
-
-The `lua-state` dependency requires a native binary. On macOS ARM64, you need to manually add the darwin-arm64 build:
-
-1. Download the prebuilt binary from https://github.com/quaternion/node-lua-state/releases (look for your system architecture, e.g. `
-   lua-state-native-v1.2.0-lua-v5.4.8-darwin-arm64.tar.gz `).
-2. Extract the `lua-state.node` file
-3. Create the directory structure and place the file:
-
-```bash
-mkdir -p node_modules/lua-state/build/Release
-cp /path/to/lua-state.node node_modules/lua-state/build/Release/
-```
-
 ## Trace Files
 
 The analyzer expects trace files (`.lua`) in the **QuestieTrace project root** at `Traces/`:
