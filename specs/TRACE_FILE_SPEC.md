@@ -417,6 +417,9 @@ Called with a quest ID as the argument.
 | `GetNumQuestLogRewards` | scalar number/nil | Reward count |
 | `GetQuestLogRewardMoney` | scalar number/nil | Reward money |
 | `GetQuestTagInfo` | tuple (n varies) | Tag info |
+| `IsBreadcrumbQuest` | scalar boolean | Forever only; undocumented, called with the quest ID |
+| `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | Forever only; questLineName/questName sanitized, other fields raw; includes hidden quest lines |
+| `C_QuestInfoSystem.GetQuestClassification` | scalar number | Forever only; `Enum.QuestClassification` |
 
 ### Nested parameterized by native arguments
 
@@ -430,6 +433,8 @@ Called with a quest ID as the argument.
 |---|---|---|
 | `GetActiveTitle` | tuple (n=2) | title, isComplete |
 | `GetAvailableTitle` | scalar string/nil | available quest title |
+| `GetAvailableQuestInfo` | tuple (n varies) | isTrivial, frequency, isRepeatable, isLegendary, questID, isImportant, ... |
+| `GetActiveQuestID` | scalar number | active quest ID; Forever only |
 
 ### Parameterized by unit token (string: `"target"`, `"npc"`, `"questnpc"`)
 

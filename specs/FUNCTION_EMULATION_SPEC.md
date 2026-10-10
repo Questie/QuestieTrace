@@ -102,6 +102,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetActiveTitle(index)` | `functions["GetActiveTitle"][index]` |
 | `GetNumAvailableQuests()` | `functions["GetNumAvailableQuests"]` |
 | `GetAvailableTitle(index)` | `functions["GetAvailableTitle"][index]` |
+| `GetAvailableQuestInfo(index)` | `functions["GetAvailableQuestInfo"][index]` |
+| `GetActiveQuestID(index)` | `functions["GetActiveQuestID"][index]` |
 | `GetQuestID()` | `functions["GetQuestID"]` |
 | `GetTitleText()` | `functions["GetTitleText"]` |
 | `GetQuestText()` | `functions["GetQuestText"]` |
@@ -140,6 +142,9 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestLogRewardMoney(questId)` | `functions["GetQuestLogRewardMoney"][questId]` |
 | `GetQuestLogRewardInfo(rewardIndex, questId)` | `functions["GetQuestLogRewardInfo"][rewardIndex][questId]` |
 | `GetQuestTagInfo(questId)` | `functions["GetQuestTagInfo"][questId]` |
+| `IsBreadcrumbQuest(questId)` | `functions["IsBreadcrumbQuest"][questId]` |
+| `C_QuestLine.GetQuestLineInfo(questId)` | `functions["C_QuestLine.GetQuestLineInfo"][questId]` (recorded without `uiMapID`/`displayableOnly`) |
+| `C_QuestInfoSystem.GetQuestClassification(questId)` | `functions["C_QuestInfoSystem.GetQuestClassification"][questId]` |
 | `GetLootSlotInfo(slot)` | `functions["GetLootSlotInfo"][slot]` |
 | `GetLootSourceInfo(slot)` | `functions["GetLootSourceInfo"][slot]` |
 | `GetLootSlotLink(slot)` | `functions["GetLootSlotLink"][slot]` |

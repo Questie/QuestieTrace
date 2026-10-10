@@ -17,8 +17,18 @@ local C_After = C_Timer.After
 -- GetGossipActiveQuests() -> repeated legacy 6-tuples:
 --   title, questLevel, isTrivial, isComplete, isLegendary, isIgnored
 --
--- GetActiveTitle(index)    -> title, isComplete
--- GetAvailableTitle(index) -> title
+-- GetActiveTitle(index)        -> title, isComplete
+-- GetAvailableTitle(index)     -> title
+-- GetAvailableQuestInfo(index) -> isTrivial, frequency, isRepeatable, isLegendary, questID, isImportant
+--   Blizzard's Forever UI also reads isMeta, questInfoID (Gethe/wow-ui-source `forever` @ 9437644,
+--   1.60.1 (70338), Blizzard_UIPanels_Game/Mainline/QuestFrame.lua:390); not verified in-client.
+--   Older clients may return fewer values.
+-- GetActiveQuestID(index)      -> questID (Forever only, undocumented)
+--
+-- Quest flags, keyed by quest ID (Forever only):
+-- IsBreadcrumbQuest(questID)                        -> isBreadcrumb (undocumented)
+-- C_QuestLine.GetQuestLineInfo(questID)             -> QuestLineInfo?
+-- C_QuestInfoSystem.GetQuestClassification(questID) -> Enum.QuestClassification
 ---------------------------------------------------------------------------
 
 ---@type number[]
@@ -28,6 +38,10 @@ local SAMPLE_DELAYS = { 0, 0.10, 0.35, 0.55, 0.75, 1.00 }
 ---@field key string
 ---@field getter fun(): boolean, any
 
+---@class QuestFlagStreamDef
+---@field key string
+---@field fn function Called with a quest ID as its only argument
+
 ---@type table<string, FunctionStream>
 local functions
 ---@type table<string, any>
@@ -35,9 +49,9 @@ local previousValues
 ---@type table<string, boolean>
 local availableFlatStreams
 ---@type number
-local maxActiveTitleCount = 0
+local maxActiveQuestCount = 0
 ---@type number
-local maxAvailableTitleCount = 0
+local maxAvailableQuestCount = 0
 ---@type number
 local delayedSampleToken = 0 -- Invalidates pending delayed samples when dialog/gossip state changes.
 
@@ -78,7 +92,8 @@ local function SafeScalarCall(fn)
   return true, results[1]
 end
 
----Call an indexed function with pcall and return all results packed.
+---Call a one-argument function (greeting index or quest ID) with pcall and
+---return all results packed.
 ---@param fn function?
 ---@param index number
 ---@return boolean ok
@@ -98,7 +113,8 @@ local function SafePackedIndexCall(fn, index)
   return true, results
 end
 
----Call an indexed function with pcall and return its first result.
+---Call a one-argument function (greeting index or quest ID) with pcall and
+---return its first result.
 ---@param fn function?
 ---@param index number
 ---@return boolean ok
@@ -152,19 +168,10 @@ local function GetOrCreateIndexStream(functionName, key)
   return streams[key]
 end
 
----Create a stream only when its getter exists in this client.
----Dialog/gossip APIs vary across Classic flavors; absent APIs intentionally do
----not create empty streams, so replay can distinguish unavailable from nil.
----@param key string
-local function EnsureFlatStream(key)
-  functions[key] = {}
-  availableFlatStreams[key] = true
-end
-
----Function keys whose returned string is free-form text that can embed a
----player's own name (e.g. NPC greetings like "Greetings, <name>"). These are
----run through Core.SanitizeText before being stored; see AGENTS.md/CLAUDE.md
----"Privacy" sections.
+---Function keys whose returns hold free-form text or quest titles that can
+---embed a player's own name (e.g. NPC greetings like "Greetings, <name>").
+---These are run through SanitizeReturn before being stored; see
+---AGENTS.md/CLAUDE.md "Privacy" sections.
 ---@type table<string, boolean>
 local SANITIZE_TEXT_FUNCTIONS = {
   ["C_GossipInfo.GetText"] = true,
@@ -173,7 +180,63 @@ local SANITIZE_TEXT_FUNCTIONS = {
   GetObjectiveText = true,
   GetProgressText = true,
   GetRewardText = true,
+  GetActiveTitle = true,
+  GetAvailableTitle = true,
+  ["C_QuestLine.GetQuestLineInfo"] = true, -- questLineName, questName
 }
+
+---Pass a return value's strings through Core.SanitizeText: a scalar string,
+---or every top-level string in a packed tuple or returned table. Tables are
+---copied so the API's own table is never modified; non-string fields stay raw.
+---@param value any
+---@return any sanitized
+local function SanitizeReturn(value)
+  if type(value) ~= "table" then
+    return Core.SanitizeText(value)
+  end
+
+  local copy = {}
+  for key, field in pairs(value) do
+    copy[key] = Core.SanitizeText(field)
+  end
+  return copy
+end
+
+---Sample a stream keyed by its single argument (greeting index or quest ID).
+---Failed or absent calls are skipped and create no stream.
+---@param t number
+---@param tp number
+---@param functionName string
+---@param fn function?
+---@param key number
+---@param packed boolean Store all returns as a packed tuple instead of the first return
+---@return boolean ok
+---@return any value
+local function SampleParamStream(t, tp, functionName, fn, key, packed)
+  local ok, value
+  if packed then
+    ok, value = SafePackedIndexCall(fn, key)
+  else
+    ok, value = SafeScalarIndexCall(fn, key)
+  end
+  if not ok then return false, nil end
+
+  if SANITIZE_TEXT_FUNCTIONS[functionName] then
+    value = SanitizeReturn(value)
+  end
+
+  AppendIfChanged(GetOrCreateIndexStream(functionName, key), t, tp, functionName .. ":" .. key, value)
+  return true, value
+end
+
+---Create a stream only when its getter exists in this client.
+---Dialog/gossip APIs vary across Classic flavors; absent APIs intentionally do
+---not create empty streams, so replay can distinguish unavailable from nil.
+---@param key string
+local function EnsureFlatStream(key)
+  functions[key] = {}
+  availableFlatStreams[key] = true
+end
 
 ---Sample one parameterless stream.
 ---@param t number
@@ -186,7 +249,7 @@ local function SampleFlatStream(t, tp, def)
   if not ok then return end
 
   if SANITIZE_TEXT_FUNCTIONS[def.key] then
-    value = Core.SanitizeText(value)
+    value = SanitizeReturn(value)
   end
 
   local stream = functions[def.key]
@@ -271,8 +334,28 @@ local function BuildFlatStreamDefs()
   return defs
 end
 
+---Resolve the quest-flag APIs this client has. All are Forever-only, so on
+---Era the list is empty and no quest flags are sampled.
+---@return QuestFlagStreamDef[]
+local function BuildQuestFlagDefs()
+  ---@type QuestFlagStreamDef[]
+  local defs = {}
+  if type(IsBreadcrumbQuest) == "function" then
+    defs[#defs + 1] = { key = "IsBreadcrumbQuest", fn = IsBreadcrumbQuest }
+  end
+  if HasMethod(C_QuestLine, "GetQuestLineInfo") then
+    defs[#defs + 1] = { key = "C_QuestLine.GetQuestLineInfo", fn = C_QuestLine.GetQuestLineInfo }
+  end
+  if HasMethod(C_QuestInfoSystem, "GetQuestClassification") then
+    defs[#defs + 1] = { key = "C_QuestInfoSystem.GetQuestClassification", fn = C_QuestInfoSystem.GetQuestClassification }
+  end
+  return defs
+end
+
 ---@type QuestDialogStreamDef[]
 local flatStreamDefs
+---@type QuestFlagStreamDef[]
+local questFlagDefs
 
 ---Return whether an event closes transient dialog/gossip state.
 ---@param event string
@@ -281,38 +364,76 @@ local function IsCloseEvent(event)
   return event == "GOSSIP_CLOSED" or event == "QUEST_FINISHED"
 end
 
----Sample indexed greeting title APIs.
+---Add a quest ID to a set, ignoring the 0/nil that dialog APIs return when no quest is shown.
+---@param questIDs table<number, boolean>
+---@param questID any
+local function AddQuestID(questIDs, questID)
+  if type(questID) == "number" and questID > 0 then
+    questIDs[questID] = true
+  end
+end
+
+---Sample greeting APIs keyed by active/available quest index.
 ---Keep the highest counts for this capture so delayed samples retry stale
 ---indices even when the first shrink probe errors or returns unsettled data.
 ---Failed calls are skipped; raw streams never receive invented inactive values.
 ---@param t number
 ---@param tp number
-local function SampleTitleStreams(t, tp)
-  if type(GetNumActiveQuests) == "function" and type(GetActiveTitle) == "function" then
-    local ok, count = SafeScalarCall(GetNumActiveQuests)
-    if ok and type(count) == "number" then
-      maxActiveTitleCount = math.max(maxActiveTitleCount, count)
-      for index = 1, maxActiveTitleCount do
-        local titleOk, titleData = SafePackedIndexCall(GetActiveTitle, index)
-        if titleOk then
-          local stream = GetOrCreateIndexStream("GetActiveTitle", index)
-          AppendIfChanged(stream, t, tp, "GetActiveTitle:" .. index, titleData)
+---@param questIDs table<number, boolean> Receives the quest IDs returned by GetAvailableQuestInfo
+local function SampleGreetingStreams(t, tp, questIDs)
+  local ok, count = SafeScalarCall(GetNumActiveQuests)
+  if ok and type(count) == "number" then
+    maxActiveQuestCount = math.max(maxActiveQuestCount, count)
+    for index = 1, maxActiveQuestCount do
+      SampleParamStream(t, tp, "GetActiveTitle", GetActiveTitle, index, true)
+      SampleParamStream(t, tp, "GetActiveQuestID", GetActiveQuestID, index, false)
+    end
+  end
+
+  ok, count = SafeScalarCall(GetNumAvailableQuests)
+  if ok and type(count) == "number" then
+    maxAvailableQuestCount = math.max(maxAvailableQuestCount, count)
+    for index = 1, maxAvailableQuestCount do
+      SampleParamStream(t, tp, "GetAvailableTitle", GetAvailableTitle, index, false)
+      local infoOk, info = SampleParamStream(t, tp, "GetAvailableQuestInfo", GetAvailableQuestInfo, index, true)
+      if infoOk then
+        AddQuestID(questIDs, info[5])
+      end
+    end
+  end
+end
+
+---Add the current dialog quest and the gossip-offered quests to questIDs.
+---These reads only choose which quests get flag samples: GetQuestID is
+---recorded by the flat streams, and UnitInteraction records the gossip list.
+---@param questIDs table<number, boolean>
+local function CollectDialogQuestIDs(questIDs)
+  local ok, questID = SafeScalarCall(GetQuestID)
+  if ok then
+    AddQuestID(questIDs, questID)
+  end
+
+  if HasMethod(C_GossipInfo, "GetAvailableQuests") then
+    local listOk, available = SafeScalarCall(C_GossipInfo.GetAvailableQuests)
+    if listOk and type(available) == "table" then
+      for _, info in ipairs(available) do
+        if type(info) == "table" then
+          AddQuestID(questIDs, info.questID)
         end
       end
     end
   end
+end
 
-  if type(GetNumAvailableQuests) == "function" and type(GetAvailableTitle) == "function" then
-    local ok, count = SafeScalarCall(GetNumAvailableQuests)
-    if ok and type(count) == "number" then
-      maxAvailableTitleCount = math.max(maxAvailableTitleCount, count)
-      for index = 1, maxAvailableTitleCount do
-        local titleOk, title = SafeScalarIndexCall(GetAvailableTitle, index)
-        if titleOk then
-          local stream = GetOrCreateIndexStream("GetAvailableTitle", index)
-          AppendIfChanged(stream, t, tp, "GetAvailableTitle:" .. index, title)
-        end
-      end
+---Sample every available quest-flag API for each quest ID, change-only per quest.
+---@param t number
+---@param tp number
+---@param questIDs table<number, boolean>
+local function SampleQuestFlags(t, tp, questIDs)
+  for questID in pairs(questIDs) do
+    for i = 1, #questFlagDefs do
+      local def = questFlagDefs[i]
+      SampleParamStream(t, tp, def.key, def.fn, questID, false)
     end
   end
 end
@@ -328,7 +449,14 @@ local function SampleQuestDialog(capture)
   for i = 1, #flatStreamDefs do
     SampleFlatStream(t, tp, flatStreamDefs[i])
   end
-  SampleTitleStreams(t, tp)
+
+  ---@type table<number, boolean>
+  local questIDs = {}
+  SampleGreetingStreams(t, tp, questIDs)
+  if #questFlagDefs > 0 then
+    CollectDialogQuestIDs(questIDs)
+    SampleQuestFlags(t, tp, questIDs)
+  end
 
   return t, tp
 end
@@ -370,10 +498,11 @@ Core.RegisterTracker({
     functions = capture.session.functions
     previousValues = {}
     availableFlatStreams = {}
-    maxActiveTitleCount = 0
-    maxAvailableTitleCount = 0
+    maxActiveQuestCount = 0
+    maxAvailableQuestCount = 0
     delayedSampleToken = 0
     flatStreamDefs = BuildFlatStreamDefs()
+    questFlagDefs = BuildQuestFlagDefs()
 
     SampleQuestDialog(capture)
     ScheduleDelayedSamples(capture)
