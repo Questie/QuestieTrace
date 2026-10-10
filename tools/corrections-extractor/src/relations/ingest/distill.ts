@@ -8,7 +8,7 @@
 import { createHash } from "crypto";
 import type { CompletedTimeline, GiverRef, OfferedQuest, OfferSnapshot, PlayerContext, QuestClientInfo, QuestEvent, QuestEventKind, TimedValue } from "../core/types";
 import type { EventEntry, FunctionStreamEntry, SessionRecord } from "../../core/types";
-import { parseGuid } from "../../extract/guid";
+import { parseGuid } from "../../core/guid";
 import {
   asPositiveInt,
   entriesBetween,

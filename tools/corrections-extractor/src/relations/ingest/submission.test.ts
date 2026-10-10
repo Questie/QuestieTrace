@@ -10,7 +10,7 @@ const entry = resolve(here, "submission.ts");
 describe("ingest cache key", () => {
   it("covers every module that shapes cached results, found by following imports", () => {
     const sources = [...pipelineSources(entry).keys()];
-    for (const module of ["decode.ts", "cbor.ts", "distill.ts", "streams.ts", "../../core/normalize.ts", "../../extract/guid.ts"]) {
+    for (const module of ["decode.ts", "cbor.ts", "distill.ts", "streams.ts", "../../core/normalize.ts", "../../core/guid.ts"]) {
       expect(sources).toContain(resolve(here, module));
     }
   });

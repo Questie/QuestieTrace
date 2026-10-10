@@ -1,7 +1,7 @@
 // Shared helper behind emit/npc.ts, emit/quest.ts, emit/item.ts, emit/object.ts:
 // turns a map of { fieldName -> Map<entityId, Fact> } into a map of
 // { entityId -> sparse record }, only setting the fields that were actually
-// extracted (see schema/corrections-writer.ts - no defaulting happens here or later).
+// extracted (see core/corrections-writer.ts - no defaulting happens here or later).
 
 import type { Fact } from "../aggregate";
 

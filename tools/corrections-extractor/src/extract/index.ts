@@ -50,7 +50,7 @@ import { observeRequiredLevel } from './observers/quest';
 import { observeZoneOrSort } from './observers/quest';
 import { observeObjectives, mergeQuestObjectives, observeTriggerEnd, mergeQuestTriggerEnds } from './observers/quest';
 import { observeObjectivesText } from './observers/quest';
-import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
+import { writeQuestieCorrectionsLua } from "../core/corrections-writer";
 import {mergeRequiredLevel} from './observers/quest/requiredLevel';
 
 const MAX_IDS = {

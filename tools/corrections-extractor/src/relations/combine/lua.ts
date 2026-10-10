@@ -9,7 +9,7 @@
 // preQuestSingle would silently override an authored preQuestGroup. Quests with authored
 // prerequisites of either kind therefore get none from here.
 
-import { writeQuestieCorrectionsLua } from "../../extract/schema/corrections-writer";
+import { writeQuestieCorrectionsLua } from "../../core/corrections-writer";
 import { RELATION_FIELDS, SCALAR_RELATION_FIELDS, type RelationSet } from "../core/types";
 
 export const LUA_MODULE_NAME = "ForeverQuestRelationTraces";

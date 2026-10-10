@@ -40,7 +40,7 @@ The trace-analyzer's Extract tab shows these files for copy/download.
 
 1. `src/core/loader.ts` parses a trace file via `lua-state`.
 2. `foldSessions` (`src/extract/index.ts`) runs every observer in `src/extract/observers/` over the file's sessions and collects their observations. Fields with the default scalar merge only keep a per-value summary; fields with a custom merge (spawns, drops, ...) keep every observation.
-3. After the last file, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
+3. After the last file, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/core/corrections-writer.ts`).
 
 ## Development
 
