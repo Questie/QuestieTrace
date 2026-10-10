@@ -13,6 +13,8 @@ exclude_files = {
     "tools/decoder/dependencies/",
     "tools/decoder/input/",
     "tools/decoder/output/",
+    "tools/corrections-extractor/.relations/",
+    "tools/corrections-extractor/output/",
     ".luacheckrc",
     "**/.luarocks/**/", -- Created by the GitHub Action
     "**/.install/**/",  -- Created by the GitHub Action
