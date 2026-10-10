@@ -81,6 +81,7 @@ local Core = QuestieTraceCore
 ---@field sessionName string
 ---@field eventCount number
 ---@field canSave boolean
+---@field sessionDuration number? Duration in seconds, only when running
 
 ---@class EventCategory
 ---@field name string
