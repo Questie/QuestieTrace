@@ -163,3 +163,62 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     assert.equal(2, startCalls)
   end)
 end)
+
+describe("ExportUI export edit box read-only handling", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+  ---@type table
+  local exportEditBox
+  local setTextCalls
+
+  before_each(function()
+    env = {}
+    Core = LoadExportUIModules(env)
+    Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+    env.QuestieTraceCharacter = { sessions = { { functions = {} } } }
+    setTextCalls = 0
+
+    env.CreateFrame = function(frameType)
+      local widget = NewWidgetStub()
+      if frameType == "EditBox" then
+        local scripts = {}
+        widget = setmetatable({
+          scripts = scripts,
+          SetScript = function(_, name, handler) scripts[name] = handler end,
+          SetMultiLine = function(self) exportEditBox = self end,
+          SetText = function(self, text)
+            setTextCalls = setTextCalls + 1
+            self.text = text
+          end,
+        }, getmetatable(widget))
+      end
+      return widget
+    end
+  end)
+
+  it("should restore the export text when the user edits it", function()
+    Core.ShowExportWindow()
+    exportEditBox.text = "tampered"
+
+    exportEditBox.scripts.OnTextChanged(exportEditBox, true)
+
+    assert.equal(exportEditBox.originalText, exportEditBox.text)
+  end)
+
+  it("should not rewrite the export text on programmatic changes", function()
+    Core.ShowExportWindow()
+    local callsAfterShow = setTextCalls
+
+    exportEditBox.scripts.OnTextChanged(exportEditBox, false)
+
+    assert.equal(callsAfterShow, setTextCalls)
+  end)
+
+  it("should not rewrite the export text when the cursor moves", function()
+    Core.ShowExportWindow()
+
+    assert.is_nil(exportEditBox.scripts.OnCursorChanged)
+  end)
+end)

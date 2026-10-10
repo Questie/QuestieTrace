@@ -92,11 +92,17 @@ local function BuildExportFrame()
   editBox:SetAutoFocus(false)
   editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
-  --- Make the edit box read-only by reverting text on cursor change (any edit attempt).
-  editBox:SetScript("OnCursorChanged", function(self)
-    self:SetText(self.originalText)
-    self:HighlightText()
+  --- Make the edit box read-only by reverting only real user edits. Reacting to
+  --- every cursor move instead would re-set the whole (potentially huge) export
+  --- string on each click or arrow key.
+  editBox:SetScript("OnTextChanged", function(self, userInput)
+    if userInput then
+      self:SetText(self.originalText)
+      self:HighlightText()
+    end
   end)
+  editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+  editBox:SetScript("OnMouseUp", function(self) self:HighlightText() end)
   scrollFrame:SetScrollChild(editBox)
 
   local warningText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -189,6 +195,7 @@ function Core.ShowExportWindow()
     exportFrame.scrollFrame:Show()
     exportFrame.warningText:Hide()
     exportFrame.editBox:SetFocus()
+    exportFrame.editBox:HighlightText()
 
     -- Only offer "I reported this" if the string actually contains encoded
     -- data. If the codec is unavailable, `text` is just an error message --
