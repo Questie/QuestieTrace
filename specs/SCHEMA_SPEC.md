@@ -396,6 +396,9 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumQuestLogRewards` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestLogRewardMoney` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestTagInfo` | tuple (n varies) | |
+| `IsBreadcrumbQuest` | scalar (boolean expected) | QuestDialog; Forever only, undocumented API called as `IsBreadcrumbQuest(questID)` -- argument meaning unconfirmed, treat as a hint |
+| `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | QuestDialog; Forever only; copy of the `C_QuestLine.GetQuestLineInfo(questID)` table with `questLineName`/`questName` sanitized by `Core.SanitizeText`, other fields raw (no map, `displayableOnly` defaults to false so hidden lines return with `isHidden = true`) |
+| `C_QuestInfoSystem.GetQuestClassification` | scalar (number) | QuestDialog; Forever only; raw `Enum.QuestClassification` value |
 
 ### Nested parameterized by native arguments
 
@@ -407,8 +410,10 @@ All tuple-returning functions MUST have `n` on every stored value.
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `GetActiveTitle` | tuple (n=2) | title, isComplete |
-| `GetAvailableTitle` | scalar (string/nil) | title; stale indices are probed with the actual API when counts shrink |
+| `GetActiveTitle` | tuple (n=2) | title (sanitized with `Core.SanitizeText`), isComplete |
+| `GetAvailableTitle` | scalar (string/nil) | title, sanitized with `Core.SanitizeText`; stale indices are probed with the actual API when counts shrink |
+| `GetAvailableQuestInfo` | tuple (n varies) | isTrivial, frequency, isRepeatable, isLegendary, questID, isImportant; Blizzard's Forever UI also reads isMeta, questInfoID (Gethe/wow-ui-source `forever` @ 9437644, 1.60.1 (70338), `Blizzard_UIPanels_Game/Mainline/QuestFrame.lua:390`; not verified in-client); older clients may stop before questID |
+| `GetActiveQuestID` | scalar (number) | questID; Forever only, undocumented, recorded only when the API exists |
 
 ### Parameterized by unit token (`"target"`, `"npc"`, `"questnpc"`, `"mouseover"`)
 
