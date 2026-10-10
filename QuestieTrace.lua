@@ -344,12 +344,17 @@ end
 --- Get status data for UI consumption.
 ---@return StatusData
 function Core.GetStatusData()
+  local duration = nil
+  if capture.active and capture.startedAt then
+    duration = GetTime() - capture.startedAt
+  end
   return {
     captureState = Core.GetCaptureState(),
     isRunning = capture.active,
     sessionName = capture.session and (capture.session.name or "(unnamed)") or "None",
     eventCount = capture.session and #capture.session.events or 0,
     canSave = capture.session ~= nil and not capture.active,
+    sessionDuration = duration,
   }
 end
 
@@ -558,7 +563,14 @@ local function PrintStatus()
   local settings = QuestieTrace and QuestieTrace.settings
   local consent = settings and settings.dataCollectionConsent
   local consentStr = consent == true and "granted" or consent == false and "declined" or "pending"
-  Core.Print("status:", running, "session:", state.sessionName, "events:", state.eventCount, "consent:", consentStr)
+  local parts = { "status:", running, "session:", state.sessionName, "events:", state.eventCount, "consent:", consentStr }
+  if state.sessionDuration then
+    table.insert(parts, "duration:")
+    local mins = math.floor(state.sessionDuration / 60)
+    local secs = math.floor(state.sessionDuration % 60)
+    table.insert(parts, string.format("%dm %02ds", mins, secs))
+  end
+  Core.Print(unpack(parts))
 end
 
 --- Print the available slash commands to chat.

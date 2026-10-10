@@ -111,11 +111,12 @@ Returned by `Core.GetStatusData()`:
 
 ```lua
 {
-  captureState = "idle" | "running",
-  isRunning    = boolean,
-  sessionName  = string,
-  eventCount   = number,
-  canSave      = boolean,  -- deprecated; kept for compat but always false now
+  captureState    = "idle" | "running",
+  isRunning       = boolean,
+  sessionName     = string,
+  eventCount      = number,
+  canSave         = boolean,  -- deprecated; kept for compat but always false now
+  sessionDuration = number?,  -- optional; present only while capture is running, in seconds
 }
 ```
 
