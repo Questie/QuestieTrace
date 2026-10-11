@@ -216,11 +216,15 @@ local function OnLeaveResting()
   restingToken = restingToken + 1
 end
 
---- Initialize the reminder state on login.
+--- Initialize the reminder state on first login. Preserves the timer across /reload.
 local function InitReminderState()
   local reminder = GetReminderState()
-  reminder.sessionStart = GetTime()
-  reminder.lastReminderAt = 0
+  -- Only initialize if not already set (first login ever for this character).
+  -- This preserves the reminder timer across /reload while the capture session still restarts.
+  if reminder.sessionStart == 0 then
+    reminder.sessionStart = GetTime()
+    reminder.lastReminderAt = 0
+  end
 end
 
 ---------------------------------------------------------------------------
