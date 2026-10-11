@@ -25,12 +25,42 @@ QuestieDB data + corrections   --catalog--> .relations/catalog.json           (Q
                                             .relations/groundtruth.json       (GroundTruth, scoring only)
 scraper-questie forever.db     --source:wowhead--> .relations/candidates/wowhead-*.json
 episodes + catalog             --signal:*-->       .relations/candidates/<signal>.json
-all candidates                 --combine-->        .relations/output/{relations.json, foreverQuestRelationTraces.lua}
-                                                   .relations/reports/combine-review.md (human review)
+all candidates                 --combine-->        output/foreverQuestRelationTraces.lua   (deliverable)
+                                                   output/relations-review.md              (human review)
+                                                   output/relations-meta.json              (run summary)
+                                                   .relations/relations.json, .relations/reports/combine-metrics.json
 ```
 
 `.relations/` lives in `tools/corrections-extractor/` and is gitignored. Override locations with
-`RELATIONS_DIR`, `TRACE_DATA_DIR`, `QUESTIEDB_DIR` and `SCRAPER_DIR` (see `core/paths.ts`).
+`RELATIONS_DIR`, `TRACE_DATA_DIR`, `QUESTIEDB_DIR`, `SCRAPER_DIR` and `RELATIONS_OUTPUT_DIR` (see
+`core/paths.ts`).
+
+## Deliverables
+
+`combine` publishes into `tools/corrections-extractor/output/` (gitignored), next to the four
+`forever*Traces.lua` modules from `npm run extract`:
+
+- `foreverQuestRelationTraces.lua`: module `ForeverQuestRelationTraces`, relationship fields only, so
+  it never overlaps the field extractor's modules.
+- `relations-review.md`: read this before trusting the module.
+- `relations-meta.json`: generatedAt, min score, episode and character counts, quests and relations in
+  the Lua, authored agree/new/conflict counts, inputs used, and the metrics leakage caveat. It has its
+  own name because `npm run extract` rewrites `meta.json` and its four modules (and nothing else) in
+  the same folder. Combine removes it first and writes it last, so it never describes a half-written run.
+
+Setting `RELATIONS_DIR` (a scratch run) moves the deliverables to `$RELATIONS_DIR/output/` as well, so
+scratch runs and tests never overwrite the real ones; `RELATIONS_OUTPUT_DIR` sets the folder explicitly.
+
+The trace analyzer (`tools/trace-analyzer`, `npm run dev`) shows them in its Extract view, "Quest
+relations" tab: the module for copy/download with the run summary, and the review report. It always
+reads `tools/corrections-extractor/output/` and ignores `RELATIONS_DIR` and `RELATIONS_OUTPUT_DIR`, so
+scratch runs never show up there.
+
+**Shipping is manual, in QuestieDB (a separate repo):** copy `foreverQuestRelationTraces.lua` into
+`src/corrections/Forever/traces/`, and register `ForeverQuestRelationTraces` in `src/config.lua` next to
+the `ForeverQuestTraces` entry (`datatype = 'Quest'`, `static = {'Load'}`, `generated = true`,
+`window = 'Forever'`), so it loads after the generated base and before the authored
+`foreverQuestFixes.lua`, which overrides it per field.
 
 ## Commands
 
@@ -41,6 +71,7 @@ npm run relations -- ingest              # build/refresh episodes.jsonl (increme
 npm run relations -- catalog             # build catalog.json + groundtruth.json (needs Lua 5.1; uses QuestieDB's own loader)
 npm run relations -- signal:handoff      # any signal or source writes candidates/<name>.json
 npm run relations -- score handoff       # precision/recall of candidates/handoff.json vs ground truth
+npm run relations -- combine             # all candidates -> deliverables in output/ (see Deliverables)
 npm run relations -- pipeline            # every step in order, ingest through combine
 ```
 
@@ -60,7 +91,10 @@ writes inside its own folder and its own cache outputs.
 | Absence from complete offer lists | `signals/absence/` | episodes, catalog | `candidates/absence.json` |
 | Completion-history co-occurrence | `signals/cooccurrence/` | episodes, catalog | `candidates/cooccurrence.json` |
 | Breadcrumbs | `signals/breadcrumbs/` | episodes, catalog | `candidates/breadcrumbs.json` |
-| Combination and output | `combine/` | all candidates, ground truth | `output/relations.json`, `output/foreverQuestRelationTraces.lua`, `reports/combine-*` |
+| Combination and output | `combine/` | all candidates, ground truth, episodes (counts only) | `relations.json`, `reports/combine-metrics.json`; deliverables in the tool's `output/` (see Deliverables) |
+
+Ingest reads and decodes submissions through `src/core/trace-data/`, the same reader the field
+extractor's `--trace-data` mode uses, so both pipelines see identical sessions.
 
 `sources/wowhead` writes one candidate file per page surface: `wowhead-series`, `-storyline`,
 `-requires`, `-requires-any`, `-requires-in-progress`, `-unlocks` and `-disables`. Forever pages only
