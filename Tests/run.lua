@@ -272,6 +272,165 @@ local function TestGreetingRestart()
   assert(#oldSession.functions.GetAvailableTitle[2] == 1, "Stopped capture must not receive delayed writes")
 end
 
+local function TestGreetingQuestIDs()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  GreetingApis(runtime)
+  runtime.env.GetActiveQuestID = function(index) return 100 + index end
+  ---@param index number
+  runtime.env.GetAvailableQuestInfo = function(index) return true, 1, false, false, 300 + index, false, false, nil end
+  runtime.core.StartCapture("greeting ids")
+  SendEvent(runtime, "QUEST_GREETING")
+  AdvanceTo(runtime, 2)
+
+  local functions = Session(runtime).functions
+  assert(#functions.GetActiveQuestID[2] == 1 and functions.GetActiveQuestID[2][1].v == 102,
+    "Active greeting quest IDs are recorded per index, change-only")
+  local info = functions.GetAvailableQuestInfo[2]
+  assert(#info == 1 and info[1].v.n == 8 and info[1].v[1] == true and info[1].v[5] == 302,
+    "Available greeting info keeps the raw tuple per index, change-only")
+end
+
+---@class QuestFlagFixture
+---@field runtime TestRuntime
+---@field dialogQuestID number Returned by GetQuestID
+---@field classification number
+---@field questLineHidden boolean
+
+---Runtime with the Forever-only quest-flag APIs mocked. Quest 200 is a
+---breadcrumb, quest 300 has no quest line, and IsBreadcrumbQuest errors for
+---quest 300. GetQuestLineInfo returns a fresh table on every call.
+---@return QuestFlagFixture
+local function QuestFlagRuntime()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  ---@type QuestFlagFixture
+  local state = { runtime = runtime, dialogQuestID = 0, classification = 7, questLineHidden = false }
+  local env = runtime.env
+  env.GetQuestID = function() return state.dialogQuestID end
+  ---@param questID number
+  env.IsBreadcrumbQuest = function(questID)
+    if questID == 300 then error("Breadcrumb data unavailable") end
+    return questID == 200
+  end
+  env.C_QuestLine = {
+    ---@param questID number
+    GetQuestLineInfo = function(questID)
+      if questID == 300 then return nil end
+      return { questLineID = 7, questLineName = "Quest line", questID = questID, isHidden = state.questLineHidden }
+    end,
+  }
+  env.C_QuestInfoSystem = { GetQuestClassification = function() return state.classification end }
+  return state
+end
+
+local function TestQuestFlagsSampledForDialogQuests()
+  local flags = QuestFlagRuntime()
+  local runtime, env = flags.runtime, flags.runtime.env
+  local gossipQuests, greetingCount = {}, 0
+  env.C_GossipInfo = { GetAvailableQuests = function() return gossipQuests end }
+  env.GetNumAvailableQuests = function() return greetingCount end
+  env.GetAvailableQuestInfo = function() return false, 1, false, false, 400, false end
+  runtime.core.StartCapture("quest flag sources")
+  local functions = Session(runtime).functions
+  assert(functions["C_QuestInfoSystem.GetQuestClassification"] == nil, "Quest ID 0 (no dialog quest) is not sampled")
+
+  flags.dialogQuestID = 100
+  SendEvent(runtime, "QUEST_DETAIL")
+  flags.dialogQuestID, gossipQuests = 0, { { questID = 200 } }
+  SendEvent(runtime, "GOSSIP_SHOW")
+  gossipQuests, greetingCount = {}, 1
+  SendEvent(runtime, "QUEST_GREETING")
+
+  for _, key in ipairs({ "IsBreadcrumbQuest", "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
+    for _, questID in ipairs({ 100, 200, 400 }) do
+      assert(#functions[key][questID] == 1, key .. " must be sampled for quest " .. questID)
+    end
+  end
+  assert(functions.IsBreadcrumbQuest[200][1].v == true, "Flags are recorded under the quest's own ID")
+end
+
+local function TestQuestFlagsNilAndFailedCalls()
+  local flags = QuestFlagRuntime()
+  flags.dialogQuestID = 300
+  flags.runtime.core.StartCapture("quest flag nil")
+  AdvanceTo(flags.runtime, 2)
+
+  local functions = Session(flags.runtime).functions
+  local questLine = functions["C_QuestLine.GetQuestLineInfo"][300]
+  assert(#questLine == 1 and questLine[1].v == nil, "A real nil return is recorded once")
+  assert(functions.IsBreadcrumbQuest == nil, "A failed call records nothing")
+  assert(functions["C_QuestInfoSystem.GetQuestClassification"][300][1].v == 7,
+    "A failing flag API does not block the others")
+end
+
+local function TestQuestFlagsChangeOnly()
+  local flags = QuestFlagRuntime()
+  flags.dialogQuestID = 100
+  flags.runtime.core.StartCapture("quest flag changes")
+  AdvanceTo(flags.runtime, 2)
+
+  local functions = Session(flags.runtime).functions
+  local classification = functions["C_QuestInfoSystem.GetQuestClassification"][100]
+  local questLine = functions["C_QuestLine.GetQuestLineInfo"][100]
+  assert(#classification == 1, "An unchanged scalar flag is not re-appended")
+  assert(#questLine == 1, "An identical (fresh) quest-line table is not re-appended")
+
+  flags.classification, flags.questLineHidden = 2, true
+  SendEvent(flags.runtime, "QUEST_DETAIL")
+  assert(#classification == 2 and classification[2].v == 2, "A changed scalar flag is appended")
+  assert(#questLine == 2 and questLine[2].v.isHidden == true, "A changed quest-line field is appended")
+end
+
+local function TestQuestDialogSanitizesTitlesAndQuestLineNames()
+  local flags = QuestFlagRuntime()
+  local env = flags.runtime.env
+  env.UnitName = function(token) if token == "player" then return "Arthas" end end
+  env.GetNumActiveQuests = function() return 1 end
+  env.GetNumAvailableQuests = env.GetNumActiveQuests
+  env.GetActiveTitle = function() return "Report to Arthas", false end
+  env.GetAvailableTitle = function() return "Arthas needs help" end
+  local apiInfo = { questLineID = 7, questLineName = "The Arthas line", questName = "Arthas rising", isHidden = false }
+  env.C_QuestLine.GetQuestLineInfo = function() return apiInfo end
+  flags.dialogQuestID = 100
+  flags.runtime.core.StartCapture("quest dialog sanitization")
+
+  local functions = Session(flags.runtime).functions
+  local active = functions.GetActiveTitle[1][1].v
+  assert(active.n == 2 and active[1] == "Report to <name>" and active[2] == false, "Active titles are sanitized")
+  assert(functions.GetAvailableTitle[1][1].v == "<name> needs help", "Available titles are sanitized")
+  local info = functions["C_QuestLine.GetQuestLineInfo"][100][1].v
+  assert(info.questLineName == "The <name> line" and info.questName == "<name> rising", "Quest-line names are sanitized")
+  assert(info.questLineID == 7 and info.isHidden == false, "Non-text quest-line fields stay raw")
+  assert(info ~= apiInfo and apiInfo.questLineName == "The Arthas line", "The API's table is copied, not modified")
+end
+
+local function TestQuestFlagsAbsentWithoutApis()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  GreetingApis(runtime)
+  local env = runtime.env
+  local gossipReads = 0
+  env.GetQuestID = function() return 100 end
+  env.C_GossipInfo = {
+    GetAvailableQuests = function()
+      gossipReads = gossipReads + 1
+      return { { questID = 200 } }
+    end,
+  }
+  -- Older clients return no questID from GetAvailableQuestInfo.
+  env.GetAvailableQuestInfo = function() return false, 1, false, false end
+  runtime.core.StartCapture("no flag apis")
+  SendEvent(runtime, "QUEST_GREETING")
+  SendEvent(runtime, "GOSSIP_SHOW")
+  AdvanceTo(runtime, 2)
+
+  local functions = Session(runtime).functions
+  assert(functions.GetAvailableQuestInfo[1][1].v.n == 4, "Short greeting info tuples are still recorded raw")
+  assert(functions.GetActiveQuestID == nil, "An absent GetActiveQuestID creates no stream")
+  for _, key in ipairs({ "IsBreadcrumbQuest", "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
+    assert(functions[key] == nil, key .. " must not be recorded when its API is absent")
+  end
+  assert(gossipReads == 0, "Without flag APIs the gossip list is not read for quest IDs")
+end
+
 local function TestSessionContract()
   local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
   MockIsResting(runtime, false)
@@ -2221,6 +2380,12 @@ local tests = {
   { name = "greeting retries failed calls", run = function() TestGreetingRetry("error") end },
   { name = "greeting close cancels delayed samples", run = TestGreetingClose },
   { name = "greeting capture restart resets probes", run = TestGreetingRestart },
+  { name = "greeting records quest ids per index", run = TestGreetingQuestIDs },
+  { name = "quest flags sampled for detail, gossip and greeting quests", run = TestQuestFlagsSampledForDialogQuests },
+  { name = "quest flags record real nil once and skip failed calls", run = TestQuestFlagsNilAndFailedCalls },
+  { name = "quest flags append only on change, including tables", run = TestQuestFlagsChangeOnly },
+  { name = "quest dialog sanitizes titles and quest-line names", run = TestQuestDialogSanitizesTitlesAndQuestLineNames },
+  { name = "quest flags absent without their APIs", run = TestQuestFlagsAbsentWithoutApis },
   { name = "session contract preserves legacy saves", run = TestSessionContract },
   { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
   { name = "export scrubs player identity", run = TestExportScrubsPlayerIdentity },

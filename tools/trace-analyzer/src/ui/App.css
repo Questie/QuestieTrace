@@ -822,3 +822,7 @@ body {
   white-space: pre;
 }
 
+/* The relations review report is markdown prose: wrap it instead of scrolling sideways. */
+.extract-review {
+  white-space: pre-wrap;
+}

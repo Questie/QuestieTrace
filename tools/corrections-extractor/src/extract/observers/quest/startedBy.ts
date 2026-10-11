@@ -16,7 +16,7 @@
 // Custom merge: set-union per starter type across all observations.
 
 import { getStream, valueAt } from "../../../core/emulator";
-import { parseGuid } from "../../guid";
+import { parseGuid } from "../../../core/guid";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 import type { SessionRecord } from "../../../core/types";
 

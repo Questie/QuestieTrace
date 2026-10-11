@@ -1,6 +1,6 @@
 # QuestieTrace Correction Output Format
 
-This document describes the Lua output format produced by the QuestieTrace correction writer (`tools/corrections-extractor/src/extract/schema/corrections-writer.ts`).
+This document describes the Lua output format produced by the QuestieTrace correction writer (`tools/corrections-extractor/src/core/corrections-writer.ts`).
 
 ## Overview
 

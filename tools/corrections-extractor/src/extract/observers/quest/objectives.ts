@@ -25,7 +25,7 @@
 import { emulate, getParamKeys, getStream, valueAt } from "../../../core/emulator";
 import type { FunctionStreamEntry, SessionRecord } from "../../../core/types";
 import { getLocaleAt, unitNameAt } from "../../probes";
-import { parseGuid } from "../../guid";
+import { parseGuid } from "../../../core/guid";
 import { parseItemLink } from "../../itemLink";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 

@@ -7,7 +7,7 @@
 // Custom merge: set-union of questIDs per npc.
 
 import { getStream, valueAt } from "../../../core/emulator";
-import { parseGuid } from "../../guid";
+import { parseGuid } from "../../../core/guid";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 import type { SessionRecord } from "../../../core/types";
 

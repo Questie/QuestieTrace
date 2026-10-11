@@ -78,6 +78,28 @@ describe("writeQuestieCorrectionsLua", () => {
     expect(nameLine).toBe('            [npcKeys.name] = "Telenos \\nLeafwhisper",');
   });
 
+  it("should write each comment on one line, and none where the callback has nothing", () => {
+    const records = new Map([
+      [1, { nextQuestInChain: 2, exclusiveTo: [3] }],
+      [4, { nextQuestInChain: 5 }],
+    ]);
+    const comments = {
+      // A raw line break in a comment would turn the rest of it into Lua code.
+      entity: (id: number) => (id === 1 ? "Telenos \r\nLeafwhisper" : undefined),
+      aboveField: (id: number, fieldName: string) => (id === 1 && fieldName === "nextQuestInChain" ? ["2 \"Next\"", "", "a\nb"] : undefined),
+      field: (id: number, fieldName: string) => (id === 1 && fieldName === "nextQuestInChain" ? "Assumption: seen" : undefined),
+    };
+
+    const lua = writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", records, header, comments);
+
+    expect(lua).toContain("        [1] = { -- Telenos Leafwhisper\n");
+    expect(lua).toContain(
+      '            -- 2 "Next"\n            -- a b\n            [questKeys.nextQuestInChain] = 2, -- Assumption: seen\n',
+    );
+    expect(lua).toContain("            [questKeys.exclusiveTo] = {3},\n");
+    expect(lua).toContain("        [4] = {\n            [questKeys.nextQuestInChain] = 5,\n");
+  });
+
   it("should render array and nested object values as Lua table constructors", () => {
     const records = new Map([
       [

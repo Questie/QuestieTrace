@@ -1,7 +1,7 @@
 // Fact -> named record for the npc entity kind.
 //
 // Only sets the fields that were actually extracted - this is a sparse
-// corrections record (see schema/corrections-writer.ts), not a full DB row;
+// corrections record (see core/corrections-writer.ts), not a full DB row;
 // fields with no Fact are simply absent, not defaulted. As more npc field
 // observers are added (see observers/<entity>/), this function grows to read
 // their aggregated Facts too - no other code needs to change.

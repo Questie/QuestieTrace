@@ -113,6 +113,76 @@ describe("traceApiPlugin middleware", () => {
     expect(JSON.parse(response.end.mock.calls[0]?.[0]).error).toContain("Unreadable meta.json");
   });
 
+  it("should serve the quest relations module with its own meta file", async () => {
+    const root = createExtractorOutput({
+      "foreverQuestRelationTraces.lua": "function ForeverQuestRelationTraces:Load()\nend",
+      "relations-meta.json": JSON.stringify({ minScore: 0.9, lua: { quests: 2, relations: 3 } }),
+    });
+    const handler = setupHandler(root);
+    const response = makeResponse();
+
+    handler({ url: "/api/extract/relations" }, response, vi.fn());
+
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
+    expect(JSON.parse(response.end.mock.calls[0]?.[0])).toEqual({
+      fixes: "function ForeverQuestRelationTraces:Load()\nend",
+      meta: { minScore: 0.9, lua: { quests: 2, relations: 3 } },
+    });
+  });
+
+  it("should respond 404 with the relations hint until a combine run has written relations-meta.json", async () => {
+    // The field extractor's meta.json says nothing about the relations module next to it.
+    const root = createExtractorOutput({
+      "foreverQuestRelationTraces.lua": "function ForeverQuestRelationTraces:Load()\nend",
+      "meta.json": JSON.stringify({ sessionCount: 3, fileCount: 2, skippedFiles: [] }),
+    });
+    const handler = setupHandler(root);
+    const response = makeResponse();
+
+    handler({ url: "/api/extract/relations" }, response, vi.fn());
+
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
+    expect(response.statusCode).toBe(404);
+    expect(response.end.mock.calls[0]?.[0]).toContain("npm run relations -- pipeline");
+  });
+
+  it("should respond 404 when relations-meta.json exists but the module is missing", async () => {
+    const root = createExtractorOutput({ "relations-meta.json": JSON.stringify({ minScore: 0.9 }) });
+    const handler = setupHandler(root);
+    const response = makeResponse();
+
+    handler({ url: "/api/extract/relations" }, response, vi.fn());
+
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
+    expect(response.statusCode).toBe(404);
+    expect(response.end.mock.calls[0]?.[0]).toContain("npm run relations -- pipeline");
+  });
+
+  it("should serve the relations review report, ignoring a query string", async () => {
+    const root = createExtractorOutput({
+      "relations-review.md": "# Quest relation review\n",
+      "relations-meta.json": JSON.stringify({ minScore: 0.9 }),
+    });
+    const handler = setupHandler(root);
+    const response = makeResponse();
+
+    handler({ url: "/api/extract/relations/review?t=1" }, response, vi.fn());
+
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
+    expect(JSON.parse(response.end.mock.calls[0]?.[0])).toEqual({ review: "# Quest relation review\n" });
+  });
+
+  it("should not serve a review left behind while combine has relations-meta.json removed", async () => {
+    const root = createExtractorOutput({ "relations-review.md": "# Quest relation review\n" });
+    const handler = setupHandler(root);
+    const response = makeResponse();
+
+    handler({ url: "/api/extract/relations/review" }, response, vi.fn());
+
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
+    expect(response.statusCode).toBe(404);
+  });
+
   it("should respond 404 for entity names inherited from Object.prototype", async () => {
     const handler = setupHandler();
     const response = makeResponse();
