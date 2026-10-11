@@ -14,7 +14,7 @@
 
 import { getParamKeys, getStream } from "../../../core/emulator";
 import type { SessionRecord } from "../../../core/types";
-import { parseGuid } from "../../guid";
+import { parseGuid } from "../../../core/guid";
 import { parseItemLink } from "../../itemLink";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 

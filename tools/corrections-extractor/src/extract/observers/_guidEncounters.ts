@@ -8,7 +8,7 @@
 
 import { getStream } from "../../core/emulator";
 import type { SessionRecord } from "../../core/types";
-import { parseGuid, type GuidKind } from "../guid";
+import { parseGuid, type GuidKind } from "../../core/guid";
 
 /** Unit tokens the addon records UnitGUID/UnitName/UnitLevel for (see Modules/Trackers/UnitInteraction.lua). */
 export const TRACKED_UNIT_TOKENS = ["target", "npc", "questnpc"] as const;

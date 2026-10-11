@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "extract": "tsx src/cli.ts",
+    "relations": "tsx src/relations/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
