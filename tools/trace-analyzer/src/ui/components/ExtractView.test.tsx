@@ -16,13 +16,34 @@ const RESULTS: Record<string, MockResult> = {
   object: { fixes: "function ForeverObjectTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
 };
 
-function mockSuccessFetch(overrides: Partial<Record<string, MockResult>> = {}) {
+const RELATIONS = {
+  fixes: "function ForeverQuestRelationTraces:Load()\nend",
+  meta: {
+    generatedAt: "2026-10-11T00:00:00.000Z",
+    minScore: 0.9,
+    episodeCount: 120,
+    characterCount: 40,
+    lua: { quests: 2, relations: 3 },
+    authored: { agree: 5, new: 1, conflict: 0 },
+    caveat: "Held-out metrics are optimistic.",
+  },
+};
+
+const REVIEW = { review: "# Quest relation review" };
+
+/** Serves RESULTS per entity plus the relations module and review; `bodies` replaces any URL's body. */
+function mockSuccessFetch(overrides: Partial<Record<string, MockResult>> = {}, bodies: Record<string, unknown> = {}) {
   const results = { ...RESULTS, ...overrides };
+  const responses: Record<string, unknown> = {
+    ...Object.fromEntries(Object.entries(results).map(([entity, body]) => [`/api/extract/${entity}`, body])),
+    "/api/extract/relations": RELATIONS,
+    "/api/extract/relations/review": REVIEW,
+    ...bodies,
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string) => {
-      const entity = url.match(/\/api\/extract\/(\w+)/)?.[1];
-      const body = entity ? results[entity] : { error: "unknown entity" };
+      const body = responses[url] ?? { error: `unknown url ${url}` };
       return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
     }),
   );
@@ -206,5 +227,80 @@ describe("ExtractView", () => {
 
     expect(copyButton).toBeDisabled();
     expect(downloadButton).toBeDisabled();
+  });
+
+  it("should show the relations module with its summary and caveat in the Quest relations tab", async () => {
+    mockSuccessFetch();
+
+    render(<ExtractView />);
+    fireEvent.click(screen.getByText("Load all"));
+    fireEvent.click(screen.getByText("Quest relations"));
+
+    await waitFor(() => expect(screen.getByText(/ForeverQuestRelationTraces:Load/)).toBeInTheDocument());
+    expect(screen.getByText(/2 Forever quest\(s\), 3 relation\(s\) from 120 episode\(s\) of 40 character\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText("Held-out metrics are optimistic.")).toBeInTheDocument();
+  });
+
+  it("should show the review report and download it under its own name", async () => {
+    mockSuccessFetch();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    render(<ExtractView />);
+    fireEvent.click(screen.getByText("Load all"));
+    fireEvent.click(screen.getByText("Quest relations"));
+    await waitFor(() => expect(screen.getByText("Show review report")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("Show review report"));
+    expect(screen.getByText("# Quest relation review")).toBeInTheDocument();
+
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:mock"), revokeObjectURL: vi.fn() });
+    const createElementSpy = vi.spyOn(document, "createElement");
+    fireEvent.click(screen.getByText("Download"));
+
+    const anchor = createElementSpy.mock.results.find((r) => r.value instanceof HTMLAnchorElement)?.value as
+      | HTMLAnchorElement
+      | undefined;
+    expect(anchor?.download).toBe("relations-review.md");
+  });
+
+  it("should keep the field corrections loading when the relations pipeline has not run", async () => {
+    const missing = { error: "No generated quest relations found. Run `npm run relations -- pipeline` in tools/corrections-extractor first." };
+    mockSuccessFetch({}, { "/api/extract/relations": missing, "/api/extract/relations/review": missing });
+
+    render(<ExtractView />);
+    fireEvent.click(screen.getByText("Load all"));
+
+    await waitFor(() => expect(screen.getByText("3 session(s) from 2 trace file(s)")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Quest relations"));
+    await waitFor(() =>
+      expect(screen.getByText(/Run `npm run relations -- pipeline` in tools\/corrections-extractor first/)).toBeInTheDocument(),
+    );
+  });
+
+  it("should show a fallback for a relations meta file of another shape and keep the field tabs working", async () => {
+    const { authored: _authored, ...metaWithoutAuthored } = RELATIONS.meta;
+    mockSuccessFetch({}, { "/api/extract/relations": { ...RELATIONS, meta: metaWithoutAuthored } });
+
+    render(<ExtractView />);
+    fireEvent.click(screen.getByText("Load all"));
+    fireEvent.click(screen.getByText("Quest relations"));
+
+    await waitFor(() => expect(screen.getByText(/relations-meta.json has an unexpected shape/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText("NPC"));
+    expect(screen.getByText(/ForeverNpcTraces:Load/)).toBeInTheDocument();
+  });
+
+  it("should contain a render error in the relations tab", async () => {
+    // A module body that is not a string makes React throw while rendering the <pre>.
+    mockSuccessFetch({}, { "/api/extract/relations": { ...RELATIONS, fixes: { unexpected: true } } });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(<ExtractView />);
+    fireEvent.click(screen.getByText("Load all"));
+    fireEvent.click(screen.getByText("Quest relations"));
+
+    await waitFor(() => expect(screen.getByText(/the quest relations could not be shown/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText("NPC"));
+    expect(screen.getByText(/ForeverNpcTraces:Load/)).toBeInTheDocument();
   });
 });
