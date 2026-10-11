@@ -12,7 +12,6 @@ local l10n = Core.l10n
 
 ---@class ExportFrame : Frame
 ---@field editBox EditBox
----@field scrollFrame ScrollFrame
 ---@field urlEditBox EditBox
 ---@field hint FontString
 ---@field warningText FontString
@@ -34,7 +33,7 @@ local pendingSourceSessions
 ---@return ExportFrame
 local function BuildExportFrame()
   local frame = CreateFrame("Frame", "QuestieTraceExportFrame", UIParent) --[[@as ExportFrame]]
-  frame:SetSize(520, 420)
+  frame:SetSize(450, 200)
   frame:SetPoint("CENTER")
   frame:SetFrameStrata("DIALOG")
   frame:SetClampedToScreen(true)
@@ -63,15 +62,17 @@ local function BuildExportFrame()
   title:SetText(l10n("QuestieTrace Export"))
 
   local urlEditBox = CreateFrame("EditBox", nil, frame, "InputBoxTemplate") --[[@as EditBox]]
-  urlEditBox:SetSize(470, 20)
+  urlEditBox:SetSize(410, 20)
   urlEditBox:SetPoint("TOP", title, "BOTTOM", 0, -10)
   urlEditBox:SetAutoFocus(false)
   urlEditBox:SetFontObject("ChatFontNormal")
   urlEditBox:SetText("https://questie.dev/trace")
   urlEditBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-  urlEditBox:SetScript("OnCursorChanged", function(self)
-    self:SetText("https://questie.dev/trace")
-    self:HighlightText()
+  urlEditBox:SetScript("OnTextChanged", function(self, userInput)
+    if userInput then
+      self:SetText("https://questie.dev/trace")
+      self:HighlightText()
+    end
   end)
 
   local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -81,14 +82,14 @@ local function BuildExportFrame()
   hint:SetJustifyH("CENTER")
   hint:SetText(l10n("Copy the text below and submit it at the URL above. Please do this again each time this window has new data to share, since one submission only covers what happened up to that point. This helps us build the Questie database. Player and guild names are never included."))
 
-  local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate") --[[@as ScrollFrame]]
-  scrollFrame:SetPoint("TOPLEFT", 16, -110)
-  scrollFrame:SetPoint("BOTTOMRIGHT", -32, 44)
-
-  local editBox = CreateFrame("EditBox", nil, scrollFrame) --[[@as EditBox]]
-  editBox:SetMultiLine(true)
+  --- Single-line on purpose: the client fails to render (and stalls on) very
+  --- large export strings in a multiline edit box, while a single-line box only
+  --- draws the visible part. Ctrl+A / Ctrl+C still copy the full string.
+  local editBox = CreateFrame("EditBox", nil, frame, "InputBoxTemplate") --[[@as EditBox]]
+  editBox:SetSize(410, 20)
+  editBox:SetPoint("TOP", hint, "BOTTOM", 0, -10)
+  editBox:SetMaxLetters(0)
   editBox:SetFontObject("ChatFontNormal")
-  editBox:SetWidth(456)
   editBox:SetAutoFocus(false)
   editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
@@ -103,14 +104,13 @@ local function BuildExportFrame()
   end)
   editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
   editBox:SetScript("OnMouseUp", function(self) self:HighlightText() end)
-  scrollFrame:SetScrollChild(editBox)
 
   local warningText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   warningText:SetPoint("CENTER")
   warningText:SetJustifyH("CENTER")
   warningText:SetMaxLines(0)
   warningText:SetWordWrap(true)
-  warningText:SetWidth(456)
+  warningText:SetWidth(380)
   warningText:Hide()
 
   local closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate") --[[@as Button]]
@@ -138,7 +138,6 @@ local function BuildExportFrame()
   reportedButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
   frame.editBox = editBox
-  frame.scrollFrame = scrollFrame
   frame.urlEditBox = urlEditBox
   frame.hint = hint
   frame.warningText = warningText
@@ -192,7 +191,7 @@ function Core.ShowExportWindow()
     -- Show export UI, hide warning
     exportFrame.urlEditBox:Show()
     exportFrame.hint:Show()
-    exportFrame.scrollFrame:Show()
+    exportFrame.editBox:Show()
     exportFrame.warningText:Hide()
     exportFrame.editBox:SetFocus()
     exportFrame.editBox:HighlightText()
@@ -225,7 +224,7 @@ function Core.ShowExportWindow()
 
     exportFrame.urlEditBox:Hide()
     exportFrame.hint:Hide()
-    exportFrame.scrollFrame:Hide()
+    exportFrame.editBox:Hide()
     exportFrame.reportedButton:Hide()
     pendingSourceSessions = nil
   end
