@@ -7,5 +7,3 @@ export { observeMaxLevel } from "./maxLevel";
 export { observeSpawns } from "./spawns";
 export { observeZoneID } from "./zoneID";
 export { mergeSpawns, mergeZoneID } from "./spawnsMerge";
-export { observeQuestStarts, mergeQuestStarts } from "./questStarts";
-export { observeQuestEnds, mergeQuestEnds } from "./questEnds";

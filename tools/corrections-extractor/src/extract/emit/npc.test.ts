@@ -14,8 +14,6 @@ describe("emitNpcRecords", () => {
       maxLevel: new Map(),
       spawns: new Map(),
       zoneID: new Map(),
-      questStarts: new Map(),
-      questEnds: new Map(),
     });
     expect(records.get(823)).toEqual({ name: "Deputy Willem", minLevel: 18 });
   });
@@ -27,8 +25,6 @@ describe("emitNpcRecords", () => {
       maxLevel: new Map(),
       spawns: new Map([[823, fact(823, { 40: [[30.01, 86.02]] })]]),
       zoneID: new Map([[823, fact(823, 40)]]),
-      questStarts: new Map(),
-      questEnds: new Map(),
     });
     expect(records.get(823)).toEqual({
       name: "Old Murk-Eye",
@@ -44,8 +40,6 @@ describe("emitNpcRecords", () => {
       maxLevel: new Map(),
       spawns: new Map(),
       zoneID: new Map(),
-      questStarts: new Map(),
-      questEnds: new Map(),
     });
     expect([...records.keys()].sort()).toEqual([1, 2]);
     expect(records.get(1)).toEqual({ name: "Only Named" });
@@ -59,8 +53,6 @@ describe("emitNpcRecords", () => {
       maxLevel: new Map(),
       spawns: new Map(),
       zoneID: new Map(),
-      questStarts: new Map(),
-      questEnds: new Map(),
     });
     expect(records.size).toBe(0);
   });

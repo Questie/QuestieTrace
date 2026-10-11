@@ -414,6 +414,96 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     expect(npcFixes).toContain("[276171] = {");
     expect(npcFixes).toContain("[npcKeys.questEnds_add] = {99196},");
   });
+
+  function turnInSession(questId: number) {
+    const session = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: {
+        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+      },
+      UnitName: {
+        target: [{ t: 3, tp: 3, v: { 1: "Oura Stormspinner", 2: "", n: 2 } }],
+      },
+    });
+    return { ...session, events: [{ t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: questId, n: 1 } }] };
+  }
+
+  it("should only export quest relations for an npc below MAX_IDS", () => {
+    const options = { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } };
+    expect(extractAll([turnInSession(99196)], options).npcFixes).toContain("[npcKeys.name]");
+
+    const { npcFixes } = extractAll([turnInSession(99196)], { ...options, maxIds: { ...options.maxIds, npc: 300000 } });
+
+    expect(npcFixes).toContain("[npcKeys.questEnds_add] = {99196},");
+    expect(npcFixes).not.toContain("[npcKeys.name]");
+  });
+
+  it("should export questEnds for an object that finishes a quest", () => {
+    const session = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-410369-00002DDB54" }] },
+    });
+    const withTurnIn = { ...session, events: [{ t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 78261, n: 1 } }] };
+
+    const { questFixes, objectFixes } = extractAll([withTurnIn], {
+      sourceFileNames: ["test.lua"],
+      maxIds: { npc: 0, quest: 0, item: 0, object: 500000 },
+    });
+
+    expect(questFixes).toContain("[questKeys.finishedBy_add] = {nil,{410369}},");
+    expect(objectFixes).toContain("[410369] = {");
+    expect(objectFixes).toContain("[objectKeys.questEnds_add] = {78261},");
+  });
+
+  it("should not export relations between a quest and an npc that are both below MAX_IDS", () => {
+    const { npcFixes, questFixes } = extractAll([turnInSession(99196)], {
+      sourceFileNames: ["test.lua"],
+      maxIds: { npc: 300000, quest: 100000, item: 0, object: 0 },
+    });
+
+    expect(npcFixes).not.toContain("questEnds_add");
+    expect(questFixes).not.toContain("[99196]");
+  });
+
+  it("should export only relations to new npcs for a quest below MAX_IDS", () => {
+    const session = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: {
+        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-100-00002DDB54" }],
+      },
+    });
+    const withTurnIn = { ...session, events: [{ t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 940, n: 1 } }] };
+
+    const { questFixes, npcFixes } = extractAll([withTurnIn], {
+      sourceFileNames: ["test.lua"],
+      maxIds: { npc: 18199, quest: 9665, item: 0, object: 0 },
+    });
+
+    expect(questFixes).toContain("[questKeys.finishedBy_add] = {{276171}},");
+    expect(npcFixes).toContain("[276171] = {");
+    expect(npcFixes).toContain("[npcKeys.questEnds_add] = {940},");
+    expect(npcFixes).not.toContain("[100] = {");
+  });
+
+  it("should export only the relation for a quest below MAX_IDS started by a new object", () => {
+    const session = makeForeverSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      UnitGUID: { questnpc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-673378-00002DDB54" }] },
+    });
+    const withDetail = { ...session, events: [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 940, n: 1 } }] };
+
+    const { questFixes, objectFixes } = extractAll([withDetail], {
+      sourceFileNames: ["test.lua"],
+      maxIds: { npc: 0, quest: 9665, item: 0, object: 300142 },
+    });
+
+    expect(questFixes).toContain("[940] = {");
+    expect(questFixes).toContain("[questKeys.startedBy_add] = {nil,{673378}},");
+    expect(questFixes).not.toContain("[questKeys.name]");
+    expect(objectFixes).toContain("[objectKeys.questStarts_add] = {940},");
+  });
 });
 
 describe("foldSessions + finalize (incremental extraction)", () => {

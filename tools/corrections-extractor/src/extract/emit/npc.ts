@@ -16,8 +16,6 @@ export interface NpcFacts {
   maxLevel: Map<number, Fact<number>>;
   spawns: Map<number, Fact<Record<number, Array<[number, number]>>>>;
   zoneID: Map<number, Fact<number>>;
-  questStarts: Map<number, Fact<number[]>>;
-  questEnds: Map<number, Fact<number[]>>;
 }
 
 export function emitNpcRecords(facts: NpcFacts): Map<number, Record<string, unknown>> {
