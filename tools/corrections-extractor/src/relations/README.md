@@ -41,7 +41,11 @@ all candidates                 --combine-->        output/foreverQuestRelationTr
 `forever*Traces.lua` modules from `npm run extract`:
 
 - `foreverQuestRelationTraces.lua`: module `ForeverQuestRelationTraces`, relationship fields only, so
-  it never overlaps the field extractor's modules.
+  it never overlaps the field extractor's modules. Like authored corrections, each quest's opening line
+  carries its name as a comment, here with its Wowhead page (`https://wowhead.com/forever/quest=<id>`).
+  Above each field is one comment line per quest the field names (`id "name" url`), and each field ends
+  with an `-- Assumption:` giving the strongest trace observation behind it, how many signals agree and
+  the combined score (`combine/assumptions.ts`).
 - `relations-review.md`: read this before trusting the module.
 - `relations-meta.json`: generatedAt, min score, episode and character counts, quests and relations in
   the Lua, authored agree/new/conflict counts, inputs used, and the metrics leakage caveat. It has its

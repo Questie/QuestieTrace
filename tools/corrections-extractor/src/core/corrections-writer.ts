@@ -18,6 +18,30 @@ export interface CorrectionsWriterHeader {
   generatedAt: Date;
 }
 
+/**
+ * Optional comments, the way authored Questie corrections carry them:
+ * `[91743] = { -- Rascally Rodents` and `[questKeys.x] = y, -- Assumption: ...`.
+ * Return undefined for no comment. Whitespace runs (including line breaks) are
+ * collapsed to one space, so a comment can never spill into code.
+ */
+export interface CorrectionComments {
+  /** Comment on an entity's opening line, e.g. its name. */
+  entity?: (id: number) => string | undefined;
+  /** Comment lines above one field line, e.g. the entities its value names. */
+  aboveField?: (id: number, fieldName: string) => readonly string[] | undefined;
+  /** Comment on one field line; `fieldName` is the record's (internal) field name. */
+  field?: (id: number, fieldName: string) => string | undefined;
+}
+
+function flatComment(text: string | undefined): string | undefined {
+  return text?.replace(/\s+/g, " ").trim() || undefined;
+}
+
+function trailingComment(text: string | undefined): string {
+  const flat = flatComment(text);
+  return flat ? ` -- ${flat}` : "";
+}
+
 /** Renders an object key as a Lua table constructor key, e.g. `["creatures"]` or `[7]`. */
 function luaKey(key: string): string {
   return /^\d+$/.test(key) ? `[${key}]` : `[${luaString(key)}]`;
@@ -151,12 +175,14 @@ function luaValue(value: unknown): string {
  *   to translate each record's field names into their real Questie key lookups.
  * @param records entityId -> only the fields that were actually extracted (already sparse,
  *   see emit/npc.ts); entities with an empty record are skipped.
+ * @param comments optional trailing comments for entity and field lines.
  */
 export function writeQuestieCorrectionsLua(
   moduleName: string,
   keysLocalName: string,
   records: Map<number, Record<string, unknown>>,
   header: CorrectionsWriterHeader,
+  comments: CorrectionComments = {},
 ): string {
   const lines: string[] = [
     `---@class ${moduleName}`,
@@ -181,7 +207,7 @@ export function writeQuestieCorrectionsLua(
     const fieldNames = record ? Object.keys(record) : [];
     if (fieldNames.length === 0) continue;
 
-    lines.push(`        [${id}] = {`);
+    lines.push(`        [${id}] = {${trailingComment(comments.entity?.(id))}`);
     for (const fieldName of fieldNames) {
       if (isFieldExcluded(fieldName)) continue;
       const value = record![fieldName];
@@ -202,7 +228,11 @@ export function writeQuestieCorrectionsLua(
       } else {rendered = luaValue(value);
       }
       const outputFieldName = getQuestieFieldName(fieldName);
-      lines.push(`            [${keysLocalName}.${outputFieldName}] = ${rendered},`);
+      for (const text of comments.aboveField?.(id, fieldName) ?? []) {
+        const flat = flatComment(text);
+        if (flat) lines.push(`            -- ${flat}`);
+      }
+      lines.push(`            [${keysLocalName}.${outputFieldName}] = ${rendered},${trailingComment(comments.field?.(id, fieldName))}`);
     }
     lines.push("        },");
   }

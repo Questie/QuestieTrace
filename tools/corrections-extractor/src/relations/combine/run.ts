@@ -14,7 +14,7 @@ import type { RelationField, RelationSet } from "../core/types";
 import { DEFAULT_MODEL_PARAMS, type ScoredEdge } from "./crossval";
 import { domainOf, type Claim, type Edge, type QuestDomains } from "./edges";
 import { loadInputs } from "./inputs";
-import { foreverRecords, foreverRelationsLua } from "./lua";
+import { foreverComments, foreverRecords, foreverRelationsLua } from "./lua";
 import { authoredStatusCounts, countEpisodes, LEAKAGE_CAVEAT, luaRelationCount, type RelationsMeta } from "./meta";
 import { formatComparison, formatMetrics, heldOutMetrics, METRIC_CAVEATS } from "./metrics";
 import { combine, DEFAULTS, type Combined } from "./pipeline";
@@ -139,13 +139,17 @@ export async function run(args: string[]): Promise<void> {
   rmSync(metaPath, { force: true });
   writeFileSync(
     luaPath,
-    foreverRelationsLua(records, {
-      candidateFiles: inputs.files.map((file) => file.signal),
-      sessionCount: Math.max(...inputs.files.map((file) => file.inputCount)),
-      minScore,
-      generatedAt,
-      reviewFile: basename(reviewPath),
-    }),
+    foreverRelationsLua(
+      records,
+      {
+        candidateFiles: inputs.files.map((file) => file.signal),
+        sessionCount: Math.max(...inputs.files.map((file) => file.inputCount)),
+        minScore,
+        generatedAt,
+        reviewFile: basename(reviewPath),
+      },
+      foreverComments(views, inputs.catalog.quests),
+    ),
   );
 
   const metricsMarkdown = formatMetrics(metrics, minScore, DEFAULTS.reviewScore);
