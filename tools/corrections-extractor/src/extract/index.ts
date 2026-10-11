@@ -33,8 +33,7 @@ import {
   mergeZoneID as mergeNpcZoneID,
 } from './observers/npc';
 import { observeName as observeNpcName } from "./observers/npc/name";
-import { observeQuestStarts as observeNpcQuestStarts, mergeQuestStarts as mergeNpcQuestStarts } from "./observers/npc/questStarts";
-import { observeQuestEnds as observeNpcQuestEnds, mergeQuestEnds as mergeNpcQuestEnds } from "./observers/npc/questEnds";
+import { invertQuestRelations, type QuestRelations } from "./questRelations";
 import { observeName as observeObjectName } from "./observers/object/name";
 import {
   observeSpawns as observeObjectSpawns,
@@ -42,8 +41,6 @@ import {
   mergeSpawns as mergeObjectSpawns,
   mergeZoneID as mergeObjectZoneID,
 } from "./observers/object";
-import { observeQuestStarts as observeObjectQuestStarts, mergeQuestStarts as mergeObjectQuestStarts } from "./observers/object/questStarts";
-import { observeQuestEnds as observeObjectQuestEnds, mergeQuestEnds as mergeObjectQuestEnds } from "./observers/object/questEnds";
 import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, observeFinishedBy, mergeFinishedBy } from "./observers/quest";
 import { observeQuestLevel } from './observers/quest';
 import { observeRequiredLevel } from './observers/quest';
@@ -128,14 +125,10 @@ const OBSERVERS = {
   finishedBy: observeFinishedBy,
   npcSpawns: observeNpcSpawns,
   npcZoneID: observeNpcZoneID,
-  npcQuestStarts: observeNpcQuestStarts,
-  npcQuestEnds: observeNpcQuestEnds,
   npcDrops: observeNpcDrops,
   objectDrops: observeObjectDrops,
   objectSpawns: observeObjectSpawns,
   objectZoneID: observeObjectZoneID,
-  objectQuestStarts: observeObjectQuestStarts,
-  objectQuestEnds: observeObjectQuestEnds,
 };
 
 type ScalarObserverKey = keyof typeof SCALAR_OBSERVERS;
@@ -246,25 +239,6 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     ),
   });
 
-  // Collect NPC and object IDs referenced in quest startedBy/finishedBy
-  // to protect them from MAX_IDS filtering
-  const referencedNpcIds = new Set<number>();
-  const referencedObjectIds = new Set<number>();
-
-  for (const record of questRecords.values()) {
-    const startedBy = record.startedBy as { creatures: number[]; objects: number[]; items: number[] } | undefined;
-    const finishedBy = record.finishedBy as { creatures: number[]; objects: number[] } | undefined;
-
-    if (startedBy) {
-      for (const id of startedBy.creatures) referencedNpcIds.add(id);
-      for (const id of startedBy.objects) referencedObjectIds.add(id);
-    }
-    if (finishedBy) {
-      for (const id of finishedBy.creatures) referencedNpcIds.add(id);
-      for (const id of finishedBy.objects) referencedObjectIds.add(id);
-    }
-  }
-
   const npcRecords = emitNpcRecords({
     name: aggregateScalarSummary(scalars.npcName),
     minLevel: aggregateScalarSummary(scalars.minLevel),
@@ -276,14 +250,6 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     zoneID: aggregateField(
       observations.npcZoneID,
       mergeNpcZoneID,
-    ),
-    questStarts: aggregateField(
-      observations.npcQuestStarts,
-      mergeNpcQuestStarts,
-    ),
-    questEnds: aggregateField(
-      observations.npcQuestEnds,
-      mergeNpcQuestEnds,
     ),
   });
   const itemRecords = emitItemRecords({
@@ -307,62 +273,48 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
       observations.objectZoneID,
       mergeObjectZoneID,
     ),
-    questStarts: aggregateField(
-      observations.objectQuestStarts,
-      mergeObjectQuestStarts,
-    ),
-    questEnds: aggregateField(
-      observations.objectQuestEnds,
-      mergeObjectQuestEnds,
-    ),
   });
 
-  // Filter with protection for referenced NPCs/objects
-  // For protected IDs (below threshold but referenced in quests), only keep questStarts/questEnds
-  // Also filter quest IDs in questStarts/questEnds by MAX_IDS.quest threshold
-  function filterBelowMaxWithProtection(
-    records: Map<number, Record<string, unknown>>,
-    entity: keyof typeof MAX_IDS,
-    protectedIds: Set<number>
-  ): Map<number, Record<string, unknown>> {
-    const filtered = new Map<number, Record<string, unknown>>();
-    const threshold = effectiveMaxIds[entity];
-    const questThreshold = effectiveMaxIds.quest;
-    if (threshold === undefined) return records;
-    for (const [id, record] of records) {
-      if (id > threshold) {
-        // Above threshold: keep all fields
-        filtered.set(id, record);
-      } else if (protectedIds.has(id)) {
-        // Below threshold but referenced: only keep questStarts/questEnds with quest IDs above questThreshold
-        const protectedRecord: Record<string, unknown> = {};
-        let hasValidQuests = false;
-        if (record.questStarts !== undefined) {
-          const questStarts = (record.questStarts as number[]).filter((qid) => qid > questThreshold);
-          if (questStarts.length > 0) {
-            protectedRecord.questStarts = questStarts;
-            hasValidQuests = true;
-          }
-        }
-        if (record.questEnds !== undefined) {
-          const questEnds = (record.questEnds as number[]).filter((qid) => qid > questThreshold);
-          if (questEnds.length > 0) {
-            protectedRecord.questEnds = questEnds;
-            hasValidQuests = true;
-          }
-        }
-        if (hasValidQuests) {
-          filtered.set(id, protectedRecord);
-        }
+  // Quests below MAX_IDS are already known to Questie, but may be started/finished by new npcs/objects.
+  // Those relations are exported on the quest (and below, on the entity) so both sides stay consistent.
+  function relationsToNewEntities(record: Record<string, unknown>): Record<string, unknown> {
+    const relationOnly: Record<string, unknown> = {};
+    for (const field of ["startedBy", "finishedBy"] as const) {
+      const relation = record[field] as { creatures: number[]; objects: number[] } | undefined;
+      if (!relation) continue;
+      const creatures = relation.creatures.filter((id) => id > effectiveMaxIds.npc);
+      const objects = relation.objects.filter((id) => id > effectiveMaxIds.object);
+      if (creatures.length > 0 || objects.length > 0) {
+        relationOnly[field] = field === "startedBy" ? { creatures, objects, items: [] } : { creatures, objects };
       }
     }
-    return filtered;
+    return relationOnly;
+  }
+
+  const exportedQuestRecords = new Map<number, Record<string, unknown>>();
+  for (const [id, record] of questRecords) {
+    const exported = id > effectiveMaxIds.quest ? record : relationsToNewEntities(record);
+    if (Object.keys(exported).length > 0) exportedQuestRecords.set(id, exported);
+  }
+  const questRelations = invertQuestRelations(exportedQuestRecords);
+
+  // Relations are kept even for entities below MAX_IDS, so quests always resolve their starters/finishers.
+  function withQuestRelations(
+    records: Map<number, Record<string, unknown>>,
+    relations: Map<number, QuestRelations>,
+    entity: keyof typeof MAX_IDS,
+  ): Map<number, Record<string, unknown>> {
+    const merged = filterBelowMax(records, entity);
+    for (const [id, relation] of relations) {
+      merged.set(id, { ...merged.get(id), ...relation });
+    }
+    return merged;
   }
 
   return {
-    npcFixes: writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", filterBelowMaxWithProtection(npcRecords, "npc", referencedNpcIds), header),
-    questFixes: writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", filterBelowMax(questRecords, "quest"), header),
+    npcFixes: writeQuestieCorrectionsLua("ForeverNpcTraces", "npcKeys", withQuestRelations(npcRecords, questRelations.npcs, "npc"), header),
+    questFixes: writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", exportedQuestRecords, header),
     itemFixes: writeQuestieCorrectionsLua("ForeverItemTraces", "itemKeys", filterBelowMax(itemRecords, "item"), header),
-    objectFixes: writeQuestieCorrectionsLua("ForeverObjectTraces", "objectKeys", filterBelowMaxWithProtection(objectRecords, "object", referencedObjectIds), header),
+    objectFixes: writeQuestieCorrectionsLua("ForeverObjectTraces", "objectKeys", withQuestRelations(objectRecords, questRelations.objects, "object"), header),
   };
 }

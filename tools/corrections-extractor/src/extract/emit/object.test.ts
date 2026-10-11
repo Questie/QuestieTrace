@@ -12,8 +12,6 @@ describe("emitObjectRecords", () => {
       name: new Map([[2843, fact(2843, "Suspicious Chest")]]),
       spawns: new Map(),
       zoneID: new Map(),
-      questStarts: new Map(),
-      questEnds: new Map(),
     });
     expect(records.get(2843)).toEqual({ name: "Suspicious Chest" });
   });
@@ -23,8 +21,6 @@ describe("emitObjectRecords", () => {
       name: new Map([[2843, fact(2843, "Suspicious Chest")]]),
       spawns: new Map([[2843, fact(2843, { 40: [[30.01, 86.02]] })]]),
       zoneID: new Map([[2843, fact(2843, 40)]]),
-      questStarts: new Map(),
-      questEnds: new Map(),
     });
     expect(records.get(2843)).toEqual({
       name: "Suspicious Chest",
@@ -34,7 +30,7 @@ describe("emitObjectRecords", () => {
   });
 
   it("should return an empty map when no facts were observed", () => {
-    const records = emitObjectRecords({ name: new Map(), spawns: new Map(), zoneID: new Map(), questStarts: new Map(), questEnds: new Map() });
+    const records = emitObjectRecords({ name: new Map(), spawns: new Map(), zoneID: new Map() });
     expect(records.size).toBe(0);
   });
 });

@@ -8,8 +8,6 @@ export interface ObjectFacts {
   name: Map<number, Fact<string>>;
   spawns: Map<number, Fact<Record<number, Array<[number, number]>>>>;
   zoneID: Map<number, Fact<number>>;
-  questStarts: Map<number, Fact<number[]>>;
-  questEnds: Map<number, Fact<number[]>>;
 }
 
 export function emitObjectRecords(facts: ObjectFacts): Map<number, Record<string, unknown>> {
