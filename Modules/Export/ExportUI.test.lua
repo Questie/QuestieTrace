@@ -171,6 +171,8 @@ describe("ExportUI export edit box read-only handling", function()
   local Core
   ---@type table
   local exportEditBox
+  ---@type table[]
+  local editBoxes
   local setTextCalls
 
   before_each(function()
@@ -179,6 +181,8 @@ describe("ExportUI export edit box read-only handling", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
     env.QuestieTraceCharacter = { sessions = { { functions = {} } } }
     setTextCalls = 0
+    editBoxes = {}
+    exportEditBox = nil
 
     env.CreateFrame = function(frameType)
       local widget = NewWidgetStub()
@@ -187,12 +191,14 @@ describe("ExportUI export edit box read-only handling", function()
         widget = setmetatable({
           scripts = scripts,
           SetScript = function(_, name, handler) scripts[name] = handler end,
-          SetMultiLine = function(self) exportEditBox = self end,
+          SetMultiLine = function(self, multiLine) self.multiLine = multiLine end,
+          SetMaxLetters = function(self, maxLetters) self.maxLetters = maxLetters end,
           SetText = function(self, text)
             setTextCalls = setTextCalls + 1
             self.text = text
           end,
         }, getmetatable(widget))
+        table.insert(editBoxes, widget)
       end
       return widget
     end
@@ -200,6 +206,10 @@ describe("ExportUI export edit box read-only handling", function()
 
   it("should restore the export text when the user edits it", function()
     Core.ShowExportWindow()
+    exportEditBox = editBoxes[2]
+    assert.is_not_nil(exportEditBox)
+    assert.is_not_nil(exportEditBox.originalText)
+
     exportEditBox.text = "tampered"
 
     exportEditBox.scripts.OnTextChanged(exportEditBox, true)
@@ -209,6 +219,9 @@ describe("ExportUI export edit box read-only handling", function()
 
   it("should not rewrite the export text on programmatic changes", function()
     Core.ShowExportWindow()
+    exportEditBox = editBoxes[2]
+    assert.is_not_nil(exportEditBox)
+    assert.is_not_nil(exportEditBox.originalText)
     local callsAfterShow = setTextCalls
 
     exportEditBox.scripts.OnTextChanged(exportEditBox, false)
@@ -218,7 +231,28 @@ describe("ExportUI export edit box read-only handling", function()
 
   it("should not rewrite the export text when the cursor moves", function()
     Core.ShowExportWindow()
+    exportEditBox = editBoxes[2]
+    assert.is_not_nil(exportEditBox)
+    assert.is_not_nil(exportEditBox.originalText)
 
     assert.is_nil(exportEditBox.scripts.OnCursorChanged)
+  end)
+
+  it("should show the export text in a single-line edit box", function()
+    Core.ShowExportWindow()
+    exportEditBox = editBoxes[2]
+    assert.is_not_nil(exportEditBox)
+    assert.is_not_nil(exportEditBox.originalText)
+
+    assert.is_not_true(exportEditBox.multiLine)
+  end)
+
+  it("should not limit the length of the export text", function()
+    Core.ShowExportWindow()
+    exportEditBox = editBoxes[2]
+    assert.is_not_nil(exportEditBox)
+    assert.is_not_nil(exportEditBox.originalText)
+
+    assert.equal(0, exportEditBox.maxLetters)
   end)
 end)
