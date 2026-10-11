@@ -4,11 +4,11 @@
 
 import { createHash } from "crypto";
 import { existsSync, readFileSync } from "fs";
-import { basename, dirname, relative, resolve } from "path";
+import { dirname, relative, resolve } from "path";
 import { fileURLToPath } from "url";
+import { readSubmission } from "../../core/trace-data/submissions";
 import { paths } from "../core/paths";
 import { readJson } from "../core/io";
-import { decodeExportString } from "./decode";
 import { distillSession } from "./distill";
 import type { SubmissionResult } from "./types";
 
@@ -40,22 +40,9 @@ export function cacheVersionOf(sources: ReadonlyMap<string, string>, root: strin
 const here = fileURLToPath(import.meta.url);
 /**
  * Cache entries are reused only when written by exactly the code that would write them now: every
- * module processSubmission runs (decode, CBOR, distill and its parameters, contracts) is hashed.
+ * module processSubmission runs (reader, decode, CBOR, distill and its parameters, contracts) is hashed.
  */
 export const CACHE_VERSION = cacheVersionOf(pipelineSources(here), dirname(here));
-
-interface SubmissionFile {
-  id?: unknown;
-  contributor_id?: unknown;
-  received_at?: unknown;
-  export_string?: unknown;
-}
-
-/** trace-data names files `<received stamp>_<submission id>.json`. */
-export function submissionIdFromPath(path: string): string {
-  const name = basename(path, ".json");
-  return name.slice(name.lastIndexOf("_") + 1);
-}
 
 export function cachePath(submissionId: string): string {
   return resolve(paths.ingestCacheDir, `${submissionId}.json`);
@@ -71,22 +58,11 @@ export function readCachedResult(submissionId: string): SubmissionResult | undef
 }
 
 export function processSubmission(path: string): SubmissionResult {
-  const fallbackId = submissionIdFromPath(path);
-  let raw: SubmissionFile;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf8")) as SubmissionFile;
-  } catch {
-    // JSON.parse messages quote the input, and submissions carry free-text fields.
-    return failed(fallbackId, "", "", "unreadable submission JSON");
-  }
-  const submissionId = typeof raw.id === "string" && raw.id.length > 0 ? raw.id : fallbackId;
-  const contributorId = typeof raw.contributor_id === "string" ? raw.contributor_id : "";
-  const receivedAt = typeof raw.received_at === "string" ? raw.received_at : "";
-  if (typeof raw.export_string !== "string") return failed(submissionId, contributorId, receivedAt, "no export_string");
+  const { submissionId, contributorId, receivedAt, traces, error } = readSubmission(path);
+  if (error) return failed(submissionId, contributorId, receivedAt, error);
 
   try {
-    const traces = decodeExportString(raw.export_string);
-    const sessions = traces.flatMap((trace) => (Array.isArray(trace.sessions) ? trace.sessions : []).map(distillSession));
+    const sessions = traces.flatMap((trace) => trace.sessions.map(distillSession));
     return { cacheVersion: CACHE_VERSION, submissionId, contributorId, receivedAt, exports: traces.length, sessions };
   } catch (e) {
     return failed(submissionId, contributorId, receivedAt, message(e));

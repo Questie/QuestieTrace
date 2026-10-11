@@ -3,12 +3,12 @@
 //   "!QuestieTrace:N!" + EncodeForPrint(raw deflate(CBOR(payload))) + "!End:QuestieTrace:N!"
 //
 // The result has exactly the shape `loadTraceFile` (lua-state + normalizeLuaValue) gives
-// for the same data, so the extractor's stream helpers work on it unchanged. The Lua
-// toolchain in tools/decoder is the reference; ingest/decode.oracle.test.ts compares both.
+// for the same data, so the extractor and the relations pipeline work on it unchanged. The
+// Lua toolchain in tools/decoder is the reference; decode.oracle.test.ts compares both.
 
 import { inflateRawSync } from "zlib";
-import { normalizeLuaValue } from "../../core/normalize";
-import type { TraceFile } from "../../core/types";
+import { normalizeLuaValue } from "../normalize";
+import type { TraceFile } from "../types";
 import { decodeCbor } from "./cbor";
 
 const PRINT_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789()";

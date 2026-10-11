@@ -3,6 +3,8 @@
 // Exports used to be cumulative and always include the in-progress `currentSession`, so one
 // session shows up in many submissions, growing as play continues. Sessions are identified by
 // their capture-start clocks (sessionKey); the copy with the most events is the most complete.
+// The extractor keeps the newest copy instead; core/trace-data/session-key.ts explains why both
+// rules pick the same copy in practice.
 
 import type { DistilledSession } from "./types";
 

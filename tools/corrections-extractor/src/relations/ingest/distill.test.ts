@@ -419,3 +419,15 @@ describe("distillSession: removals", () => {
     expect(removal((b) => b.frame(10).event("QUEST_ACCEPTED", 8).frame(11).event("QUEST_REMOVED", 7, false))).toEqual(["accepted:8", "removed:7"]);
   });
 });
+
+describe("distillSession: key", () => {
+  it("keys every copy of a session by its capture-start clocks, and one without them by its content", () => {
+    const copy = new TraceBuilder().frame(10).event("QUEST_ACCEPTED", 7).session;
+    const grown = new TraceBuilder().frame(10).event("QUEST_ACCEPTED", 7).frame(20).event("QUEST_TURNED_IN", 7).session;
+    const withoutClocks = (session: SessionRecord) => ({ ...session, startedAt: undefined, startedAtPrecise: undefined }) as unknown as SessionRecord;
+
+    expect(distillSession(grown).key).toBe(distillSession(copy).key);
+    expect(distillSession(withoutClocks(copy)).key).toBe(distillSession(withoutClocks(structuredClone(copy))).key);
+    expect(distillSession(withoutClocks(grown)).key).not.toBe(distillSession(withoutClocks(copy)).key);
+  });
+});

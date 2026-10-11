@@ -1,29 +1,26 @@
 // Opt-in check of the native decoder against the Lua reference toolchain on real submissions:
 //
-//   RELATIONS_ORACLE=1 npx vitest run src/relations/ingest/decode.oracle.test.ts
+//   DECODE_ORACLE=1 npx vitest run src/core/trace-data/decode.oracle.test.ts
 //
 // Needs a trace-data checkout (TRACE_DATA_DIR) and lua5.1 with luafilesystem. Checks the first,
-// middle and last submission by default; RELATIONS_ORACLE_FILES=a.json,b.json picks others.
+// middle and last submission by default; DECODE_ORACLE_FILES=a.json,b.json picks others.
 
 import { execFileSync } from "child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
-import { loadTraceFile } from "../../core/loader";
-import { paths } from "../core/paths";
+import { loadTraceFile } from "../loader";
+import { defaultTraceDataDir, listSubmissionFiles } from "./submissions";
 import { decodeExportString, splitExports } from "./decode";
 
-const enabled = process.env.RELATIONS_ORACLE === "1";
+const enabled = process.env.DECODE_ORACLE === "1";
 const decoderDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../decoder");
 
 function oracleFiles(): string[] {
-  if (process.env.RELATIONS_ORACLE_FILES) return process.env.RELATIONS_ORACLE_FILES.split(",");
-  const root = resolve(paths.traceDataDir, "submissions");
-  const files = readdirSync(root)
-    .flatMap((month) => readdirSync(resolve(root, month)).map((name) => resolve(root, month, name)))
-    .sort();
+  if (process.env.DECODE_ORACLE_FILES) return process.env.DECODE_ORACLE_FILES.split(",");
+  const files = listSubmissionFiles(defaultTraceDataDir()).map((file) => file.path);
   return [files[0], files[files.length >> 1], files[files.length - 1]];
 }
 

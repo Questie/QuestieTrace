@@ -4,7 +4,7 @@
 // The output is what `loadTraceFile` sees *before* `normalizeLuaValue`: every Lua table
 // becomes a plain object with string keys, nil never appears, and keys lua-state cannot
 // represent (booleans, tables) are dropped. Feeding it through `normalizeLuaValue` then
-// yields exactly the shape the rest of the extractor already works with.
+// yields exactly the shape every trace consumer already works with.
 //
 // Supported subset, as in BlizzardCBOR: definite-length items only, no tags, simple
 // values limited to false/true/null/undefined, half/single/double floats.

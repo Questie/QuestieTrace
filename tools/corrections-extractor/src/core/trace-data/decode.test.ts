@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { decodeExportString } from "./decode";
-
-// A synthetic export (no real trace data) built with the addon's own pipeline: BlizzardCBOR
-// SerializeCBOR -> LibDeflate CompressDeflate -> EncodeForPrint, from tools/decoder/dependencies.
-// It covers packed args, a nil hole, nil stream values, index-keyed streams, floats and UTF-8.
-const FIXTURE =
-  "!QuestieTrace:1!9azZoonmuuyNuqiH4bG)eQI9gLMoaBqi8KKMuGP)qAhMDvEsUWejhNOyNkydI2rJepbSA2uAfiXgEdytFrybVcGuHfGDs04fjw375E)o(SoqacrsgxS4lUCAkeABz)aSvhSL9mRUyR9Ww3Vhmh4sXYne6AJRyEtKrYAc3Kadgp1lCYmIJJ3OjEUe5U9q7lZvFvsxr4ge4z(ddd7pAwyWWxsKg6Upg1)vL8iPM6N7fMtleWI1ejIm)0R(7RFhLgK)GY0JHcrt9ZAV77OB8VF8339WF(OpGkp)wO2OQJwCWuEI0FAF3vo88OLQrmiZp62ofavwwaylChSnUlUJDx1ZrDi7x7JprKMQBMvl4f0iyvVCg9Tqrd2ngEbLPuUz9VwgeElnWN6dYXLGq23DzTYkFudUkEQ3)yLoYCAcJEmdMKizWYf1IgU9C(2VfLfdTRQxRVPzVqikJh3KvcjTqcXQW9WGderNaP0dvjJk9U2GlYrxGjPRo6UoZQ81ZZE990SzmNS0CgOMVXVInk)QnRxSEenXlRb59ehAC8Il5NOIIek7udZwJUa9Ocikra)X7JF99haVjpRq24bJXNqfEvv0psxQK(R))d!End:QuestieTrace:1!";
+import { TINY_EXPORT } from "./fixtures";
 
 describe("decodeExportString", () => {
   it("produces the shapes loadTraceFile + normalizeLuaValue produce", () => {
-    const [trace] = decodeExportString(FIXTURE);
+    const [trace] = decodeExportString(TINY_EXPORT);
     const session = trace.sessions[0];
     const functions = session.functions as Record<string, any>;
     // Packed args keep their `n` and stay objects; nil args are simply absent.
@@ -24,8 +19,8 @@ describe("decodeExportString", () => {
   });
 
   it("decodes every export of a submission that pasted several, even when line-wrapped", () => {
-    const wrapped = FIXTURE.replace(/(.{76})/g, "$1\n");
-    const traces = decodeExportString(`${FIXTURE}\n${wrapped}`);
+    const wrapped = TINY_EXPORT.replace(/(.{76})/g, "$1\n");
+    const traces = decodeExportString(`${TINY_EXPORT}\n${wrapped}`);
     expect(traces).toHaveLength(2);
     expect(traces[1]).toEqual(traces[0]);
   });

@@ -6,25 +6,21 @@
 // legacy greeting titles (titles.ts), drops sessions without quest data, groups sessions into
 // characters (characters.ts) and writes episodes plus reports/ingest.json.
 
-import { closeSync, existsSync, openSync, readdirSync, readSync } from "fs";
+import { closeSync, existsSync, openSync, readSync } from "fs";
 import { availableParallelism } from "os";
 import { resolve } from "path";
 import { Worker } from "worker_threads";
+import { listSubmissionFiles, type SubmissionFile } from "../../core/trace-data/submissions";
 import { writeEpisodes, writeJsonAtomic } from "../core/io";
 import { paths } from "../core/paths";
 import type { QuestEpisode, QuestEventKind } from "../core/types";
 import { assignCharacters, CHARACTER_PARAMS, orderSessions, type CharacterInput } from "./characters";
 import { DISTILL_PARAMS } from "./distill";
 import { SessionMerger, type MergedSession } from "./merge";
-import { CACHE_VERSION, cachePath, readCachedResult, submissionIdFromPath } from "./submission";
+import { CACHE_VERSION, cachePath, readCachedResult } from "./submission";
 import { emptyGreetingStats, resolveGreeting, TitleIndex } from "./titles";
 import { emptyDistillStats, type DistillStats, type SubmissionResult } from "./types";
 import type { WorkerReply, WorkerRequest } from "./worker";
-
-interface SubmissionPath {
-  path: string;
-  id: string;
-}
 
 export async function run(args: string[]): Promise<void> {
   const force = args.includes("--force");
@@ -32,7 +28,7 @@ export async function run(args: string[]): Promise<void> {
   const jobs = jobsIndex >= 0 ? Math.max(1, Number(args[jobsIndex + 1]) || 1) : Math.max(1, Math.min(6, availableParallelism() - 2));
   const started = Date.now();
 
-  const submissions = listSubmissions(resolve(paths.traceDataDir, "submissions"));
+  const submissions = listSubmissionFiles(paths.traceDataDir);
   const todo = force ? submissions : submissions.filter((submission) => !hasCurrentCache(submission.id));
   console.log(`ingest: ${submissions.length} submissions, ${todo.length} to decode with ${jobs} worker(s)`);
   const crashes = await decodeAll(todo, jobs);
@@ -50,19 +46,6 @@ export async function run(args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 // Phase 1: decode + distill in worker threads
 // ---------------------------------------------------------------------------
-
-function listSubmissions(dir: string): SubmissionPath[] {
-  if (!existsSync(dir)) throw new Error(`${dir} does not exist. Set TRACE_DATA_DIR to a trace-data checkout.`);
-  const files: SubmissionPath[] = [];
-  for (const month of readdirSync(dir, { withFileTypes: true })) {
-    if (!month.isDirectory()) continue;
-    for (const name of readdirSync(resolve(dir, month.name))) {
-      if (name.endsWith(".json")) files.push({ path: resolve(dir, month.name, name), id: submissionIdFromPath(name) });
-    }
-  }
-  if (files.length === 0) throw new Error(`${dir} has no submissions`);
-  return files.sort((a, b) => (a.path < b.path ? -1 : 1));
-}
 
 /** Reads only the head of a cache file: `cacheVersion` is its first key. */
 function hasCurrentCache(id: string): boolean {
@@ -86,7 +69,7 @@ function startWorker(): Worker {
 }
 
 /** Runs one submission; `dead` means the worker itself failed and must be replaced. */
-function runInWorker(worker: Worker, submission: SubmissionPath): Promise<{ reply: WorkerReply; dead: boolean }> {
+function runInWorker(worker: Worker, submission: SubmissionFile): Promise<{ reply: WorkerReply; dead: boolean }> {
   return new Promise((resolveRun) => {
     const finish = (reply: WorkerReply, dead: boolean) => {
       worker.off("message", onMessage).off("error", onError).off("exit", onExit);
@@ -104,7 +87,7 @@ function runInWorker(worker: Worker, submission: SubmissionPath): Promise<{ repl
  * Decodes submissions on `jobs` workers. A submission that crashes its worker is reported and
  * left uncached (the next run retries it); the worker is replaced and the run goes on.
  */
-async function decodeAll(todo: SubmissionPath[], jobs: number): Promise<string[]> {
+async function decodeAll(todo: SubmissionFile[], jobs: number): Promise<string[]> {
   const crashes: string[] = [];
   let next = 0;
   let done = 0;
@@ -196,7 +179,7 @@ function hasQuestData(merged: MergedSession): boolean {
   return !!episode.completed || episode.questEvents.length > 0 || episode.offers.length > 0 || episode.questLog.some((entry) => entry.v.length > 0);
 }
 
-function buildEpisodes(submissions: SubmissionPath[], decodedThisRun: number, crashes: string[]) {
+function buildEpisodes(submissions: SubmissionFile[], decodedThisRun: number, crashes: string[]) {
   const merger = new SessionMerger();
   const titles = new TitleIndex();
   const failures: Array<{ submissionId: string; error: string }> = [];

@@ -9,6 +9,7 @@ import { createHash } from "crypto";
 import type { CompletedTimeline, GiverRef, OfferedQuest, OfferSnapshot, PlayerContext, QuestClientInfo, QuestEvent, QuestEventKind, TimedValue } from "../core/types";
 import type { EventEntry, FunctionStreamEntry, SessionRecord } from "../../core/types";
 import { parseGuid } from "../../core/guid";
+import { sessionKey } from "../../core/trace-data/session-key";
 import {
   asPositiveInt,
   entriesBetween,
@@ -62,9 +63,12 @@ const SESSION_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/;
 /** How far a recorded duration may run past the last event before it is distrusted. */
 const DURATION_SLACK_SECONDS = 3600;
 
-/** Stable pseudonymous id of a recording session: its two capture-start clocks. */
-export function sessionKey(session: SessionRecord): string {
-  return createHash("sha256").update(`${session.startedAt}|${session.startedAtPrecise}`).digest("hex").slice(0, 16);
+/**
+ * The shared session key. A session without capture-start clocks cannot be matched with its
+ * copies, so it is keyed by its content instead: only identical copies merge.
+ */
+function episodeKey(session: SessionRecord): string {
+  return sessionKey(session) ?? createHash("sha256").update(JSON.stringify(session)).digest("hex").slice(0, 16);
 }
 
 // ---------------------------------------------------------------------------
@@ -885,14 +889,15 @@ export function distillSession(session: SessionRecord): DistilledSession {
   const interfaceVersion = readInterfaceVersion(session);
   const questInfo = readQuestInfo(session);
   const serverTime = leafStream(session, "GetServerTime")?.[0];
+  const key = episodeKey(session);
 
   return {
-    key: sessionKey(session),
+    key,
     eventCount: reader.events.length,
     saved: typeof session.name === "string",
     ...(serverTime && typeof serverTime.v === "number" ? { startServerTime: serverTime.v - entryTime(serverTime) } : {}),
     episode: {
-      key: sessionKey(session),
+      key,
       ...(typeof session.name === "string" && SESSION_NAME.test(session.name) ? { sessionName: session.name } : {}),
       ...(interfaceVersion ? { interfaceVersion } : {}),
       ...(typeof locale === "string" ? { locale } : {}),
