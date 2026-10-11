@@ -20,6 +20,8 @@ export interface LuaHeader {
   sessionCount: number;
   minScore: number;
   generatedAt: Date;
+  /** File name of the review report combine publishes next to this module. */
+  reviewFile: string;
 }
 
 /** Questie stores scalar fields as a bare id and list fields as a table; fields keep RELATION_FIELDS order. */
@@ -54,7 +56,7 @@ export function foreverRelationsLua(records: Map<number, Record<string, unknown>
   // The writer's header counts trace files; here the inputs are candidate files.
   return lua.replace(
     /^-- Source trace files: \d+$/m,
-    `-- Quest relations from \`npm run relations -- combine\` (min score ${header.minScore}); review: .relations/reports/combine-review.md\n` +
+    `-- Quest relations from \`npm run relations -- combine\` (min score ${header.minScore}); review: ${header.reviewFile}, published next to this module\n` +
       `-- Candidate files: ${header.candidateFiles.join(", ")}`,
   );
 }

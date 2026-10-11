@@ -1,30 +1,32 @@
 // `npm run relations -- combine [--min-score n]`: all candidates -> reviewed relations + Questie output.
 //
 // ./inputs.ts loads every candidates/*.json and sets Wowhead aside as context only; ./pipeline.ts
-// scores and resolves the rest. This file writes the outputs: output/relations.json (every quest
-// with accepted or near-miss relations), output/foreverQuestRelationTraces.lua (Forever-new quests
-// only), reports/combine-review.md and reports/combine-metrics.json.
+// scores and resolves the rest. This file writes the outputs. Deliverables go next to the field
+// extractor's modules in output/ (see paths.outputDir): foreverQuestRelationTraces.lua (Forever-new
+// quests only), relations-review.md and relations-meta.json. Intermediates stay in .relations/:
+// relations.json (every quest with accepted or near-miss relations) and reports/combine-metrics.json.
 
-import { mkdirSync, writeFileSync } from "fs";
-import { resolve } from "path";
-import { writeJsonAtomic } from "../core/io";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { basename, resolve } from "path";
+import { readEpisodes, writeJsonAtomic } from "../core/io";
 import { paths } from "../core/paths";
 import type { RelationField, RelationSet } from "../core/types";
 import { DEFAULT_MODEL_PARAMS, type ScoredEdge } from "./crossval";
 import { domainOf, type Claim, type Edge, type QuestDomains } from "./edges";
 import { loadInputs } from "./inputs";
 import { foreverRecords, foreverRelationsLua } from "./lua";
+import { authoredStatusCounts, countEpisodes, LEAKAGE_CAVEAT, luaRelationCount, type RelationsMeta } from "./meta";
 import { formatComparison, formatMetrics, heldOutMetrics, METRIC_CAVEATS } from "./metrics";
 import { combine, DEFAULTS, type Combined } from "./pipeline";
 import type { Resolution } from "./resolve";
 import { renderReview } from "./review";
-import { buildQuestViews, type QuestView } from "./views";
+import { buildQuestViews, isWritten, type QuestView } from "./views";
 
-const outputDir = resolve(paths.relationsDir, "output");
-const relationsPath = resolve(outputDir, "relations.json");
-const luaPath = resolve(outputDir, "foreverQuestRelationTraces.lua");
-const reviewPath = resolve(paths.reportsDir, "combine-review.md");
+const relationsPath = resolve(paths.relationsDir, "relations.json");
 const metricsPath = resolve(paths.reportsDir, "combine-metrics.json");
+const luaPath = resolve(paths.outputDir, "foreverQuestRelationTraces.lua");
+const reviewPath = resolve(paths.outputDir, "relations-review.md");
+const metaPath = resolve(paths.outputDir, "relations-meta.json");
 
 function parseMinScore(args: string[]): number {
   const index = args.indexOf("--min-score");
@@ -131,7 +133,10 @@ export async function run(args: string[]): Promise<void> {
   const authored = inputs.groundTruth.tiers.authoredForever;
   const records = foreverRecords(accepted.relations, authored, inputs.domains.isForeverNew);
   const luaQuests = records.size;
-  mkdirSync(outputDir, { recursive: true });
+  const counts = await countEpisodes(readEpisodes());
+  mkdirSync(paths.outputDir, { recursive: true });
+  // relations-meta.json marks a complete run: remove it until the module and the review are written.
+  rmSync(metaPath, { force: true });
   writeFileSync(
     luaPath,
     foreverRelationsLua(records, {
@@ -139,11 +144,11 @@ export async function run(args: string[]): Promise<void> {
       sessionCount: Math.max(...inputs.files.map((file) => file.inputCount)),
       minScore,
       generatedAt,
+      reviewFile: basename(reviewPath),
     }),
   );
 
   const metricsMarkdown = formatMetrics(metrics, minScore, DEFAULTS.reviewScore);
-  mkdirSync(paths.reportsDir, { recursive: true });
   writeFileSync(
     reviewPath,
     renderReview({
@@ -158,28 +163,39 @@ export async function run(args: string[]): Promise<void> {
       labelFreeMarkdown: formatComparison(metrics, labelFree, minScore),
       caveats: METRIC_CAVEATS,
       fitted,
-      luaPath,
+      luaFile: basename(luaPath),
       luaQuests,
       classicMisses: classicMisses(scored, accepted.decisions, inputs.truth, inputs.domains),
       generatedAt,
     }),
   );
 
-  printSummary([...views.values()], accepted.relations, luaQuests, metricsMarkdown, inputs.files.length);
+  const meta: RelationsMeta = {
+    generatedAt: generatedAt.toISOString(),
+    minScore,
+    episodeCount: counts.episodes,
+    characterCount: counts.characters,
+    lua: { quests: luaQuests, relations: luaRelationCount(records) },
+    authored: authoredStatusCounts(views.values()),
+    inputs: inputSummary,
+    contextOnly: inputs.contextFiles.map((file) => file.signal),
+    caveat: LEAKAGE_CAVEAT,
+  };
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+  printSummary([...views.values()], accepted.relations, meta, metricsMarkdown, inputs.files.length);
 }
 
-function printSummary(views: QuestView[], relations: ReadonlyMap<number, RelationSet>, luaQuests: number, metricsMarkdown: string, fileCount: number): void {
-  const written = (view: QuestView) => view.edges.filter((edge) => ["accepted", "clique", "derived"].includes(edge.outcome));
-  const forever = views.filter((view) => view.domain === "forever");
-  const uncovered = forever.filter((view) => view.reference === "none" && written(view).length > 0);
-  const authored = forever.filter((view) => view.reference === "authored");
-  const statusCount = (list: QuestView[], status: string) => list.reduce((sum, view) => sum + written(view).filter((edge) => edge.status === status).length, 0);
+function printSummary(views: QuestView[], relations: ReadonlyMap<number, RelationSet>, meta: RelationsMeta, metricsMarkdown: string, fileCount: number): void {
+  const written = (view: QuestView) => view.edges.filter(isWritten);
+  const uncovered = views.filter((view) => view.domain === "forever" && view.reference === "none" && written(view).length > 0);
   const classic = views.filter((view) => view.domain === "classic" && written(view).some((edge) => edge.status !== "agree"));
   console.log(
     `combine: ${fileCount} candidate files, ${relations.size} quests with accepted relations\n` +
       `  Forever-new without authored relations: ${uncovered.length} quests, ${uncovered.reduce((sum, view) => sum + written(view).length, 0)} relations\n` +
-      `  Forever-new authored: agree ${statusCount(authored, "agree")}, new ${statusCount(authored, "new")}, conflict ${statusCount(authored, "conflict")}\n` +
+      `  Forever-new authored: agree ${meta.authored.agree}, new ${meta.authored.new}, conflict ${meta.authored.conflict}\n` +
       `  Classic quests disagreeing with inherited data: ${classic.length} (review only)\n` +
-      `  -> ${luaPath} (${luaQuests} quests)\n  -> ${relationsPath}\n  -> ${reviewPath}\n\nHeld-out metrics:\n${metricsMarkdown}`,
+      `  -> ${luaPath} (${meta.lua.quests} quests, ${meta.lua.relations} relations)\n  -> ${reviewPath}\n  -> ${metaPath}\n  -> ${relationsPath}\n\n` +
+      `Held-out metrics:\n${metricsMarkdown}`,
   );
 }

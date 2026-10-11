@@ -1,4 +1,4 @@
-// reports/combine-review.md: what a person reads before trusting the Lua output. Ordered by
+// relations-review.md: what a person reads before trusting the Lua output. Ordered by
 // value: Forever-new quests nobody has authored come first, most confident first; then authored
 // quests where the evidence adds or disagrees; then Classic disagreements; then the numbers.
 // Wowhead claims appear only as labelled context lines (see inputs.ts for why).
@@ -6,7 +6,7 @@
 import type { CatalogQuest, RelationField } from "../core/types";
 import type { FittedKind, ScoredEdge } from "./crossval";
 import type { Claim } from "./edges";
-import type { EdgeView, HintView, QuestView } from "./views";
+import { isWritten, type EdgeView, type HintView, type QuestView } from "./views";
 
 export interface ReviewInput {
   views: ReadonlyMap<number, QuestView>;
@@ -22,15 +22,13 @@ export interface ReviewInput {
   labelFreeMarkdown: string;
   caveats: readonly string[];
   fitted: FittedKind[];
-  luaPath: string;
+  /** The Lua module's file name; it ships next to this report. */
+  luaFile: string;
   luaQuests: number;
   /** Classic edges left out despite broad signal agreement, with the inherited values they disagree with. */
   classicMisses: Array<{ edge: ScoredEdge; inherited: Array<{ field: RelationField; target: number }> }>;
   generatedAt: Date;
 }
-
-const WRITTEN = new Set(["accepted", "clique", "derived"]);
-const isWritten = (edge: EdgeView) => WRITTEN.has(edge.outcome);
 
 function questLabel(questId: number, quests: ReviewInput["quests"]): string {
   const name = quests[String(questId)]?.name;
@@ -175,7 +173,7 @@ export function renderReview(input: ReviewInput): string {
     `- Forever-new quests with authored relations: ${authored.length}; accepted relations agree ${count(authored, "agree")}, new ${count(authored, "new")}, ` +
       `conflict ${count(authored, "conflict")}; ${authoredOnly} authored relations have no accepted evidence.`,
     `- Classic quests whose accepted relations disagree with inherited data: ${classicDisagreeing.length} (review only, never in the Lua output).`,
-    `- Lua: \`${input.luaPath}\`, ${input.luaQuests} Forever-new quests.`,
+    `- Lua: \`${input.luaFile}\` (next to this report), ${input.luaQuests} Forever-new quests.`,
     `- Inputs: ${input.candidateFiles.map((file) => `${file.signal} (${file.candidates})`).join(", ")}.`,
     `- Context only, untrusted: ${input.contextFiles.map((file) => `${file.signal} (${file.candidates})`).join(", ") || "none"}.`,
     `- AND (preQuestGroup) evidence trusted from: ${input.andSources.join(", ") || "none"}.`,

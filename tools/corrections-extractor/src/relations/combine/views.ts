@@ -58,6 +58,10 @@ export interface QuestView {
   notes: string[];
 }
 
+const WRITTEN: ReadonlySet<Outcome> = new Set(["accepted", "clique", "derived"]);
+/** Edges the resolution wrote to the RelationSet, so relations.json and (Forever-new quests) the Lua output. */
+export const isWritten = (edge: EdgeView) => WRITTEN.has(edge.outcome);
+
 const PREREQUISITE_FIELDS: readonly RelationField[] = ["preQuestSingle", "preQuestGroup"];
 
 function perspectives(edge: { kind: EdgeKind; quest: number; target: number }, relations: ReadonlyMap<number, RelationSet>) {

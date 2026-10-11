@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GroundTruth } from "../core/types";
 import { questDomains } from "./edges";
-import { foreverRecords } from "./lua";
+import { foreverRecords, foreverRelationsLua } from "./lua";
 
 describe("foreverRecords", () => {
   it("writes Forever-new quests only, and leaves authored prerequisites alone", () => {
@@ -22,5 +22,17 @@ describe("foreverRecords", () => {
     expect(records.get(92001)).toEqual({ preQuestSingle: [3], exclusiveTo: [92002] });
     expect(records.has(500)).toBe(false);
     expect(records.has(65593)).toBe(false);
+  });
+});
+
+describe("foreverRelationsLua", () => {
+  it("replaces the writer's trace-file count with the review file and candidate files", () => {
+    const header = { candidateFiles: ["handoff", "offer-set"], sessionCount: 12, minScore: 0.9, generatedAt: new Date(0), reviewFile: "relations-review.md" };
+
+    const lua = foreverRelationsLua(new Map([[92000, { nextQuestInChain: 92001 }]]), header);
+
+    expect(lua).toContain("(min score 0.9); review: relations-review.md, published next to this module");
+    expect(lua).toContain("-- Candidate files: handoff, offer-set");
+    expect(lua).not.toContain("Source trace files");
   });
 });
