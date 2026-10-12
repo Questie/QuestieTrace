@@ -4,7 +4,7 @@ local function LoadConsentModule(env)
   setmetatable(env, { __index = _G })
   env._G = env
   env.QuestieTraceCore = {}
-  env.QuestieTrace = { schemaVersion = 13, settings = {} }
+  env.QuestieTrace = { schemaVersion = 14, settings = {} }
   env.QuestieTraceCharacter = { sessions = {}, currentSession = nil }
   env.GetLocale = function() return "enUS" end
 
