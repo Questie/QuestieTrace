@@ -44,7 +44,7 @@ describe("observeObjectives", () => {
     expect(observeObjectives(session)).toEqual([
       {
         entityId: 33,
-        value: [{ kind: "item", name: "Tough Wolf Meat", text: "Tough Wolf Meat: 0/8", id: 750 }],
+        value: [{ kind: "item", name: "Tough Wolf Meat", text: "Tough Wolf Meat: 0/8", id: 750, index: 0 }],
         confidence: "low",
         provenance: { session: "test-session", t: 3 },
       },
@@ -95,8 +95,30 @@ describe("observeObjectives", () => {
 
     const matches = observeObjectives(session)[0]?.value;
     expect(matches).toEqual([
-      { kind: "monster", name: "Kobold Vermin", text: "0/10 Kobold Vermin slain", id: 299 },
-      { kind: "object", name: "Suspicious Cache", text: "0/1 Suspicious Cache", id: 2843 },
+      { kind: "monster", name: "Kobold Vermin", text: "0/10 Kobold Vermin slain", id: 299, index: 0 },
+      { kind: "object", name: "Suspicious Cache", text: "0/1 Suspicious Cache", id: 2843, index: 1 },
+    ]);
+  });
+
+  it("should keep the API index of a matched objective that follows an unmatched one", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [
+          {
+            t: 3,
+            tp: 3,
+            v: [
+              { type: "item", text: "Twisted Water Totem: 0/5" },
+              { type: "item", text: "Tough Wolf Meat: 0/8" },
+            ],
+          },
+        ],
+      },
+      GetLootSlotLink: { "1": [{ t: 4, tp: 4, v: itemLink }] },
+    });
+
+    expect(observeObjectives(session)[0]?.value).toEqual([
+      { kind: "item", name: "Tough Wolf Meat", text: "Tough Wolf Meat: 0/8", id: 750, index: 1 },
     ]);
   });
 
@@ -128,6 +150,7 @@ describe("observeObjectives", () => {
       name: "Kobold Vermin",
       text: "0/1 Kobold Vermin slain",
       id: 299,
+      index: 0,
     });
   });
 
@@ -148,6 +171,7 @@ describe("observeObjectives", () => {
       name: "Kobold Vermin",
       text: "0/1 Kobold Vermin slain",
       id: 299,
+      index: 0,
     });
   });
 
@@ -227,6 +251,7 @@ describe("observeObjectives", () => {
       name: "Bones of the Slain",
       text: "0/1 Bones of the Slain",
       id: 2843,
+      index: 0,
     });
   });
 
@@ -264,6 +289,7 @@ describe("observeObjectives", () => {
           name: "Juvenile Vuldren",
           text: expect.stringContaining("Juvenile Vuldren slain"),
           id: JUVENILE_VULDREN_CREATURE_ID,
+          index: 0,
         },
       ]);
     }
@@ -271,13 +297,20 @@ describe("observeObjectives", () => {
 });
 
 describe("mergeQuestObjectives", () => {
+  function obs(value: ObjectiveMatch[], t = 1, session = "s") {
+    return { entityId: 33, value, confidence: "low" as const, provenance: { session, t } };
+  }
+  function item(id: number, index: number): ObjectiveMatch {
+    return { kind: "item", name: `Item ${id}`, text: `Item ${id}: 0/1`, id, index };
+  }
+
   it("should emit a positional table with only the buckets that have data (no leading nils)", () => {
     const matches: ObjectiveMatch[] = [
-      { kind: "object", name: "Suspicious Cache", text: "0/1 Suspicious Cache", id: 2843 },
-      { kind: "item", name: "Tough Wolf Meat", text: "Tough Wolf Meat: 0/8", id: 750 },
+      { kind: "object", name: "Suspicious Cache", text: "0/1 Suspicious Cache", id: 2843, index: 0 },
+      { kind: "item", name: "Tough Wolf Meat", text: "Tough Wolf Meat: 0/8", id: 750, index: 1 },
     ];
 
-    expect(mergeQuestObjectives([{ entityId: 33, value: matches, confidence: "low", provenance: { session: "s", t: 1 } }])).toEqual({
+    expect(mergeQuestObjectives([obs(matches)])).toEqual({
       [OBJECT_OBJECTIVE_INDEX]: [2843],
       [ITEM_OBJECTIVE_INDEX]: [750],
     });
@@ -285,79 +318,47 @@ describe("mergeQuestObjectives", () => {
 
   it("should dedupe ids for the same objective seen across multiple observations", () => {
     const matches: ObjectiveMatch[] = [
-      { kind: "monster", name: "Kobold Vermin", text: "0/10 Kobold Vermin slain", id: 299 },
+      { kind: "monster", name: "Kobold Vermin", text: "0/10 Kobold Vermin slain", id: 299, index: 0 },
     ];
 
-    const observations = [
-      { entityId: 33, value: matches, confidence: "low" as const, provenance: { session: "s", t: 1 } },
-      { entityId: 33, value: matches, confidence: "low" as const, provenance: { session: "s", t: 2 } },
-    ];
-
-    expect(mergeQuestObjectives(observations)).toEqual({ [CREATURE_OBJECTIVE_INDEX]: [299] });
+    expect(mergeQuestObjectives([obs(matches, 1), obs(matches, 2)])).toEqual({ [CREATURE_OBJECTIVE_INDEX]: [299] });
   });
 
   it("should return an empty object when there are no observations", () => {
     expect(mergeQuestObjectives([])).toEqual({});
   });
 
-  it("should preserve API order of objective IDs (not sort numerically)", () => {
-    // Simulate API returning IDs in non-sorted order: 251291, 251284, 251261
-    // The merge should preserve this order, not sort to 251261, 251284, 251291
-    const matches1: ObjectiveMatch[] = [
-      { kind: "monster", name: "Mob A", text: "0/1 Mob A slain", id: 251291 },
-      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 251284 },
-      { kind: "monster", name: "Mob C", text: "0/1 Mob C slain", id: 251261 },
-    ];
+  it("should order ids by their API objective index, not numerically", () => {
+    const result = mergeQuestObjectives([obs([item(251291, 0), item(251284, 1), item(251261, 2)])]);
 
-    const observations = [
-      { entityId: 33, value: matches1, confidence: "low" as const, provenance: { session: "s", t: 1 } },
-    ];
-
-    const result = mergeQuestObjectives(observations);
-    // Order should be preserved from API: 251291, 251284, 251261
-    expect(result[CREATURE_OBJECTIVE_INDEX]).toEqual([251291, 251284, 251261]);
+    expect(result[ITEM_OBJECTIVE_INDEX]).toEqual([251291, 251284, 251261]);
   });
 
-  it("should preserve API order across multiple observations (first occurrence wins)", () => {
-    // First observation has 300 then 200; second has 200 then 100
-    // First occurrences: 300, 200, 100
-    const matches1: ObjectiveMatch[] = [
-      { kind: "monster", name: "Mob A", text: "0/1 Mob A slain", id: 300 },
-      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 200 },
-    ];
-    const matches2: ObjectiveMatch[] = [
-      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 200 },
-      { kind: "monster", name: "Mob C", text: "0/1 Mob C slain", id: 100 },
-    ];
+  it("should keep API order when observations only matched some objectives", () => {
+    // Water(0), Earth(1), Fire(2), Air(3): evidence for each totem shows up at different times.
+    const result = mergeQuestObjectives([
+      obs([item(274046, 2)], 1),
+      obs([item(274044, 1), item(274046, 2), item(274047, 3)], 2),
+      obs([item(274045, 0), item(274044, 1), item(274046, 2), item(274047, 3)], 3, "other-session"),
+    ]);
 
-    const observations = [
-      { entityId: 33, value: matches1, confidence: "low" as const, provenance: { session: "s", t: 1 } },
-      { entityId: 33, value: matches2, confidence: "low" as const, provenance: { session: "s", t: 2 } },
-    ];
-
-    const result = mergeQuestObjectives(observations);
-    // First occurrence order: 300, 200, 100
-    expect(result[CREATURE_OBJECTIVE_INDEX]).toEqual([300, 200, 100]);
+    expect(result[ITEM_OBJECTIVE_INDEX]).toEqual([274045, 274044, 274046, 274047]);
   });
 
-  it("should preserve API order for mixed objective types independently", () => {
+  it("should keep API order for mixed objective types independently", () => {
     const matches: ObjectiveMatch[] = [
-      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 200 },
-      { kind: "object", name: "Obj A", text: "0/1 Obj A", id: 100 },
-      { kind: "monster", name: "Mob A", text: "0/1 Mob A slain", id: 100 },
-      { kind: "item", name: "Item B", text: "Item B: 0/1", id: 300 },
-      { kind: "object", name: "Obj B", text: "0/1 Obj B", id: 200 },
-      { kind: "item", name: "Item A", text: "Item A: 0/1", id: 100 },
+      { kind: "monster", name: "Mob B", text: "0/1 Mob B slain", id: 200, index: 0 },
+      { kind: "object", name: "Obj A", text: "0/1 Obj A", id: 100, index: 1 },
+      { kind: "monster", name: "Mob A", text: "0/1 Mob A slain", id: 100, index: 2 },
+      { kind: "item", name: "Item B", text: "Item B: 0/1", id: 300, index: 3 },
+      { kind: "object", name: "Obj B", text: "0/1 Obj B", id: 200, index: 4 },
+      { kind: "item", name: "Item A", text: "Item A: 0/1", id: 100, index: 5 },
     ];
 
-    const observations = [
-      { entityId: 33, value: matches, confidence: "low" as const, provenance: { session: "s", t: 1 } },
-    ];
+    const result = mergeQuestObjectives([obs(matches)]);
 
-    const result = mergeQuestObjectives(observations);
-    // Each type preserves its own API order
-    expect(result[CREATURE_OBJECTIVE_INDEX]).toEqual([200, 100]); // Mob B, Mob A
-    expect(result[OBJECT_OBJECTIVE_INDEX]).toEqual([100, 200]);   // Obj A, Obj B
-    expect(result[ITEM_OBJECTIVE_INDEX]).toEqual([300, 100]);      // Item B, Item A
+    expect(result[CREATURE_OBJECTIVE_INDEX]).toEqual([200, 100]);
+    expect(result[OBJECT_OBJECTIVE_INDEX]).toEqual([100, 200]);
+    expect(result[ITEM_OBJECTIVE_INDEX]).toEqual([300, 100]);
   });
 });

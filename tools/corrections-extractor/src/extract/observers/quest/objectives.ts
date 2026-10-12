@@ -36,6 +36,8 @@ export interface ObjectiveMatch {
   name: string;
   text: string;
   id: number;
+  /** Position in the C_QuestLog.GetQuestObjectives result (0-based). */
+  index: number;
 }
 
 // Questie questKeys.objectives positional indices (see file header comment).
@@ -107,12 +109,14 @@ function questIdAt(session: SessionRecord, t: number): number | null {
   return typeof value === "number" && value !== 0 ? value : null;
 }
 
-function readObjectiveList(value: unknown): RawObjective[] {
+/** Unfiltered so array positions keep matching the API's objective indices. */
+function readObjectiveList(value: unknown): unknown[] {
   const objectives = emulate(value);
-  if (!Array.isArray(objectives)) return [];
-  return objectives.filter((objective): objective is RawObjective => {
-    return objective !== null && typeof objective === "object" && !Array.isArray(objective);
-  });
+  return Array.isArray(objectives) ? objectives : [];
+}
+
+function isRawObjective(objective: unknown): objective is RawObjective {
+  return objective !== null && typeof objective === "object" && !Array.isArray(objective);
 }
 
 function collectItemEvidence(session: SessionRecord): Evidence[] {
@@ -229,7 +233,8 @@ export const observeObjectives: FieldObserver<ObjectiveMatch[]> = (session) => {
       const objectiveList = readObjectiveList(entry.v);
       const matches: ObjectiveMatch[] = [];
 
-      for (const rawObjective of objectiveList) {
+      for (const [index, rawObjective] of objectiveList.entries()) {
+        if (!isRawObjective(rawObjective)) continue;
         const kind = objectiveKind(rawObjective.type);
         const text = typeof rawObjective.text === "string" ? rawObjective.text : null;
         const name = kind && text ? objectiveName(text, kind) : null;
@@ -237,7 +242,7 @@ export const observeObjectives: FieldObserver<ObjectiveMatch[]> = (session) => {
 
         const source = kind === "item" ? itemEvidence : unitEvidence;
         const id = candidateForObjective({ kind, name }, source, questID);
-        if (id !== null) matches.push({ kind, name, text, id });
+        if (id !== null) matches.push({ kind, name, text, id, index });
       }
 
       if (matches.length > 0) {
@@ -256,35 +261,26 @@ export const observeObjectives: FieldObserver<ObjectiveMatch[]> = (session) => {
 
 /** Merge matched objectives across observations into Questie's positional buckets. */
 export function mergeQuestObjectives(observations: Observation<ObjectiveMatch[]>[]): QuestObjectivesValue {
-  // Use arrays to preserve order from API, deduplicate while preserving first occurrence
-  const creatures: number[] = [];
-  const objects: number[] = [];
-  const items: number[] = [];
-
-  const seenCreatures = new Set<number>();
-  const seenObjects = new Set<number>();
-  const seenItems = new Set<number>();
-
+  // Order by the objective's index in the C_QuestLog.GetQuestObjectives result,
+  // since unmatched objectives leave gaps in each observation's match list.
+  const indexById: Record<ObjectiveKind, Map<number, number>> = {
+    monster: new Map(),
+    object: new Map(),
+    item: new Map(),
+  };
   for (const observation of observations) {
     for (const match of observation.value) {
-      if (match.kind === "monster") {
-        if (!seenCreatures.has(match.id)) {
-          seenCreatures.add(match.id);
-          creatures.push(match.id);
-        }
-      } else if (match.kind === "object") {
-        if (!seenObjects.has(match.id)) {
-          seenObjects.add(match.id);
-          objects.push(match.id);
-        }
-      } else if (match.kind === "item") {
-        if (!seenItems.has(match.id)) {
-          seenItems.add(match.id);
-          items.push(match.id);
-        }
-      }
+      const indices = indexById[match.kind];
+      if (!indices.has(match.id)) indices.set(match.id, match.index);
     }
   }
+
+  const ordered = (kind: ObjectiveKind) =>
+    [...indexById[kind]].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+
+  const creatures = ordered("monster");
+  const objects = ordered("object");
+  const items = ordered("item");
 
   const value: QuestObjectivesValue = {};
   if (creatures.length > 0) value[CREATURE_OBJECTIVE_INDEX] = creatures;
