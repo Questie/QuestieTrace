@@ -418,7 +418,7 @@ Called with a quest ID as the argument.
 | `GetQuestLogRewardMoney` | scalar number/nil | Reward money |
 | `GetQuestTagInfo` | tuple (n varies) | Tag info |
 | `IsBreadcrumbQuest` | scalar boolean | Forever only; undocumented, called with the quest ID |
-| `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | Forever only; questLineName/questName sanitized, other fields raw; includes hidden quest lines |
+| `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | Forever only; questLineName/questName raw, other fields raw; includes hidden quest lines |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar number | Forever only; `Enum.QuestClassification` |
 
 ### Nested parameterized by native arguments

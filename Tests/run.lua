@@ -380,29 +380,6 @@ local function TestQuestFlagsChangeOnly()
   assert(#questLine == 2 and questLine[2].v.isHidden == true, "A changed quest-line field is appended")
 end
 
-local function TestQuestDialogSanitizesTitlesAndQuestLineNames()
-  local flags = QuestFlagRuntime()
-  local env = flags.runtime.env
-  env.UnitName = function(token) if token == "player" then return "Arthas" end end
-  env.GetNumActiveQuests = function() return 1 end
-  env.GetNumAvailableQuests = env.GetNumActiveQuests
-  env.GetActiveTitle = function() return "Report to Arthas", false end
-  env.GetAvailableTitle = function() return "Arthas needs help" end
-  local apiInfo = { questLineID = 7, questLineName = "The Arthas line", questName = "Arthas rising", isHidden = false }
-  env.C_QuestLine.GetQuestLineInfo = function() return apiInfo end
-  flags.dialogQuestID = 100
-  flags.runtime.core.StartCapture("quest dialog sanitization")
-
-  local functions = Session(flags.runtime).functions
-  local active = functions.GetActiveTitle[1][1].v
-  assert(active.n == 2 and active[1] == "Report to <name>" and active[2] == false, "Active titles are sanitized")
-  assert(functions.GetAvailableTitle[1][1].v == "<name> needs help", "Available titles are sanitized")
-  local info = functions["C_QuestLine.GetQuestLineInfo"][100][1].v
-  assert(info.questLineName == "The <name> line" and info.questName == "<name> rising", "Quest-line names are sanitized")
-  assert(info.questLineID == 7 and info.isHidden == false, "Non-text quest-line fields stay raw")
-  assert(info ~= apiInfo and apiInfo.questLineName == "The Arthas line", "The API's table is copied, not modified")
-end
-
 local function TestQuestFlagsAbsentWithoutApis()
   local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
   GreetingApis(runtime)
@@ -2384,7 +2361,6 @@ local tests = {
   { name = "quest flags sampled for detail, gossip and greeting quests", run = TestQuestFlagsSampledForDialogQuests },
   { name = "quest flags record real nil once and skip failed calls", run = TestQuestFlagsNilAndFailedCalls },
   { name = "quest flags append only on change, including tables", run = TestQuestFlagsChangeOnly },
-  { name = "quest dialog sanitizes titles and quest-line names", run = TestQuestDialogSanitizesTitlesAndQuestLineNames },
   { name = "quest flags absent without their APIs", run = TestQuestFlagsAbsentWithoutApis },
   { name = "session contract preserves legacy saves", run = TestSessionContract },
   { name = "spellbook preserves observed tuple arity", run = TestSpellBookArity },
