@@ -51,10 +51,11 @@ streams do not receive synthetic inactive values.
 
 Privacy: free-text APIs that can embed the local player's own name (e.g.
 `C_GossipInfo.GetText`'s "Greetings, <name>" pattern, `GetQuestText`,
-`GetObjectiveText`, `GetProgressText`, `GetRewardText`, `GetGreetingText`),
-greeting titles (`GetActiveTitle`, `GetAvailableTitle`), and the
-`questLineName`/`questName` fields of `C_QuestLine.GetQuestLineInfo` are
-passed through `Core.SanitizeText` before being stored.
+`GetObjectiveText`, `GetProgressText`, `GetRewardText`, `GetGreetingText`) are
+passed through `Core.SanitizeText` before being stored. Greeting titles
+(`GetActiveTitle`, `GetAvailableTitle`) and the `questLineName`/`questName`
+fields of `C_QuestLine.GetQuestLineInfo` are static game data and do not
+contain player names, so they are stored raw.
 
 - `QUEST_DETAIL`
 - `QUEST_PROGRESS`

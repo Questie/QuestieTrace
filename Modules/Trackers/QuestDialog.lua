@@ -168,10 +168,10 @@ local function GetOrCreateIndexStream(functionName, key)
   return streams[key]
 end
 
----Function keys whose returns hold free-form text or quest titles that can
+---Function keys whose returns hold free-form text that can
 ---embed a player's own name (e.g. NPC greetings like "Greetings, <name>").
----These are run through SanitizeReturn before being stored; see
----AGENTS.md/CLAUDE.md "Privacy" sections.
+---Quest titles and quest line names are static game data and do not contain
+---player names, so they are stored raw.
 ---@type table<string, boolean>
 local SANITIZE_TEXT_FUNCTIONS = {
   ["C_GossipInfo.GetText"] = true,
@@ -180,9 +180,6 @@ local SANITIZE_TEXT_FUNCTIONS = {
   GetObjectiveText = true,
   GetProgressText = true,
   GetRewardText = true,
-  GetActiveTitle = true,
-  GetAvailableTitle = true,
-  ["C_QuestLine.GetQuestLineInfo"] = true, -- questLineName, questName
 }
 
 ---Pass a return value's strings through Core.SanitizeText: a scalar string,
