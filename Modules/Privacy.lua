@@ -250,6 +250,7 @@ local allowedSystemMessagePatterns
 ---@param text any
 ---@return boolean
 function Core.IsAllowedSystemMessage(text)
+  if issecretvalue and issecretvalue(text) then return false end
   if type(text) ~= "string" or text == "" then return false end
 
   if not allowedSystemMessagePatterns then

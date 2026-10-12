@@ -619,5 +619,10 @@ describe("GetPrivacyNameSet", function()
     it("should reject empty string input", function()
       assert.is_false(Core.IsAllowedSystemMessage(""))
     end)
+
+    it("should reject secret value text", function()
+      env.issecretvalue = function(_value) return true end
+      assert.is_false(Core.IsAllowedSystemMessage("(secret)"))
+    end)
   end)
 end)
