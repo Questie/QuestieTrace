@@ -7,6 +7,7 @@ import type { Observation } from "../../observation";
 import type { SpawnObservationValue, TaggedSpawnObservation } from "./spawns";
 
 const TOKEN_PRIORITY: Record<string, number> = {
+  questpoi: 4,
   questnpc: 3,
   npc: 2,
   target: 1,
@@ -17,6 +18,13 @@ const CLUSTER_EPSILON = 1e-9; // Tolerance for floating point comparisons
 
 function tokenPriority(token: string): number {
   return TOKEN_PRIORITY[token] ?? 0;
+}
+
+/** Tokens whose coordinates replace all other sources, in priority order. */
+const EXCLUSIVE_TOKENS = ["questpoi", "questnpc"];
+
+function findExclusiveToken(observations: TaggedSpawnObservation[]): string | undefined {
+  return EXCLUSIVE_TOKENS.find((token) => observations.some((obs) => obs.token === token));
 }
 
 /**
@@ -93,8 +101,9 @@ function clusterAndAverageCoordinatess(
  *   {[zoneID]: {{x,y}, {x,y}, ...}, ...}
  *
  * When the same NPC has observations via different tokens at different
- * coordinates, questnpc observations overrule ALL others. Only questnpc
- * coordinates are kept when questnpc observations exist for that NPC.
+ * coordinates, questpoi observations (quest turn-in POIs from
+ * C_QuestLog.GetQuestsOnMap) overrule ALL others, followed by questnpc.
+ * Only coordinates of the highest such token are kept when present.
  *
  * This is because questnpc fires during quest interactions when the player
  * must be adjacent to the NPC, giving us the true spawn location. Target/npc
@@ -108,14 +117,13 @@ export function mergeSpawns(
 ): Record<number, Array<[number, number]>> {
   const tagged = observations as TaggedSpawnObservation[];
 
-  // Check if any questnpc observations exist for this NPC
-  const hasQuestnpc = tagged.some((obs) => obs.token === "questnpc");
+  const exclusiveToken = findExclusiveToken(tagged);
 
-  if (hasQuestnpc) {
-    // questnpc overrides everything: only keep questnpc coordinates
+  if (exclusiveToken) {
+    // questpoi/questnpc override everything: only keep coordinates of that token
     const byZone = new Map<number, Array<[number, number]>>();
     for (const obs of tagged) {
-      if (obs.token !== "questnpc") continue;
+      if (obs.token !== exclusiveToken) continue;
       const { zoneID, x, y } = obs.value;
       const coords = byZone.get(zoneID);
       if (coords) {
@@ -179,6 +187,7 @@ export function mergeSpawns(
  * Derives zoneID from spawn observations: the most frequently observed zone.
  * When counting, questnpc observations are weighted higher (count as 3) since
  * they represent adjacent NPC interactions, vs regular encounters (count as 1).
+ * When questpoi observations exist, only those are counted.
  * Returns 0 (schema default) when no observations exist.
  */
 export function mergeZoneID(
@@ -187,7 +196,10 @@ export function mergeZoneID(
   if (observations.length === 0) return 0;
 
   const zoneWeights = new Map<number, number>();
-  for (const obs of observations as TaggedSpawnObservation[]) {
+  const tagged = observations as TaggedSpawnObservation[];
+  const hasQuestpoi = tagged.some((obs) => obs.token === "questpoi");
+  for (const obs of tagged) {
+    if (hasQuestpoi && obs.token !== "questpoi") continue;
     const { zoneID } = obs.value;
     const weight = tokenPriority(obs.token);
     zoneWeights.set(zoneID, (zoneWeights.get(zoneID) ?? 0) + weight);
