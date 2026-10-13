@@ -190,6 +190,18 @@ describe("mergeSpawns (object)", () => {
     expect(result[40]!.length).toBe(2);
     expect(result[12]!.length).toBe(2);
   });
+
+  it("should override questnpc and other coordinates when questpoi exists", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 10, "target"),
+      obs(2843, { zoneID: 12, x: 47.46, y: 62.18 }, 20, "questnpc"),
+      obs(2843, { zoneID: 40, x: 50.0, y: 70.0 }, 30, "questpoi"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[50.0, 70.0]],
+    });
+  });
 });
 
 describe("mergeZoneID (object)", () => {
@@ -232,6 +244,16 @@ describe("mergeZoneID (object)", () => {
       obs(2843, { zoneID: 12, x: 47.46, y: 62.18 }, 1, "target"),
       obs(2843, { zoneID: 12, x: 48.0, y: 63.0 }, 2, "target"),
       obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 3, "questnpc"),
+    ];
+
+    expect(mergeZoneID(observations)).toBe(40);
+  });
+
+  it("should only count questpoi zones when questpoi exists", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 12, x: 1, y: 1 }, 10, "questnpc"),
+      obs(2843, { zoneID: 12, x: 2, y: 2 }, 20, "questnpc"),
+      obs(2843, { zoneID: 40, x: 50.0, y: 70.0 }, 30, "questpoi"),
     ];
 
     expect(mergeZoneID(observations)).toBe(40);
