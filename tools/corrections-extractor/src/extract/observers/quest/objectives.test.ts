@@ -324,6 +324,41 @@ describe("mergeQuestObjectives", () => {
     expect(mergeQuestObjectives([obs(matches, 1), obs(matches, 2)])).toEqual({ [CREATURE_OBJECTIVE_INDEX]: [299] });
   });
 
+  it("should emit one id per objective when observations resolve the same objective to different ids", () => {
+    const hecklefang = (id: number): ObjectiveMatch => ({
+      kind: "monster", name: "Hecklefang Stalker", text: "0/7 Hecklefang Stalker slain", id, index: 0,
+    });
+    const stormhide = (id: number): ObjectiveMatch => ({
+      kind: "monster", name: "Stormhide", text: "0/7 Stormhide slain", id, index: 1,
+    });
+
+    const result = mergeQuestObjectives([
+      obs([hecklefang(4128), stormhide(3456)], 1, "a"),
+      obs([hecklefang(4128), stormhide(3238)], 2, "b"),
+      obs([stormhide(3238)], 3, "c"),
+    ]);
+
+    expect(result).toEqual({ [CREATURE_OBJECTIVE_INDEX]: [4128, 3238] });
+  });
+
+  it("should prefer the lowest id when conflicting ids for an objective are seen in equally many sessions", () => {
+    const result = mergeQuestObjectives([obs([item(20, 0)], 1, "a"), obs([item(10, 0)], 2, "b")]);
+
+    expect(result[ITEM_OBJECTIVE_INDEX]).toEqual([10]);
+  });
+
+  it("should count repeated observations from one session only once", () => {
+    const result = mergeQuestObjectives([
+      obs([item(10, 0)], 1, "a"),
+      obs([item(10, 0)], 2, "a"),
+      obs([item(10, 0)], 3, "a"),
+      obs([item(20, 0)], 4, "b"),
+      obs([item(20, 0)], 5, "c"),
+    ]);
+
+    expect(result[ITEM_OBJECTIVE_INDEX]).toEqual([20]);
+  });
+
   it("should return an empty object when there are no observations", () => {
     expect(mergeQuestObjectives([])).toEqual({});
   });
