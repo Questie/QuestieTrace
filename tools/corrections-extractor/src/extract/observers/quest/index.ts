@@ -10,3 +10,4 @@ export { observeObjectivesText } from "./objectivesText";
 export { observeTriggerEnd, mergeQuestTriggerEnds, type QuestTriggerEndValue } from "./triggerEnd";
 export { observeStartedBy, mergeStartedBy } from "./startedBy";
 export { observeFinishedBy, mergeFinishedBy } from "./finishedBy";
+export { observeTurnInPoi, turnInPoiSpawns } from "./turnInPoi";
