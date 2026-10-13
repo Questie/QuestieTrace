@@ -41,7 +41,7 @@ import {
   mergeSpawns as mergeObjectSpawns,
   mergeZoneID as mergeObjectZoneID,
 } from "./observers/object";
-import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, observeFinishedBy, mergeFinishedBy } from "./observers/quest";
+import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, observeFinishedBy, mergeFinishedBy, observeTurnInPoi, turnInPoiSpawns } from "./observers/quest";
 import { observeQuestLevel } from './observers/quest';
 import { observeRequiredLevel } from './observers/quest';
 import { observeZoneOrSort } from './observers/quest';
@@ -123,6 +123,7 @@ const OBSERVERS = {
   triggerEnd: observeTriggerEnd,
   startedBy: observeStartedBy,
   finishedBy: observeFinishedBy,
+  turnInPoi: observeTurnInPoi,
   npcSpawns: observeNpcSpawns,
   npcZoneID: observeNpcZoneID,
   npcDrops: observeNpcDrops,
@@ -215,6 +216,8 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
   }
 
   const zoneOrSortFacts = aggregateScalarSummary(scalars.zoneOrSort);
+  const finishedByFacts = aggregateField(observations.finishedBy, mergeFinishedBy);
+  const turnInSpawns = turnInPoiSpawns(observations.turnInPoi, finishedByFacts);
   const questRecords = emitQuestRecords({
     name: aggregateScalarSummary(scalars.questName),
     questLevel: aggregateScalarSummary(scalars.questLevel),
@@ -233,10 +236,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
       observations.startedBy,
       mergeStartedBy,
     ),
-    finishedBy: aggregateField(
-      observations.finishedBy,
-      mergeFinishedBy,
-    ),
+    finishedBy: finishedByFacts,
   });
 
   const npcRecords = emitNpcRecords({
@@ -244,11 +244,11 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     minLevel: aggregateScalarSummary(scalars.minLevel),
     maxLevel: aggregateScalarSummary(scalars.maxLevel),
     spawns: aggregateField(
-      observations.npcSpawns,
+      [...observations.npcSpawns, ...turnInSpawns.npcs],
       mergeNpcSpawns,
     ),
     zoneID: aggregateField(
-      observations.npcZoneID,
+      [...observations.npcZoneID, ...turnInSpawns.npcs],
       mergeNpcZoneID,
     ),
   });
@@ -266,11 +266,11 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
   const objectRecords = emitObjectRecords({
     name: aggregateScalarSummary(scalars.objectName),
     spawns: aggregateField(
-      observations.objectSpawns,
+      [...observations.objectSpawns, ...turnInSpawns.objects],
       mergeObjectSpawns,
     ),
     zoneID: aggregateField(
-      observations.objectZoneID,
+      [...observations.objectZoneID, ...turnInSpawns.objects],
       mergeObjectZoneID,
     ),
   });
