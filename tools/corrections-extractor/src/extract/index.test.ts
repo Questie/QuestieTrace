@@ -555,4 +555,26 @@ describe("foldSessions + finalize (incremental extraction)", () => {
     expect(acc.sessionCount).toBe(1);
     expect(finalize(acc, options).npcFixes).not.toContain("TBC Only");
   });
+
+  it("should count each unnamed session as a separate objective vote", () => {
+    const stormhideSession = (guid: string): SessionRecord => ({
+      ...westfallSession({
+        "C_QuestLog.GetQuestObjectives": { "33": [{ t: 3, tp: 3, v: [{ type: "monster", text: "0/7 Stormhide slain" }] }] },
+        UnitGUID: { target: [{ t: 3, tp: 3, v: guid }] },
+        UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Stormhide", n: 1 } }] },
+      }),
+      name: undefined,
+    });
+
+    const { questFixes } = extractAll(
+      [
+        stormhideSession("Creature-0-5208-0-7-100-000031"),
+        stormhideSession("Creature-0-5208-0-7-200-000031"),
+        stormhideSession("Creature-0-5208-0-7-200-000032"),
+      ],
+      options,
+    );
+
+    expect(questFixes).toContain("[questKeys.objectives] = {{{200}}},");
+  });
 });

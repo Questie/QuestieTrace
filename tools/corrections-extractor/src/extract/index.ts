@@ -183,6 +183,7 @@ export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[])
     for (const key of Object.keys(OBSERVERS) as ObserverKey[]) {
       const target = acc.observations[key] as unknown[];
       for (const observation of OBSERVERS[key](session)) {
+        observation.provenance.sessionKey = acc.sessionCount;
         target.push(observation);
       }
     }

@@ -268,7 +268,7 @@ export function mergeQuestObjectives(observations: Observation<ObjectiveMatch[]>
   // Different observations may resolve the same objective slot to different
   // ids (e.g. several creatures sharing a name), so each slot is reduced to a
   // single id: the one matched in the most sessions, lowest id on ties.
-  const sessionsBySlot: Record<ObjectiveKind, Map<number, Map<number, Set<string>>>> = {
+  const sessionsBySlot: Record<ObjectiveKind, Map<number, Map<number, Set<number | string>>>> = {
     monster: new Map(),
     object: new Map(),
     item: new Map(),
@@ -276,15 +276,15 @@ export function mergeQuestObjectives(observations: Observation<ObjectiveMatch[]>
   for (const observation of observations) {
     for (const match of observation.value) {
       const slots = sessionsBySlot[match.kind];
-      const candidates = slots.get(match.index) ?? new Map<number, Set<string>>();
-      const sessions = candidates.get(match.id) ?? new Set<string>();
-      sessions.add(observation.provenance.session);
+      const candidates = slots.get(match.index) ?? new Map<number, Set<number | string>>();
+      const sessions = candidates.get(match.id) ?? new Set<number | string>();
+      sessions.add(observation.provenance.sessionKey ?? observation.provenance.session);
       candidates.set(match.id, sessions);
       slots.set(match.index, candidates);
     }
   }
 
-  const pick = (candidates: Map<number, Set<string>>) =>
+  const pick = (candidates: Map<number, Set<number | string>>) =>
     [...candidates].sort((a, b) => b[1].size - a[1].size || a[0] - b[0])[0][0];
 
   const ordered = (kind: ObjectiveKind) => {

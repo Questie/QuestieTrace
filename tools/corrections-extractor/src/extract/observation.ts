@@ -9,6 +9,8 @@ export type Confidence = "high" | "medium" | "low";
 
 export interface Provenance {
   session: string;
+  /** Unique per folded session (names may repeat or be absent); set by foldSessions. */
+  sessionKey?: number;
   /** Time (seconds) within the session at which this value was observed. */
   t: number;
 }
