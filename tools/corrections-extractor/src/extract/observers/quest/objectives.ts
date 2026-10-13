@@ -263,20 +263,32 @@ export const observeObjectives: FieldObserver<ObjectiveMatch[]> = (session) => {
 export function mergeQuestObjectives(observations: Observation<ObjectiveMatch[]>[]): QuestObjectivesValue {
   // Order by the objective's index in the C_QuestLog.GetQuestObjectives result,
   // since unmatched objectives leave gaps in each observation's match list.
-  const indexById: Record<ObjectiveKind, Map<number, number>> = {
+  // Different observations may resolve the same objective slot to different
+  // ids (e.g. several creatures sharing a name), so each slot is reduced to a
+  // single id: the one matched in the most sessions, lowest id on ties.
+  const sessionsBySlot: Record<ObjectiveKind, Map<number, Map<number, Set<string>>>> = {
     monster: new Map(),
     object: new Map(),
     item: new Map(),
   };
   for (const observation of observations) {
     for (const match of observation.value) {
-      const indices = indexById[match.kind];
-      if (!indices.has(match.id)) indices.set(match.id, match.index);
+      const slots = sessionsBySlot[match.kind];
+      const candidates = slots.get(match.index) ?? new Map<number, Set<string>>();
+      const sessions = candidates.get(match.id) ?? new Set<string>();
+      sessions.add(observation.provenance.session);
+      candidates.set(match.id, sessions);
+      slots.set(match.index, candidates);
     }
   }
 
-  const ordered = (kind: ObjectiveKind) =>
-    [...indexById[kind]].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+  const pick = (candidates: Map<number, Set<string>>) =>
+    [...candidates].sort((a, b) => b[1].size - a[1].size || a[0] - b[0])[0][0];
+
+  const ordered = (kind: ObjectiveKind) => {
+    const ids = [...sessionsBySlot[kind]].sort((a, b) => a[0] - b[0]).map(([, candidates]) => pick(candidates));
+    return [...new Set(ids)];
+  };
 
   const creatures = ordered("monster");
   const objects = ordered("object");
