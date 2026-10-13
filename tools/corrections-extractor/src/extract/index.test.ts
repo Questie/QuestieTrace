@@ -94,7 +94,7 @@ describe("extractAll (quest/item/object entities)", () => {
         "1": [{ t: 4, tp: 4, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }],
       },
       GetLootSlotInfo: {
-        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 6: true, 7: 96659, n: 8 } }],
+        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 7: true, n: 10 } }],
       },
       GetTitleText: [{ t: 3, tp: 3, v: "A Threat Within" }],
       GetLocale: { player: [{ t: 3, tp: 3, v: "enUS" }] },

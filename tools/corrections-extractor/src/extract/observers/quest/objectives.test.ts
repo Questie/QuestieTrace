@@ -37,7 +37,7 @@ describe("observeObjectives", () => {
       },
       GetLootSlotLink: { "1": [{ t: 4, tp: 4, v: itemLink }] },
       GetLootSlotInfo: {
-        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 6: true, 7: 33, n: 8 } }],
+        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 7: true, n: 10 } }],
       },
     });
 
@@ -61,7 +61,7 @@ describe("observeObjectives", () => {
         "2": [{ t: 5, tp: 5, v: itemLink }],
       },
       GetLootSlotInfo: {
-        "2": [{ t: 5, tp: 5, v: { 2: "Tough Wolf Meat", 6: true, 7: 99, n: 8 } }],
+        "2": [{ t: 5, tp: 5, v: { 2: "Tough Wolf Meat", 7: true, n: 10 } }],
       },
     });
 
@@ -199,19 +199,41 @@ describe("observeObjectives", () => {
     expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(299);
   });
 
-  it("should reject item evidence whose loot-slot quest id differs from the quest (authoritative attribution)", () => {
+  it("should not match an item that starts the quest itself to that quest's objective", () => {
     const session = makeSession({
       "C_QuestLog.GetQuestObjectives": {
         "33": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
       },
       GetLootSlotLink: { "1": [{ t: 4, tp: 4, v: itemLink }] },
       GetLootSlotInfo: {
-        // Loot slot reports quest 99, not 33 - only the quest-99 item remains.
-        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 6: true, 7: 99, n: 8 } }],
+        // GetLootSlotInfo: 7 = isQuestItem, 8 = questID of the quest the item starts, 9 = isActive.
+        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 7: false, 8: 33, 9: false, n: 10 } }],
       },
     });
 
     expect(observeObjectives(session)).toEqual([]);
+  });
+
+  it("should prefer a quest item over a same-named quest starter item with a lower id", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "86613": [{ t: 3, tp: 3, v: [{ type: "item", text: "0/6 Excavation Tools" }] }],
+      },
+      GetLootSlotLink: {
+        "1": [
+          { t: 1, tp: 1, v: "|cnIQ1:|Hitem:278049::::::::15:1487:::::::::|h[Excavation Tools]|h|r" },
+          { t: 5, tp: 5, v: "|cnIQ1:|Hitem:278398::::::::15:1487:::::::::|h[Excavation Tools]|h|r" },
+        ],
+      },
+      GetLootSlotInfo: {
+        "1": [
+          { t: 1, tp: 1, v: { 2: "Excavation Tools", 7: false, 8: 86000, 9: false, n: 10 } },
+          { t: 5, tp: 5, v: { 2: "Excavation Tools", 7: true, n: 10 } },
+        ],
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(278398);
   });
 
   it("should support legacy flat loot streams and traces without GetLocale", () => {
@@ -220,7 +242,7 @@ describe("observeObjectives", () => {
         "33": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
       },
       GetLootSlotLink: [{ t: 4, tp: 4, v: itemLink }],
-      GetLootSlotInfo: [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 5: true, 6: 33, n: 8 } }],
+      GetLootSlotInfo: [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 7: true, n: 10 } }],
     });
 
     expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(750);

@@ -61,16 +61,17 @@ interface Evidence {
   name: string;
   id: number;
   /**
-   * Best-effort quest attribution for this piece of evidence. Provenance
-   * differs by evidence kind: for items this is the quest id `GetLootSlotInfo`
-   * itself reports for the loot slot and is authoritative in
-   * `candidateForObjective` (mismatched item evidence is rejected); for units
-   * it is whatever `GetQuestID()` (quest-dialog frame) last reported at the
-   * interaction's timestamp - a much weaker signal, since it reflects "what
-   * dialog was open", not "what quest this kill was for" - so it is used only
-   * as a same-quest tie-break and never rejects evidence.
+   * Whether this evidence should win over same-named alternatives for the
+   * quest. Items: `GetLootSlotInfo` flags it as a quest item. Units: the
+   * `GetQuestID()` (quest-dialog frame) last reported at the interaction's
+   * timestamp - a weak "what dialog was open" signal - matches the quest.
    */
-  questId: number | null;
+  preferredFor: (questId: number) => boolean;
+  /**
+   * Quest this item starts, from `GetLootSlotInfo`. A starter item is never
+   * the objective item of the quest it starts, even if the names match.
+   */
+  startsQuestId: number | null;
 }
 
 function normalizeName(name: string): string {
@@ -144,13 +145,17 @@ function collectItemEvidence(session: SessionRecord): Evidence[] {
       const parsed = parseItemLink(linkEntry.v);
       if (!parsed) continue;
 
+      // GetLootSlotInfo returns (icon, name, quantity, currencyID, quality,
+      // locked, isQuestItem, questID, isActive); questID is the quest the item starts.
       const info = infoEntries.length > 0 ? emulate(valueAt(infoEntries, linkEntry.t)) : null;
-      const questId = Array.isArray(info) && typeof info[6] === "number" ? info[6] : null;
+      const isQuestItem = Array.isArray(info) && info[6] === true;
+      const startsQuestId = Array.isArray(info) && typeof info[7] === "number" && info[7] !== 0 ? info[7] : null;
       evidence.push({
         kind: "item",
         name: parsed.name,
         id: parsed.itemID,
-        questId: questId && questId !== 0 ? questId : null,
+        preferredFor: () => isQuestItem,
+        startsQuestId,
       });
     }
   }
@@ -171,11 +176,13 @@ function collectUnitEvidence(session: SessionRecord): Evidence[] {
       const name = unitNameAt(session, token, entry.t);
       if (!name) continue;
 
+      const dialogQuestId = questIdAt(session, entry.t);
       evidence.push({
         kind: parsed.kind === "npc" ? "npc" : "object",
         name,
         id: parsed.id,
-        questId: questIdAt(session, entry.t),
+        preferredFor: (questId) => dialogQuestId === questId,
+        startsQuestId: null,
       });
     }
   }
@@ -183,28 +190,23 @@ function collectUnitEvidence(session: SessionRecord): Evidence[] {
 }
 
 /**
- * Find the best evidence match by exact normalized name. Item quest IDs come
- * from the loot slot itself and are authoritative: item evidence attributed to
- * a different quest is rejected. Unit quest IDs are a weak "what dialog was
- * open" signal and are never used to reject evidence - same-quest evidence is
- * merely preferred, with remaining ties broken by the lowest id for
- * determinism.
+ * Find the best evidence match by exact normalized name. Items that start the
+ * quest are rejected. Preferred evidence (see `Evidence.preferredFor`) wins,
+ * with remaining ties broken by the lowest id for determinism.
  */
 function candidateForObjective(objective: { kind: ObjectiveKind; name: string }, evidence: Evidence[], questId: number): number | null {
-  let best: { id: number; sameQuest: boolean } | null = null;
+  let best: { id: number; preferred: boolean } | null = null;
 
   const evidenceKind = objective.kind === "item" ? "item" : objective.kind === "monster" ? "npc" : "object";
   const wantedName = normalizeName(objective.name);
   for (const item of evidence) {
     if (item.kind !== evidenceKind) continue;
     if (normalizeName(item.name) !== wantedName) continue;
-    // Only loot-slot attribution is authoritative; mismatched item evidence is
-    // rejected outright, mismatched unit evidence only loses the tie-break.
-    if (item.kind === "item" && item.questId !== null && item.questId !== questId) continue;
+    if (item.startsQuestId === questId) continue;
 
-    const sameQuest = item.questId === questId;
-    if (!best || (sameQuest && !best.sameQuest) || (sameQuest === best.sameQuest && item.id < best.id)) {
-      best = { id: item.id, sameQuest };
+    const preferred = item.preferredFor(questId);
+    if (!best || (preferred && !best.preferred) || (preferred === best.preferred && item.id < best.id)) {
+      best = { id: item.id, preferred };
     }
   }
 
