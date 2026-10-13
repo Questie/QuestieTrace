@@ -68,8 +68,8 @@ interface Evidence {
    */
   preferredFor: (questId: number) => boolean;
   /**
-   * Quest this item starts, from `GetLootSlotInfo`. A starter item is never
-   * the objective item of the quest it starts, even if the names match.
+   * Quest this item starts, from `GetLootSlotInfo`. Such an item ranks below
+   * same-named alternatives for that quest, but remains a valid fallback.
    */
   startsQuestId: number | null;
 }
@@ -190,23 +190,23 @@ function collectUnitEvidence(session: SessionRecord): Evidence[] {
 }
 
 /**
- * Find the best evidence match by exact normalized name. Items that start the
- * quest are rejected. Preferred evidence (see `Evidence.preferredFor`) wins,
- * with remaining ties broken by the lowest id for determinism.
+ * Find the best evidence match by exact normalized name, ranked: preferred
+ * evidence (see `Evidence.preferredFor`), then other evidence, then items that
+ * start the quest. Starter items stay eligible since some quests ask to bring
+ * back the very item that started them. Remaining ties go to the lowest id.
  */
 function candidateForObjective(objective: { kind: ObjectiveKind; name: string }, evidence: Evidence[], questId: number): number | null {
-  let best: { id: number; preferred: boolean } | null = null;
+  let best: { id: number; rank: number } | null = null;
 
   const evidenceKind = objective.kind === "item" ? "item" : objective.kind === "monster" ? "npc" : "object";
   const wantedName = normalizeName(objective.name);
   for (const item of evidence) {
     if (item.kind !== evidenceKind) continue;
     if (normalizeName(item.name) !== wantedName) continue;
-    if (item.startsQuestId === questId) continue;
 
-    const preferred = item.preferredFor(questId);
-    if (!best || (preferred && !best.preferred) || (preferred === best.preferred && item.id < best.id)) {
-      best = { id: item.id, preferred };
+    const rank = item.preferredFor(questId) ? 2 : item.startsQuestId === questId ? 0 : 1;
+    if (!best || rank > best.rank || (rank === best.rank && item.id < best.id)) {
+      best = { id: item.id, rank };
     }
   }
 

@@ -199,7 +199,7 @@ describe("observeObjectives", () => {
     expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(299);
   });
 
-  it("should not match an item that starts the quest itself to that quest's objective", () => {
+  it("should fall back to an item that starts the quest when no other item matches", () => {
     const session = makeSession({
       "C_QuestLog.GetQuestObjectives": {
         "33": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
@@ -211,7 +211,29 @@ describe("observeObjectives", () => {
       },
     });
 
-    expect(observeObjectives(session)).toEqual([]);
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(750);
+  });
+
+  it("should prefer any other same-named item over one that starts the quest", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "86613": [{ t: 3, tp: 3, v: [{ type: "item", text: "0/6 Excavation Tools" }] }],
+      },
+      GetLootSlotLink: {
+        "1": [
+          { t: 1, tp: 1, v: "|cnIQ1:|Hitem:278049::::::::15:1487:::::::::|h[Excavation Tools]|h|r" },
+          { t: 5, tp: 5, v: "|cnIQ1:|Hitem:278398::::::::15:1487:::::::::|h[Excavation Tools]|h|r" },
+        ],
+      },
+      GetLootSlotInfo: {
+        "1": [
+          { t: 1, tp: 1, v: { 2: "Excavation Tools", 7: false, 8: 86613, 9: false, n: 10 } },
+          { t: 5, tp: 5, v: { 2: "Excavation Tools", 7: false, n: 10 } },
+        ],
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(278398);
   });
 
   it("should prefer a quest item over a same-named quest starter item with a lower id", () => {
