@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { loadTraceFile } from "./core/loader";
+import type { SessionRecord } from "./core/types";
 import { createAccumulator, finalize, foldSessions } from './extract';
 
 const OUTPUT_FILES = {
@@ -24,11 +25,17 @@ export interface ExtractMeta {
   generatedAt: string;
 }
 
-export function extractCorrections(
+export interface FoldResult {
+  loadedFileNames: string[];
+  skippedFiles: ExtractMeta["skippedFiles"];
+}
+
+/** Loads every trace file in `traceDir` one at a time and passes its sessions to `fold`. */
+export function foldTraceFiles(
   traceDir: string,
-  outputDir: string,
-  log: (message: string) => void = console.log,
-): ExtractMeta {
+  fold: (sessions: SessionRecord[]) => void,
+  log: (message: string) => void,
+): FoldResult {
   if (!existsSync(traceDir)) {
     throw new Error(`Trace directory not found: ${traceDir}`);
   }
@@ -39,19 +46,29 @@ export function extractCorrections(
     throw new Error(`No .lua trace files found in ${traceDir}`);
   }
 
-  const acc = createAccumulator();
   const loadedFileNames: string[] = [];
   const skippedFiles: ExtractMeta["skippedFiles"] = [];
 
   fileNames.forEach((fileName, index) => {
     try {
-      foldSessions(acc, loadTraceFile(join(traceDir, fileName)).sessions);
+      fold(loadTraceFile(join(traceDir, fileName)).sessions);
       loadedFileNames.push(fileName);
     } catch (e) {
       skippedFiles.push({ name: fileName, error: String(e) });
     }
     log(`[${index + 1}/${fileNames.length}] ${fileName}`);
   });
+
+  return { loadedFileNames, skippedFiles };
+}
+
+export function extractCorrections(
+  traceDir: string,
+  outputDir: string,
+  log: (message: string) => void = console.log,
+): ExtractMeta {
+  const acc = createAccumulator();
+  const { loadedFileNames, skippedFiles } = foldTraceFiles(traceDir, (sessions) => foldSessions(acc, sessions), log);
 
   const now = new Date();
   const bundle = finalize(acc, { sourceFileNames: loadedFileNames, now });
