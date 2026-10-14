@@ -1,28 +1,26 @@
 // questKeys.name - Questie field 1.
-// Only names from enUS locale are extracted. Other locales will be handled separately.
+// observeName keeps enUS names only; observeLocalizedName keeps every locale (for the lookup export).
 
 import { getLocaleAt, questInfoTitleAt, questTitleAt } from "../../probes";
 import { getParamKeys, getStream } from "../../../core/emulator";
-import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
+import { onlyLocale, sessionLabel, type FieldObserver, type Localized, type Observation } from "../../observation";
 import { questEncounters } from "./_encounters";
 
-export const observeName: FieldObserver<string> = (session) => {
-  const observations: Observation<string>[] = [];
+export const observeLocalizedName: FieldObserver<Localized<string>> = (session) => {
+  const observations: Observation<Localized<string>>[] = [];
   const questIDsWithDialogTitle = new Set<number>();
 
   // Quest-dialog titles are the most direct source and retain precedence over
   // the quest-log API when both are available for the same quest.
   for (const encounter of questEncounters(session)) {
     const locale = getLocaleAt(session, encounter.t);
-    if (locale !== "enUS") {
-      continue; // Skip non-enUS names
-    }
+    if (locale === null) continue;
     const title = questTitleAt(session, encounter.t);
     if (title) {
       questIDsWithDialogTitle.add(encounter.questID);
       observations.push({
         entityId: encounter.questID,
-        value: title,
+        value: { locale, value: title },
         confidence: "high",
         provenance: { session: sessionLabel(session), t: encounter.t },
       });
@@ -42,13 +40,13 @@ export const observeName: FieldObserver<string> = (session) => {
     const stream = getStream(session, "C_QuestLog.GetInfo", questIdKey) ?? [];
     for (const entry of stream) {
       const locale = getLocaleAt(session, entry.t);
-      if (locale !== "enUS") continue; // Skip non-enUS names
+      if (locale === null) continue;
 
       const title = questInfoTitleAt(session, questID, entry.t);
       if (title) {
         observations.push({
           entityId: questID,
-          value: title,
+          value: { locale, value: title },
           confidence: "high",
           provenance: { session: sessionLabel(session), t: entry.t },
         });
@@ -58,3 +56,5 @@ export const observeName: FieldObserver<string> = (session) => {
 
   return observations;
 };
+
+export const observeName: FieldObserver<string> = (session) => onlyLocale(observeLocalizedName(session), "enUS");

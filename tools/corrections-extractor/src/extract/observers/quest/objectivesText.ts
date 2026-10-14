@@ -22,7 +22,7 @@
 
 import { emulate, getParamKeys, getStream } from "../../../core/emulator";
 import { getLocaleAt } from "../../probes";
-import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
+import { onlyLocale, sessionLabel, type FieldObserver, type Localized, type Observation } from "../../observation";
 
 /** Questie's objectivesText value: the summary split into lines. */
 export type QuestObjectivesTextValue = string[];
@@ -52,8 +52,8 @@ function readObjectivesText(value: unknown): string | null {
   return typeof text === "string" ? text : null;
 }
 
-export const observeObjectivesText: FieldObserver<QuestObjectivesTextValue> = (session) => {
-  const observations: Observation<QuestObjectivesTextValue>[] = [];
+export const observeLocalizedObjectivesText: FieldObserver<Localized<QuestObjectivesTextValue>> = (session) => {
+  const observations: Observation<Localized<QuestObjectivesTextValue>>[] = [];
 
   const root = session.functions["GetQuestLogQuestText"];
   if (!root || Array.isArray(root)) return observations;
@@ -64,10 +64,8 @@ export const observeObjectivesText: FieldObserver<QuestObjectivesTextValue> = (s
 
     const stream = getStream(session, "GetQuestLogQuestText", questIdKey) ?? [];
     for (const entry of stream) {
-      const locale = getLocaleAt(session, entry.t);
-      // Older traces may not contain GetLocale. Explicit non-enUS sessions are
-      // still rejected; absent locale is treated as the legacy enUS default.
-      if (locale !== null && locale !== "enUS") continue;
+      // Older traces may not contain GetLocale; absent locale is treated as the legacy enUS default.
+      const locale = getLocaleAt(session, entry.t) ?? "enUS";
 
       const text = readObjectivesText(entry.v);
       if (text === null) continue;
@@ -77,7 +75,7 @@ export const observeObjectivesText: FieldObserver<QuestObjectivesTextValue> = (s
 
       observations.push({
         entityId: questID,
-        value: lines,
+        value: { locale, value: lines },
         // The objectives text is read straight out of the quest log API.
         confidence: "high",
         provenance: { session: sessionLabel(session), t: entry.t },
@@ -87,3 +85,6 @@ export const observeObjectivesText: FieldObserver<QuestObjectivesTextValue> = (s
 
   return observations;
 };
+
+export const observeObjectivesText: FieldObserver<QuestObjectivesTextValue> = (session) =>
+  onlyLocale(observeLocalizedObjectivesText(session), "enUS");

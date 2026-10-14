@@ -3,16 +3,16 @@
 // Unlike npc/object, item id + name both come from the same signal - a
 // `GetLootSlotLink(slot)` item hyperlink (see Modules/Trackers/Loot.lua) - so no
 // GUID parsing or time correlation with a separate name stream is needed.
-// Only names from enUS locale are extracted. Other locales will be handled separately.
+// observeName keeps enUS names only; observeLocalizedName keeps every locale (for the lookup export).
 
 import { getParamKeys, getStream } from "../../../core/emulator";
 import type { SessionRecord } from "../../../core/types";
 import { getLocaleAt } from "../../probes";
 import { parseItemLink } from "../../itemLink";
-import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
+import { onlyLocale, sessionLabel, type FieldObserver, type Localized, type Observation } from "../../observation";
 
-export const observeName: FieldObserver<string> = (session) => {
-  const observations: Observation<string>[] = [];
+export const observeLocalizedName: FieldObserver<Localized<string>> = (session) => {
+  const observations: Observation<Localized<string>>[] = [];
   const linkStream = session.functions["GetLootSlotLink"];
   if (!linkStream) return observations;
 
@@ -22,14 +22,12 @@ export const observeName: FieldObserver<string> = (session) => {
     for (const entry of entries) {
       if (typeof entry.v !== "string") continue;
       const locale = getLocaleAt(session, entry.t);
-      if (locale !== "enUS") {
-        continue; // Skip non-enUS names
-      }
+      if (locale === null) continue;
       const parsed = parseItemLink(entry.v);
       if (!parsed) continue;
       observations.push({
         entityId: parsed.itemID,
-        value: parsed.name,
+        value: { locale, value: parsed.name },
         confidence: "high",
         provenance: { session: sessionLabel(session), t: entry.t },
       });
@@ -37,3 +35,5 @@ export const observeName: FieldObserver<string> = (session) => {
   }
   return observations;
 };
+
+export const observeName: FieldObserver<string> = (session) => onlyLocale(observeLocalizedName(session), "enUS");
