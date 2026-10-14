@@ -50,7 +50,7 @@ import { observeObjectivesText } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 import {mergeRequiredLevel} from './observers/quest/requiredLevel';
 
-const MAX_IDS = {
+export const MAX_IDS = {
     npc: 18199,
     quest: 9665,
     item: 25818,
@@ -101,6 +101,12 @@ function getInterfaceVersion(session: SessionRecord): number | undefined {
 function isForeverBuild(interfaceVersion: number | undefined): boolean {
   if (interfaceVersion === undefined) return false;
   return String(interfaceVersion).startsWith("16");
+}
+
+/** Sessions without GetBuildInfo count as Forever (see foldSessions). */
+export function isForeverSession(session: SessionRecord): boolean {
+  const version = getInterfaceVersion(session);
+  return version === undefined || isForeverBuild(version);
 }
 
 /** Fields using the default scalar merge: only a per-value summary is kept. */
@@ -173,8 +179,7 @@ export function createAccumulator(): ExtractAccumulator {
  */
 export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[]): void {
   for (const session of sessions) {
-    const version = getInterfaceVersion(session);
-    if (version !== undefined && !isForeverBuild(version)) continue;
+    if (!isForeverSession(session)) continue;
 
     acc.sessionCount++;
     for (const key of Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]) {
