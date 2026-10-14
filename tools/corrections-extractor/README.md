@@ -36,6 +36,14 @@ The results are written to `output/`:
 
 The trace-analyzer's Extract tab shows these files for copy/download.
 
+### Translations
+
+```sh
+npm run extract:lookups
+```
+
+Writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Like the corrections, only IDs above the known Classic maximum are exported. NPC subnames are not traced and are always `nil`.
+
 ## How it works
 
 1. `src/core/loader.ts` parses a trace file via `lua-state`.

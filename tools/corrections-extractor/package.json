@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "extract": "tsx src/cli.ts",
+    "extract:lookups": "tsx src/lookups-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

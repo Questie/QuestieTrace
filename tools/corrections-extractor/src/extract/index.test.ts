@@ -556,6 +556,20 @@ describe("foldSessions + finalize (incremental extraction)", () => {
     expect(finalize(acc, options).npcFixes).not.toContain("TBC Only");
   });
 
+  it("should leave the accumulator untouched when an observer throws for a later session", () => {
+    const broken = makeForeverSession({});
+    broken.functions = new Proxy(broken.functions, {
+      get(target, key) {
+        if (key === "GetLootSlotLink") throw new Error("corrupt stream");
+        return Reflect.get(target, key);
+      },
+    });
+    const acc = createAccumulator();
+
+    expect(() => foldSessions(acc, [...fileA, broken])).toThrow("corrupt stream");
+    expect(acc).toEqual(createAccumulator());
+  });
+
   it("should count each unnamed session as a separate objective vote", () => {
     const stormhideSession = (guid: string): SessionRecord => ({
       ...westfallSession({

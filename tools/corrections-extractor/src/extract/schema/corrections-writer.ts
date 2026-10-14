@@ -79,7 +79,7 @@ function isFieldExcluded(fieldName: string): boolean {
  * characters (e.g. the embedded \r\n the WoW client returns for some NPC names
  * and gossip text) that would otherwise break the emitted file. Lua 5.1 has no
  * \xHH escape, so unmapped control chars use zero-padded decimal form. */
-function luaString(value: string): string {
+export function luaString(value: string): string {
   const escaped = value
     .replace(/[\\"]/g, "\\$&")
     .replace(/[\b\f\n\r\t\v]/g, (ch) => {
