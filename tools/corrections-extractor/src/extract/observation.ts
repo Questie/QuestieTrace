@@ -34,3 +34,16 @@ export type FieldObserver<T> = (session: import("../core/types").SessionRecord) 
 export function sessionLabel(session: import("../core/types").SessionRecord): string {
   return session.name ?? "(unnamed session)";
 }
+
+/** A value observed under a specific client locale (`GetLocale()`). */
+export interface Localized<T> {
+  locale: string;
+  value: T;
+}
+
+/** Keeps only the observations made under `locale`, unwrapping their values. */
+export function onlyLocale<T>(observations: Observation<Localized<T>>[], locale: string): Observation<T>[] {
+  return observations
+    .filter((obs) => obs.value.locale === locale)
+    .map((obs) => ({ ...obs, value: obs.value.value }));
+}

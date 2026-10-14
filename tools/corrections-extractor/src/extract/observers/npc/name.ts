@@ -1,22 +1,20 @@
 // npcKeys.name - Questie field 1.
-// Only names from enUS locale are extracted. Other locales will be handled separately.
+// observeName keeps enUS names only; observeLocalizedName keeps every locale (for the lookup export).
 
 import { getLocaleAt, unitNameAt } from "../../probes";
-import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
+import { onlyLocale, sessionLabel, type FieldObserver, type Localized, type Observation } from "../../observation";
 import { npcEncounters } from "./_encounters";
 
-export const observeName: FieldObserver<string> = (session) => {
-  const observations: Observation<string>[] = [];
+export const observeLocalizedName: FieldObserver<Localized<string>> = (session) => {
+  const observations: Observation<Localized<string>>[] = [];
   for (const encounter of npcEncounters(session)) {
     const locale = getLocaleAt(session, encounter.t);
-    if (locale !== "enUS") {
-      continue; // Skip non-enUS names
-    }
+    if (locale === null) continue;
     const name = unitNameAt(session, encounter.token, encounter.t);
     if (name) {
       observations.push({
         entityId: encounter.npcID,
-        value: name,
+        value: { locale, value: name },
         confidence: "high",
         provenance: { session: sessionLabel(session), t: encounter.t },
       });
@@ -24,3 +22,5 @@ export const observeName: FieldObserver<string> = (session) => {
   }
   return observations;
 };
+
+export const observeName: FieldObserver<string> = (session) => onlyLocale(observeLocalizedName(session), "enUS");
