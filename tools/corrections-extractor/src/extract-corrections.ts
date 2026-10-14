@@ -30,7 +30,10 @@ export interface FoldResult {
   skippedFiles: ExtractMeta["skippedFiles"];
 }
 
-/** Loads every trace file in `traceDir` one at a time and passes its sessions to `fold`. */
+/**
+ * Loads every trace file in `traceDir` one at a time and passes its sessions to `fold`.
+ * `fold` must be all-or-nothing, so a skipped file contributes no data.
+ */
 export function foldTraceFiles(
   traceDir: string,
   fold: (sessions: SessionRecord[]) => void,
@@ -50,11 +53,19 @@ export function foldTraceFiles(
   const skippedFiles: ExtractMeta["skippedFiles"] = [];
 
   fileNames.forEach((fileName, index) => {
+    let sessions: SessionRecord[] | undefined;
     try {
-      fold(loadTraceFile(join(traceDir, fileName)).sessions);
-      loadedFileNames.push(fileName);
+      sessions = loadTraceFile(join(traceDir, fileName)).sessions;
     } catch (e) {
-      skippedFiles.push({ name: fileName, error: String(e) });
+      skippedFiles.push({ name: fileName, error: `Failed to load: ${String(e)}` });
+    }
+    if (sessions) {
+      try {
+        fold(sessions);
+        loadedFileNames.push(fileName);
+      } catch (e) {
+        skippedFiles.push({ name: fileName, error: `Failed to extract: ${String(e)}` });
+      }
     }
     log(`[${index + 1}/${fileNames.length}] ${fileName}`);
   });

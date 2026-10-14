@@ -176,18 +176,24 @@ export function createAccumulator(): ExtractAccumulator {
  * GetBuildInfo are INCLUDED (they might be early Forever beta traces with
  * valuable data) - any Classic IDs they contain are filtered out by
  * filterBelowMax in finalize.
+ *
+ * All observers run before anything is added, so a throwing observer leaves
+ * `acc` untouched.
  */
 export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[]): void {
-  for (const session of sessions) {
-    if (!isForeverSession(session)) continue;
+  const staged = sessions.filter(isForeverSession).map((session) => ({
+    scalars: (Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]).map((key) => [key, SCALAR_OBSERVERS[key](session)] as const),
+    observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session)] as const),
+  }));
 
+  for (const session of staged) {
     acc.sessionCount++;
-    for (const key of Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]) {
-      addToScalarSummary(acc.scalars[key] as ScalarSummary<unknown>, SCALAR_OBSERVERS[key](session));
+    for (const [key, observations] of session.scalars) {
+      addToScalarSummary(acc.scalars[key] as ScalarSummary<unknown>, observations as Observation<unknown>[]);
     }
-    for (const key of Object.keys(OBSERVERS) as ObserverKey[]) {
+    for (const [key, observations] of session.observations) {
       const target = acc.observations[key] as unknown[];
-      for (const observation of OBSERVERS[key](session)) {
+      for (const observation of observations) {
         observation.provenance.sessionKey = acc.sessionCount;
         target.push(observation);
       }
