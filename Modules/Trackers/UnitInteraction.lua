@@ -58,6 +58,17 @@ local function SafePackedCall(fn, ...)
   return true, out
 end
 
+---@param token string
+---@param guid string
+---@return boolean
+local function IsPlayerControlled(token, guid)
+  if guid:sub(1, 4) == "Pet-" then
+    return true
+  end
+  local ok, controlled = SafeScalarCall(UnitPlayerControlled, token)
+  return ok and controlled == true
+end
+
 --- Sample all six streams (UnitGUID + UnitName for each token).
 ---@param t number Session-relative GetTime()
 ---@param tp number Session-relative GetTimePreciseSec()
@@ -77,6 +88,15 @@ local function SampleAll(t, tp)
       ---@type boolean
       local allowed = guid == nil or kind == "npc" or kind == "object" or kind == "item"
 
+      -- Player pets and minions (hunter pets, warlock demons, ...) are not
+      -- world NPCs and hunter pets carry player-chosen names. Record them as
+      -- "no unit" so the token's previous NPC doesn't appear to linger.
+      ---@type boolean
+      local playerControlled = allowed and guid ~= nil and IsPlayerControlled(token, guid)
+      if playerControlled then
+        guid = nil
+      end
+
       if allowed then
         ---@type FunctionStreamEntry[]
         local guidStream = guidStreams[token]
@@ -88,7 +108,13 @@ local function SampleAll(t, tp)
 
         -- UnitName (packed actual returns). Do not synthesize nil from UnitExists;
         -- the token itself is mutable, so event-synchronous observations are the trace.
-        local nameOk, nameVal = SafePackedCall(UnitName, token)
+        local nameOk, nameVal
+        if playerControlled then
+          -- Same empty result UnitName returns for a token without a unit.
+          nameOk, nameVal = true, { n = 2 }
+        else
+          nameOk, nameVal = SafePackedCall(UnitName, token)
+        end
         if nameOk and nameVal then
           ---@type FunctionStreamEntry[]
           local nameStream = nameStreams[token]
