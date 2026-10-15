@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../core/types";
 import { createAccumulator, extractAll, finalize, foldSessions } from "./index";
-import { apiSample, makeSession, traceEvent } from "../test/fixtures";
+import { apiSample, creatureGuid, makeSession, traceEvent } from "../test/fixtures";
 
 /** Creates a session with a Forever interfaceVersion (16001) */
 function makeForeverSession(functions: SessionRecord["functions"]): SessionRecord {
@@ -338,6 +338,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
         target: [apiSample(2162.145, 2162.1480881, { 1: "Oura Stormspinner", 2: "", n: 2 })],
       },
     });
+    session.events.push(traceEvent("GOSSIP_SHOW", 2162.777, 2162.779));
 
     const { questFixes, npcFixes } = extractAll([session], {
       sourceFileNames: ["test.lua"],
@@ -563,5 +564,49 @@ describe("foldSessions + finalize (incremental extraction)", () => {
     );
 
     expect(questFixes).toContain("[questKeys.objectives] = {{{200}}},");
+  });
+});
+
+describe("extractAll (quest-giver correlation)", () => {
+  const relations: Array<{ action: string; gossip: string; questField: string; npcField: string }> = [
+    { action: "QUEST_ACCEPTED", gossip: "C_GossipInfo.GetAvailableQuests", questField: "startedBy_add", npcField: "questStarts_add" },
+    { action: "QUEST_TURNED_IN", gossip: "C_GossipInfo.GetActiveQuests", questField: "finishedBy_add", npcField: "questEnds_add" },
+  ];
+
+  it.each(relations)("should export only the preferred giver on both sides of $questField", ({ action, questField, npcField }) => {
+    const session = makeSession({
+      UnitGUID: {
+        questnpc: [apiSample(3, 3.002, creatureGuid(276171))],
+        npc: [apiSample(3, 3.002, creatureGuid(276172))],
+      },
+    });
+    session.events.push(traceEvent(action, 3, 3.001, 99196));
+
+    const output = extractAll([session], { sourceFileNames: [], now: new Date(0) });
+    expect(output.questFixes).toContain(`[questKeys.${questField}] = {{276171}}`);
+    expect(output.npcFixes).toContain(`[npcKeys.${npcField}] = {99196}`);
+    expect(output.questFixes).not.toContain("276172");
+    expect(output.npcFixes).not.toContain("276172");
+  });
+
+  it.each(relations)("should export a replayed gossip list for both NPCs on $questField", ({ gossip, questField, npcField }) => {
+    const session = makeSession({
+      UnitGUID: {
+        npc: [
+          apiSample(3, 3.002, creatureGuid(276171)),
+          apiSample(3, 3.012, creatureGuid(276172)),
+        ],
+      },
+      [gossip]: [apiSample(3, 3.002, [{ questID: 99196 }])],
+    });
+    session.events.push(
+      traceEvent("GOSSIP_SHOW", 3, 3.001),
+      traceEvent("GOSSIP_SHOW", 3, 3.011),
+    );
+
+    const output = extractAll([session], { sourceFileNames: [], now: new Date(0) });
+    expect(output.questFixes).toContain(`[questKeys.${questField}] = {{276171,276172}}`);
+    expect(output.npcFixes).toMatch(new RegExp(`\\[276171\\] = \\{[^}]*\\[npcKeys\\.${npcField}\\] = \\{99196\\}`));
+    expect(output.npcFixes).toMatch(new RegExp(`\\[276172\\] = \\{[^}]*\\[npcKeys\\.${npcField}\\] = \\{99196\\}`));
   });
 });
