@@ -1,34 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { SessionRecord } from "../../../core/types";
 import { observeStartedBy, mergeStartedBy } from "./startedBy";
-
-function makeSession(functions: SessionRecord["functions"], events: SessionRecord["events"] = []): SessionRecord {
-  return {
-    schemaVersion: 9,
-    name: "test-session",
-    startedAt: 0,
-    startedAtPrecise: 0,
-    stoppedAt: 100,
-    stoppedAtPrecise: 100,
-    duration: 100,
-    durationPrecise: 100,
-    events,
-    functions,
-    functionsDelta: {},
-  };
-}
+import { apiSample, creatureGuid, makeSession, traceEvent } from "../../../test/fixtures";
 
 describe("observeStartedBy", () => {
   it("should capture a creature starter from questnpc GUID at QUEST_DETAIL time", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
@@ -45,13 +29,13 @@ describe("observeStartedBy", () => {
   it("should capture a creature starter from npc GUID when questnpc is absent", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          npc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
@@ -68,10 +52,10 @@ describe("observeStartedBy", () => {
   it("should capture an item starter from QUEST_DETAIL questStartItemID", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 750, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 750),
       ]
     );
 
@@ -88,13 +72,13 @@ describe("observeStartedBy", () => {
   it("should capture both creature and item starters for the same quest", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 750, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 750),
       ]
     );
 
@@ -108,10 +92,10 @@ describe("observeStartedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
-      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 96659, n: 1 } }]
+      [traceEvent("QUEST_ACCEPTED", 3, 3, 96659)]
     );
 
     expect(observeStartedBy(session)).toEqual([
@@ -127,12 +111,12 @@ describe("observeStartedBy", () => {
   it("should read the quest ID from argument 2 for the two-argument QUEST_ACCEPTED form", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 11111 }],
+        GetQuestID: [apiSample(3, 3, 11111)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
-      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 11111, 2: 96659, n: 2 } }]
+      [traceEvent("QUEST_ACCEPTED", 3, 3, 11111, 96659)]
     );
 
     expect(observeStartedBy(session)).toEqual([
@@ -150,9 +134,9 @@ describe("observeStartedBy", () => {
     (args) => {
       const session = makeSession(
         {
-          GetQuestID: [{ t: 3, tp: 3, v: 11111 }],
+          GetQuestID: [apiSample(3, 3, 11111)],
           UnitGUID: {
-            questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+            questnpc: [apiSample(3, 3, creatureGuid(197))],
           },
         },
         [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: args }]
@@ -166,19 +150,19 @@ describe("observeStartedBy", () => {
     const session = makeSession(
       {
         GetQuestID: [
-          { t: 3, tp: 3, v: 96659 },
-          { t: 10, tp: 10, v: 12345 },
+          apiSample(3, 3, 96659),
+          apiSample(10, 10, 12345),
         ],
         UnitGUID: {
           questnpc: [
-            { t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" },
-            { t: 10, tp: 10, v: "Creature-0-5208-0-7-200-000040" },
+            apiSample(3, 3, creatureGuid(197)),
+            apiSample(10, 10, "Creature-0-5208-0-7-200-000040"),
           ],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 12345, n: 1 } },
-        { t: 10, tp: 10, e: "QUEST_DETAIL", a: { 1: 67890, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 12345),
+        traceEvent("QUEST_DETAIL", 10, 10, 67890),
       ]
     );
 
@@ -193,13 +177,13 @@ describe("observeStartedBy", () => {
   it("should ignore target GUID (only questnpc and npc are used)", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          target: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
@@ -209,13 +193,13 @@ describe("observeStartedBy", () => {
   it("should ignore GameObject GUID on target token (only questnpc/npc used)", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+          target: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
@@ -228,13 +212,13 @@ describe("observeStartedBy", () => {
     // past relative to the anchor event - this must not be treated as stale.
     const session = makeSession(
       {
-        GetQuestID: [{ t: 60, tp: 60, v: 96659 }],
+        GetQuestID: [apiSample(60, 60, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 1, tp: 1, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(1, 1, creatureGuid(197))],
         },
       },
       [
-        { t: 60, tp: 60, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+        traceEvent("QUEST_DETAIL", 60, 60, 0),
       ]
     );
 
@@ -251,13 +235,13 @@ describe("observeStartedBy", () => {
   it("should ignore player GUIDs seen on quest tokens", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Player-5284-0362" }],
+          questnpc: [apiSample(3, 3, "Player-5284-0362")],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
@@ -266,9 +250,9 @@ describe("observeStartedBy", () => {
 
   it("should return no observations when no quest-start events exist", () => {
     const session = makeSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+      GetQuestID: [apiSample(3, 3, 96659)],
       UnitGUID: {
-        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        questnpc: [apiSample(3, 3, creatureGuid(197))],
       },
     });
 
@@ -279,11 +263,11 @@ describe("observeStartedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 12345, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 12345),
       ]
     );
 
@@ -294,16 +278,12 @@ describe("observeStartedBy", () => {
     const session = makeSession(
       {
         "C_GossipInfo.GetAvailableQuests": [
-          {
-            t: 3,
-            tp: 3,
-            v: [
-              { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
-            ],
-          },
+          apiSample(3, 3, [
+            { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
+          ]),
         ],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       []
@@ -323,17 +303,13 @@ describe("observeStartedBy", () => {
     const session = makeSession(
       {
         "C_GossipInfo.GetAvailableQuests": [
-          {
-            t: 3,
-            tp: 3,
-            v: [
-              { questID: 99196, title: "A Donation of Wool", repeatable: false },
-              { questID: 99197, title: "Another Quest", repeatable: false },
-            ],
-          },
+          apiSample(3, 3, [
+            { questID: 99196, title: "A Donation of Wool", repeatable: false },
+            { questID: 99197, title: "Another Quest", repeatable: false },
+          ]),
         ],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       []
@@ -349,17 +325,13 @@ describe("observeStartedBy", () => {
     const session = makeSession(
       {
         "C_GossipInfo.GetAvailableQuests": [
-          {
-            t: 3,
-            tp: 3,
-            v: [
-              { title: "No ID here", repeatable: false },
-              { questID: 0, title: "Zero ID", repeatable: false },
-            ],
-          },
+          apiSample(3, 3, [
+            { title: "No ID here", repeatable: false },
+            { questID: 0, title: "Zero ID", repeatable: false },
+          ]),
         ],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       []
@@ -371,20 +343,16 @@ describe("observeStartedBy", () => {
   it("should produce observations from both QUEST_DETAIL and gossip for the same quest", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         "C_GossipInfo.GetAvailableQuests": [
-          {
-            t: 3,
-            tp: 3,
-            v: [{ questID: 96659, title: "From Gossip", repeatable: false }],
-          },
+          apiSample(3, 3, [{ questID: 96659, title: "From Gossip", repeatable: false }]),
         ],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_DETAIL", a: { 1: 0, n: 1 } },
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
