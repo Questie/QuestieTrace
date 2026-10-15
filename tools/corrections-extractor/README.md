@@ -50,6 +50,16 @@ Writes Questie l10n lookup modules for every non-enUS locale found in the Foreve
 2. `foldSessions` (`src/extract/index.ts`) runs every observer in `src/extract/observers/` over the file's sessions and collects their observations. Fields with the default scalar merge only keep a per-value summary; fields with a custom merge (spawns, drops, ...) keep every observation.
 3. After the last file, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
 
+### Quest-giver correlation
+
+`startedBy` and `finishedBy` prefer a valid `questnpc` giver, using `npc` only as a fallback. NPC/object `questStarts` and `questEnds` are derived from those exported quest records so both sides agree.
+
+Quest and `GOSSIP_SHOW` lookups include synchronous API samples recorded after the raw event, but stop before the next raw event in the same frame. Ambiguous clock ties are skipped rather than resolved to an arbitrary giver. Recorded nil transitions clear earlier GUIDs; unchanged GUIDs remain usable during long dialogs.
+
+Gossip lists remain change-only. The extractor replays every `GOSSIP_SHOW` using the last observed available/active quest lists and the giver at that event. This recovers identical lists offered by different NPCs without changing recordings, including existing traces. An observed empty or nil list clears previous quests. No gossip relation is inferred without a `GOSSIP_SHOW` event.
+
+As with GUID replay, missing samples retain the last observed state. The format cannot distinguish an unchanged successful read from a failed probe. A failed list read at a different NPC can therefore reuse an earlier list incorrectly; this is an explicit limitation of last-observed-state inference, not proof of a successful read at every event.
+
 ## Development
 
 ```sh

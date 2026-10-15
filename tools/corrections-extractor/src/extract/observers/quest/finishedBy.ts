@@ -6,22 +6,20 @@
 // Sources:
 //   - QUEST_COMPLETE event: questId + GetQuestID() at same t (quest)
 //   - QUEST_TURNED_IN event: questId from event payload (arg 1)
-//   - C_GossipInfo.GetActiveQuests() snapshots: questID + UnitGUID("questnpc"/"npc") at snapshot t
-//     (Active = in log, can be turned in/finished at this NPC)
+//   - GOSSIP_SHOW: replay the last observed C_GossipInfo.GetActiveQuests() list
+//     against the current questnpc/npc (Active = in log, can be turned in here).
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → finisher
-//   - questnpc takes priority over npc (player may target something else while talking to quest NPC)
+//   - Use questnpc when it identifies a giver; npc is only a fallback, not a second giver.
 //
 // Custom merge: set-union per finisher type across all observations.
 
-import { getStream, valueAt } from "../../../core/emulator";
+import { AMBIGUOUS_INTERACTION, questEventLookup, type InteractionLookup } from "./_interaction";
 import { parseGuid } from "../../guid";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 import type { SessionRecord } from "../../../core/types";
 
-function questIdAt(session: SessionRecord, t: number): number | null {
-  const stream = getStream(session, "GetQuestID");
-  if (!stream) return null;
-  const v = valueAt(stream, t);
+function questIdAt(lookup: InteractionLookup): number | null {
+  const v = lookup("GetQuestID");
   return typeof v === "number" && v !== 0 ? v : null;
 }
 
@@ -59,15 +57,14 @@ function pushGuidObservations(
   session: SessionRecord,
   questID: number,
   t: number,
+  lookup: InteractionLookup,
   observations: Observation<FinishedByFinisher>[],
 ): void {
   const tokens = ["questnpc", "npc"] as const;
 
   for (const token of tokens) {
-    const stream = getStream(session, "UnitGUID", token);
-    if (!stream) continue;
-
-    const guid = valueAt(stream, t);
+    const guid = lookup("UnitGUID", token);
+    if (guid === AMBIGUOUS_INTERACTION) return;
 
     if (typeof guid !== "string") continue;
     const parsed = parseGuid(guid);
@@ -80,6 +77,7 @@ function pushGuidObservations(
         confidence: "medium",
         provenance: { session: sessionLabel(session), t },
       });
+      return;
     } else if (parsed.kind === "object" && parsed.id) {
       observations.push({
         entityId: questID,
@@ -87,6 +85,7 @@ function pushGuidObservations(
         confidence: "low",
         provenance: { session: sessionLabel(session), t },
       });
+      return;
     }
   }
 }
@@ -94,13 +93,30 @@ function pushGuidObservations(
 export const observeFinishedBy: FieldObserver<FinishedByFinisher> = (session) => {
   const observations: Observation<FinishedByFinisher>[] = [];
 
-  // 1) Walk events looking for quest-completion events
   for (let i = 0; i < session.events.length; i++) {
     const ev = session.events[i];
+    if (ev.e !== "QUEST_COMPLETE" && ev.e !== "QUEST_TURNED_IN" && ev.e !== "GOSSIP_SHOW") continue;
+    const lookup = questEventLookup(session, i);
+    if (!lookup) continue;
+
+    // Reuse the last observed list at each interaction, not just when its contents change.
+    // Missing samples retain last-observed state; failed probes cannot be distinguished.
+    if (ev.e === "GOSSIP_SHOW") {
+      const quests = lookup("C_GossipInfo.GetActiveQuests") as GossipQuestEntry[] | undefined;
+      if (Array.isArray(quests)) {
+        for (const quest of quests) {
+          if (typeof quest?.questID === "number" && quest.questID > 0) {
+            pushGuidObservations(session, quest.questID, ev.t, lookup, observations);
+          }
+        }
+      }
+      continue;
+    }
+
     let questID: number | null = null;
 
     if (ev.e === "QUEST_COMPLETE") {
-      questID = questIdAt(session, ev.t);
+      questID = questIdAt(lookup);
     } else if (ev.e === "QUEST_TURNED_IN") {
       const args = ev.a;
       if (args && typeof args.n === "number" && args.n >= 1) {
@@ -113,24 +129,7 @@ export const observeFinishedBy: FieldObserver<FinishedByFinisher> = (session) =>
 
     if (questID === null) continue;
 
-    pushGuidObservations(session, questID, ev.t, observations);
-  }
-
-  // 2) Gossip ACTIVE quests = quests in log that can be FINISHED (turned in) at this NPC
-  // (not Available quests - those are for start, see startedBy)
-  const activeStream = getStream(session, "C_GossipInfo.GetActiveQuests");
-  if (activeStream) {
-    for (const entry of activeStream) {
-      const questList = entry.v as GossipQuestEntry[] | undefined;
-      if (!Array.isArray(questList)) continue;
-
-      for (const q of questList) {
-        const questID = q.questID;
-        if (typeof questID !== "number" || questID === 0) continue;
-
-        pushGuidObservations(session, questID, entry.t, observations);
-      }
-    }
+    pushGuidObservations(session, questID, ev.t, lookup, observations);
   }
 
   return observations;

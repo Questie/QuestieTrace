@@ -5,25 +5,23 @@
 // Sources:
 //   - QUEST_DETAIL event: questStartItemID (item starter) + GetQuestID() at same t (quest)
 //   - QUEST_ACCEPTED event: questId from the event payload
-//   - C_GossipInfo.GetAvailableQuests() snapshots: questID + UnitGUID("questnpc"/"npc") at snapshot t
-//     (Available = can be accepted/started at this NPC)
+//   - GOSSIP_SHOW: replay the last observed C_GossipInfo.GetAvailableQuests() list
+//     against the current questnpc/npc (Available = can be accepted/started here).
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → creature starter
 //   - At same times, UnitGUID for GameObject tokens → object starter
-//   - questnpc takes priority over npc (player may target something else while talking to quest NPC)
+//   - Use questnpc when it identifies a giver; npc is only a fallback, not a second giver.
 //   - "target" is intentionally excluded: unlike questnpc/npc, it can point at anything the player
 //     happens to be targeting and is not tied to the quest interaction.
 //
 // Custom merge: set-union per starter type across all observations.
 
-import { getStream, valueAt } from "../../../core/emulator";
+import { AMBIGUOUS_INTERACTION, questEventLookup, type InteractionLookup } from "./_interaction";
 import { parseGuid } from "../../guid";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 import type { SessionRecord } from "../../../core/types";
 
-function questIdAt(session: SessionRecord, t: number): number | null {
-  const stream = getStream(session, "GetQuestID");
-  if (!stream) return null;
-  const v = valueAt(stream, t);
+function questIdAt(lookup: InteractionLookup): number | null {
+  const v = lookup("GetQuestID");
   return typeof v === "number" && v !== 0 ? v : null;
 }
 
@@ -66,15 +64,14 @@ function pushGuidObservations(
   session: SessionRecord,
   questID: number,
   t: number,
+  lookup: InteractionLookup,
   observations: Observation<StartedByStarter>[],
 ): void {
   const tokens = ["questnpc", "npc"] as const;
 
   for (const token of tokens) {
-    const stream = getStream(session, "UnitGUID", token);
-    if (!stream) continue;
-
-    const guid = valueAt(stream, t);
+    const guid = lookup("UnitGUID", token);
+    if (guid === AMBIGUOUS_INTERACTION) return;
 
     if (typeof guid !== "string") continue;
     const parsed = parseGuid(guid);
@@ -87,6 +84,7 @@ function pushGuidObservations(
         confidence: "medium",
         provenance: { session: sessionLabel(session), t },
       });
+      return;
     } else if (parsed.kind === "object" && parsed.id) {
       observations.push({
         entityId: questID,
@@ -94,6 +92,7 @@ function pushGuidObservations(
         confidence: "low",
         provenance: { session: sessionLabel(session), t },
       });
+      return;
     }
   }
 }
@@ -101,9 +100,26 @@ function pushGuidObservations(
 export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
   const observations: Observation<StartedByStarter>[] = [];
 
-  // 1) Classic quest-start events (QUEST_DETAIL, QUEST_ACCEPTED)
   for (let i = 0; i < session.events.length; i++) {
     const ev = session.events[i];
+    if (ev.e !== "QUEST_DETAIL" && ev.e !== "QUEST_ACCEPTED" && ev.e !== "GOSSIP_SHOW") continue;
+    const lookup = questEventLookup(session, i);
+    if (!lookup) continue;
+
+    // Lists are change-only: each GOSSIP_SHOW can expose the same quests at a different NPC.
+    // As with GUID replay, a failed probe is indistinguishable from an unchanged value.
+    if (ev.e === "GOSSIP_SHOW") {
+      const quests = lookup("C_GossipInfo.GetAvailableQuests") as GossipQuestEntry[] | undefined;
+      if (Array.isArray(quests)) {
+        for (const quest of quests) {
+          if (typeof quest?.questID === "number" && quest.questID > 0) {
+            pushGuidObservations(session, quest.questID, ev.t, lookup, observations);
+          }
+        }
+      }
+      continue;
+    }
+
     let questID: number | null = null;
     let starterItemID: number | null = null;
 
@@ -112,7 +128,7 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
       if (args && typeof args.n === "number" && args.n >= 1) {
         starterItemID = typeof args[1] === "number" ? args[1] : null;
       }
-      questID = questIdAt(session, ev.t);
+      questID = questIdAt(lookup);
     } else if (ev.e === "QUEST_ACCEPTED") {
       const v = ev.a.n === 1 ? ev.a[1] : ev.a[2];
       questID = typeof v === "number" && v !== 0 ? v : null;
@@ -120,7 +136,7 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
 
     if (questID === null) continue;
 
-    pushGuidObservations(session, questID, ev.t, observations);
+    pushGuidObservations(session, questID, ev.t, lookup, observations);
 
     if (starterItemID !== null && starterItemID > 0) {
       observations.push({
@@ -129,23 +145,6 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
         confidence: "high",
         provenance: { session: sessionLabel(session), t: ev.t },
       });
-    }
-  }
-
-  // 2) Gossip AVAILABLE quests = quests that can be STARTED (accepted) at this NPC
-  // (not Active quests - those are for turn-in, see finishedBy)
-  const availableStream = getStream(session, "C_GossipInfo.GetAvailableQuests");
-  if (availableStream) {
-    for (const entry of availableStream) {
-      const questList = entry.v as GossipQuestEntry[] | undefined;
-      if (!Array.isArray(questList)) continue;
-
-      for (const q of questList) {
-        const questID = q.questID;
-        if (typeof questID !== "number" || questID === 0) continue;
-
-        pushGuidObservations(session, questID, entry.t, observations);
-      }
     }
   }
 

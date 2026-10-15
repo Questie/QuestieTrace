@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { observeStartedBy, mergeStartedBy } from "./startedBy";
-import { apiSample, creatureGuid, makeSession, traceEvent } from "../../../test/fixtures";
+import { apiSample, creatureGuid, makeSession, objectGuid, traceEvent } from "../../../test/fixtures";
 
 describe("observeStartedBy", () => {
   it("should capture a creature starter from questnpc GUID at QUEST_DETAIL time", () => {
@@ -286,7 +286,7 @@ describe("observeStartedBy", () => {
           questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
-      []
+      [traceEvent("GOSSIP_SHOW", 3, 3)]
     );
 
     expect(observeStartedBy(session)).toEqual([
@@ -312,7 +312,7 @@ describe("observeStartedBy", () => {
           questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
-      []
+      [traceEvent("GOSSIP_SHOW", 3, 3)]
     );
 
     const results = observeStartedBy(session);
@@ -334,7 +334,7 @@ describe("observeStartedBy", () => {
           questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
-      []
+      [traceEvent("GOSSIP_SHOW", 3, 3)]
     );
 
     expect(observeStartedBy(session)).toEqual([]);
@@ -352,7 +352,8 @@ describe("observeStartedBy", () => {
         },
       },
       [
-        traceEvent("QUEST_DETAIL", 3, 3, 0),
+        traceEvent("GOSSIP_SHOW", 3, 3),
+        traceEvent("QUEST_DETAIL", 4, 4, 0),
       ]
     );
 
@@ -391,5 +392,308 @@ describe("observeStartedBy", () => {
     expect(result.creatures).toEqual([197]);
     expect(result.objects).toEqual([2843]);
     expect(result.items).toEqual([750]);
+  });
+});
+
+describe("observeStartedBy interaction correlation", () => {
+  it("should prefer a questnpc object over a conflicting npc creature", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          questnpc: [apiSample(3, 3.002, objectGuid(410369))],
+          npc: [apiSample(3, 3.002, creatureGuid(276172))],
+        },
+      },
+      [
+        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ objectId: 410369 }]);
+  });
+
+  it("should fall back to npc when questnpc is explicitly nil", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          questnpc: [
+            apiSample(1, 1, creatureGuid(276171)),
+            apiSample(3, 3.002),
+          ],
+          npc: [apiSample(3, 3.002, creatureGuid(276172))],
+        },
+      },
+      [
+        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ creatureId: 276172 }]);
+  });
+
+  it("should include synchronous probes without borrowing a later same-frame quest or giver", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [
+          apiSample(3, 3.002, 99196),
+          apiSample(3, 3.012, 99197),
+        ],
+        UnitGUID: {
+          questnpc: [
+            apiSample(3, 3.003, creatureGuid(276171)),
+            apiSample(3, 3.013, creatureGuid(276172)),
+          ],
+        },
+      },
+      [
+        traceEvent("QUEST_DETAIL", 3, 3.001),
+        traceEvent("QUEST_DETAIL", 3, 3.011),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => [o.entityId, o.value])).toEqual([
+      [99196, { creatureId: 276171 }],
+      [99197, { creatureId: 276172 }],
+    ]);
+  });
+
+  it("should use the next raw event as the boundary, even when it is not a quest event", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          questnpc: [
+            apiSample(1, 1, creatureGuid(276171)),
+            apiSample(3, 3.012, creatureGuid(276172)),
+          ],
+        },
+      },
+      [
+        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("MERCHANT_SHOW", 3, 3.011),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ creatureId: 276171 }]);
+  });
+
+  it("should not let a later same-frame close erase the current giver or reuse it after close", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [
+            apiSample(1, 1, objectGuid(410369)),
+            apiSample(3, 3.012),
+          ],
+        },
+      },
+      [
+        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_FINISHED", 3, 3.011),
+        traceEvent("QUEST_ACCEPTED", 3, 3.021, 99197),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => [o.entityId, o.value])).toEqual([[99196, { objectId: 410369 }]]);
+  });
+
+  it("should keep an unchanged object giver during a long dialog", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [apiSample(1, 1, objectGuid(410369))],
+        },
+      },
+      [
+        traceEvent("QUEST_PROGRESS", 1, 1),
+        traceEvent("QUEST_ACCEPTED", 60, 60, 99196),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ objectId: 410369 }]);
+  });
+
+  it("should skip events with indistinguishable timestamps rather than guessing their giver", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          questnpc: [
+            apiSample(3, 3, creatureGuid(276171)),
+            apiSample(3, 3, creatureGuid(276172)),
+          ],
+        },
+      },
+      [
+        traceEvent("QUEST_ACCEPTED", 3, 3, 99196),
+        traceEvent("QUEST_ACCEPTED", 3, 3, 99197),
+      ]
+    );
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it.each<string | undefined>([undefined, creatureGuid(276172)])("should not resurrect an older giver when a probe ties with the next event (%s)", (tiedGuid) => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          questnpc: [
+            apiSample(1, 1, creatureGuid(276171)),
+            apiSample(3, 3.002, tiedGuid),
+          ],
+          npc: [apiSample(1, 1, creatureGuid(276173))],
+        },
+      },
+      [
+        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("MERCHANT_SHOW", 3, 3.002),
+      ]
+    );
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should not resurrect an older quest ID when its probe ties with the next event", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [
+          apiSample(1, 1, 99196),
+          apiSample(3, 3.002, 99197),
+        ],
+        UnitGUID: {
+          questnpc: [apiSample(1, 1, creatureGuid(276171))],
+        },
+      },
+      [
+        traceEvent("QUEST_DETAIL", 3, 3.001),
+        traceEvent("QUEST_FINISHED", 3, 3.002),
+      ]
+    );
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should skip gossip events with indistinguishable timestamps", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [
+            apiSample(1, 1, creatureGuid(276171)),
+            apiSample(3, 3.002, creatureGuid(276172)),
+          ],
+        },
+        "C_GossipInfo.GetAvailableQuests": [apiSample(1, 1, [{ questID: 99196 }])],
+      },
+      [
+        traceEvent("GOSSIP_SHOW", 3, 3.001),
+        traceEvent("GOSSIP_SHOW", 3, 3.001),
+      ]
+    );
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should not infer an interaction from a list without a GOSSIP_SHOW event", () => {
+    const session = makeSession({
+      UnitGUID: {
+        npc: [apiSample(3, 3.002, creatureGuid(276171))],
+      },
+      "C_GossipInfo.GetAvailableQuests": [apiSample(3, 3.002, [{ questID: 99196 }])],
+    });
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should replay one unchanged gossip list at two NPCs within the same frame", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [
+            apiSample(3, 3.002, creatureGuid(276171)),
+            apiSample(3, 3.012, creatureGuid(276172)),
+          ],
+        },
+        "C_GossipInfo.GetAvailableQuests": [apiSample(3, 3.002, [{ questID: 99196 }])],
+      },
+      [
+        traceEvent("GOSSIP_SHOW", 3, 3.001),
+        traceEvent("GOSSIP_SHOW", 3, 3.011),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => [o.entityId, o.value])).toEqual([
+      [99196, { creatureId: 276171 }],
+      [99196, { creatureId: 276172 }],
+    ]);
+  });
+
+  it("should replay the last observed list after closing and opening gossip at another NPC", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [
+            apiSample(1, 1.002, creatureGuid(276171)),
+            apiSample(2, 2.002),
+            apiSample(3, 3.002, creatureGuid(276172)),
+          ],
+        },
+        "C_GossipInfo.GetAvailableQuests": [apiSample(1, 1.002, [{ questID: 99196 }])],
+      },
+      [
+        traceEvent("GOSSIP_SHOW", 1, 1.001),
+        traceEvent("GOSSIP_CLOSED", 2, 2.001),
+        traceEvent("GOSSIP_SHOW", 3, 3.001),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ creatureId: 276171 }, { creatureId: 276172 }]);
+  });
+
+  it.each<unknown[] | undefined>([[], undefined])("should not carry quests past an observed empty or nil list (%s)", (clearingList) => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [
+            apiSample(1, 1.002, creatureGuid(276171)),
+            apiSample(3, 3.002, creatureGuid(276172)),
+          ],
+        },
+        "C_GossipInfo.GetAvailableQuests": [
+          apiSample(1, 1.002, [{ questID: 99196 }]),
+          apiSample(3, 3.002, clearingList),
+        ],
+      },
+      [
+        traceEvent("GOSSIP_SHOW", 1, 1.001),
+        traceEvent("GOSSIP_SHOW", 3, 3.001),
+        traceEvent("GOSSIP_SHOW", 4, 4.001),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ creatureId: 276171 }]);
+  });
+
+  it("should not read a later same-frame quest list into an earlier gossip interaction", () => {
+    const session = makeSession(
+      {
+        UnitGUID: {
+          npc: [
+            apiSample(3, 3.002, creatureGuid(276171)),
+            apiSample(3, 3.012, creatureGuid(276172)),
+          ],
+        },
+        "C_GossipInfo.GetAvailableQuests": [
+          apiSample(3, 3.002, [{ questID: 99196 }]),
+          apiSample(3, 3.012, [{ questID: 99197 }]),
+        ],
+      },
+      [
+        traceEvent("GOSSIP_SHOW", 3, 3.001),
+        traceEvent("GOSSIP_SHOW", 3, 3.011),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => [o.entityId, o.value])).toEqual([
+      [99196, { creatureId: 276171 }],
+      [99197, { creatureId: 276172 }],
+    ]);
   });
 });
