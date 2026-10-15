@@ -1,34 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { SessionRecord } from "../../../core/types";
 import { observeFinishedBy, mergeFinishedBy } from "./finishedBy";
-
-function makeSession(functions: SessionRecord["functions"], events: SessionRecord["events"] = []): SessionRecord {
-  return {
-    schemaVersion: 9,
-    name: "test-session",
-    startedAt: 0,
-    startedAtPrecise: 0,
-    stoppedAt: 100,
-    stoppedAtPrecise: 100,
-    duration: 100,
-    durationPrecise: 100,
-    events,
-    functions,
-    functionsDelta: {},
-  };
-}
+import { apiSample, creatureGuid, makeSession, traceEvent } from "../../../test/fixtures";
 
 describe("observeFinishedBy", () => {
   it("should capture a creature finisher from questnpc GUID at QUEST_COMPLETE time", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -45,13 +29,13 @@ describe("observeFinishedBy", () => {
   it("should capture a creature finisher from npc GUID when questnpc is absent", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          npc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -68,13 +52,13 @@ describe("observeFinishedBy", () => {
   it("should capture an object finisher from GameObject GUID on npc token", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+          npc: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -91,14 +75,14 @@ describe("observeFinishedBy", () => {
   it("should capture both creature and object finishers for the same quest", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
-          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
+          npc: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -111,14 +95,14 @@ describe("observeFinishedBy", () => {
   it("should prefer questnpc over npc when both are present", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
-          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-200-000040" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
+          npc: [apiSample(3, 3, "Creature-0-5208-0-7-200-000040")],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -135,19 +119,19 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         GetQuestID: [
-          { t: 3, tp: 3, v: 96659 },
-          { t: 10, tp: 10, v: 12345 },
+          apiSample(3, 3, 96659),
+          apiSample(10, 10, 12345),
         ],
         UnitGUID: {
           questnpc: [
-            { t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" },
-            { t: 10, tp: 10, v: "Creature-0-5208-0-7-200-000040" },
+            apiSample(3, 3, creatureGuid(197)),
+            apiSample(10, 10, "Creature-0-5208-0-7-200-000040"),
           ],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
-        { t: 10, tp: 10, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
+        traceEvent("QUEST_COMPLETE", 10, 10),
       ]
     );
 
@@ -160,13 +144,13 @@ describe("observeFinishedBy", () => {
   it("should ignore player GUIDs seen on quest tokens", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Player-5284-0362" }],
+          questnpc: [apiSample(3, 3, "Player-5284-0362")],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -175,9 +159,9 @@ describe("observeFinishedBy", () => {
 
   it("should return no observations when no quest-completion events exist", () => {
     const session = makeSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+      GetQuestID: [apiSample(3, 3, 96659)],
       UnitGUID: {
-        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+        questnpc: [apiSample(3, 3, creatureGuid(197))],
       },
     });
 
@@ -188,11 +172,11 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -203,11 +187,11 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 99196, n: 1 } },
+        traceEvent("QUEST_TURNED_IN", 3, 3, 99196),
       ]
     );
 
@@ -225,11 +209,11 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }],
+          npc: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 99196, n: 1 } },
+        traceEvent("QUEST_TURNED_IN", 3, 3, 99196),
       ]
     );
 
@@ -247,13 +231,13 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 0, n: 1 } },
-        { t: 4, tp: 4, e: "QUEST_TURNED_IN", a: { 1: "99196", n: 1 } },
-        { t: 5, tp: 5, e: "QUEST_TURNED_IN", a: { n: 0 } },
+        traceEvent("QUEST_TURNED_IN", 3, 3, 0),
+        traceEvent("QUEST_TURNED_IN", 4, 4, "99196"),
+        traceEvent("QUEST_TURNED_IN", 5, 5),
       ]
     );
 
@@ -263,14 +247,14 @@ describe("observeFinishedBy", () => {
   it("should produce observations from both QUEST_COMPLETE and QUEST_TURNED_IN for the same quest", () => {
     const session = makeSession(
       {
-        GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
+        GetQuestID: [apiSample(3, 3, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(197))],
         },
       },
       [
-        { t: 3, tp: 3, e: "QUEST_COMPLETE", a: { n: 0 } },
-        { t: 4, tp: 4, e: "QUEST_TURNED_IN", a: { 1: 96659, n: 1 } },
+        traceEvent("QUEST_COMPLETE", 3, 3),
+        traceEvent("QUEST_TURNED_IN", 4, 4, 96659),
       ]
     );
 
@@ -288,16 +272,12 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         "C_GossipInfo.GetActiveQuests": [
-          {
-            t: 3,
-            tp: 3,
-            v: [
-              { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
-            ],
-          },
+          apiSample(3, 3, [
+            { questID: 99196, title: "A Donation of Wool", repeatable: false, isLegendary: false },
+          ]),
         ],
         UnitGUID: {
-          npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          npc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       []
@@ -317,17 +297,13 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         "C_GossipInfo.GetActiveQuests": [
-          {
-            t: 3,
-            tp: 3,
-            v: [
-              { questID: 99196, title: "A Donation of Wool", repeatable: false },
-              { questID: 99197, title: "Another Quest", repeatable: false },
-            ],
-          },
+          apiSample(3, 3, [
+            { questID: 99196, title: "A Donation of Wool", repeatable: false },
+            { questID: 99197, title: "Another Quest", repeatable: false },
+          ]),
         ],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       []
@@ -343,17 +319,13 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         "C_GossipInfo.GetActiveQuests": [
-          {
-            t: 3,
-            tp: 3,
-            v: [
-              { title: "No ID here", repeatable: false },
-              { questID: 0, title: "Zero ID", repeatable: false },
-            ],
-          },
+          apiSample(3, 3, [
+            { title: "No ID here", repeatable: false },
+            { questID: 0, title: "Zero ID", repeatable: false },
+          ]),
         ],
         UnitGUID: {
-          questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-000032" }],
+          questnpc: [apiSample(3, 3, creatureGuid(276171))],
         },
       },
       []
@@ -392,13 +364,13 @@ describe("observeFinishedBy", () => {
     // past relative to the anchor event - this must not be treated as stale.
     const session = makeSession(
       {
-        GetQuestID: [{ t: 60, tp: 60, v: 96659 }],
+        GetQuestID: [apiSample(60, 60, 96659)],
         UnitGUID: {
-          questnpc: [{ t: 1, tp: 1, v: "Creature-0-5208-0-7-197-000032" }],
+          questnpc: [apiSample(1, 1, creatureGuid(197))],
         },
       },
       [
-        { t: 60, tp: 60, e: "QUEST_COMPLETE", a: { n: 0 } },
+        traceEvent("QUEST_COMPLETE", 60, 60),
       ]
     );
 

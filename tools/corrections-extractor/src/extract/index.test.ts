@@ -1,28 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../core/types";
 import { createAccumulator, extractAll, finalize, foldSessions } from "./index";
-
-function makeSession(functions: SessionRecord["functions"]): SessionRecord {
-  return {
-    schemaVersion: 9,
-    name: "test-session",
-    startedAt: 0,
-    startedAtPrecise: 0,
-    stoppedAt: 100,
-    stoppedAtPrecise: 100,
-    duration: 100,
-    durationPrecise: 100,
-    events: [],
-    functions,
-    functionsDelta: {},
-  };
-}
+import { apiSample, makeSession, traceEvent } from "../test/fixtures";
 
 /** Creates a session with a Forever interfaceVersion (16001) */
 function makeForeverSession(functions: SessionRecord["functions"]): SessionRecord {
   return makeSession({
     ...functions,
-    GetBuildInfo: { player: [{ t: 0, tp: 0, v: 16001 }] },
+    GetBuildInfo: { player: [apiSample(0, 0, 16001)] },
   });
 }
 
@@ -30,18 +15,18 @@ function makeForeverSession(functions: SessionRecord["functions"]): SessionRecor
 function makeTBCSession(functions: SessionRecord["functions"]): SessionRecord {
   return makeSession({
     ...functions,
-    GetBuildInfo: { player: [{ t: 0, tp: 0, v: 10102 }] },
+    GetBuildInfo: { player: [apiSample(0, 0, 10102)] },
   });
 }
 
 describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () => {
   it("should produce a paste-ready foreverNpcTraces.lua correction for an npc encountered in the session", () => {
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "Deputy Willem", n: 1 })] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(3, 3, 1436)] }, // uiMapID 1436 = Westfall (area 40),
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(3, 3, { x: 0.3001, y: 0.8602 })] },
     });
 
     const { npcFixes } = extractAll([session], {
@@ -59,9 +44,9 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
 
   it("should only emit fields that were actually observed, not every schema field", () => {
     const session = makeForeverSession({
-      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
+      UnitGUID: { target: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(3, 3, 1436)] }, // uiMapID 1436 = Westfall (area 40),
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(3, 3, { x: 0.3001, y: 0.8602 })] },
     });
 
     const { npcFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
@@ -76,32 +61,28 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
 describe("extractAll (quest/item/object entities)", () => {
   it("should produce a paste-ready foreverQuestTraces.lua correction for a quest encountered in the session", () => {
     const session = makeForeverSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
-      QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
+      GetQuestID: [apiSample(3, 3, 96659)],
+      QuestLogZone: { "96659": [apiSample(2, 2, "Westfall")] },
       "C_QuestLog.GetQuestObjectives": {
         "96659": [
-          {
-            t: 3,
-            tp: 3,
-            v: [
-              { type: "item", text: "Tough Wolf Meat: 0/8" },
-              { type: "event", text: "Light the campfire", finished: true },
-            ],
-          },
+          apiSample(3, 3, [
+            { type: "item", text: "Tough Wolf Meat: 0/8" },
+            { type: "event", text: "Light the campfire", finished: true },
+          ]),
         ],
       },
       GetLootSlotLink: {
-        "1": [{ t: 4, tp: 4, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }],
+        "1": [apiSample(4, 4, "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r")],
       },
       GetLootSlotInfo: {
-        "1": [{ t: 4, tp: 4, v: { 2: "Tough Wolf Meat", 7: true, n: 10 } }],
+        "1": [apiSample(4, 4, { 2: "Tough Wolf Meat", 6: true, 7: 96659, n: 10 })],
       },
-      GetTitleText: [{ t: 3, tp: 3, v: "A Threat Within" }],
-      GetLocale: { player: [{ t: 3, tp: 3, v: "enUS" }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
-      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", 2: "", n: 2 } }] },
+      GetTitleText: [apiSample(3, 3, "A Threat Within")],
+      GetLocale: { player: [apiSample(3, 3, "enUS")] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(3, 3, 1436)] }, // uiMapID 1436 = Westfall (area 40),
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(3, 3, { x: 0.3001, y: 0.8602 })] },
+      UnitGUID: { target: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { target: [apiSample(3, 3, { 1: "Deputy Willem", 2: "", n: 2 })] },
     });
 
     const { questFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
@@ -117,18 +98,14 @@ describe("extractAll (quest/item/object entities)", () => {
 
   it("should export objectivesText as a line list, keeping blank separator lines", () => {
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
       "GetQuestLogQuestText": {
         "25": [
-          {
-            t: 10,
-            tp: 10,
-            v: {
-              1: "Warlord Senta has a problem...",
-              2: "Dispatch 12 Befouled Water Elementals at Mystral Lake.\n\nScout the gazebo on Mystral Lake.\n\nReturn to Mastok Wrilehiss.",
-              n: 2,
-            },
-          },
+          apiSample(10, 10, {
+            1: "Warlord Senta has a problem...",
+            2: "Dispatch 12 Befouled Water Elementals at Mystral Lake.\n\nScout the gazebo on Mystral Lake.\n\nReturn to Mastok Wrilehiss.",
+            n: 2,
+          }),
         ],
       },
     });
@@ -143,10 +120,10 @@ describe("extractAll (quest/item/object entities)", () => {
 
   it("should produce a paste-ready foreverItemTraces.lua correction for a looted item", () => {
     const session = makeForeverSession({
-      GetLootSlotLink: { "1": [{ t: 0, tp: 0, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 0, tp: 0, v: 1436 }] },
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 0, tp: 0, v: { x: 0.3001, y: 0.8602 } }] },
+      GetLootSlotLink: { "1": [apiSample(0, 0, "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r")] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(0, 0, 1436)] },
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(0, 0, { x: 0.3001, y: 0.8602 })] },
     });
 
     const { itemFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
@@ -158,11 +135,11 @@ describe("extractAll (quest/item/object entities)", () => {
 
   it("should produce a paste-ready foreverObjectTraces.lua correction for a GameObject encountered in the session", () => {
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
-      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Suspicious Chest", n: 1 } }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] }, // uiMapID 1436 = Westfall (area 40),
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { target: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")] },
+      UnitName: { target: [apiSample(3, 3, { 1: "Suspicious Chest", n: 1 })] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(3, 3, 1436)] }, // uiMapID 1436 = Westfall (area 40),
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(3, 3, { x: 0.3001, y: 0.8602 })] },
     });
 
     const { objectFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
@@ -179,28 +156,28 @@ describe("extractAll (quest/item/object entities)", () => {
     // areaID 12) and in Westfall (uiMapID 1436 -> areaID 40). The quest log
     // header says Westfall, so the Westfall completion must win.
     const sessionInElwynn = makeForeverSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
-      QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
+      GetQuestID: [apiSample(3, 3, 96659)],
+      QuestLogZone: { "96659": [apiSample(2, 2, "Westfall")] },
       "C_QuestLog.GetQuestObjectives": {
         "96659": [
-          { t: 8, tp: 8, v: [{ type: "event", text: "Light the campfire", finished: false }] },
-          { t: 12, tp: 12, v: [{ type: "event", text: "Light the campfire", finished: true }] },
+          apiSample(8, 8, [{ type: "event", text: "Light the campfire", finished: false }]),
+          apiSample(12, 12, [{ type: "event", text: "Light the campfire", finished: true }]),
         ],
       },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 12, tp: 12, v: 1429 }] },
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 12, tp: 12, v: { x: 0.4746, y: 0.6218 } }] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(12, 12, 1429)] },
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(12, 12, { x: 0.4746, y: 0.6218 })] },
     });
     const sessionInWestfall = makeForeverSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
-      QuestLogZone: { "96659": [{ t: 2, tp: 2, v: "Westfall" }] },
+      GetQuestID: [apiSample(3, 3, 96659)],
+      QuestLogZone: { "96659": [apiSample(2, 2, "Westfall")] },
       "C_QuestLog.GetQuestObjectives": {
         "96659": [
-          { t: 16, tp: 16, v: [{ type: "event", text: "Light the campfire", finished: false }] },
-          { t: 20, tp: 20, v: [{ type: "event", text: "Light the campfire", finished: true }] },
+          apiSample(16, 16, [{ type: "event", text: "Light the campfire", finished: false }]),
+          apiSample(20, 20, [{ type: "event", text: "Light the campfire", finished: true }]),
         ],
       },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 20, tp: 20, v: 1436 }] },
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 20, tp: 20, v: { x: 0.5611, y: 0.6164 } }] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(20, 20, 1436)] },
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(20, 20, { x: 0.5611, y: 0.6164 })] },
     });
 
     const { questFixes } = extractAll([sessionInElwynn, sessionInWestfall], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
@@ -216,9 +193,9 @@ describe("extractAll interfaceVersion filtering", () => {
     // early Forever beta when PlayerIdentity.lua didn't capture interfaceVersion yet.
     // Any Classic IDs they contain will be filtered by filterBelowMax.
     const sessionWithoutBuildInfo = makeSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "Deputy Willem", n: 1 })] },
     });
 
     const { npcFixes } = extractAll([sessionWithoutBuildInfo], {
@@ -235,9 +212,9 @@ describe("extractAll interfaceVersion filtering", () => {
 
   it("should skip sessions with TBC interfaceVersion (10xxx)", () => {
     const tbcSession = makeTBCSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "Deputy Willem", n: 1 })] },
     });
 
     const { npcFixes } = extractAll([tbcSession], {
@@ -254,10 +231,10 @@ describe("extractAll interfaceVersion filtering", () => {
 
   it("should skip sessions with WotLK interfaceVersion (11xxx)", () => {
     const wotlkSession = makeSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
-      GetBuildInfo: { player: [{ t: 0, tp: 0, v: 11883 }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "Deputy Willem", n: 1 })] },
+      GetBuildInfo: { player: [apiSample(0, 0, 11883)] },
     });
 
     const { npcFixes } = extractAll([wotlkSession], {
@@ -274,9 +251,9 @@ describe("extractAll interfaceVersion filtering", () => {
 
   it("should process sessions with Forever interfaceVersion (16xxx)", () => {
     const foreverSession = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "Deputy Willem", n: 1 })] },
     });
 
     const { npcFixes } = extractAll([foreverSession], {
@@ -292,14 +269,14 @@ describe("extractAll interfaceVersion filtering", () => {
 
   it("should process mixed sessions, only including Forever builds", () => {
     const foreverSession = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "Deputy Willem", n: 1 })] },
     });
     const tbcSession = makeTBCSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-999999" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "TBC NPC", n: 1 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-999999")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "TBC NPC", n: 1 })] },
     });
 
     const { npcFixes } = extractAll([tbcSession, foreverSession], {
@@ -316,9 +293,9 @@ describe("extractAll interfaceVersion filtering", () => {
   });
 
   it("should report correct session count for mixed Forever/non-Forever sessions", () => {
-    const foreverSession1 = makeForeverSession({ GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] } });
-    const foreverSession2 = makeForeverSession({ GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] } });
-    const tbcSession = makeTBCSession({ GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] } });
+    const foreverSession1 = makeForeverSession({ GetLocale: { player: [apiSample(0, 0, "enUS")] } });
+    const foreverSession2 = makeForeverSession({ GetLocale: { player: [apiSample(0, 0, "enUS")] } });
+    const tbcSession = makeTBCSession({ GetLocale: { player: [apiSample(0, 0, "enUS")] } });
 
     const { npcFixes } = extractAll([foreverSession1, tbcSession, foreverSession2], {
       sourceFileNames: ["test.lua"],
@@ -336,33 +313,29 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     // Quest 99196 "A Donation of Wool" offered by NPC 276171 "Oura Stormspinner"
     // via gossip available quests, with no QUEST_DETAIL or QUEST_ACCEPTED event.
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
       "C_GossipInfo.GetAvailableQuests": [
-        {
-          t: 2162.777,
-          tp: 2162.779501,
-          v: [
-            {
-              questID: 99196,
-              title: "A Donation of Wool",
-              questLevel: 0,
-              isIgnored: false,
-              isImportant: false,
-              isMeta: false,
-              isLegendary: false,
-              repeatable: false,
-              frequency: 0,
-            },
-          ],
-        },
+        apiSample(2162.777, 2162.779501, [
+          {
+            questID: 99196,
+            title: "A Donation of Wool",
+            questLevel: 0,
+            isIgnored: false,
+            isImportant: false,
+            isMeta: false,
+            isLegendary: false,
+            repeatable: false,
+            frequency: 0,
+          },
+        ]),
       ],
       UnitGUID: {
-        questnpc: [{ t: 2162.777, tp: 2162.779501, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
-        npc: [{ t: 2162.777, tp: 2162.779501, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
-        target: [{ t: 2162.145, tp: 2162.1480881, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        questnpc: [apiSample(2162.777, 2162.779501, "Creature-0-5208-0-7-276171-00002DDB54")],
+        npc: [apiSample(2162.777, 2162.779501, "Creature-0-5208-0-7-276171-00002DDB54")],
+        target: [apiSample(2162.145, 2162.1480881, "Creature-0-5208-0-7-276171-00002DDB54")],
       },
       UnitName: {
-        target: [{ t: 2162.145, tp: 2162.1480881, v: { 1: "Oura Stormspinner", 2: "", n: 2 } }],
+        target: [apiSample(2162.145, 2162.1480881, { 1: "Oura Stormspinner", 2: "", n: 2 })],
       },
     });
 
@@ -383,13 +356,13 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
   it("should export finishedBy and questEnds when QUEST_TURNED_IN is observed (no QUEST_COMPLETE)", () => {
     // Quest completed via QUEST_TURNED_IN (no reward selection frame / QUEST_COMPLETE)
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
       UnitGUID: {
-        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
-        npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        questnpc: [apiSample(3, 3, "Creature-0-5208-0-7-276171-00002DDB54")],
+        npc: [apiSample(3, 3, "Creature-0-5208-0-7-276171-00002DDB54")],
       },
       UnitName: {
-        target: [{ t: 3, tp: 3, v: { 1: "Oura Stormspinner", 2: "", n: 2 } }],
+        target: [apiSample(3, 3, { 1: "Oura Stormspinner", 2: "", n: 2 })],
       },
     });
 
@@ -397,7 +370,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     const sessionWithTurnIn = {
       ...session,
       events: [
-        { t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 99196, n: 1 } },
+        traceEvent("QUEST_TURNED_IN", 3, 3, 99196),
       ],
     };
 
@@ -417,16 +390,16 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
 
   function turnInSession(questId: number) {
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
       UnitGUID: {
-        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
-        target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
+        questnpc: [apiSample(3, 3, "Creature-0-5208-0-7-276171-00002DDB54")],
+        target: [apiSample(3, 3, "Creature-0-5208-0-7-276171-00002DDB54")],
       },
       UnitName: {
-        target: [{ t: 3, tp: 3, v: { 1: "Oura Stormspinner", 2: "", n: 2 } }],
+        target: [apiSample(3, 3, { 1: "Oura Stormspinner", 2: "", n: 2 })],
       },
     });
-    return { ...session, events: [{ t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: questId, n: 1 } }] };
+    return { ...session, events: [traceEvent("QUEST_TURNED_IN", 3, 3, questId)] };
   }
 
   it("should only export quest relations for an npc below MAX_IDS", () => {
@@ -441,10 +414,10 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
 
   it("should export questEnds for an object that finishes a quest", () => {
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-410369-00002DDB54" }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { npc: [apiSample(3, 3, "GameObject-0-5208-0-7-410369-00002DDB54")] },
     });
-    const withTurnIn = { ...session, events: [{ t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 78261, n: 1 } }] };
+    const withTurnIn = { ...session, events: [traceEvent("QUEST_TURNED_IN", 3, 3, 78261)] };
 
     const { questFixes, objectFixes } = extractAll([withTurnIn], {
       sourceFileNames: ["test.lua"],
@@ -468,13 +441,13 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
 
   it("should export only relations to new npcs for a quest below MAX_IDS", () => {
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
       UnitGUID: {
-        questnpc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-276171-00002DDB54" }],
-        npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-100-00002DDB54" }],
+        questnpc: [apiSample(3, 3, "Creature-0-5208-0-7-276171-00002DDB54")],
+        npc: [apiSample(3, 3, "Creature-0-5208-0-7-100-00002DDB54")],
       },
     });
-    const withTurnIn = { ...session, events: [{ t: 3, tp: 3, e: "QUEST_TURNED_IN", a: { 1: 940, n: 1 } }] };
+    const withTurnIn = { ...session, events: [traceEvent("QUEST_TURNED_IN", 3, 3, 940)] };
 
     const { questFixes, npcFixes } = extractAll([withTurnIn], {
       sourceFileNames: ["test.lua"],
@@ -489,10 +462,10 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
 
   it("should export only the relation for a quest below MAX_IDS started by a new object", () => {
     const session = makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { questnpc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-673378-00002DDB54" }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: { questnpc: [apiSample(3, 3, "GameObject-0-5208-0-7-673378-00002DDB54")] },
     });
-    const withDetail = { ...session, events: [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 940, n: 1 } }] };
+    const withDetail = { ...session, events: [traceEvent("QUEST_ACCEPTED", 3, 3, 940)] };
 
     const { questFixes, objectFixes } = extractAll([withDetail], {
       sourceFileNames: ["test.lua"],
@@ -515,28 +488,28 @@ describe("foldSessions + finalize (incremental extraction)", () => {
 
   function westfallSession(functions: SessionRecord["functions"]): SessionRecord {
     return makeForeverSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      "C_Map.GetBestMapForUnit": { player: [{ t: 3, tp: 3, v: 1436 }] },
-      "C_Map.GetPlayerMapPosition": { player: [{ t: 3, tp: 3, v: { x: 0.3001, y: 0.8602 } }] },
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(3, 3, 1436)] },
+      "C_Map.GetPlayerMapPosition": { player: [apiSample(3, 3, { x: 0.3001, y: 0.8602 })] },
       ...functions,
     });
   }
 
   const fileA = [
     westfallSession({
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "Deputy Willem", n: 1 } }] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-823-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "Deputy Willem", n: 1 })] },
     }),
   ];
   const fileB = [
     westfallSession({
-      UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
-      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Suspicious Chest", n: 1 } }] },
-      GetLootSlotLink: { "1": [{ t: 3, tp: 3, v: "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r" }] },
+      UnitGUID: { target: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")] },
+      UnitName: { target: [apiSample(3, 3, { 1: "Suspicious Chest", n: 1 })] },
+      GetLootSlotLink: { "1": [apiSample(3, 3, "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r")] },
     }),
     makeTBCSession({
-      UnitGUID: { npc: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-999-000031" }] },
-      UnitName: { npc: [{ t: 3, tp: 3, v: { 1: "TBC Only", n: 1 } }] },
+      UnitGUID: { npc: [apiSample(3, 3, "Creature-0-5208-0-7-999-000031")] },
+      UnitName: { npc: [apiSample(3, 3, { 1: "TBC Only", n: 1 })] },
     }),
   ];
 
