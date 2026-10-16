@@ -51,6 +51,7 @@ Modules/Trackers/UnitLevel.lua
 Modules/Trackers/Position.lua
 Modules/Trackers/Loot.lua
 Modules/Trackers/Merchant.lua
+Modules/Trackers/ItemCount.lua
 Modules/Trackers/Reputation.lua
 Modules/Trackers/QuestLog.lua
 Modules/Trackers/CompletedQuests.lua
@@ -63,6 +64,7 @@ Modules/Trackers/GroupState.lua
 Modules/Trackers/SkillLines.lua
 Modules/Trackers/SpellBook.lua
 Modules/Trackers/ResetTime.lua
+Modules/Trackers/Display.lua
 
 Modules/Dumps/MapHierarchy.lua
 

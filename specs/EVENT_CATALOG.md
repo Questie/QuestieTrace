@@ -108,9 +108,9 @@ event stream to avoid trace noise.
 ### Reputation tracker
 
 Triggers faction detail sampling (`GetFactionInfoByID` or `C_Reputation.GetFactionDataByID`, whichever the client exposes) and faction discovery. On
-`QUEST_TURNED_IN`, runs full collection (discover new factions). On the
-other events, samples existing factions only (including the login-time
-sampling events).
+`QUEST_TURNED_IN`, `CHAT_MSG_COMBAT_FACTION_CHANGE` and `UPDATE_FACTION`,
+runs full collection, since any reputation change can reveal a new faction.
+On the login-time sampling events, samples known factions only.
 
 - `CHAT_MSG_COMBAT_FACTION_CHANGE`
 - `UPDATE_FACTION`
@@ -178,6 +178,12 @@ recorded, since that reflects a state transition rather than PII.
 - `PLAYER_ENTERING_WORLD`
 - `SPELLS_CHANGED`
 
+**From `group_world` (shared, nameplate token only):**
+- `NAME_PLATE_UNIT_ADDED` -- samples `UnitGUID` for the event's `nameplateN`
+  token only, outside instances. Only creature and vehicle GUIDs are stored;
+  any other unit (players, player pets and minions, game objects) records nil.
+  See TRACKER_SPEC section 14.
+
 ### UnitState tracker
 
 Triggers raw `UnitLevel` (scalar number; `-1` = "??"), `UnitClassification`
@@ -239,11 +245,31 @@ profession tabs in Classic Era.
 
 ### ResetTime tracker
 
-Captures low-frequency server/reset time snapshots.
+Captures low-frequency server/reset time and realm calendar time snapshots.
 
 - `PLAYER_LOGIN`
 - `PLAYER_ENTERING_WORLD`
 - `PLAYER_LOGOUT`
+
+### ItemCount tracker
+
+Samples `C_Item.GetItemCount` for the event's item ID (after a capture-start
+snapshot of every carried item).
+
+- `ITEM_COUNT_CHANGED`
+- `BAG_UPDATE_DELAYED` *(private trigger, not recorded)* -- schedules one
+  rescan of carried items a second later; see TRACKER_SPEC section 15.
+
+### Display tracker
+
+Samples screen geometry, UI scale and the allowlisted UI CVars.
+
+- `PLAYER_ENTERING_WORLD` *(login-time sampling)*
+- `UI_SCALE_CHANGED`
+- `DISPLAY_SIZE_CHANGED`
+- `CVAR_UPDATE` *(private trigger, not recorded)* -- re-reads the allowlisted
+  CVars. It fires for every CVar, some of which hold account or realm
+  identifiers, so the event itself never reaches the event stream.
 
 ### PlayerIdentity tracker
 
@@ -302,7 +328,7 @@ channelIndex, channelBaseName, languageID, lineID, guid, bnSenderID,
 isMobile, isSubtitle, hideSenderInLetterbox, supressRaidIcons`) and are
 routed through `Core.SanitizeChatMsgArgs` before being recorded or
 dispatched: `playerName`/`playerName2` are stripped, any literal occurrence
-of those names (or the local player/party/raid roster) in `text` is
+of those names (or the local player, guild and party/raid roster) in `text` is
 replaced with `<name>`, and `guid` is dropped if it identifies a player.
 
 `CHAT_MSG_SYSTEM` additionally goes through an allowlist filter
@@ -321,7 +347,7 @@ dropped and never recorded or dispatched to trackers.
 - `GROUP_JOINED`
 - `GROUP_LEFT`
 - `GROUP_ROSTER_UPDATE`
-- `NAME_PLATE_UNIT_ADDED`
+- `NAME_PLATE_UNIT_ADDED` *(also UnitInteraction nameplate sampling)*
 - `NAME_PLATE_UNIT_REMOVED`
 - `ACHIEVEMENT_EARNED`
 - `TRACKED_ACHIEVEMENT_LIST_CHANGED`
@@ -332,7 +358,12 @@ dropped and never recorded or dispatched to trackers.
 
 - `ITEM_PUSH`
 - `ITEM_LOCK_CHANGED`
-- `ITEM_COUNT_CHANGED`
+- `ITEM_COUNT_CHANGED` *(also ItemCount)*
+
+### Display
+
+- `UI_SCALE_CHANGED`
+- `DISPLAY_SIZE_CHANGED`
 
 ---
 
@@ -346,8 +377,10 @@ dropped and never recorded or dispatched to trackers.
   For example, `QUEST_TURNED_IN` appears in both the event stream and
   triggers the QuestLog, CompletedQuests, Reputation, and UnitInteraction
   trackers. Quest dialog events now also route to QuestDialog and UnitInteraction.
-  Position movement transitions are private sampling triggers and are not
-  recorded in the main event stream.
+  Private sampling triggers are registered on a tracker's own frame and are
+  never recorded in the main event stream: Position's movement transitions
+  (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), ItemCount's
+  `BAG_UPDATE_DELAYED` and Display's `CVAR_UPDATE`.
 - `LOOT_OPENED` and `LOOT_READY` are different events. The Loot tracker
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).

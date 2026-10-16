@@ -211,18 +211,20 @@ successful observed returns.
 |---|---|---|---|---|
 | PlayerIdentity | `Trackers/PlayerIdentity.lua` | `UnitRace["player"]`, `UnitClass["player"]`, `UnitClassBase["player"]`, `UnitSex["player"]`, `UnitFactionGroup["player"]` | Init only (t=0) | None |
 | UnitLevel | `Trackers/UnitLevel.lua` | `UnitLevel["player"]`, `GetQuestGreenRange` | Event-driven | `PLAYER_LEVEL_UP`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| Position | `Trackers/Position.lua` | `GetZoneText`, `GetSubZoneText`, `GetRealZoneText`, `C_Map.GetBestMapForUnit["player"]`, `C_Map.GetPlayerMapPosition["player"]`, `IsInInstance`, `GetInstanceInfo` | Timer (0.2s) + event-driven + private movement sampling | zone/map events + `PLAYER_ENTERING_WORLD`, `PLAYER_ALIVE`, `SPELLS_CHANGED`; movement events are private sampling triggers and are not recorded globally |
+| Position | `Trackers/Position.lua` | `GetZoneText`, `GetSubZoneText`, `GetRealZoneText`, `C_Map.GetBestMapForUnit["player"]`, `C_Map.GetPlayerMapPosition["player"]`, `IsInInstance`, `GetInstanceInfo`, `C_MapExplorationInfo.GetExploredMapTextures[mapID]` (on map change and `MAP_EXPLORATION_UPDATED` only). `GetPlayerFacing` is not recorded; replay derives the heading from consecutive positions | Timer (0.2s) + event-driven + private movement sampling | zone/map events + `PLAYER_ENTERING_WORLD`, `PLAYER_ALIVE`, `SPELLS_CHANGED`; movement events are private sampling triggers and are not recorded globally |
 | Loot | `Trackers/Loot.lua` | `GetNumLootItems`, `GetLootSlotInfo[slot]`, `GetLootSourceInfo[slot]`, `GetLootSlotLink[slot]`, `GetLootSlotType[slot]` | Event + window lifecycle | `LOOT_READY`, `LOOT_CLOSED` |
-| Reputation | `Trackers/Reputation.lua` | `FactionOrder`, `GetFactionInfoByID[factionID]` and `C_Reputation.GetFactionDataByID[factionID]` (independent, each whenever its own API exists) | Event + index iteration | `CHAT_MSG_COMBAT_FACTION_CHANGE`, `UPDATE_FACTION`, `QUEST_TURNED_IN`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| QuestLog | `Trackers/QuestLog.lua` | `QuestLog`, `C_QuestLog.GetMaxNumQuestsCanAccept`, `IsQuestComplete[qid]`, `HaveQuestData[qid]`, `C_QuestLog.IsOnQuest[qid]`, `C_QuestLog.IsQuestFlaggedCompleted[qid]`, `C_QuestLog.GetQuestObjectives[qid]`, `C_QuestLog.GetInfo[qid]`, `C_QuestLog.GetQuestTagInfo[qid]`, `C_QuestLog.IsComplete[qid]`, `C_QuestLog.IsFailed[qid]`, `C_QuestLog.GetLogIndexForQuestID[qid]`, `GetQuestLogTitle[qid]`, `GetQuestLogIndexByID[qid]`, `GetQuestLogQuestText[qid]`, `QuestLogZone[qid]`, timer streams, reward streams, `GetQuestTagInfo[qid]` | Event + delayed re-samples + index iteration | 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| Reputation | `Trackers/Reputation.lua` | `FactionOrder`, `GetFactionInfoByID[factionID]` and `C_Reputation.GetFactionDataByID[factionID]` (independent, each whenever its own API exists) for every `FactionOrder` faction except the guild faction | Event + index iteration | `CHAT_MSG_COMBAT_FACTION_CHANGE`, `UPDATE_FACTION`, `QUEST_TURNED_IN`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| QuestLog | `Trackers/QuestLog.lua` | `QuestLog`, `C_QuestLog.GetMaxNumQuestsCanAccept`, `IsQuestComplete[qid]`, `HaveQuestData[qid]`, `C_QuestLog.IsOnQuest[qid]`, `C_QuestLog.IsQuestFlaggedCompleted[qid]`, `C_QuestLog.GetQuestObjectives[qid]`, `C_QuestLog.GetInfo[qid]`, `C_QuestLog.GetQuestTagInfo[qid]`, `C_QuestLog.IsComplete[qid]`, `C_QuestLog.IsFailed[qid]`, `C_QuestLog.GetLogIndexForQuestID[qid]`, `GetQuestLogTitle[qid]`, `GetQuestLogIndexByID[qid]`, `GetQuestLogQuestText[qid]`, `GetQuestLogCompletionText[qid]`, `GetQuestLogSpecialItemInfo[qid]`, `C_QuestLog.GetRequiredMoney[qid]`, `QuestLogZone[qid]`, timer streams (`C_QuestLog.GetQuestTimers` and the legacy derived ones), reward streams, `GetQuestTagInfo[qid]` | Event + delayed re-samples + index iteration | 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | CompletedQuests | `Trackers/CompletedQuests.lua` | `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted` (independent functionsDelta streams) | Event + delayed re-samples | Same 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| UnitInteraction | `Trackers/UnitInteraction.lua` | `UnitGUID`/`UnitName` for `target`, `npc`, `questnpc`, `mouseover`; `C_GossipInfo.GetAvailableQuests`; `C_GossipInfo.GetActiveQuests` | Event-driven fixed unit-token fanout | target, quest dialog, selected quest state, loot-open, NPC interaction, login-time events, `UPDATE_MOUSEOVER_UNIT` |
+| UnitInteraction | `Trackers/UnitInteraction.lua` | `UnitGUID`/`UnitName` for `target`, `npc`, `questnpc`, `mouseover`; `UnitGUID` only for the `nameplateN` token of each added nameplate; `C_GossipInfo.GetAvailableQuests`; `C_GossipInfo.GetActiveQuests` | Event-driven fixed unit-token fanout; nameplates per event token | target, quest dialog, selected quest state, loot-open, NPC interaction, login-time events, `UPDATE_MOUSEOVER_UNIT`, `NAME_PLATE_UNIT_ADDED` |
 | UnitState | `Trackers/UnitState.lua` | `UnitLevel`/`UnitClassification`/`UnitReaction` for `target`, `mouseover` | Event-driven fixed unit-token fanout (NPC-only) | `PLAYER_TARGET_CHANGED`, `UPDATE_MOUSEOVER_UNIT` |
 | GroupState | `Trackers/GroupState.lua` | `IsInGroup`, `GetNumGroupMembers` | Event-driven | `GROUP_JOINED`, `GROUP_LEFT`, `GROUP_ROSTER_UPDATE`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | SkillLines | `Trackers/SkillLines.lua` | `GetNumSkillLines[?]`, `GetSkillLineInfo[index]` (legacy, when present), `GetProfessions`, `GetProfessionInfo[index]`, `C_TradeSkillUI.GetAllProfessionTradeSkillLines`, `C_TradeSkillUI.GetTradeSkillLineInfoByID[skillLineID]` | Event + index iteration | `SKILL_LINES_CHANGED`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | SpellBook | `Trackers/SpellBook.lua` | `SpellBook`, `GetSpellBookItemName[slot]`, `GetSpellBookItemInfo[slot]`, `IsPassiveSpell[slot]`, `PlayerKnownSpells` (functionsDelta) | Event + slot iteration | `SPELLS_CHANGED`, `PLAYER_ENTERING_WORLD` |
-| QuestDialog | `Trackers/QuestDialog.lua` | Gossip, greeting, and current quest-dialog APIs; `GetAvailableQuestInfo[index]`, `GetActiveQuestID[index]`; quest flags `IsBreadcrumbQuest[qid]`, `C_QuestLine.GetQuestLineInfo[qid]`, `C_QuestInfoSystem.GetQuestClassification[qid]` (Forever only) | Event + delayed re-samples + observed close sample | `QUEST_DETAIL`, `QUEST_PROGRESS`, `QUEST_COMPLETE`, `QUEST_FINISHED`, `QUEST_GREETING`, `QUEST_ACCEPT_CONFIRM`, `GOSSIP_SHOW`, `GOSSIP_CLOSED` |
-| ResetTime | `Trackers/ResetTime.lua` | `GetServerTime`, `GetQuestResetTime` (legacy, when present), `C_DateAndTime.GetSecondsUntilDailyReset` (when present) | Init + low-frequency event snapshots | `PLAYER_LOGIN`, `PLAYER_ENTERING_WORLD`, `PLAYER_LOGOUT` |
+| QuestDialog | `Trackers/QuestDialog.lua` | Gossip, greeting, and current quest-dialog APIs, including reward/required counts, money, title, skill points, group size, auto-accept and background material; `GetQuestItemInfo[type][index]`, `GetQuestItemLink[type][index]`; `GetAvailableQuestInfo[index]`, `GetActiveQuestID[index]`; quest flags `IsBreadcrumbQuest[qid]`, `C_QuestLine.GetQuestLineInfo[qid]`, `C_QuestInfoSystem.GetQuestClassification[qid]` (Forever only) | Event + delayed re-samples + observed close sample | `QUEST_DETAIL`, `QUEST_PROGRESS`, `QUEST_COMPLETE`, `QUEST_FINISHED`, `QUEST_GREETING`, `QUEST_ACCEPT_CONFIRM`, `GOSSIP_SHOW`, `GOSSIP_CLOSED` |
+| ResetTime | `Trackers/ResetTime.lua` | `GetServerTime`, `GetQuestResetTime` (legacy, when present), `C_DateAndTime.GetSecondsUntilDailyReset` and `C_DateAndTime.GetCurrentCalendarTime` (each when present) | Init + low-frequency event snapshots | `PLAYER_LOGIN`, `PLAYER_ENTERING_WORLD`, `PLAYER_LOGOUT` |
+| ItemCount | `Trackers/ItemCount.lua` | `C_Item.GetItemCount[itemID]` | Init snapshot of carried items + event-driven + throttled private rescan | `ITEM_COUNT_CHANGED`; `BAG_UPDATE_DELAYED` is a private trigger and is not recorded |
+| Display | `Trackers/Display.lua` | `GetPhysicalScreenSize`, `UIParent:GetScale`, `GetScreenWidth`, `GetScreenHeight`, `GetCVar[lowercase name]` (allowlisted CVars) | Init + event-driven + private CVar trigger | `PLAYER_ENTERING_WORLD`, `UI_SCALE_CHANGED`, `DISPLAY_SIZE_CHANGED`; `CVAR_UPDATE` is a private trigger and is not recorded |
 | GameObject | `Trackers/GameObject.lua` | `GameObjectName` (synthetic) | TooltipDataProcessor callback (Modern/Forever only) | None (uses `TooltipDataProcessor.AddTooltipPostCall`) |
 
 ---
@@ -243,7 +245,10 @@ Two distinct phases:
 - Updates `FactionOrder` if the set changed.
 
 **SampleReputation** (pure reads):
-- For each known factionID, calls every available API independently: `C_Reputation.GetFactionDataByID(factionID)` when `C_Reputation` exists, and the legacy `GetFactionInfoByID(factionID)` when that global exists. Each result is recorded under its own API name (`C_Reputation.GetFactionDataByID[factionID]` / `GetFactionInfoByID[factionID]`) with its own change-detection state. A client exposing both gets both streams recorded; there is no synthesized composite value or exclusive either/or selection.
+- Samples every `FactionOrder` faction, i.e. the player's own reputation panel. Factions outside the panel are not recorded: a faction joins the panel on its first reputation change, so one outside it still has its starting value. Replay answers those from a static per-faction-group table (on Forever 1.60.1 the starting values outside the panel matched across the races checked, except one faction for each Skyborne race), which spares every player's client hundreds of lookups at login.
+- A nil answer (a faction the client does not have) is recorded once, like any other value. Failed calls are skipped.
+- Privacy: the guild faction (1168, Cataclysm and later clients) is named after the player's guild, so it is never sampled. Its ID stays in `FactionOrder`.
+- For each sampled factionID, calls every available API independently: `C_Reputation.GetFactionDataByID(factionID)` when `C_Reputation` exists, and the legacy `GetFactionInfoByID(factionID)` when that global exists. Each result is recorded under its own API name (`C_Reputation.GetFactionDataByID[factionID]` / `GetFactionInfoByID[factionID]`) with its own change-detection state. A client exposing both gets both streams recorded; there is no synthesized composite value or exclusive either/or selection.
 - Compares the raw value against the previous value (DeepCompare).
 - Appends `{t, tp, v}` only if changed.
 
@@ -253,10 +258,12 @@ Two distinct phases:
 |---|---|
 | Capture start (Init) | CollectAndSample (both phases) |
 | `QUEST_TURNED_IN` | CollectAndSample (quest rewards can reveal new factions) |
-| `CHAT_MSG_COMBAT_FACTION_CHANGE` | SampleReputation only (values changed, set unchanged) |
-| `UPDATE_FACTION` | SampleReputation only (same) |
+| `CHAT_MSG_COMBAT_FACTION_CHANGE` | CollectAndSample (a kill can reveal a new faction) |
+| `UPDATE_FACTION` | CollectAndSample (any other reputation change) |
 | `PLAYER_ENTERING_WORLD` | SampleReputation only (login-time sampling) |
 | `SPELLS_CHANGED` | SampleReputation only (login-time sampling) |
+
+Re-collecting walks the panel rows once. Headers are already expanded after the first pass, so later passes expand nothing and fire no further `UPDATE_FACTION`.
 
 ### Expand-only policy
 
@@ -304,6 +311,8 @@ Timer streams are derived compatibility streams. The native Classic API exposes 
 
 Reward streams are quest-scoped except `GetQuestLogRewardInfo`, which is a true two-argument API and is stored in native argument order as `functions["GetQuestLogRewardInfo"][rewardIndex][questId]`. Previously observed reward indices continue to be probed during post-invalidation checks; failed calls are skipped rather than replaced with invented inactive values.
 
+`GetQuestLogCompletionText` and `GetQuestLogSpecialItemInfo` take a quest-log index. Like `GetQuestLogQuestText`, they are sampled with the index resolved for each active quest and stored by quest ID, so the streams do not churn when other quests shift the log's indices. Replay resolves index → quest ID first. Completion text is passed through `Core.SanitizeText`. `C_QuestLog.GetRequiredMoney[questId]` is a direct quest-ID API, probed with the others, including after the quest leaves the log. `C_QuestLog.GetQuestTimers` is Forever's timer API and is recorded raw as a flat stream on every quest-log sample. The legacy `GetQuestTimers` global does not exist on Forever, so the derived timer streams below stay empty there.
+
 `QuestLogZone[questId]` is a derived stream, not a raw API return value. While scanning quest-log rows to build the `QuestLog` quest-ID array, the tracker tracks the most recent header row's title (`isHeader` rows are excluded from `QuestLog` itself) and records it as the zone/category for every quest that follows until the next header. This lets replay consumers associate a quest with the zone heading Blizzard's quest log displays it under.
 
 ---
@@ -312,13 +321,15 @@ Reward streams are quest-scoped except `GetQuestLogRewardInfo`, which is a true 
 
 The QuestDialog tracker captures transient gossip, greeting, and current quest dialog APIs used by replay consumers. It is separate from UnitInteraction because it records dialog state, not unit identity. It uses safe `pcall` wrappers and the standard delayed re-sample schedule for open/update events. Close events (`GOSSIP_CLOSED`, `QUEST_FINISHED`) cancel pending delayed reads and perform one observed API sample; raw streams do not receive deterministic synthetic inactive values.
 
-Sampled parameterless streams include `C_GossipInfo.GetNumAvailableQuests`, `C_GossipInfo.GetNumActiveQuests`, `C_GossipInfo.GetText`, `C_GossipInfo.GetOptions`, legacy gossip count/list globals, greeting text/counts, current quest title/text/objective/progress/reward APIs, `GetRewardXP`, `IsQuestCompletable`, and `GetNumQuestChoices`.
+Sampled parameterless streams include `C_GossipInfo.GetNumAvailableQuests`, `C_GossipInfo.GetNumActiveQuests`, `C_GossipInfo.GetText`, `C_GossipInfo.GetOptions`, legacy gossip count/list globals, greeting text/counts, current quest title/text/objective/progress/reward APIs, `GetRewardXP`, `IsQuestCompletable`, `GetNumQuestChoices`, `GetNumQuestRewards`, `GetNumQuestItems`, `GetNumQuestCurrencies`, `GetRewardMoney`, `GetQuestMoneyToGet`, `GetRewardTitle`, `GetRewardSkillPoints` (packed), `GetSuggestedGroupSize`, `QuestGetAutoAccept`, and `GetQuestBackgroundMaterial`.
+
+Quest dialog items are stored in native argument order as `GetQuestItemInfo[type][index]` (packed tuple) and `GetQuestItemLink[type][index]` (scalar). Each sample pass reads `"choice"` indices 1..`GetNumQuestChoices()`, `"reward"` indices 1..`GetNumQuestRewards()` and `"required"` indices 1..`GetNumQuestItems()`. Indices beyond the current count are not read, since Blizzard's quest frame never asks for them. The delayed re-samples catch item names that arrive after the dialog event.
 
 Greeting streams are keyed by greeting index: `GetActiveTitle[index]` and `GetAvailableQuestInfo[index]` as packed tuples, and `GetAvailableTitle[index]` and `GetActiveQuestID[index]` (Forever only) as scalars. Active and available indices each start at 1, the same as the native APIs, not offset like the greeting frame's button IDs. The highest count seen for each list (`GetNumActiveQuests` / `GetNumAvailableQuests`) is retained for the capture. When counts shrink, subsequent event and delayed samples continue probing stale indices so an initial error or unsettled return does not prevent later observations. Only successful returns are appended. A new capture resets these counts; close events still cancel delayed reads and perform only one sample.
 
 Quest flags are keyed by quest ID: `IsBreadcrumbQuest[qid]`, `C_QuestLine.GetQuestLineInfo[qid]`, and `C_QuestInfoSystem.GetQuestClassification[qid]`. All three APIs are Forever-only. Each is feature-detected once at capture start, and when none exist (Era) no flags are sampled and neither `GetQuestID` nor the gossip list is read for this. Every sample pass (events and delayed re-samples) collects the dialog quest and the offered quests: `GetQuestID()` (the detail/progress/complete quest; 0 is ignored), each `questID` in `C_GossipInfo.GetAvailableQuests()`, and each questID (5th return) from `GetAvailableQuestInfo`. Active quests listed in gossip or greeting menus are not sampled unless they come up as the dialog quest. The tracker then calls each available flag API with that quest ID as its only argument. These reads only decide which quests are sampled. `GetQuestID` is recorded as its own flat stream and the gossip list is recorded by UnitInteraction. Each call is wrapped in `pcall`, and only successful returns are appended, change-only per quest. A gossip or greeting list holds only a few quests, so each pass makes at most about three calls per listed quest. `IsBreadcrumbQuest` is undocumented and no Blizzard UI code calls it, so passing the quest ID is an assumption and its value should be treated as a hint. `C_QuestLine.GetQuestLineInfo` is called without `uiMapID`/`displayableOnly`, so hidden quest lines are returned with `isHidden = true` rather than filtered out.
 
-Privacy: every string these APIs return goes through `Core.SanitizeText` before it is stored, as AGENTS.md requires for free text from WoW APIs. This applies to `C_GossipInfo.GetText`, `GetGreetingText`, `GetQuestText`, `GetObjectiveText`, `GetProgressText`, and `GetRewardText`. All six are listed in `SANITIZE_TEXT_FUNCTIONS`. Sanitization replaces each top-level string of a scalar, packed tuple or returned table, and stores a copy so the API's own table is never modified. Quest titles (`GetActiveTitle`, `GetAvailableTitle`) and quest line names (`C_QuestLine.GetQuestLineInfo` `questLineName`/`questName`) are static game data and do not contain player names, so they are stored raw. The other streams hold only quest IDs, booleans and enum numbers. `QuestLineInfo` is otherwise stored whole rather than as a hand-picked subset. Its non-string fields are quest-start map data (`x`, `y`, `startMapID`, `floorLocation`) and quest/account state flags, none of which identify a player. The field set keeps growing across builds (`isQuestStart`, `inProgress`, `isAccountCompleted`, ...), and a whitelist would silently drop new fields that relationship inference could use.
+Privacy: every string these APIs return goes through `Core.SanitizeText` before it is stored, as AGENTS.md requires for free text from WoW APIs. This applies to `C_GossipInfo.GetText`, `GetGreetingText`, `GetQuestText`, `GetObjectiveText`, `GetProgressText`, `GetRewardText`, and `GetRewardTitle` (a character title can be formatted around the player's name). All seven are listed in `SANITIZE_TEXT_FUNCTIONS`. Sanitization replaces each top-level string of a scalar, packed tuple or returned table, and stores a copy so the API's own table is never modified. Quest titles (`GetActiveTitle`, `GetAvailableTitle`) and quest line names (`C_QuestLine.GetQuestLineInfo` `questLineName`/`questName`) are static game data and do not contain player names, so they are stored raw. The other streams hold only quest IDs, booleans and enum numbers. `QuestLineInfo` is otherwise stored whole rather than as a hand-picked subset. Its non-string fields are quest-start map data (`x`, `y`, `startMapID`, `floorLocation`) and quest/account state flags, none of which identify a player. The field set keeps growing across builds (`isQuestStart`, `inProgress`, `isAccountCompleted`, ...), and a whitelist would silently drop new fields that relationship inference could use.
 
 ---
 
@@ -339,7 +350,37 @@ The ResetTime tracker samples `GetServerTime` and `GetQuestResetTime` at capture
 
 ---
 
-## 14) Change detection
+## 14) Nameplate units (UnitInteraction)
+
+On `NAME_PLATE_UNIT_ADDED(token)`, UnitInteraction records `UnitGUID[token]` for the new nameplate's unit. It samples only that token, and only tokens matching `nameplate%d+`; the event does not re-sample the fixed tokens. Only the GUID is recorded: Questie reads it for the NPC ID and only checks that `UnitName` is not nil, so replay answers the name from the NPC ID and no nameplate name is ever stored. Nothing is sampled inside instances (`IsInInstance()`), where Questie draws no nameplate icons on Forever and GUIDs are restricted.
+
+Privacy: the GUID is classified with `Core.ParseGUIDKind`. Only `Creature-` and `Vehicle-` GUIDs of kind `npc` are recorded, the units Questie draws icons on. Players, game objects, unrecognized or restricted GUIDs, and player pets and minions (`Pet-` GUIDs, or `UnitPlayerControlled(token)` true or restricted) are withheld.
+
+The stream is change-only per token, and a withheld unit's add records nil: "no recordable unit on this token", not a nil returned by the client. Nameplate tokens are reused as plates come and go; without that nil, a token taken over by a player would keep answering with its previous NPC. `NAME_PLATE_UNIT_REMOVED` writes no entry, so between a removal and the next add the token keeps its last value.
+
+---
+
+## 15) ItemCount tracker behavior
+
+`C_Item.GetItemCount[itemID]` answers Questie's item objective and tooltip counts. Forever's `C_QuestLog.GetQuestObjectives` carries no item IDs, so the objective items cannot be picked out of the quest log. Instead the tracker reads the items the player carries: the backpack, bags 1–4, the keyring (when the client has one) and the equipment slots 0–19, since `GetItemCount` counts equipped items too. The bag and equipment reads only choose which items to sample and are not recorded.
+
+- Capture start samples every carried item. An item without a `t=0` entry was not carried and had count 0.
+- `ITEM_COUNT_CHANGED(itemID)` samples that item immediately. Forever skips this event for some pickups (often an item's first), and Era does not have it, so it is not enough on its own.
+- `BAG_UPDATE_DELAYED`, on a private frame that records nothing, schedules one rescan a second later; further bag updates in that second share it. The rescan reads every carried item plus every recorded item whose last count was above 0, so an item that left the bags is recorded as 0. Items at 0 that are not carried are not read again.
+
+All samples are change-only. A full rescan measured 0.21 ms on Forever with 20 bag slots and 25 items, and runs at most once per second, only after bag changes.
+
+---
+
+## 16) Display tracker behavior
+
+The Display tracker records the screen geometry (`GetPhysicalScreenSize`, `UIParent:GetScale`, `GetScreenWidth`, `GetScreenHeight`) and `GetCVar[name]` for the CVars in `RECORDED_CVARS` (`Modules/Trackers/Display.lua`): `useUiScale`, `uiScale`, `questPOI`, `autoQuestWatch`, `autoQuestProgress`, `miniWorldMap`, `mapFade`, `rotateMinimap`, `minimapZoom`, `minimapInsideZoom` and `instantQuestText`. All of them exist on Forever 1.60.1. CVar streams are keyed by the lowercase name, since CVar names are case-insensitive and callers use both spellings. It samples at capture start and on `PLAYER_ENTERING_WORLD`, `UI_SCALE_CHANGED`, `DISPLAY_SIZE_CHANGED` and `CVAR_UPDATE`, change-only. A nil CVar value is recorded once.
+
+Privacy: `CVAR_UPDATE` fires for every CVar, and some CVars hold account or realm identifiers. Its first argument is the CVar name or an event name passed to `SetCVar` (the world map sends `"QUEST_POI"` for `questPOI`). The tracker therefore listens on a private frame: any `CVAR_UPDATE` re-reads the allowlisted CVars, and the event itself is never recorded or dispatched.
+
+---
+
+## 17) Change detection
 
 Trackers only append entries when values change. The comparison method
 depends on the value type:
