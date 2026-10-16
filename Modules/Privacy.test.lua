@@ -262,6 +262,19 @@ describe("GetPrivacyNameSet", function()
       assert.are.equal("Greetings, <name>, welcome!", result)
     end)
 
+    it("should redact the player's guild name, as in guild reputation messages", function()
+      env.UnitName = function(token)
+        if token == "player" then return "John" end
+        return nil
+      end
+      env.GetGuildInfo = function(unit)
+        if unit == "player" then return "Knights of Dawn", "Member", 3 end
+      end
+
+      local result = Core.SanitizeText("Reputation with Knights of Dawn increased by 25.")
+      assert.are.equal("Reputation with <name> increased by 25.", result)
+    end)
+
     it("should redact local player firstname only", function()
       env.UnitName = function(token)
         if token == "player" then return "John Doe" end
