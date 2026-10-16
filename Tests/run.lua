@@ -438,6 +438,7 @@ local function TestSessionContract()
   local env = runtime.env
   local settings = env.QuestieTrace.settings
   env.QuestieTraceCharacter.sessions[1] = legacy
+  env.GetBuildInfo = function() return "1.15.9", "70003", "Sep 29 2026", 11509, "", " " end
   SendEvent(runtime, "PLAYER_LOGIN")
   assert(env.QuestieTrace.settings == settings,
     "Recording contract must not reset existing settings")
@@ -446,6 +447,8 @@ local function TestSessionContract()
   local current = Session(runtime)
   assert(current.schemaVersion == 15 and current.recordingContractVersion == 1,
     "New captures need contract provenance without a storage schema bump")
+  assert(current.buildInfo.n == 6 and current.buildInfo[1] == "1.15.9" and current.buildInfo[2] == "70003"
+    and current.buildInfo[4] == 11509, "New captures record the client build they were made on")
   runtime.core.SaveCapture()
   assert(env.QuestieTraceCharacter.sessions[2] == current and current.recordingContractVersion == 1,
     "Saving must retain the recording contract")
@@ -2397,10 +2400,10 @@ end
 
 local function TestNameplatesRecordOnlyWorldCreatures()
   local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  -- Restricted values: a boolean stand-in and a GUID string that would otherwise pass the filter.
   local secret = {}
-  runtime.env.issecretvalue = function(value) return value == secret end
-  local inInstance = false
-  runtime.env.IsInInstance = function() return inInstance end
+  local secretGUID = "Creature-0-5251-0-12-6-000099999"
+  runtime.env.issecretvalue = function(value) return value == secret or value == secretGUID end
   local npc = { guid = "Creature-0-5251-0-12-6-000012345", name = "Kobold Vermin" }
   local units = {
     nameplate1 = npc,
@@ -2438,11 +2441,21 @@ local function TestNameplatesRecordOnlyWorldCreatures()
   assert(#guids.nameplate1 == 2 and guids.nameplate1[2].v == nil and guids.nameplate1[2].t == 5,
     "A reused token never keeps answering with its previous NPC")
 
-  -- Questie draws no nameplate icons in instances, so nothing is sampled there.
-  inInstance = true
+  -- Inside instances: a readable creature is recorded (Classic Questie draws dungeon icons),
+  -- a restricted GUID as Forever returns there records nil, and so does a failed call.
+  runtime.env.IsInInstance = function() return true, "party" end
   units.nameplate1 = npc
   SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate1")
-  assert(#guids.nameplate1 == 2, "Nameplates are not sampled inside instances")
+  assert(#guids.nameplate1 == 3 and guids.nameplate1[3].v == npc.guid, "Nameplates are sampled inside instances")
+  units.nameplate1 = { guid = secretGUID, name = "Restricted" }
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+  assert(#guids.nameplate1 == 4 and guids.nameplate1[4].v == nil, "A restricted GUID records nil, like any withheld unit")
+  units.nameplate1 = npc
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+  runtime.env.UnitGUID = function() error("token not available to addons") end
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+  assert(#guids.nameplate1 == 6 and guids.nameplate1[6].v == nil, "A failed UnitGUID call records nil")
+  assert(not ContainsString(session, secretGUID), "A restricted GUID never reaches the session")
 
   for token in pairs(functions.UnitName) do
     assert(not token:find("^nameplate"), "Nameplate names are never recorded")
@@ -2529,6 +2542,31 @@ local function TestQuestDialogRecordsRewardItems()
   assert(not ContainsString(Session(runtime), "Testplayer"), "The player's name never reaches the session")
 end
 
+local function TestQuestDialogRecordsMistsRewardCurrencies()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  local env = runtime.env
+  env.GetNumRewardCurrencies = function() return 1 end
+  env.GetMaxRewardCurrencies = function() return 2 end
+  ---@param itemType string
+  ---@param index number
+  env.GetQuestCurrencyInfo = function(itemType, index)
+    if itemType == "reward" and index == 1 then return "Justice Points", 463446, 75, 1 end
+  end
+  ---@param index number
+  env.GetQuestCurrencyID = function(_, index) if index == 1 then return 395 end end
+  runtime.core.StartCapture("reward currencies")
+  SendEvent(runtime, "QUEST_COMPLETE")
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local info, ids = functions.GetQuestCurrencyInfo.reward, functions.GetQuestCurrencyID.reward
+  assert(info[1][1].v.n == 4 and info[1][1].v[3] == 75 and ids[1][1].v == 395, "Reward currencies keep their raw tuple and ID")
+  -- Mists' quest frame reads every slot up to GetMaxRewardCurrencies(), past the count.
+  assert(#info[2] == 1 and info[2][1].v.n == 0 and #ids[2] == 1 and ids[2][1].v == nil,
+    "Slots past the count are read up to the maximum, as Blizzard's frame does")
+  assert(functions.GetNumRewardCurrencies[1].v == 1 and functions.GetMaxRewardCurrencies[1].v == 2,
+    "Both bounds are recorded")
+end
+
 local function TestItemCountSnapshotAndChanges()
   local runtime = NewRuntime({ "Modules/Trackers/ItemCount.lua" })
   local env = runtime.env
@@ -2606,6 +2644,35 @@ local function TestQuestLogExtrasStoredByQuestID()
   assert(functions["C_QuestLog.GetRequiredMoney"][100][1].v == -1, "Required money is the raw API value")
   local timers = functions["C_QuestLog.GetQuestTimers"]
   assert(#timers == 1 and next(timers[1].v) == nil, "No running timers is recorded once, across the delayed re-samples")
+end
+
+local function TestQuestLogRecordsLegacyTimerSlots()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestLog.lua" })
+  local env = runtime.env
+  -- Classic clients: legacy quest-log globals only, no C_QuestLog.GetInfo
+  env.GetQuestLogTitle = function(index)
+    if index == 1 then return "Tanaris", 0, 0, true, false, false, 0, 0 end
+    if index == 2 then return "Rescue OOX-17/TN!", 45, 0, false, false, false, 0, 351 end
+  end
+  env.GetQuestLogIndexByID = function(questID) if questID == 351 then return 2 end end
+  local timers, slots = { 300 }, { 2 }
+  env.GetQuestTimers = function() return unpack(timers) end
+  env.GetQuestIndexForTimer = function(slot) return slots[slot] end
+  runtime.core.StartCapture("legacy timers")
+  AdvanceTo(runtime, 2)
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local slotStream = functions.GetQuestIndexForTimer[1]
+  assert(#slotStream == 1 and slotStream[1].v == 2, "Timer slot 1 maps to quest-log index 2, raw and change-only")
+  assert(functions.GetQuestTimers[351][1].v == 300, "The derived questID stream still carries the seconds")
+
+  -- The escort ends: no slot is current any more, which the derived stream's nil
+  -- shows (replay counts slots from it); the ended slot itself is not read.
+  timers, slots = {}, {}
+  runtime.now = 10
+  SendEvent(runtime, "QUEST_LOG_UPDATE")
+  local seconds = functions.GetQuestTimers[351]
+  assert(#seconds == 2 and seconds[2].v == nil and seconds[2].t == 10, "An ended timer leaves the derived stream")
+  assert(#slotStream == 1, "Slots past the current timers are not read")
 end
 
 ---@class PositionFixture
@@ -2686,9 +2753,11 @@ end
 local tests = {
   { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
   { name = "quest log extras are stored by quest ID", run = TestQuestLogExtrasStoredByQuestID },
+  { name = "quest log records legacy timer slots raw", run = TestQuestLogRecordsLegacyTimerSlots },
   { name = "position records explored map overlays", run = TestPositionRecordsExploredMap },
   { name = "reset time records realm calendar time", run = TestResetTimeRecordsCalendarTime },
   { name = "quest dialog records reward items per type and index", run = TestQuestDialogRecordsRewardItems },
+  { name = "quest dialog records Mists reward currencies up to the maximum", run = TestQuestDialogRecordsMistsRewardCurrencies },
   { name = "display records screen size and only allowlisted CVars", run = TestDisplayRecordsOnlyAllowlistedCVars },
   { name = "nameplates record only world creatures, change-only per token", run = TestNameplatesRecordOnlyWorldCreatures },
   { name = "restricted unit identity does not interrupt capture", run = TestRestrictedUnitIdentityDoesNotInterruptCapture },

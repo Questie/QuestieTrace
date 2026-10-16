@@ -101,6 +101,7 @@ Each `/qlt save` appends one record to `QuestieTraceCharacter.sessions`.
 SessionRecord = {
   schemaVersion = 9,
   recordingContractVersion = 1,
+  buildInfo = { "1.60.1", "70425", "Oct 14 2026", 16001, "", " ", n = 6 }, -- schema 15+
   name = "2026-02-10_12-34-56",
 
   startedAt        = 100000.000,     -- GetTime() at capture start
@@ -120,6 +121,14 @@ There is no `exportedAt` field: a reported session is deleted outright by
 `Core.DeleteReportedSessions()` rather than flagged and kept around (see
 "Export and deletion" above).
 
+`buildInfo` (schema 15+) is the raw `GetBuildInfo()` return at capture start,
+packed: version, build, build date, interface version, and the client's
+remaining values. It identifies the client flavor and exact build that
+produced the trace (`"1.15.9"`/`"70003"` Era, `"5.5.4"` Mists, `"1.60.1"`
+Forever), so replay can pick matching UI source and per-build data. The older
+`GetBuildInfo["player"]` stream, holding only the interface version, is kept
+unchanged for existing readers.
+
 ### Recording contract
 
 `recordingContractVersion` identifies recording semantics independently of the
@@ -130,7 +139,9 @@ last observation is not proof that an API still returns that value later.
 
 Restricted GUIDs cannot pass privacy classification and are omitted, along with
 their associated unit names. They are not replaced with synthetic nil observations;
-other readable observations continue to be recorded.
+other readable observations continue to be recorded. The one exception is
+nameplate tokens (schema 15+), where every withheld unit, restricted or not,
+records nil so a reused token never answers with its previous unit.
 
 Missing markers mean legacy/unknown semantics, even for schema v9. Those sessions
 may contain synthetic resets or normalized returns. Consumers must check for the
@@ -362,6 +373,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetSuggestedGroupSize` | scalar (number) | QuestDialog; 0 when none. Schema 15+ |
 | `QuestGetAutoAccept` | scalar (boolean) | QuestDialog. Schema 15+ |
 | `GetQuestBackgroundMaterial` | scalar (string/nil) | QuestDialog; nil means the default parchment. Schema 15+ |
+| `GetNumRewardCurrencies` | scalar (number) | QuestDialog; reward currency count, on clients that have it (Mists). Schema 15+ |
+| `GetMaxRewardCurrencies` | scalar (number) | QuestDialog; reward currency slots Mists' quest frame reads, on clients that have it. Schema 15+ |
 | `C_QuestLog.GetQuestTimers` | object (QuestTimerInfo[]) | QuestLog; raw table, empty when no timer runs. A running timer appends on every quest-log sample. Schema 15+ |
 | `GetPhysicalScreenSize` | tuple (n=2) | Display; width, height in pixels. Schema 15+ |
 | `UIParent:GetScale` | scalar (number) | Display; `UIParent:GetScale()` method call. Schema 15+ |
@@ -419,6 +432,12 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetQuestLogCompletionText` | scalar (string/nil) | Sampled with the native quest-log index, stored by quest ID; nil until the quest can be turned in; passed through `Core.SanitizeText`. Schema 15+ |
 | `GetQuestLogSpecialItemInfo` | tuple (n varies) | Sampled with the native quest-log index, stored by quest ID; itemLink, icon, charges, showItemWhenComplete, or n=0 when the quest has no usable item. Schema 15+ |
 
+### Parameterized by timer slot
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `GetQuestIndexForTimer` | scalar (number/nil) | QuestLog; legacy timer API (Classic clients). Raw quest-log index of each current `GetQuestTimers()` slot, change-only. Slots past the current timers are not read, so a slot's last entry can outlive its timer: the current slot count is the number of quests with a non-nil derived `GetQuestTimers[questId]`. Together they rebuild `GetQuestTimers()` in slot order. Schema 15+ |
+
 ### Nested parameterized by native arguments
 
 | Function key | Shape | Return type | Notes |
@@ -431,6 +450,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 |---|---|---|---|
 | `GetQuestItemInfo` | `[type][index]` | tuple (n=7 on Forever) | QuestDialog; name, texture, count, quality, isUsable, itemID, ... in native argument order. `type` is `"choice"` (1..`GetNumQuestChoices`), `"reward"` (1..`GetNumQuestRewards`) or `"required"` (1..`GetNumQuestItems`); only indices within the current count are read. Schema 15+ |
 | `GetQuestItemLink` | `[type][index]` | scalar (string/nil) | QuestDialog; same keys as `GetQuestItemInfo`. Schema 15+ |
+| `GetQuestCurrencyInfo` | `["reward"][index]` | tuple (n varies) | QuestDialog, on clients that have it (Mists); name, texture, count, quality. Read for index 1..`GetMaxRewardCurrencies()`, past `GetNumRewardCurrencies()`, as Blizzard's Mists quest frame does (`Wrath/QuestInfo.lua`); empty slots return n=0. Classic frames never read required currencies. Schema 15+ |
+| `GetQuestCurrencyID` | `["reward"][index]` | scalar (number/nil) | QuestDialog, on clients that have it (Mists); same keys as `GetQuestCurrencyInfo`. Schema 15+ |
 
 ### Parameterized by greeting index
 
@@ -452,9 +473,9 @@ All tuple-returning functions MUST have `n` on every stored value.
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `UnitGUID` | scalar (string) or nil | UnitInteraction; `Creature-` or `Vehicle-` GUID, or nil when the token's unit is withheld. Sampled on `NAME_PLATE_UNIT_ADDED` outside instances, change-only per token. Schema 15+ |
+| `UnitGUID` | scalar (string) or nil | UnitInteraction; `Creature-` or `Vehicle-` GUID, or nil when the token's unit is withheld. Sampled on `NAME_PLATE_UNIT_ADDED`, change-only per token. Schema 15+ |
 
-Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, and unrecognized or restricted GUIDs are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. No sample is taken inside instances, where Questie draws no nameplate icons on Forever and GUIDs are restricted. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
+Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, unrecognized or restricted GUIDs, and failed `UnitGUID` calls are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. Instances are sampled too: Questie draws nameplate icons in dungeons on Classic clients, while Forever restricts GUIDs there, so its instance adds record nil. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
 
 ### Parameterized by unit token (`"target"`, `"mouseover"`)
 

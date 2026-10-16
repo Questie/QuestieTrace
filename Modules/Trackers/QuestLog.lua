@@ -44,6 +44,7 @@ local C_After = C_Timer.After
 -- GetQuestLogQuestText(questLogIndex)          -> packed quest text tuple keyed by questID
 -- GetQuestTimers[questID]                      -> number secondsLeft (derived from GetQuestTimers())
 -- GetQuestLogTimeLeft[questID]                 -> number secondsLeft (same derived compatibility value)
+-- GetQuestIndexForTimer(timerIndex)            -> number? questLogIndex (raw, keyed by timer slot)
 -- GetNumQuestLogRewards(questID)               -> number numRewards
 -- GetQuestLogRewardInfo(index, questID)        -> packed reward item tuple
 -- GetQuestLogRewardMoney(questID)              -> number money
@@ -626,6 +627,11 @@ end
 ---quest log index. We store the resolved seconds under questID so replay callers
 ---can answer Questie's questID-shaped timer queries without mutating quest-log
 ---selection via `SelectQuestLogEntry`.
+---
+---`GetQuestIndexForTimer[slot]` is also recorded raw, change-only, for the
+---current slots, so replay can rebuild `GetQuestTimers()` in slot order. The
+---number of current slots is the number of quests with a non-nil derived
+---`GetQuestTimers[questId]`; slots past it are not read.
 ---@param t number
 ---@param tp number
 local function SampleQuestTimers(t, tp)
@@ -640,6 +646,17 @@ local function SampleQuestTimers(t, tp)
   for timerIndex = 1, timers.n do
     local secondsLeft = timers[timerIndex]
     local indexOk, questLogIndex = SafeScalarCall(GetQuestIndexForTimer, timerIndex)
+
+    -- Raw slot-to-quest-log-index map
+    if indexOk then
+      local slotStream = GetOrCreateParamStream("GetQuestIndexForTimer", timerIndex)
+      local previous = slotStream[#slotStream]
+      if not previous or previous.v ~= questLogIndex then
+        slotStream[#slotStream + 1] = { t = t, tp = tp, v = questLogIndex }
+      end
+    end
+
+    -- Derived seconds left, keyed by quest ID
     if indexOk and type(questLogIndex) == "number" then
       local questId = GetQuestIdAtLogIndex(questLogIndex)
       if questId then

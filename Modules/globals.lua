@@ -44,6 +44,7 @@ local Core = QuestieTraceCore
 ---@class SessionRecord
 ---@field schemaVersion number
 ---@field recordingContractVersion number? 1 = observed raw API streams; absent = legacy/unknown.
+---@field buildInfo PackedArgs? Raw GetBuildInfo() at capture start (schema 15+): version, build, date, interfaceVersion, ...
 ---@field name string?
 ---@field startedAt number
 ---@field startedAtPrecise number

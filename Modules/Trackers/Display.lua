@@ -21,7 +21,7 @@ local DeepCompare = Core.DeepCompare
 
 ---Privacy: the only CVars whose values are recorded. Some CVars hold account,
 ---realm or character identifiers, so this is an allowlist of display and
----quest UI settings, each checked to exist on Forever 1.60.1.
+---quest UI settings. A CVar a client lacks records nil.
 ---@type string[]
 local RECORDED_CVARS = {
   "useUiScale",
@@ -35,6 +35,7 @@ local RECORDED_CVARS = {
   "minimapZoom",
   "minimapInsideZoom", -- Questie compares it with minimapZoom for minimap icon tooltips
   "instantQuestText",  -- Questie's options read it
+  "displayQuestID",    -- Questie reads it with GetCVarBool; nil on Forever 1.60.1
 }
 
 ---@type table<string, FunctionStream>

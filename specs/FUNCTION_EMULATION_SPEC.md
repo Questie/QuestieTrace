@@ -125,6 +125,9 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetSuggestedGroupSize()` | `functions["GetSuggestedGroupSize"]` |
 | `QuestGetAutoAccept()` | `functions["QuestGetAutoAccept"]` |
 | `GetQuestBackgroundMaterial()` | `functions["GetQuestBackgroundMaterial"]` |
+| `GetNumRewardCurrencies()` / `GetMaxRewardCurrencies()` | `functions["GetNumRewardCurrencies"]` / `functions["GetMaxRewardCurrencies"]` (clients that have them, e.g. Mists) |
+| `GetQuestCurrencyInfo("reward", index)` | `functions["GetQuestCurrencyInfo"]["reward"][index]` (same) |
+| `GetQuestCurrencyID("reward", index)` | `functions["GetQuestCurrencyID"]["reward"][index]` (same) |
 | `C_Item.GetItemCount(itemID)` | `functions["C_Item.GetItemCount"][itemID]`; answers calls without `includeBank` only (trailing nil arguments are skipped by `getStream`) |
 | `UnitGUID("nameplateN")` | `functions["UnitGUID"]["nameplateN"]`; see the nameplate note below |
 | `GetPhysicalScreenSize()` | `functions["GetPhysicalScreenSize"]` |
@@ -161,6 +164,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]` |
 | `GetQuestLogQuestText(questLogIndex)` for active quest `questId` | `functions["GetQuestLogQuestText"][questId]` |
 | Timed quest value for `questId` | `functions["GetQuestTimers"][questId]` |
+| `GetQuestIndexForTimer(timerIndex)` (legacy) | `functions["GetQuestIndexForTimer"][timerIndex]` |
+| `GetQuestTimers()` (legacy) | N = number of quests with a non-nil `GetQuestTimers[questId]`; for slots 1..N in order: the quest at log index `GetQuestIndexForTimer[slot]` (via `GetQuestLogIndexByID`/`C_QuestLog.GetLogIndexForQuestID`), then its `GetQuestTimers[questId]` seconds. Slot entries past N can be stale |
 | Quest log time-left value for `questId` | `functions["GetQuestLogTimeLeft"][questId]` |
 | `GetNumQuestLogRewards(questId)` | `functions["GetNumQuestLogRewards"][questId]` |
 | `GetQuestLogRewardMoney(questId)` | `functions["GetQuestLogRewardMoney"][questId]` |
@@ -184,7 +189,8 @@ Notes:
 
 - Raw questID API streams such as `C_QuestLog.IsQuestFlaggedCompleted`, `C_QuestLog.IsOnQuest`, `HaveQuestData`, objectives, reward count/money, `GetQuestTagInfo`, `C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, and `C_QuestLog.IsFailed` store observed API returns. When a quest leaves `QuestLog`, the tracker runs post-invalidation probes and records only values returned by successful calls. `C_QuestLog.IsQuestFlaggedCompleted` is related to `GetQuestsCompleted`, but the raw stream is not derived from it.
 - Quest-log title/tag/completion data is intentionally split across several independent raw streams (`C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, `C_QuestLog.IsFailed`, legacy `GetQuestLogTitle`) rather than one normalized composite value. Consumers that want a single "quest log title" view must combine whichever of these streams are present themselves; a client that lacks one of the modern `C_QuestLog.*` APIs simply has no entries for that stream, it is never backfilled from another API.
-- Nameplate `UnitGUID` entries are change-only per token. A nil entry means the token's unit was withheld for privacy (a player, a player's pet or minion, a game object, or an unrecognized or restricted GUID), not that the client returned nil. `UnitName("nameplateN")` is not recorded: answer it from the NPC ID in the GUID (QuestieDB), or nil when the GUID is nil. Inside instances no nameplate is sampled, and `NAME_PLATE_UNIT_REMOVED` writes no entry, so a token keeps its last value until its next add.
+- Nameplate `UnitGUID` entries are change-only per token. A nil entry means the token's unit was withheld (a player, a player's pet or minion, a game object, an unrecognized or restricted GUID, or a failed call), not that the client returned nil. `UnitName("nameplateN")` is not recorded: answer it from the NPC ID in the GUID (QuestieDB), or nil when the GUID is nil. Instances are sampled too (Forever's restricted instance GUIDs record nil). `NAME_PLATE_UNIT_REMOVED` writes no entry, so a token keeps its last value until its next add.
+- Session metadata: `session.buildInfo` (schema 15+) is the raw `GetBuildInfo()` tuple at capture start. Use it to choose the client flavor's API set and data; answer `GetBuildInfo()` with `unpack(buildInfo, 1, buildInfo.n)`. Sessions without it only have the interface version, in `functions["GetBuildInfo"]["player"]`.
 - `C_Item.GetItemCount`: an item with no entry at `t=0` was not in the bags, keyring or equipment at capture start (count 0). Later entries come from `ITEM_COUNT_CHANGED` and from a rescan one second after bag changes, so a count can trail the real change by up to a second.
 - `GetPlayerFacing()` is not recorded. Derive the heading from consecutive `C_Map.GetPlayerMapPosition["player"]` samples; it is wrong only while strafing, backpedaling or turning in place.
 - `GetQuestLogIndexByID`/`C_QuestLog.GetLogIndexForQuestID`, `GetQuestLogQuestText`, `GetQuestLogCompletionText` and `GetQuestLogSpecialItemInfo` are sampled with the native quest-log index but stored by `questId`. Native index emulation should map index → questId via the `QuestLog` synthetic stream first. After a quest leaves the active log, there is no valid quest-log index to probe for these streams.

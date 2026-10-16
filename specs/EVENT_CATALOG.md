@@ -180,8 +180,8 @@ recorded, since that reflects a state transition rather than PII.
 
 **From `group_world` (shared, nameplate token only):**
 - `NAME_PLATE_UNIT_ADDED` -- samples `UnitGUID` for the event's `nameplateN`
-  token only, outside instances. Only creature and vehicle GUIDs are stored;
-  any other unit (players, player pets and minions, game objects) records nil.
+  token only. Only creature and vehicle GUIDs are stored; any other unit
+  (players, player pets and minions, game objects, restricted GUIDs) records nil.
   See TRACKER_SPEC section 14.
 
 ### UnitState tracker
