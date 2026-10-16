@@ -77,10 +77,10 @@ local function GetUnitNameParts(token)
   return parts
 end
 
---- Collect the set of player names currently known to the client: the
---- local player and, if grouped, the player's raid/party members. Built
---- fresh on every call and never persisted -- it exists purely as an
---- in-memory sanitization dictionary for Core.SanitizeText.
+--- Collect the set of player and guild names currently known to the client:
+--- the local player, the player's guild and, if grouped, the player's
+--- raid/party members. Built fresh on every call and never persisted -- it
+--- exists purely as an in-memory sanitization dictionary for Core.SanitizeText.
 ---@return table<string, boolean>
 function Core.GetPrivacyNameSet()
   ---@type table<string, boolean>
@@ -96,6 +96,15 @@ function Core.GetPrivacyNameSet()
   -- Local player
   for _, part in ipairs(GetUnitNameParts("player")) do
     AddName(part)
+  end
+
+  -- Guild: clients with guild reputation name it in faction texts, such as
+  -- "Reputation with <guild> increased" chat messages.
+  if type(GetGuildInfo) == "function" then
+    local ok, guildName = pcall(GetGuildInfo, "player")
+    if ok and not (issecretvalue and issecretvalue(guildName)) then
+      AddName(guildName)
+    end
   end
 
   -- Party/raid members
