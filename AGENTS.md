@@ -75,12 +75,14 @@ Modules/                  - Core modules and tracking systems
         QuestLog.lua           - Quest log tracking
         CompletedQuests.lua    - Completed quests tracking
         QuestDialog.lua        - Quest dialog/gossip tracking
-        UnitInteraction.lua    - Unit interaction tracking
+        UnitInteraction.lua    - Unit interaction and nameplate unit tracking
         UnitState.lua          - Unit state (level/classification/reaction) tracking
         GroupState.lua         - Group/raid state tracking
         SkillLines.lua         - Skill lines tracking
         SpellBook.lua          - Spell book tracking
-        ResetTime.lua          - Daily/weekly reset tracking
+        ResetTime.lua          - Daily/weekly reset and realm calendar time tracking
+        ItemCount.lua          - Carried item counts (C_Item.GetItemCount)
+        Display.lua            - Screen size, UI scale and allowlisted UI CVars
     Dumps/                - Data dump providers
         MapHierarchy.lua   - C_Map hierarchy data dump
     Export/               - Data export functionality

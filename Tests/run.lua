@@ -10,7 +10,8 @@
 ---@field core QuestieTraceCore
 ---@field now number
 ---@field timers TestTimer[]
----@field frame table<string, any>
+---@field frame table<string, any> The main addon event frame (QuestieTrace.lua)
+---@field frames table<string, any>[] Every frame the addon created, in creation order
 
 ---@param runtime TestRuntime
 ---@param path string
@@ -87,7 +88,7 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 14, settings = { dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 15, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   runtime.printedMessages = {}
   env.print = function(...)
@@ -106,13 +107,21 @@ local function NewRuntime(trackerFiles)
       runtime.timers[#runtime.timers + 1] = { at = runtime.now + delay, callback = callback }
     end,
   }
-  ---@type fun(frame: table, event: string)
-  runtime.frame.RegisterEvent = function() end
-  ---@param frame table<string, any>
-  ---@param name string
-  ---@param callback function
-  runtime.frame.SetScript = function(frame, name, callback) frame[name] = callback end
-  env.CreateFrame = function() return runtime.frame end
+  -- Each CreateFrame call gets its own frame, so trackers' private event frames
+  -- (Position movement, ItemCount bags, Display CVars) can be driven separately.
+  runtime.frames = {}
+  env.CreateFrame = function()
+    local frame = { registered = {} }
+    ---@param self table<string, any>
+    ---@param event string
+    frame.RegisterEvent = function(self, event) self.registered[event] = true end
+    ---@param self table<string, any>
+    ---@param name string
+    ---@param callback function
+    frame.SetScript = function(self, name, callback) self[name] = callback end
+    runtime.frames[#runtime.frames + 1] = frame
+    return frame
+  end
 
   env.YES = "Yes"
   env.NO = "No"
@@ -137,14 +146,24 @@ local function NewRuntime(trackerFiles)
   env.QuestieTraceCore.OnConsentFrameLoad(runtime.consentFrame)
   for _, path in ipairs(trackerFiles) do LoadAddonFile(runtime, path) end
   LoadAddonFile(runtime, "QuestieTrace.lua")
+  -- QuestieTrace.lua creates the main event frame last.
+  runtime.frame = runtime.frames[#runtime.frames]
   runtime.core = env.QuestieTraceCore
   return runtime
 end
 
+---Fire an event like WoW does: on every frame that registered it, in creation
+---order. The main frame records and dispatches tracked events; private frames
+---(e.g. BAG_UPDATE_DELAYED, CVAR_UPDATE) get theirs without any recording.
 ---@param runtime TestRuntime
 ---@param event string
-local function SendEvent(runtime, event)
-  runtime.frame.OnEvent(runtime.frame, event)
+---@param ... any Event arguments
+local function SendEvent(runtime, event, ...)
+  for _, frame in ipairs(runtime.frames) do
+    if frame.registered[event] and frame.OnEvent then
+      frame.OnEvent(frame, event, ...)
+    end
+  end
 end
 
 ---@param runtime TestRuntime
@@ -425,7 +444,7 @@ local function TestSessionContract()
 
   runtime.core.StartCapture("new capture")
   local current = Session(runtime)
-  assert(current.schemaVersion == 14 and current.recordingContractVersion == 1,
+  assert(current.schemaVersion == 15 and current.recordingContractVersion == 1,
     "New captures need contract provenance without a storage schema bump")
   runtime.core.SaveCapture()
   assert(env.QuestieTraceCharacter.sessions[2] == current and current.recordingContractVersion == 1,
@@ -606,7 +625,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 14, settings = { dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 15, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -2349,8 +2368,329 @@ local function TestGameObjectTrackerSkipsWhenNoUnitNameLine()
     "GameObjectName must not record without a UnitName line")
 end
 
+---Whether any string anywhere in a value (keys included) contains needle.
+---@param value any
+---@param needle string
+---@return boolean
+local function ContainsString(value, needle)
+  if type(value) == "string" then return value:find(needle, 1, true) ~= nil end
+  if type(value) ~= "table" then return false end
+  for key, field in pairs(value) do
+    if ContainsString(key, needle) or ContainsString(field, needle) then return true end
+  end
+  return false
+end
+
+---@class NameplateUnit
+---@field guid string
+---@field name string
+---@field controlled any UnitPlayerControlled answer; a boolean or a restricted (secret) value
+
+---Nameplate tokens mapped to the unit each one currently shows.
+---@param runtime TestRuntime
+---@param units table<string, NameplateUnit>
+local function MockNameplateUnits(runtime, units)
+  runtime.env.UnitGUID = function(token) return units[token] and units[token].guid end
+  runtime.env.UnitName = function(token) return units[token] and units[token].name, nil end
+  runtime.env.UnitPlayerControlled = function(token) return units[token] and units[token].controlled or false end
+end
+
+local function TestNameplatesRecordOnlyWorldCreatures()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local secret = {}
+  runtime.env.issecretvalue = function(value) return value == secret end
+  local inInstance = false
+  runtime.env.IsInInstance = function() return inInstance end
+  local npc = { guid = "Creature-0-5251-0-12-6-000012345", name = "Kobold Vermin" }
+  local units = {
+    nameplate1 = npc,
+    nameplate2 = { guid = "Player-4620-00572164", name = "Someplayer" },
+    nameplate3 = { guid = "Pet-0-5251-0-12-165189-000001", name = "Fluffypet" },
+    nameplate4 = { guid = "Creature-0-5251-0-12-416-000001", name = "Imp", controlled = true },
+    nameplate5 = { guid = "GameObject-0-5251-0-12-1617-000001", name = "Silverleaf" },
+    nameplate6 = { guid = "Vehicle-0-5251-0-12-28605-000001", name = "Havenshire Stallion" },
+    nameplate7 = { guid = "Unknown-0-1", name = "Mystery" },
+    nameplate8 = { guid = "Creature-0-5251-0-12-31216-000001", name = "Mirror Image", controlled = secret },
+    target = { guid = "Creature-0-5251-0-12-7-000001", name = "Target Mob" },
+  }
+  MockNameplateUnits(runtime, units)
+  runtime.core.StartCapture("nameplates")
+  local session = Session(runtime)
+  local functions = session.functions --[[@as table<string, any>]]
+  local guids = functions.UnitGUID
+  local targetEntries = #guids.target
+
+  for i = 1, 8 do SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate" .. i) end
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "target")
+
+  assert(guids.nameplate1[1].v == npc.guid and guids.nameplate6[1].v:find("^Vehicle%-"),
+    "Creature and vehicle nameplates record their GUID")
+  for _, token in ipairs({ "nameplate2", "nameplate3", "nameplate4", "nameplate5", "nameplate7", "nameplate8" }) do
+    assert(#guids[token] == 1 and guids[token][1].v == nil, token .. " must be recorded as nil, never as its GUID")
+  end
+  assert(#guids.target == targetEntries, "Only nameplate tokens are sampled from NAME_PLATE_UNIT_ADDED")
+
+  -- The same NPC re-added is change-only; a player taking over the token replaces it with nil.
+  runtime.now = 5
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+  units.nameplate1 = units.nameplate2
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+  assert(#guids.nameplate1 == 2 and guids.nameplate1[2].v == nil and guids.nameplate1[2].t == 5,
+    "A reused token never keeps answering with its previous NPC")
+
+  -- Questie draws no nameplate icons in instances, so nothing is sampled there.
+  inInstance = true
+  units.nameplate1 = npc
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+  assert(#guids.nameplate1 == 2, "Nameplates are not sampled inside instances")
+
+  for token in pairs(functions.UnitName) do
+    assert(not token:find("^nameplate"), "Nameplate names are never recorded")
+  end
+  for _, needle in ipairs({ "Player-", "Someplayer", "Pet-", "Fluffypet", "Imp", "GameObject-", "Mystery", "Mirror Image", "Kobold" }) do
+    assert(not ContainsString(session, needle), "Withheld nameplate data leaked into the session: " .. needle)
+  end
+end
+
+local function TestDisplayRecordsOnlyAllowlistedCVars()
+  local runtime = NewRuntime({ "Modules/Trackers/Display.lua" })
+  local env = runtime.env
+  local cvars = { uiScale = "0.65", useUiScale = "0", questPOI = "1", realmName = "Secret Realm" }
+  env.GetCVar = function(name) return cvars[name] end
+  env.GetPhysicalScreenSize = function() return 2560, 1440 end
+  env.GetScreenWidth = function() return 1920 end
+  env.GetScreenHeight = function() return 1080 end
+  env.UIParent.GetScale = function() return 0.711 end
+  runtime.core.StartCapture("display")
+  local session = Session(runtime)
+  local functions = session.functions --[[@as table<string, any>]]
+  local cvarStreams = functions.GetCVar
+
+  local size = functions.GetPhysicalScreenSize[1].v
+  assert(size.n == 2 and size[1] == 2560 and size[2] == 1440, "Physical screen size is a packed tuple")
+  assert(functions["UIParent:GetScale"][1].v == 0.711 and functions.GetScreenHeight[1].v == 1080,
+    "UI scale and screen size are recorded at capture start")
+  assert(cvarStreams.uiscale[1].v == "0.65" and cvarStreams.uiScale == nil, "CVar streams are keyed by lowercase name")
+  assert(#cvarStreams.mapfade == 1 and cvarStreams.mapfade[1].v == nil, "A nil CVar answer is recorded explicitly")
+
+  -- SetCVar can pass an event name instead of the CVar name, so any update re-reads the allowlist.
+  cvars.questPOI = "0"
+  SendEvent(runtime, "CVAR_UPDATE", "QUEST_POI", "0")
+  SendEvent(runtime, "CVAR_UPDATE", "realmName", "Secret Realm")
+  SendEvent(runtime, "UI_SCALE_CHANGED")
+
+  assert(#cvarStreams.questpoi == 2 and cvarStreams.questpoi[2].v == "0", "A CVar change is recorded whatever CVAR_UPDATE names")
+  assert(#cvarStreams.mapfade == 1 and #functions.GetScreenWidth == 1, "Unchanged values are not re-appended")
+  local recorded = {}
+  for _, entry in ipairs(session.events) do recorded[entry.e] = (recorded[entry.e] or 0) + 1 end
+  assert(recorded.CVAR_UPDATE == nil and recorded.UI_SCALE_CHANGED == 1, "CVAR_UPDATE is a private trigger, never recorded")
+  assert(not ContainsString(session, "Secret Realm") and not ContainsString(session, "realmName"),
+    "CVars outside the allowlist must never reach the session")
+end
+
+local function TestQuestDialogRecordsRewardItems()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  local env = runtime.env
+  local counts = { choice = 0, reward = 0, required = 0 }
+  env.GetNumQuestChoices = function() return counts.choice end
+  env.GetNumQuestRewards = function() return counts.reward end
+  env.GetNumQuestItems = function() return counts.required end
+  ---@param itemType string
+  ---@param index number
+  env.GetQuestItemInfo = function(itemType, index)
+    return itemType .. " item " .. index, 134400 + index, 1, 2, true, 1000 + index, nil
+  end
+  ---@param itemType string
+  env.GetQuestItemLink = function(itemType, index)
+    if itemType == "required" then return nil end
+    return "|Hitem:" .. (1000 + index) .. "|h[" .. itemType .. "]|h"
+  end
+  env.GetRewardSkillPoints = function() return nil, nil, nil end
+  env.UnitName = function(token) if token == "player" then return "Testplayer" end end
+  local title
+  env.GetRewardTitle = function() return title end
+  runtime.core.StartCapture("quest rewards")
+
+  counts.choice, counts.reward, counts.required = 2, 1, 1
+  title = "Testplayer the Explorer"
+  SendEvent(runtime, "QUEST_DETAIL")
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local choice = functions.GetQuestItemInfo.choice
+  assert(choice[2][1].v.n == 7 and choice[2][1].v[6] == 1002 and choice[3] == nil,
+    "Item info is a raw tuple per [type][index], read only within the count")
+  assert(functions.GetQuestItemInfo.reward[1][1].v[1] == "reward item 1", "Fixed rewards are keyed by the reward type")
+  assert(#functions.GetQuestItemLink.required[1] == 1 and functions.GetQuestItemLink.required[1][1].v == nil,
+    "A nil item link is recorded explicitly")
+  local skill = functions.GetRewardSkillPoints
+  assert(skill[#skill].v.n == 3, "Reward skill points keep their three-value tuple")
+  local titles = functions.GetRewardTitle
+  assert(titles[#titles].v == "<name> the Explorer", "Reward titles are sanitized")
+  assert(not ContainsString(Session(runtime), "Testplayer"), "The player's name never reaches the session")
+end
+
+local function TestItemCountSnapshotAndChanges()
+  local runtime = NewRuntime({ "Modules/Trackers/ItemCount.lua" })
+  local env = runtime.env
+  local itemCounts = { [750] = 2, [6948] = 1, [2361] = 1 }
+  local bags = { [0] = { 750, 6948 }, [1] = { false } }
+  local reads = {}
+  env.C_Container = {
+    GetContainerNumSlots = function(bag) return bags[bag] and #bags[bag] or 0 end,
+    GetContainerItemID = function(bag, slot) return bags[bag][slot] or nil end,
+  }
+  env.GetInventoryItemID = function(_, slot) if slot == 16 then return 2361 end end
+  env.C_Item = {
+    GetItemCount = function(itemID)
+      reads[itemID] = (reads[itemID] or 0) + 1
+      return itemCounts[itemID] or 0
+    end,
+  }
+  runtime.core.StartCapture("item counts")
+  local session = Session(runtime)
+  local streams = session.functions["C_Item.GetItemCount"] --[[@as table<number, FunctionStreamEntry[]>]]
+
+  assert(streams[750][1].v == 2 and streams[750][1].t == 0 and streams[2361][1].v == 1,
+    "Capture start samples every bag and equipped item")
+  assert(streams[752] == nil, "Items not carried at capture start have no entry")
+
+  runtime.now = 3
+  itemCounts[750] = 3
+  SendEvent(runtime, "ITEM_COUNT_CHANGED", 750)
+  SendEvent(runtime, "ITEM_COUNT_CHANGED", 6948)
+  assert(#streams[750] == 2 and streams[750][2].v == 3 and streams[750][2].t == 3, "The event's item is sampled")
+  assert(#streams[6948] == 1, "An unchanged count is not re-appended")
+
+  -- A pickup without ITEM_COUNT_CHANGED, and 750 handed in, during a burst of bag updates.
+  bags[0] = { 752, 6948 }
+  itemCounts[750], itemCounts[752] = 0, 1
+  for _ = 1, 5 do SendEvent(runtime, "BAG_UPDATE_DELAYED") end
+  assert(streams[752] == nil, "Bag rescans wait for the burst to end")
+  AdvanceTo(runtime, 4.5)
+  assert(streams[752][1].v == 1 and streams[752][1].t == 4, "The rescan finds a new item one second later")
+  assert(streams[750][3].v == 0, "An item that left the bags is recorded as 0")
+  assert(reads[6948] == 3, "A burst of bag updates costs one rescan")
+
+  SendEvent(runtime, "BAG_UPDATE_DELAYED")
+  AdvanceTo(runtime, 6)
+  assert(reads[750] == 3, "An item at 0 that is not carried is not read again")
+  for _, entry in ipairs(session.events) do
+    assert(entry.e ~= "BAG_UPDATE_DELAYED", "BAG_UPDATE_DELAYED is a private trigger, never recorded")
+  end
+end
+
+local function TestQuestLogExtrasStoredByQuestID()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestLog.lua" })
+  local env = runtime.env
+  env.C_QuestLog = {
+    GetInfo = function(index)
+      if index == 1 then return { title = "Elwynn Forest", isHeader = true, questID = 0 } end
+      if index == 2 then return { title = "A Quest", isHeader = false, questID = 100 } end
+    end,
+    GetLogIndexForQuestID = function(questID) if questID == 100 then return 2 end end,
+    GetRequiredMoney = function() return -1 end,
+    -- A fresh, equal table on every call, as the client returns
+    GetQuestTimers = function() return {} end,
+  }
+  env.UnitName = function(token) if token == "player" then return "Testplayer" end end
+  env.GetQuestLogCompletionText = function(index) if index == 2 then return "Return to Testplayer's friend." end end
+  env.GetQuestLogSpecialItemInfo = function() end
+  runtime.core.StartCapture("quest log extras")
+  AdvanceTo(runtime, 1.1)
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+
+  assert(functions.GetQuestLogCompletionText[100][1].v == "Return to <name>'s friend.",
+    "Completion text is stored by quest ID and sanitized")
+  assert(functions.GetQuestLogCompletionText[2] == nil, "The quest-log index is not used as the key")
+  assert(functions.GetQuestLogSpecialItemInfo[100][1].v.n == 0, "No special item is recorded as an empty tuple")
+  assert(functions["C_QuestLog.GetRequiredMoney"][100][1].v == -1, "Required money is the raw API value")
+  local timers = functions["C_QuestLog.GetQuestTimers"]
+  assert(#timers == 1 and next(timers[1].v) == nil, "No running timers is recorded once, across the delayed re-samples")
+end
+
+---@class PositionFixture
+---@field mapID number
+---@field explored table<number, table[]>
+---@field exploredCalls number
+
+---@param runtime TestRuntime
+---@return PositionFixture
+local function MockPositionApis(runtime)
+  ---@type PositionFixture
+  local state = { mapID = 1429, explored = { [1429] = { { fileDataIDs = { 8061955 } } } }, exploredCalls = 0 }
+  local env = runtime.env
+  env.GetZoneText = function() return "Elwynn Forest" end
+  env.GetSubZoneText = function() return "" end
+  env.GetRealZoneText = env.GetZoneText
+  env.C_Map = {
+    GetBestMapForUnit = function() return state.mapID end,
+    GetPlayerMapPosition = function() return nil end,
+  }
+  env.IsInInstance = function() return false, "none" end
+  env.GetInstanceInfo = function() return "Eastern Kingdoms", "none" end
+  env.C_MapExplorationInfo = {
+    GetExploredMapTextures = function(mapID)
+      state.exploredCalls = state.exploredCalls + 1
+      local textures = state.explored[mapID]
+      if textures then return textures end
+      -- Maps without overlays return nothing at all
+    end,
+  }
+  return state
+end
+
+local function TestPositionRecordsExploredMap()
+  local runtime = NewRuntime({ "Modules/Trackers/Position.lua" })
+  local state = MockPositionApis(runtime)
+  runtime.core.StartCapture("explored map")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local explored = functions["C_MapExplorationInfo.GetExploredMapTextures"]
+
+  AdvanceTo(runtime, 1)
+  assert(#explored[1429] == 1 and state.exploredCalls == 1, "Timer ticks on an unchanged map do not re-read exploration")
+
+  state.mapID = 1453
+  AdvanceTo(runtime, 1.25)
+  assert(#explored[1453] == 1 and explored[1453][1].v == nil, "A map without overlays is recorded as nil on arrival")
+
+  state.mapID = 1429
+  state.explored[1429] = { { fileDataIDs = { 8061955 } }, { fileDataIDs = { 8061956 } } }
+  AdvanceTo(runtime, 1.45)
+  SendEvent(runtime, "MAP_EXPLORATION_UPDATED")
+  assert(#explored[1429] == 2 and #explored[1429][2].v == 2, "Returning to a map re-reads its overlays")
+  assert(state.exploredCalls == 4, "MAP_EXPLORATION_UPDATED re-reads the current map")
+  assert(functions.GetPlayerFacing == nil, "Facing is not recorded")
+end
+
+local function TestResetTimeRecordsCalendarTime()
+  local runtime = NewRuntime({ "Modules/Trackers/ResetTime.lua" })
+  local minute = 4
+  runtime.env.GetServerTime = function() return 1792141585 + minute * 60 end
+  runtime.env.C_DateAndTime = {
+    GetCurrentCalendarTime = function()
+      return { year = 2026, month = 10, monthDay = 16, weekday = 6, hour = 2, minute = minute }
+    end,
+  }
+  runtime.core.StartCapture("calendar time")
+  SendEvent(runtime, "PLAYER_ENTERING_WORLD")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local calendar = functions["C_DateAndTime.GetCurrentCalendarTime"]
+  assert(#calendar == 1 and calendar[1].v.hour == 2, "An equal calendar table is not re-appended")
+
+  runtime.now, minute = 60, 5
+  SendEvent(runtime, "PLAYER_LOGOUT")
+  assert(#calendar == 2 and calendar[2].t == 60 and calendar[2].v.minute == 5, "A changed calendar time is appended")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
+  { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
+  { name = "quest log extras are stored by quest ID", run = TestQuestLogExtrasStoredByQuestID },
+  { name = "position records explored map overlays", run = TestPositionRecordsExploredMap },
+  { name = "reset time records realm calendar time", run = TestResetTimeRecordsCalendarTime },
+  { name = "quest dialog records reward items per type and index", run = TestQuestDialogRecordsRewardItems },
+  { name = "display records screen size and only allowlisted CVars", run = TestDisplayRecordsOnlyAllowlistedCVars },
+  { name = "nameplates record only world creatures, change-only per token", run = TestNameplatesRecordOnlyWorldCreatures },
   { name = "restricted unit identity does not interrupt capture", run = TestRestrictedUnitIdentityDoesNotInterruptCapture },
   { name = "restricted loot source preserves other loot data", run = TestRestrictedLootSourcePreservesOtherLootData },
   { name = "greeting retries unsettled titles", run = function() TestGreetingRetry("stale") end },

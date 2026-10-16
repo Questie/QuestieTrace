@@ -47,6 +47,14 @@ local C_After = C_Timer.After
 -- GetNumQuestLogRewards(questID)               -> number numRewards
 -- GetQuestLogRewardInfo(index, questID)        -> packed reward item tuple
 -- GetQuestLogRewardMoney(questID)              -> number money
+-- C_QuestLog.GetRequiredMoney(questID)         -> number copper (-1 observed on Forever when none)
+-- C_QuestLog.GetQuestTimers()                  -> QuestTimerInfo[] (flat stream; empty table when none)
+--
+-- Sampled with the native quest-log index but stored by questID, like
+-- GetQuestLogQuestText:
+-- GetQuestLogCompletionText(questLogIndex)     -> string? completionText (sanitized)
+-- GetQuestLogSpecialItemInfo(questLogIndex)    -> packed itemLink, icon, charges, showItemWhenComplete
+--                                                 (n = 0 when the quest has no special item)
 --
 -- QuestLog (custom stream) -> number[] questIDs  -- array of active quest IDs
 -- QuestLogZone[questId] -> string? headerTitle -- derived: the quest-log
@@ -428,6 +436,10 @@ local function ProbeQuestDirectApis(t, tp, questId)
 
   ProbeQuestPacked("GetQuestTagInfo", GetQuestTagInfo, t, tp, questId)
   ProbeQuestRewards(t, tp, questId)
+
+  if type(C_QuestLog) == "table" then
+    ProbeQuestScalar("C_QuestLog.GetRequiredMoney", C_QuestLog.GetRequiredMoney, t, tp, questId)
+  end
 end
 
 ---Probe raw quest-log-index-family APIs for an active quest ID. Each API
@@ -531,6 +543,25 @@ local function ProbeQuestLogIndexAndTitle(t, tp, questId)
     AppendIfChanged(
       GetOrCreateParamStream("GetQuestLogQuestText", questId),
       t, tp, questTextData, questId, "GetQuestLogQuestText"
+    )
+  end
+
+  -- GetQuestLogCompletionText -- scalar string; nil until the quest can be turned in
+  local completionOk, completionText = SafeScalarCall(GetQuestLogCompletionText, questLogIndex)
+  if completionOk then
+    -- Privacy: completion text can embed player names.
+    AppendIfChanged(
+      GetOrCreateParamStream("GetQuestLogCompletionText", questId),
+      t, tp, Core.SanitizeText(completionText), questId, "GetQuestLogCompletionText"
+    )
+  end
+
+  -- GetQuestLogSpecialItemInfo -- packed tuple, empty when the quest has no usable item
+  local specialOk, specialItem = SafePackedCall(GetQuestLogSpecialItemInfo, questLogIndex)
+  if specialOk then
+    AppendIfChanged(
+      GetOrCreateParamStream("GetQuestLogSpecialItemInfo", questId),
+      t, tp, specialItem, questId, "GetQuestLogSpecialItemInfo"
     )
   end
 end
@@ -684,6 +715,19 @@ local function SampleQuestLog(capture)
       AppendFlatIfChanged(
         GetOrCreateFlatStream("C_QuestLog.GetMaxNumQuestsCanAccept"),
         t, tp, maxQuests, "C_QuestLog.GetMaxNumQuestsCanAccept"
+      )
+    end
+  end
+
+  -- C_QuestLog.GetQuestTimers -- raw table of the modern timer API (Forever).
+  -- Seconds left shrink between samples, so a running timer appends on every
+  -- quest-log sample; replay derives the countdown in between.
+  if type(C_QuestLog) == "table" and type(C_QuestLog.GetQuestTimers) == "function" then
+    local ok, questTimers = SafeScalarCall(C_QuestLog.GetQuestTimers)
+    if ok then
+      AppendFlatIfChanged(
+        GetOrCreateFlatStream("C_QuestLog.GetQuestTimers"),
+        t, tp, questTimers, "C_QuestLog.GetQuestTimers"
       )
     end
   end

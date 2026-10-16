@@ -1,5 +1,7 @@
 ---@type QuestieTraceCore
 local Core = QuestieTraceCore
+---@type fun(t1: any, t2: any, ignore_mt: boolean?, visited: table?): boolean
+local DeepCompare = Core.DeepCompare
 
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
@@ -7,6 +9,9 @@ local Core = QuestieTraceCore
 -- GetServerTime()     -> number serverTime
 -- GetQuestResetTime() -> number nextReset (legacy global)
 -- C_DateAndTime.GetSecondsUntilDailyReset() -> number secondsUntilReset
+-- C_DateAndTime.GetCurrentCalendarTime() -> CalendarTime { year, month, monthDay, weekday, hour, minute }
+--   Realm-local time. Sampled with GetServerTime, so replay can derive the
+--   realm's UTC offset from one pair of samples.
 ---------------------------------------------------------------------------
 
 ---@type table<string, FunctionStream>
@@ -21,7 +26,7 @@ local previousValues
 ---@type ResetTimeStreamDef[]
 local streams
 
----Append a scalar value to a stream if it changed.
+---Append a value to a stream if it changed.
 ---@param stream FunctionStreamEntry[]
 ---@param t number
 ---@param tp number
@@ -36,6 +41,8 @@ local function AppendIfChanged(stream, t, tp, key, value)
     changed = #stream == 0
   elseif previous == nil or value == nil then
     changed = true
+  elseif type(value) == "table" then
+    changed = not DeepCompare(value, previous)
   else
     changed = value ~= previous
   end
@@ -67,6 +74,11 @@ local function BuildStreams()
   if type(C_DateAndTime) == "table" and type(C_DateAndTime.GetSecondsUntilDailyReset) == "function" then
     functions["C_DateAndTime.GetSecondsUntilDailyReset"] = {}
     defs[#defs + 1] = { key = "C_DateAndTime.GetSecondsUntilDailyReset", fn = C_DateAndTime.GetSecondsUntilDailyReset }
+  end
+
+  if type(C_DateAndTime) == "table" and type(C_DateAndTime.GetCurrentCalendarTime) == "function" then
+    functions["C_DateAndTime.GetCurrentCalendarTime"] = {}
+    defs[#defs + 1] = { key = "C_DateAndTime.GetCurrentCalendarTime", fn = C_DateAndTime.GetCurrentCalendarTime }
   end
 
   return defs
