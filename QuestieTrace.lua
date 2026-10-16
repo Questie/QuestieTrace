@@ -413,6 +413,9 @@ function Core.StartCapture(sessionName)
     schemaVersion = SCHEMA_VERSION,
     -- Mark new captures only; existing v9 sessions may contain synthetic resets.
     recordingContractVersion = 1,
+    -- The client build that produced the trace, so replay can pick the matching
+    -- flavor and UI source (e.g. "1.15.9", "70003" vs "1.60.1", "70425").
+    buildInfo = type(GetBuildInfo) == "function" and Core.PackArgs(GetBuildInfo()) or nil,
     name = Trim(sessionName) ~= "" and Trim(sessionName) or nil,
     startedAt        = capture.startedAt,
     startedAtPrecise = capture.startedAtPrecise,

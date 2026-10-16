@@ -38,6 +38,13 @@ local C_After = C_Timer.After
 -- QuestGetAutoAccept()          -> boolean
 -- GetQuestBackgroundMaterial()  -> string? material (nil = default parchment)
 --
+-- Reward currencies, on clients that have these APIs (Mists' quest frame reads
+-- them; feature-detected, so absent APIs record nothing):
+-- GetNumRewardCurrencies(), GetMaxRewardCurrencies() -> number count
+-- GetQuestCurrencyInfo("reward", index) -> name, texture, count, quality
+-- GetQuestCurrencyID("reward", index)   -> number? currencyID
+--   read for index 1..GetMaxRewardCurrencies(); stored as functions[key]["reward"][index].
+--
 -- Quest flags, keyed by quest ID (Forever only):
 -- IsBreadcrumbQuest(questID)                        -> isBreadcrumb (undocumented)
 -- C_QuestLine.GetQuestLineInfo(questID)             -> QuestLineInfo?
@@ -297,6 +304,8 @@ local function BuildFlatStreamDefs()
     GetSuggestedGroupSize = true,
     QuestGetAutoAccept = true,
     GetQuestBackgroundMaterial = true,
+    GetNumRewardCurrencies = true,
+    GetMaxRewardCurrencies = true,
   }
 
   for functionName in pairs(scalarFunctions) do
@@ -394,12 +403,31 @@ local function SampleGreetingStreams(t, tp, questIDs)
   end
 end
 
----Quest dialog item lists, each bounded by its own count API.
----@type { itemType: "choice"|"reward"|"required", countFunction: string }[]
-local QUEST_ITEM_LISTS = {
-  { itemType = "choice", countFunction = "GetNumQuestChoices" },
-  { itemType = "reward", countFunction = "GetNumQuestRewards" },
-  { itemType = "required", countFunction = "GetNumQuestItems" },
+---@class QuestListReader
+---@field key string Global API name, called as key(itemType, index)
+---@field packed boolean Store all returns as a packed tuple instead of the first return
+
+---@type QuestListReader[]
+local ITEM_READERS = {
+  { key = "GetQuestItemInfo", packed = true },
+  { key = "GetQuestItemLink", packed = false },
+}
+---@type QuestListReader[]
+local CURRENCY_READERS = {
+  { key = "GetQuestCurrencyInfo", packed = true },
+  { key = "GetQuestCurrencyID", packed = false },
+}
+
+---Quest dialog lists read per index, each for indices 1..its bound API.
+---@type { itemType: "choice"|"reward"|"required", bound: string, readers: QuestListReader[] }[]
+local QUEST_DIALOG_LISTS = {
+  { itemType = "choice", bound = "GetNumQuestChoices", readers = ITEM_READERS },
+  { itemType = "reward", bound = "GetNumQuestRewards", readers = ITEM_READERS },
+  { itemType = "required", bound = "GetNumQuestItems", readers = ITEM_READERS },
+  -- Mists' quest frame reads reward currencies up to GetMaxRewardCurrencies(),
+  -- past GetNumRewardCurrencies() (Wrath/QuestInfo.lua). Classic frames never
+  -- read required currencies. Clients without these APIs read nothing.
+  { itemType = "reward", bound = "GetMaxRewardCurrencies", readers = CURRENCY_READERS },
 }
 
 ---Sample a two-argument stream stored in native argument order as
@@ -431,19 +459,20 @@ local function SampleQuestItemStream(t, tp, functionName, fn, itemType, index, p
   AppendIfChanged(stream, t, tp, functionName .. ":" .. itemType .. ":" .. index, value)
 end
 
----Sample the item info and link of every reward choice, fixed reward and
----required item the open quest dialog lists. Only indices within the current
----counts are read; Blizzard's quest frame never asks for others.
+---Sample every item and currency slot the open quest dialog lists: reward
+---choices, fixed rewards, required items and reward currencies. Each list is
+---read up to the bound Blizzard's quest frame uses, and no further.
 ---@param t number
 ---@param tp number
 local function SampleQuestItems(t, tp)
-  for i = 1, #QUEST_ITEM_LISTS do
-    local list = QUEST_ITEM_LISTS[i]
-    local ok, count = SafeScalarCall(_G[list.countFunction])
+  for i = 1, #QUEST_DIALOG_LISTS do
+    local list = QUEST_DIALOG_LISTS[i]
+    local ok, count = SafeScalarCall(_G[list.bound])
     if ok and type(count) == "number" then
       for index = 1, count do
-        SampleQuestItemStream(t, tp, "GetQuestItemInfo", GetQuestItemInfo, list.itemType, index, true)
-        SampleQuestItemStream(t, tp, "GetQuestItemLink", GetQuestItemLink, list.itemType, index, false)
+        for _, reader in ipairs(list.readers) do
+          SampleQuestItemStream(t, tp, reader.key, _G[reader.key], list.itemType, index, reader.packed)
+        end
       end
     end
   end

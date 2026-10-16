@@ -13,7 +13,7 @@ local DeepCompare = Core.DeepCompare
 --                    (packed actual returns; nil positions omitted by SavedVariables)
 --
 -- Nameplate tokens ("nameplate1", ...): UnitGUID only, sampled on
--- NAME_PLATE_UNIT_ADDED outside instances; see SampleNameplate.
+-- NAME_PLATE_UNIT_ADDED; see SampleNameplate.
 --
 -- C_GossipInfo.GetAvailableQuests() -> GossipQuestUIInfo[] (table)
 -- C_GossipInfo.GetActiveQuests()    -> GossipQuestUIInfo[] (table)
@@ -152,9 +152,9 @@ end
 
 ---Record which creature or vehicle a nameplate that just appeared belongs to.
 ---Questie only reads the GUID (for the NPC ID), so UnitName is not recorded;
----replay answers it from the NPC ID. On Forever, Questie draws no nameplate
----icons inside instances, where GUIDs are restricted, so nothing is sampled
----there.
+---replay answers it from the NPC ID. Instances are sampled too: Questie draws
+---nameplate icons in dungeons on Classic clients. Forever restricts GUIDs
+---there, and a restricted GUID records nil like any other withheld unit.
 ---
 ---Change-only per token, and a unit that is not recorded is written as nil:
 ---"no recordable unit on this token", not a nil from the client. Nameplate
@@ -166,16 +166,14 @@ end
 local function SampleNameplate(t, tp, token)
   if not guidStreams then return end
   if type(token) ~= "string" or not token:match(NAMEPLATE_TOKEN_PATTERN) then return end
-  local instanceOk, inInstance = SafeScalarCall(IsInInstance)
-  if instanceOk and inInstance then return end
-
-  local guidOk, guid = SafeScalarCall(UnitGUID, token)
-  if not guidOk then return end
 
   -- Privacy: players, player pets and minions, game objects and unrecognized
-  -- or restricted GUIDs are never stored; their adds record nil.
+  -- or restricted GUIDs are never stored; their adds record nil. So does a
+  -- failed call (Forever refuses some tokens in battlegrounds), since the
+  -- token's previous unit is gone either way.
+  local guidOk, guid = SafeScalarCall(UnitGUID, token)
   local recordedGUID = nil
-  if IsCreatureOrVehicleGUID(guid) and not IsPlayerControlled(token, guid) then
+  if guidOk and IsCreatureOrVehicleGUID(guid) and not IsPlayerControlled(token, guid) then
     recordedGUID = guid
   end
 
