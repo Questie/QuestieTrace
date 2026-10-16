@@ -352,6 +352,22 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetRewardXP` | scalar (number/nil) | Current quest reward XP |
 | `IsQuestCompletable` | scalar (boolean/nil) | Current quest progress state |
 | `GetNumQuestChoices` | scalar (number) | Current reward choice count |
+| `GetNumQuestRewards` | scalar (number) | QuestDialog; fixed reward item count. Schema 15+ |
+| `GetNumQuestItems` | scalar (number) | QuestDialog; required item count (progress panel). Schema 15+ |
+| `GetNumQuestCurrencies` | scalar (number) | QuestDialog. Schema 15+ |
+| `GetRewardMoney` | scalar (number) | QuestDialog; copper. Schema 15+ |
+| `GetQuestMoneyToGet` | scalar (number) | QuestDialog; copper the quest requires. Schema 15+ |
+| `GetRewardTitle` | scalar (string/nil) | QuestDialog; passed through `Core.SanitizeText`. Schema 15+ |
+| `GetRewardSkillPoints` | tuple (n=3) | QuestDialog; skillName, skillIcon, skillPoints, all nil when none. Schema 15+ |
+| `GetSuggestedGroupSize` | scalar (number) | QuestDialog; 0 when none. Schema 15+ |
+| `QuestGetAutoAccept` | scalar (boolean) | QuestDialog. Schema 15+ |
+| `GetQuestBackgroundMaterial` | scalar (string/nil) | QuestDialog; nil means the default parchment. Schema 15+ |
+| `C_QuestLog.GetQuestTimers` | object (QuestTimerInfo[]) | QuestLog; raw table, empty when no timer runs. A running timer appends on every quest-log sample. Schema 15+ |
+| `GetPhysicalScreenSize` | tuple (n=2) | Display; width, height in pixels. Schema 15+ |
+| `UIParent:GetScale` | scalar (number) | Display; `UIParent:GetScale()` method call. Schema 15+ |
+| `GetScreenWidth` | scalar (number) | Display; UIParent units. Schema 15+ |
+| `GetScreenHeight` | scalar (number) | Display; UIParent units. Schema 15+ |
+| `C_DateAndTime.GetCurrentCalendarTime` | object (CalendarTime) | ResetTime; realm-local time, sampled with `GetServerTime`. Schema 15+ |
 | `C_QuestLog.GetMaxNumQuestsCanAccept` | scalar (number) | Captured when API exists |
 | `GetServerTime` | scalar (number) | Low-frequency snapshot |
 | `GetQuestResetTime` | scalar (number) | Legacy global; only present when it exists |
@@ -399,12 +415,22 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `IsBreadcrumbQuest` | scalar (boolean expected) | QuestDialog; Forever only, undocumented API called as `IsBreadcrumbQuest(questID)` -- argument meaning unconfirmed, treat as a hint |
 | `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | QuestDialog; Forever only; copy of the `C_QuestLine.GetQuestLineInfo(questID)` table with all fields raw (no map, `displayableOnly` defaults to false so hidden lines return with `isHidden = true`) |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar (number) | QuestDialog; Forever only; raw `Enum.QuestClassification` value |
+| `C_QuestLog.GetRequiredMoney` | scalar (number) | Raw API result; Forever returns -1 when the quest requires no money; probed again after quest leaves log. Schema 15+ |
+| `GetQuestLogCompletionText` | scalar (string/nil) | Sampled with the native quest-log index, stored by quest ID; nil until the quest can be turned in; passed through `Core.SanitizeText`. Schema 15+ |
+| `GetQuestLogSpecialItemInfo` | tuple (n varies) | Sampled with the native quest-log index, stored by quest ID; itemLink, icon, charges, showItemWhenComplete, or n=0 when the quest has no usable item. Schema 15+ |
 
 ### Nested parameterized by native arguments
 
 | Function key | Shape | Return type | Notes |
 |---|---|---|---|
 | `GetQuestLogRewardInfo` | `[rewardIndex][questId]` | tuple (n=7) or nil | Raw API result in native argument order; previously observed indices are probed again after counts shrink or quest leaves log |
+
+### Nested parameterized by quest item type and index
+
+| Function key | Shape | Return type | Notes |
+|---|---|---|---|
+| `GetQuestItemInfo` | `[type][index]` | tuple (n=7 on Forever) | QuestDialog; name, texture, count, quality, isUsable, itemID, ... in native argument order. `type` is `"choice"` (1..`GetNumQuestChoices`), `"reward"` (1..`GetNumQuestRewards`) or `"required"` (1..`GetNumQuestItems`); only indices within the current count are read. Schema 15+ |
+| `GetQuestItemLink` | `[type][index]` | scalar (string/nil) | QuestDialog; same keys as `GetQuestItemInfo`. Schema 15+ |
 
 ### Parameterized by greeting index
 
@@ -421,6 +447,14 @@ All tuple-returning functions MUST have `n` on every stored value.
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | GUID string; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+
+### Parameterized by nameplate token (`"nameplate1"`, `"nameplate2"`, ...)
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `UnitGUID` | scalar (string) or nil | UnitInteraction; `Creature-` or `Vehicle-` GUID, or nil when the token's unit is withheld. Sampled on `NAME_PLATE_UNIT_ADDED` outside instances, change-only per token. Schema 15+ |
+
+Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, and unrecognized or restricted GUIDs are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. No sample is taken inside instances, where Questie draws no nameplate icons on Forever and GUIDs are restricted. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
 
 ### Parameterized by unit token (`"target"`, `"mouseover"`)
 
@@ -452,13 +486,26 @@ All tuple-returning functions MUST have `n` on every stored value.
 | Function key | Return type | Notes |
 |---|---|---|
 | `C_QuestLog.GetQuestsOnMap` | object (QuestPOIMapInfo[]) | Raw API result; array of quest POIs on the given map |
+| `C_MapExplorationInfo.GetExploredMapTextures` | object (UiMapExplorationInfo[])/nil | Position; the player's best map, sampled when it changes and on `MAP_EXPLORATION_UPDATED`. Maps without exploration overlays return nothing, stored as nil. Schema 15+ |
+
+### Parameterized by item ID
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `C_Item.GetItemCount` | scalar (number) | ItemCount; `GetItemCount(itemID)` without `includeBank`: bags and equipped items. At `t=0` every item in the bags, keyring and equipment slots is sampled, so an item with no `t=0` entry was not carried (count 0). After that, entries come from the item of each `ITEM_COUNT_CHANGED` and from a rescan of carried items one second after bag changes; a count can trail the real change by up to that second. Schema 15+ |
+
+### Parameterized by CVar name
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `GetCVar` | scalar (string/nil) | Display; keyed by the lowercase CVar name (`"uiscale"`), since CVar names are case-insensitive. Only the CVars in `RECORDED_CVARS` (`Modules/Trackers/Display.lua`), sampled at capture start, `PLAYER_ENTERING_WORLD`, `UI_SCALE_CHANGED`, `DISPLAY_SIZE_CHANGED` and any `CVAR_UPDATE`. `GetCVarBool` and `C_CVar.GetCVar` read the same stream. Schema 15+ |
 
 ### Parameterized by factionID
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists) |
-| `C_Reputation.GetFactionDataByID` | object (table) | Raw API result |
+| `GetFactionInfoByID` | tuple (n=16, or n=0 for a faction the client lacks) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists). Same factions as below |
+| `C_Reputation.GetFactionDataByID` | object (table)/nil | Raw API result for every `FactionOrder` faction, i.e. the player's reputation panel. A nil answer is recorded once like any other value. The guild faction (1168), named after the player's guild, is never sampled. Factions outside the panel are not recorded and still have their starting values |
 
 ### Parameterized by skill index / profession tab index / trade-skill line ID
 

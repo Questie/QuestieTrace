@@ -25,6 +25,19 @@ local C_After = C_Timer.After
 --   Older clients may return fewer values.
 -- GetActiveQuestID(index)      -> questID (Forever only, undocumented)
 --
+-- Quest dialog rewards and requirements (QUEST_DETAIL/PROGRESS/COMPLETE):
+-- GetNumQuestRewards(), GetNumQuestItems(), GetNumQuestCurrencies() -> number count
+-- GetQuestItemInfo(type, index) -> name, texture, count, quality, isUsable, itemID, ...
+--   type is "choice" (1..GetNumQuestChoices), "reward" (1..GetNumQuestRewards) or
+--   "required" (1..GetNumQuestItems); stored as functions[key][type][index].
+-- GetQuestItemLink(type, index) -> string? itemLink
+-- GetRewardMoney(), GetQuestMoneyToGet() -> number copper
+-- GetRewardTitle()              -> string? title
+-- GetRewardSkillPoints()        -> skillName, skillIcon, skillPoints (all nil when none)
+-- GetSuggestedGroupSize()       -> number size (0 when none)
+-- QuestGetAutoAccept()          -> boolean
+-- GetQuestBackgroundMaterial()  -> string? material (nil = default parchment)
+--
 -- Quest flags, keyed by quest ID (Forever only):
 -- IsBreadcrumbQuest(questID)                        -> isBreadcrumb (undocumented)
 -- C_QuestLine.GetQuestLineInfo(questID)             -> QuestLineInfo?
@@ -65,13 +78,14 @@ end
 
 ---Call a function with pcall and return all results packed, without the pcall status.
 ---@param fn function?
+---@param ... any Native API arguments
 ---@return boolean ok
 ---@return PackedArgs? results
-local function SafePackedCall(fn)
+local function SafePackedCall(fn, ...)
   if type(fn) ~= "function" then return false, nil end
 
   ---@type PackedArgs
-  local packed = PackArgs(pcall(fn))
+  local packed = PackArgs(pcall(fn, ...))
   if not packed[1] then return false, nil end
 
   ---@type PackedArgs
@@ -84,43 +98,11 @@ end
 
 ---Call a function with pcall and return its first result.
 ---@param fn function?
+---@param ... any Native API arguments
 ---@return boolean ok
 ---@return any value
-local function SafeScalarCall(fn)
-  local ok, results = SafePackedCall(fn)
-  if not ok or not results then return false, nil end
-  return true, results[1]
-end
-
----Call a one-argument function (greeting index or quest ID) with pcall and
----return all results packed.
----@param fn function?
----@param index number
----@return boolean ok
----@return PackedArgs? results
-local function SafePackedIndexCall(fn, index)
-  if type(fn) ~= "function" then return false, nil end
-
-  ---@type PackedArgs
-  local packed = PackArgs(pcall(fn, index))
-  if not packed[1] then return false, nil end
-
-  ---@type PackedArgs
-  local results = { n = packed.n - 1 }
-  for i = 2, packed.n do
-    results[i - 1] = packed[i]
-  end
-  return true, results
-end
-
----Call a one-argument function (greeting index or quest ID) with pcall and
----return its first result.
----@param fn function?
----@param index number
----@return boolean ok
----@return any value
-local function SafeScalarIndexCall(fn, index)
-  local ok, results = SafePackedIndexCall(fn, index)
+local function SafeScalarCall(fn, ...)
+  local ok, results = SafePackedCall(fn, ...)
   if not ok or not results then return false, nil end
   return true, results[1]
 end
@@ -171,7 +153,8 @@ end
 ---Function keys whose returns hold free-form text that can
 ---embed a player's own name (e.g. NPC greetings like "Greetings, <name>").
 ---Quest titles and quest line names are static game data and do not contain
----player names, so they are stored raw.
+---player names, so they are stored raw. Reward titles are sanitized because
+---a character title can be formatted around the player's name.
 ---@type table<string, boolean>
 local SANITIZE_TEXT_FUNCTIONS = {
   ["C_GossipInfo.GetText"] = true,
@@ -180,6 +163,7 @@ local SANITIZE_TEXT_FUNCTIONS = {
   GetObjectiveText = true,
   GetProgressText = true,
   GetRewardText = true,
+  GetRewardTitle = true,
 }
 
 ---Pass a return value's strings through Core.SanitizeText: a scalar string,
@@ -212,9 +196,9 @@ end
 local function SampleParamStream(t, tp, functionName, fn, key, packed)
   local ok, value
   if packed then
-    ok, value = SafePackedIndexCall(fn, key)
+    ok, value = SafePackedCall(fn, key)
   else
-    ok, value = SafeScalarIndexCall(fn, key)
+    ok, value = SafeScalarCall(fn, key)
   end
   if not ok then return false, nil end
 
@@ -304,6 +288,15 @@ local function BuildFlatStreamDefs()
     GetRewardXP = true,
     IsQuestCompletable = true,
     GetNumQuestChoices = true,
+    GetNumQuestRewards = true,
+    GetNumQuestItems = true,
+    GetNumQuestCurrencies = true,
+    GetRewardMoney = true,
+    GetQuestMoneyToGet = true,
+    GetRewardTitle = true,
+    GetSuggestedGroupSize = true,
+    QuestGetAutoAccept = true,
+    GetQuestBackgroundMaterial = true,
   }
 
   for functionName in pairs(scalarFunctions) do
@@ -318,6 +311,7 @@ local function BuildFlatStreamDefs()
   local packedFunctions = {
     GetGossipAvailableQuests = true,
     GetGossipActiveQuests = true,
+    GetRewardSkillPoints = true,
   }
 
   for functionName in pairs(packedFunctions) do
@@ -400,6 +394,61 @@ local function SampleGreetingStreams(t, tp, questIDs)
   end
 end
 
+---Quest dialog item lists, each bounded by its own count API.
+---@type { itemType: "choice"|"reward"|"required", countFunction: string }[]
+local QUEST_ITEM_LISTS = {
+  { itemType = "choice", countFunction = "GetNumQuestChoices" },
+  { itemType = "reward", countFunction = "GetNumQuestRewards" },
+  { itemType = "required", countFunction = "GetNumQuestItems" },
+}
+
+---Sample a two-argument stream stored in native argument order as
+---functions[functionName][itemType][index]. Failed calls are skipped.
+---@param t number
+---@param tp number
+---@param functionName string
+---@param fn function?
+---@param itemType string
+---@param index number
+---@param packed boolean Store all returns as a packed tuple instead of the first return
+local function SampleQuestItemStream(t, tp, functionName, fn, itemType, index, packed)
+  local ok, value
+  if packed then
+    ok, value = SafePackedCall(fn, itemType, index)
+  else
+    ok, value = SafeScalarCall(fn, itemType, index)
+  end
+  if not ok then return end
+
+  local byType = functions[functionName] or {}
+  functions[functionName] = byType
+  ---@cast byType table<string, table<number, FunctionStreamEntry[]>>
+  local byIndex = byType[itemType] or {}
+  byType[itemType] = byIndex
+  local stream = byIndex[index] or {}
+  byIndex[index] = stream
+
+  AppendIfChanged(stream, t, tp, functionName .. ":" .. itemType .. ":" .. index, value)
+end
+
+---Sample the item info and link of every reward choice, fixed reward and
+---required item the open quest dialog lists. Only indices within the current
+---counts are read; Blizzard's quest frame never asks for others.
+---@param t number
+---@param tp number
+local function SampleQuestItems(t, tp)
+  for i = 1, #QUEST_ITEM_LISTS do
+    local list = QUEST_ITEM_LISTS[i]
+    local ok, count = SafeScalarCall(_G[list.countFunction])
+    if ok and type(count) == "number" then
+      for index = 1, count do
+        SampleQuestItemStream(t, tp, "GetQuestItemInfo", GetQuestItemInfo, list.itemType, index, true)
+        SampleQuestItemStream(t, tp, "GetQuestItemLink", GetQuestItemLink, list.itemType, index, false)
+      end
+    end
+  end
+end
+
 ---Add the current dialog quest and the gossip-offered quests to questIDs.
 ---These reads only choose which quests get flag samples: GetQuestID is
 ---recorded by the flat streams, and UnitInteraction records the gossip list.
@@ -446,6 +495,7 @@ local function SampleQuestDialog(capture)
   for i = 1, #flatStreamDefs do
     SampleFlatStream(t, tp, flatStreamDefs[i])
   end
+  SampleQuestItems(t, tp)
 
   ---@type table<number, boolean>
   local questIDs = {}

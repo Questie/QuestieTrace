@@ -113,6 +113,30 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetRewardXP()` | `functions["GetRewardXP"]` |
 | `IsQuestCompletable()` | `functions["IsQuestCompletable"]` |
 | `GetNumQuestChoices()` | `functions["GetNumQuestChoices"]` |
+| `GetNumQuestRewards()` | `functions["GetNumQuestRewards"]` |
+| `GetNumQuestItems()` | `functions["GetNumQuestItems"]` |
+| `GetNumQuestCurrencies()` | `functions["GetNumQuestCurrencies"]` |
+| `GetQuestItemInfo(type, index)` | `functions["GetQuestItemInfo"][type][index]` |
+| `GetQuestItemLink(type, index)` | `functions["GetQuestItemLink"][type][index]` |
+| `GetRewardMoney()` | `functions["GetRewardMoney"]` |
+| `GetQuestMoneyToGet()` | `functions["GetQuestMoneyToGet"]` |
+| `GetRewardTitle()` | `functions["GetRewardTitle"]` |
+| `GetRewardSkillPoints()` | `functions["GetRewardSkillPoints"]` |
+| `GetSuggestedGroupSize()` | `functions["GetSuggestedGroupSize"]` |
+| `QuestGetAutoAccept()` | `functions["QuestGetAutoAccept"]` |
+| `GetQuestBackgroundMaterial()` | `functions["GetQuestBackgroundMaterial"]` |
+| `C_Item.GetItemCount(itemID)` | `functions["C_Item.GetItemCount"][itemID]`; answers calls without `includeBank` only (trailing nil arguments are skipped by `getStream`) |
+| `UnitGUID("nameplateN")` | `functions["UnitGUID"]["nameplateN"]`; see the nameplate note below |
+| `GetPhysicalScreenSize()` | `functions["GetPhysicalScreenSize"]` |
+| `UIParent:GetScale()` | `functions["UIParent:GetScale"]` |
+| `GetScreenWidth()` / `GetScreenHeight()` | `functions["GetScreenWidth"]` / `functions["GetScreenHeight"]` |
+| `GetCVar(name)`, `GetCVarBool(name)`, `C_CVar.GetCVar(name)` | `functions["GetCVar"][name:lower()]` (allowlisted CVars only; `GetCVarBool` is `value ~= nil and value ~= "0"`) |
+| `C_MapExplorationInfo.GetExploredMapTextures(mapID)` | `functions["C_MapExplorationInfo.GetExploredMapTextures"][mapID]` |
+| `C_QuestLog.GetQuestTimers()` | `functions["C_QuestLog.GetQuestTimers"]` |
+| `C_QuestLog.GetRequiredMoney(questId)` | `functions["C_QuestLog.GetRequiredMoney"][questId]` |
+| `GetQuestLogCompletionText(questLogIndex)` for active quest `questId` | `functions["GetQuestLogCompletionText"][questId]` |
+| `GetQuestLogSpecialItemInfo(questLogIndex)` for active quest `questId` | `functions["GetQuestLogSpecialItemInfo"][questId]` |
+| `C_DateAndTime.GetCurrentCalendarTime()` | `functions["C_DateAndTime.GetCurrentCalendarTime"]` snapshot; derive the realm's UTC offset against the `GetServerTime` sample at the same `t` |
 | `UnitLevel("player")` | `functions["UnitLevel"]["player"]` |
 | `UnitRace("player")` | `functions["UnitRace"]["player"]` |
 | `UnitClass("player")` | `functions["UnitClass"]["player"]` |
@@ -160,12 +184,16 @@ Notes:
 
 - Raw questID API streams such as `C_QuestLog.IsQuestFlaggedCompleted`, `C_QuestLog.IsOnQuest`, `HaveQuestData`, objectives, reward count/money, `GetQuestTagInfo`, `C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, and `C_QuestLog.IsFailed` store observed API returns. When a quest leaves `QuestLog`, the tracker runs post-invalidation probes and records only values returned by successful calls. `C_QuestLog.IsQuestFlaggedCompleted` is related to `GetQuestsCompleted`, but the raw stream is not derived from it.
 - Quest-log title/tag/completion data is intentionally split across several independent raw streams (`C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, `C_QuestLog.IsFailed`, legacy `GetQuestLogTitle`) rather than one normalized composite value. Consumers that want a single "quest log title" view must combine whichever of these streams are present themselves; a client that lacks one of the modern `C_QuestLog.*` APIs simply has no entries for that stream, it is never backfilled from another API.
-- `GetQuestLogIndexByID`/`C_QuestLog.GetLogIndexForQuestID` and `GetQuestLogQuestText` are sampled with the native quest-log index but stored by `questId`. Native index emulation should map index → questId via the `QuestLog` synthetic stream first. After a quest leaves the active log, there is no valid quest-log index to probe for these streams.
+- Nameplate `UnitGUID` entries are change-only per token. A nil entry means the token's unit was withheld for privacy (a player, a player's pet or minion, a game object, or an unrecognized or restricted GUID), not that the client returned nil. `UnitName("nameplateN")` is not recorded: answer it from the NPC ID in the GUID (QuestieDB), or nil when the GUID is nil. Inside instances no nameplate is sampled, and `NAME_PLATE_UNIT_REMOVED` writes no entry, so a token keeps its last value until its next add.
+- `C_Item.GetItemCount`: an item with no entry at `t=0` was not in the bags, keyring or equipment at capture start (count 0). Later entries come from `ITEM_COUNT_CHANGED` and from a rescan one second after bag changes, so a count can trail the real change by up to a second.
+- `GetPlayerFacing()` is not recorded. Derive the heading from consecutive `C_Map.GetPlayerMapPosition["player"]` samples; it is wrong only while strafing, backpedaling or turning in place.
+- `GetQuestLogIndexByID`/`C_QuestLog.GetLogIndexForQuestID`, `GetQuestLogQuestText`, `GetQuestLogCompletionText` and `GetQuestLogSpecialItemInfo` are sampled with the native quest-log index but stored by `questId`. Native index emulation should map index → questId via the `QuestLog` synthetic stream first. After a quest leaves the active log, there is no valid quest-log index to probe for these streams.
 - `GetQuestTimers[questId]` and `GetQuestLogTimeLeft[questId]` are derived compatibility streams from `GetQuestTimers()` and `GetQuestIndexForTimer(timerIndex)`; they do not mutate quest-log selection. Their nil entries indicate derived timer mapping invalidation, not raw native API returns.
 - `GetQuestLogRewardInfo` uses nested maps in native argument order `[rewardIndex][questId]`. Previously observed reward indices are probed again after counts shrink or quests leave the log; stored values are successful API returns, not invented inactive values.
 - Legacy gossip globals are raw packed varargs; `GetGossipAvailableQuests` is repeated 7-tuples and `GetGossipActiveQuests` is repeated 6-tuples. Quest dialog close events cancel pending delayed open/update reads and perform one observed API sample; any empty string, nil, zero, or table value in these raw streams is an API return, not a synthetic reset.
 - Loot, skill/profession, spellbook, and unit-token streams follow the same raw-observation rule. Close events or shrinking index ranges cause event-synchronous probes of the represented APIs; failed calls are skipped rather than represented by invented values.
 - `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` are two independent raw streams for the same conceptual data, not one normalized value: whichever real API the client exposes is probed and recorded under that API's own name.
+- Only factions in `FactionOrder` (the player's reputation panel) are recorded. A faction outside it has had no reputation change yet, so answer it from a static per-faction-group table of starting values (e.g. a `C_Reputation.GetFactionDataByID` dump of a new Alliance and a new Horde character, minus their panels), answering `isWatched = false`.
 - `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries. `GetProfessions`/`GetProfessionInfo` and `C_TradeSkillUI.GetAllProfessionTradeSkillLines`/`C_TradeSkillUI.GetTradeSkillLineInfoByID` are tracked independently and unconditionally whenever they exist (not only as a fallback for the legacy skill-line APIs).
 
 ### Stored custom streams
@@ -205,7 +233,7 @@ end
 
 ## 5) Event replay
 
-Iterate `session.events` in order and fire events whose `t` lies in the requested range. Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`) are private sampling triggers and are not recorded in the main event stream.
+Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount) and `CVAR_UPDATE` (Display). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams.
 
 ## 6) Known limits
 

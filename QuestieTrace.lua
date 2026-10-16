@@ -6,7 +6,7 @@ local Core = QuestieTraceCore
 ---@type string
 local ADDON_NAME = "QuestieTrace"
 ---@type number
-local SCHEMA_VERSION = 14
+local SCHEMA_VERSION = 15
 ---@type number Safety cap on QuestieTraceCharacter.sessions -- a pure size
 --- backstop for players who never open the export window, not a substitute
 --- for reporting. Oldest sessions are dropped first; there is no
@@ -172,6 +172,13 @@ local TRACKED_EVENT_CATEGORIES = {
       "ITEM_PUSH",
       "ITEM_LOCK_CHANGED",
       "ITEM_COUNT_CHANGED",
+    },
+  },
+  {
+    name = "display",
+    events = {
+      "UI_SCALE_CHANGED",
+      "DISPLAY_SIZE_CHANGED",
     },
   },
 }

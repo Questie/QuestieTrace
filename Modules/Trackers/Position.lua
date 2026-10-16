@@ -32,6 +32,15 @@ local C_After = C_Timer.After
 --                      number  instanceID,
 --                      number  instanceGroupSize,
 --                      number  LfgDungeonID
+--
+-- GetPlayerFacing() is not recorded: it is restricted in instances and would
+-- add about as many entries as the position stream itself. Replay derives the
+-- heading from consecutive C_Map.GetPlayerMapPosition samples.
+--
+-- C_MapExplorationInfo.GetExploredMapTextures(uiMapID) -> UiMapExplorationInfo[]?
+--   Keyed by the player's best map ID. Sampled when that map changes and on
+--   MAP_EXPLORATION_UPDATED, never on timer ticks alone. Maps without
+--   exploration overlays (cities, instances) return nothing, stored as nil.
 ---------------------------------------------------------------------------
 
 ---@type number
@@ -46,10 +55,34 @@ local streamZone, streamSubZone, streamRealZone
 local streamMapID, streamPosition
 ---@type FunctionStreamEntry[], FunctionStreamEntry[]
 local streamInstance, streamInstanceInfo
+---@type table<number, FunctionStreamEntry[]>? Nil when the client lacks C_MapExplorationInfo.
+local exploredMapStreams
+
+--- Sample the explored overlays of one map, change-only per map ID.
+---@param t number
+---@param tp number
+---@param mapID number
+local function SampleExploredMap(t, tp, mapID)
+  if not exploredMapStreams then return end
+
+  local ok, textures = pcall(C_MapExplorationInfo.GetExploredMapTextures, mapID)
+  if not ok then return end
+
+  local stream = exploredMapStreams[mapID]
+  if not stream then
+    stream = {}
+    exploredMapStreams[mapID] = stream
+  end
+  local previous = stream[#stream]
+  if not previous or not DeepCompare(textures, previous.v) then
+    stream[#stream + 1] = { t = t, tp = tp, v = textures }
+  end
+end
 
 --- Sample all position-related data and append changed entries to streams.
 ---@param capture CaptureState
-local function SampleAll(capture)
+---@param refreshExploredMap boolean? Re-read the current map's explored overlays even if the map is unchanged.
+local function SampleAll(capture, refreshExploredMap)
   ---@type number
   local t  = GetTime() - capture.startedAt
   ---@type number
@@ -79,8 +112,14 @@ local function SampleAll(capture)
   local mapID = C_Map.GetBestMapForUnit("player")
   ---@type FunctionStreamEntry?
   local prevMap = streamMapID[#streamMapID]
-  if not prevMap or prevMap.v ~= mapID then
+  local mapChanged = not prevMap or prevMap.v ~= mapID
+  if mapChanged then
     streamMapID[#streamMapID + 1] = { t = t, tp = tp, v = mapID }
+  end
+
+  -- Explored overlays of the player's map: on arrival, and when exploration changes
+  if mapID and (mapChanged or refreshExploredMap) then
+    SampleExploredMap(t, tp, mapID)
   end
 
   -- Position (parameterized by "player")
@@ -197,6 +236,12 @@ Core.RegisterTracker({
     streamInstance     = functions["IsInInstance"]
     streamInstanceInfo = functions["GetInstanceInfo"]
 
+    exploredMapStreams = nil
+    if type(C_MapExplorationInfo) == "table" and type(C_MapExplorationInfo.GetExploredMapTextures) == "function" then
+      exploredMapStreams = {}
+      functions["C_MapExplorationInfo.GetExploredMapTextures"] = exploredMapStreams
+    end
+
     -- Initial sample at t=0
     SampleAll(capture)
 
@@ -205,8 +250,9 @@ Core.RegisterTracker({
   end,
 
   ---@param capture CaptureState
-  OnEvent = function(capture)
-    SampleAll(capture)
+  ---@param event string
+  OnEvent = function(capture, event)
+    SampleAll(capture, event == "MAP_EXPLORATION_UPDATED")
   end,
 
   ---@param capture CaptureState

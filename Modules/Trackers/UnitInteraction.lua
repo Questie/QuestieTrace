@@ -12,6 +12,9 @@ local DeepCompare = Core.DeepCompare
 -- UnitName(unit)  -> string name, string realm
 --                    (packed actual returns; nil positions omitted by SavedVariables)
 --
+-- Nameplate tokens ("nameplate1", ...): UnitGUID only, sampled on
+-- NAME_PLATE_UNIT_ADDED outside instances; see SampleNameplate.
+--
 -- C_GossipInfo.GetAvailableQuests() -> GossipQuestUIInfo[] (table)
 -- C_GossipInfo.GetActiveQuests()    -> GossipQuestUIInfo[] (table)
 ---------------------------------------------------------------------------
@@ -19,7 +22,11 @@ local DeepCompare = Core.DeepCompare
 ---@type string[]
 local TOKENS = { "target", "npc", "questnpc", "mouseover" }
 
--- Stream references (set during Init)
+---@type string The only unit tokens NAME_PLATE_UNIT_ADDED may add to the streams.
+local NAMEPLATE_TOKEN_PATTERN = "^nameplate%d+$"
+
+-- Stream references (set during Init): the session's UnitGUID and UnitName
+-- parameter maps, keyed by unit token.
 ---@type table<string, FunctionStreamEntry[]>?
 local guidStreams
 ---@type table<string, FunctionStreamEntry[]>?
@@ -66,10 +73,14 @@ local function IsPlayerControlled(token, guid)
     return true
   end
   local ok, controlled = SafeScalarCall(UnitPlayerControlled, token)
+  -- A restricted (secret) answer cannot be compared; treat the unit as player-controlled.
+  if ok and issecretvalue and issecretvalue(controlled) then
+    return true
+  end
   return ok and controlled == true
 end
 
---- Sample all six streams (UnitGUID + UnitName for each token).
+--- Sample UnitGUID and UnitName for every fixed token.
 ---@param t number Session-relative GetTime()
 ---@param tp number Session-relative GetTimePreciseSec()
 local function SampleAll(t, tp)
@@ -129,8 +140,57 @@ local function SampleAll(t, tp)
   end
 end
 
+---Whether a GUID is a world creature or vehicle, the only units Questie draws
+---nameplate icons on. Pet- GUIDs share the "npc" kind and are excluded here.
+---@param guid any
+---@return boolean
+local function IsCreatureOrVehicleGUID(guid)
+  if Core.ParseGUIDKind(guid) ~= "npc" then return false end
+  ---@cast guid string
+  return guid:find("^Creature%-") ~= nil or guid:find("^Vehicle%-") ~= nil
+end
+
+---Record which creature or vehicle a nameplate that just appeared belongs to.
+---Questie only reads the GUID (for the NPC ID), so UnitName is not recorded;
+---replay answers it from the NPC ID. On Forever, Questie draws no nameplate
+---icons inside instances, where GUIDs are restricted, so nothing is sampled
+---there.
+---
+---Change-only per token, and a unit that is not recorded is written as nil:
+---"no recordable unit on this token", not a nil from the client. Nameplate
+---tokens are reused as plates come and go, and without the nil a token
+---reused by a player would keep answering with its previous NPC.
+---@param t number Session-relative GetTime()
+---@param tp number Session-relative GetTimePreciseSec()
+---@param token any Unit token from the event
+local function SampleNameplate(t, tp, token)
+  if not guidStreams then return end
+  if type(token) ~= "string" or not token:match(NAMEPLATE_TOKEN_PATTERN) then return end
+  local instanceOk, inInstance = SafeScalarCall(IsInInstance)
+  if instanceOk and inInstance then return end
+
+  local guidOk, guid = SafeScalarCall(UnitGUID, token)
+  if not guidOk then return end
+
+  -- Privacy: players, player pets and minions, game objects and unrecognized
+  -- or restricted GUIDs are never stored; their adds record nil.
+  local recordedGUID = nil
+  if IsCreatureOrVehicleGUID(guid) and not IsPlayerControlled(token, guid) then
+    recordedGUID = guid
+  end
+
+  local stream = guidStreams[token] or {}
+  guidStreams[token] = stream
+  local previous = stream[#stream]
+  if not previous or previous.v ~= recordedGUID then
+    stream[#stream + 1] = { t = t, tp = tp, v = recordedGUID }
+  end
+end
+
 Core.RegisterTracker({
   events = {
+    -- group_world (already registered)
+    "NAME_PLATE_UNIT_ADDED",
     -- player_state (already registered)
     "PLAYER_TARGET_CHANGED",
     "UPDATE_MOUSEOVER_UNIT",
@@ -182,13 +242,11 @@ Core.RegisterTracker({
     if not functions["UnitGUID"] then functions["UnitGUID"] = {} end
     if not functions["UnitName"] then functions["UnitName"] = {} end
 
-    guidStreams = {}
-    nameStreams = {}
+    guidStreams = functions["UnitGUID"] --[[@as table<string, FunctionStreamEntry[]>]]
+    nameStreams = functions["UnitName"] --[[@as table<string, FunctionStreamEntry[]>]]
     for _, token in ipairs(TOKENS) do
-      functions["UnitGUID"][token] = {}
-      functions["UnitName"][token] = {}
-      guidStreams[token] = functions["UnitGUID"][token]
-      nameStreams[token] = functions["UnitName"][token]
+      guidStreams[token] = {}
+      nameStreams[token] = {}
     end
 
     -- Gossip streams (parameterless)
@@ -203,11 +261,18 @@ Core.RegisterTracker({
 
   ---@param capture CaptureState
   ---@param event string
-  OnEvent = function(capture, event)
+  ---@param ... any
+  OnEvent = function(capture, event, ...)
     ---@type number
     local t  = GetTime() - capture.startedAt
     ---@type number
     local tp = GetTimePreciseSec() - capture.startedAtPrecise
+
+    if event == "NAME_PLATE_UNIT_ADDED" then
+      SampleNameplate(t, tp, ...)
+      return
+    end
+
     SampleAll(t, tp)
 
     -- Gossip functions only return valid data when the gossip window is open.
