@@ -88,7 +88,8 @@ Triggers `UnitLevel("player")` sampling.
 
 ### Position tracker
 
-Triggers position function sampling (in addition to 0.2s timer).
+Triggers position function sampling (in addition to 0.2s timer), `IsIndoors`
+included.
 Also registers a private event frame for `PLAYER_STARTED_MOVING` and
 `PLAYER_STOPPED_MOVING` so position is sampled immediately on movement
 transitions. These movement events are intentionally not recorded in the main
@@ -271,6 +272,35 @@ Samples screen geometry, UI scale and the allowlisted UI CVars.
   CVars. It fires for every CVar, some of which hold account or realm
   identifiers, so the event itself never reaches the event stream.
 
+### PlayerProgress tracker
+
+Samples `UnitXP("player")`, `UnitXPMax("player")`, `GetXPExhaustion()` and
+`GetMoney()`.
+
+- `PLAYER_ENTERING_WORLD`
+- `PLAYER_XP_UPDATE`
+- `PLAYER_LEVEL_UP`
+- `UPDATE_EXHAUSTION`
+- `PLAYER_MONEY`
+
+### ItemInfo tracker
+
+Post-hooks `C_Item.GetItemInfo`, the `GetItemInfo` global where it exists, and
+`C_Item.RequestLoadItemDataByID` to see addons' item data requests; see
+TRACKER_SPEC section 17.
+
+- `GET_ITEM_INFO_RECEIVED` *(private trigger, not recorded)* -- re-reads
+  `C_Item.IsItemDataCachedByID` for items that already have a stream. It fires
+  for every item any addon or tooltip loads, so recording it would be unbounded.
+- `ITEM_DATA_LOAD_RESULT` *(private trigger, not recorded)* -- the same, for
+  loads requested through `C_Item.RequestLoadItemDataByID`, which do not fire
+  `GET_ITEM_INFO_RECEIVED` (Forever 1.60.1).
+
+### FrameHeartbeat tracker
+
+No events. An `OnUpdate` frame, shown only while capturing, writes
+`session.frameUpdates`; see TRACKER_SPEC section 18.
+
 ### PlayerIdentity tracker
 
 No events. Sampled once at capture start (`t=0`).
@@ -287,6 +317,10 @@ filtered so only the addon's own load event is recorded in the stream.
 - `ADDON_LOADED` (filtered: only recorded when `addonName == "QuestieTrace"`)
 - `PLAYER_LOGOUT` *(also ResetTime + auto-save handling)*
 - `PLAYER_LEAVING_WORLD`
+- `LOADING_SCREEN_ENABLED` -- Questie's quest log cache treats objective
+  regressions after it as stale data, so replay needs both ends of a loading
+  screen. The login loading screen starts before capture start, so only its end
+  is recorded.
 - `LOADING_SCREEN_DISABLED`
 
 These events are captured in the event stream for replay/analysis. Some also
@@ -298,6 +332,9 @@ to trackers for login-time data sampling (see tracker sections above).
 ### Player state
 
 - `PLAYER_LOGIN` *(also ResetTime + auto-start handling)*
+- `PLAYER_XP_UPDATE`, `UPDATE_EXHAUSTION`, `PLAYER_MONEY` *(also PlayerProgress)*
+- `DUEL_FINISHED` -- no arguments. `DUEL_REQUESTED` is not recorded: its
+  argument is the challenger's name.
 - `MODIFIER_STATE_CHANGED`
 - `PLAYER_REGEN_DISABLED`
 - `PLAYER_REGEN_ENABLED`
@@ -380,7 +417,8 @@ dropped and never recorded or dispatched to trackers.
   Private sampling triggers are registered on a tracker's own frame and are
   never recorded in the main event stream: Position's movement transitions
   (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), ItemCount's
-  `BAG_UPDATE_DELAYED` and Display's `CVAR_UPDATE`.
+  `BAG_UPDATE_DELAYED`, Display's `CVAR_UPDATE` and ItemInfo's
+  `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`.
 - `LOOT_OPENED` and `LOOT_READY` are different events. The Loot tracker
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).

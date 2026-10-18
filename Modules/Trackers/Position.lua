@@ -33,6 +33,10 @@ local C_After = C_Timer.After
 --                      number  instanceGroupSize,
 --                      number  LfgDungeonID
 --
+-- IsIndoors()       -> boolean indoors  -- sampled with the position, so a step
+--                                          into a building is caught even without
+--                                          ZONE_CHANGED_INDOORS
+--
 -- GetPlayerFacing() is not recorded: it is restricted in instances and would
 -- add about as many entries as the position stream itself. Replay derives the
 -- heading from consecutive C_Map.GetPlayerMapPosition samples.
@@ -53,8 +57,8 @@ local TIMER_INTERVAL = 0.20
 local streamZone, streamSubZone, streamRealZone
 ---@type FunctionStreamEntry[], FunctionStreamEntry[]
 local streamMapID, streamPosition
----@type FunctionStreamEntry[], FunctionStreamEntry[]
-local streamInstance, streamInstanceInfo
+---@type FunctionStreamEntry[], FunctionStreamEntry[], FunctionStreamEntry[]
+local streamInstance, streamInstanceInfo, streamIndoors
 ---@type table<number, FunctionStreamEntry[]>? Nil when the client lacks C_MapExplorationInfo.
 local exploredMapStreams
 
@@ -166,6 +170,13 @@ local function SampleAll(capture, refreshExploredMap)
   if not streamInstanceInfo[#streamInstanceInfo] or not DeepCompare(streamInstanceInfo[#streamInstanceInfo].v, instanceInfo) then
     streamInstanceInfo[#streamInstanceInfo + 1] = { t = t, tp = tp, v = instanceInfo }
   end
+
+  -- Indoors (the minimap uses smaller radii indoors)
+  ---@type boolean
+  local indoors = IsIndoors()
+  if not streamIndoors[#streamIndoors] or streamIndoors[#streamIndoors].v ~= indoors then
+    streamIndoors[#streamIndoors + 1] = { t = t, tp = tp, v = indoors }
+  end
 end
 
 --- Schedule a repeating timer to sample position data.
@@ -227,6 +238,7 @@ Core.RegisterTracker({
     functions["C_Map.GetPlayerMapPosition"] = { ["player"] = {} }
     functions["IsInInstance"]   = {}
     functions["GetInstanceInfo"] = {}
+    functions["IsIndoors"]      = {}
 
     streamZone     = functions["GetZoneText"]
     streamSubZone  = functions["GetSubZoneText"]
@@ -235,6 +247,7 @@ Core.RegisterTracker({
     streamPosition = functions["C_Map.GetPlayerMapPosition"]["player"]
     streamInstance     = functions["IsInInstance"]
     streamInstanceInfo = functions["GetInstanceInfo"]
+    streamIndoors      = functions["IsIndoors"]
 
     exploredMapStreams = nil
     if type(C_MapExplorationInfo) == "table" and type(C_MapExplorationInfo.GetExploredMapTextures) == "function" then

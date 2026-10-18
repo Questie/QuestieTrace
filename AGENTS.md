@@ -83,6 +83,9 @@ Modules/                  - Core modules and tracking systems
         ResetTime.lua          - Daily/weekly reset and realm calendar time tracking
         ItemCount.lua          - Carried item counts (C_Item.GetItemCount)
         Display.lua            - Screen size, UI scale and allowlisted UI CVars
+        PlayerProgress.lua     - Experience, rested bonus and money
+        ItemInfo.lua           - When item data an addon asked for arrives
+        FrameHeartbeat.lua     - Addon frame updates at login and after gaps
     Dumps/                - Data dump providers
         MapHierarchy.lua   - C_Map hierarchy data dump
     Export/               - Data export functionality

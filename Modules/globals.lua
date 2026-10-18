@@ -55,6 +55,7 @@ local Core = QuestieTraceCore
 ---@field events EventRecord[]
 ---@field functions table<string, FunctionStream>
 ---@field functionsDelta table<string, DeltaStream>
+---@field frameUpdates FunctionStreamEntry[]? Addon frame updates that start the session or end a gap (schema 15+); v = seconds since the previous one.
 
 ---@class CaptureState
 ---@field active boolean

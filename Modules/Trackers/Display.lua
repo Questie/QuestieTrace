@@ -36,6 +36,7 @@ local RECORDED_CVARS = {
   "minimapInsideZoom", -- Questie compares it with minimapZoom for minimap icon tooltips
   "instantQuestText",  -- Questie's options read it
   "displayQuestID",    -- Questie reads it with GetCVarBool; nil on Forever 1.60.1
+  "closedInfoFrames",  -- bitfield string of the first-time help tips the player closed
 }
 
 ---@type table<string, FunctionStream>
