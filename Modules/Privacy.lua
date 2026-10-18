@@ -53,6 +53,45 @@ local function EscapePattern(str)
   return (str:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%1"))
 end
 
+--- Pattern that matches a known name only as a whole word, so a short name such
+--- as "Ann" no longer rewrites "Announce" or "Annals" in quest and objective texts.
+---
+--- A word is a run of the ASCII letters A-Z and a-z, an explicit byte range we own
+--- (`%w` follows the C library's locale, and counts digits). A word boundary beside
+--- a Cyrillic, Korean, Chinese or accented first or last letter is not possible
+--- with that range, so that side of such a name still matches inside words. A
+--- trailing "s" is redacted with the name: German forms the possessive without an
+--- apostrophe ("Anns Schwert").
+---@param name string
+---@return string pattern
+local function NamePattern(name)
+  local pattern = EscapePattern(name)
+  if name:find("^[A-Za-z]") then
+    pattern = "%f[A-Za-z]" .. pattern
+  end
+  if name:find("[A-Za-z]$") then
+    pattern = pattern .. "s?%f[^A-Za-z]"
+  end
+  return pattern
+end
+
+--- Replace each name in `text` with "<name>", as whole words (see NamePattern).
+---
+--- WoW escape sequences can end in a letter right before a name
+--- ("|cff00ff00Ann|r", "|TIcon:0|tAnn"). A marker byte after each one keeps
+--- that edge a word boundary while the names are matched, then is removed.
+---@param text string
+---@param names string[] Sorted in place, longest first, so a name is replaced before any shorter name inside it.
+---@return string redacted
+local function RedactNames(text, names)
+  table.sort(names, function(a, b) return #a > #b end)
+  local marked = text:gsub("|c%x%x%x%x%x%x%x%x", "%0\1"):gsub("|[rthna]", "%0\1")
+  for i = 1, #names do
+    marked = marked:gsub(NamePattern(names[i]), "<name>")
+  end
+  return (marked:gsub("\1", ""))
+end
+
 --- Normalize UnitName return values into a flat list of name parts.
 --- Handles both patterns:
 ---   - UnitName("player") -> "First Last" (single return, full name)
@@ -125,24 +164,19 @@ function Core.GetPrivacyNameSet()
   return names
 end
 
---- Redact any known player name from a free-text WoW API return value.
+--- Redact every known player and guild name, as whole words (see RedactNames),
+--- from a free-text WoW API return value.
 --- Used for quest/gossip text and chat message text before storage.
 ---@param text any
 ---@return any sanitized Unchanged unless it is a non-empty string.
 function Core.SanitizeText(text)
   if type(text) ~= "string" or text == "" then return text end
 
-  local sanitized = text
-  local nameSet = Core.GetPrivacyNameSet()
   local names = {}
-  for name in pairs(nameSet) do
+  for name in pairs(Core.GetPrivacyNameSet()) do
     names[#names + 1] = name
   end
-  table.sort(names, function(a, b) return #a > #b end)
-  for i = 1, #names do
-    sanitized = sanitized:gsub(EscapePattern(names[i]), "<name>")
-  end
-  return sanitized
+  return RedactNames(text, names)
 end
 
 ---@type table<number, boolean>
@@ -156,8 +190,8 @@ local CHAT_MSG_GUID_ARG_INDEX = 12
 --- lineID, guid, bnSenderID, isMobile, isSubtitle, hideSenderInLetterbox,
 --- supressRaidIcons`.
 ---
---- The literal `playerName`/`playerName2` values are used to redact any
---- occurrence of that name from `text` (this catches names even when the
+--- The literal `playerName`/`playerName2` values are used to redact that
+--- name from `text`, as a whole word (see RedactNames; this catches names even when the
 --- subject isn't grouped with the local player, e.g. a duel/trade request),
 --- then `Core.SanitizeText` is applied as a second pass for the local
 --- player/roster. The name args and any player GUID are then discarded.
@@ -169,13 +203,14 @@ function Core.SanitizeChatMsgArgs(args)
 
   local text = out[1]
   if type(text) == "string" and text ~= "" then
+    local senderNames = {}
     for index in pairs(CHAT_MSG_NAME_ARG_INDICES) do
       local name = out[index]
       if type(name) == "string" and name ~= "" then
-        text = text:gsub(EscapePattern(name), "<name>")
+        senderNames[#senderNames + 1] = name
       end
     end
-    text = Core.SanitizeText(text)
+    text = Core.SanitizeText(RedactNames(text, senderNames))
   end
   out[1] = text
 

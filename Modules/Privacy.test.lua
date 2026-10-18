@@ -353,7 +353,7 @@ describe("GetPrivacyNameSet", function()
       assert.are.equal("<name> and <name> and <name>", result)
     end)
 
-    it("should handle substring matches correctly (greedy)", function()
+    it("should redact a name only as a whole word, possessives included", function()
       env.UnitName = function(token)
         if token == "player" then return "Ann" end
         return nil
@@ -361,9 +361,37 @@ describe("GetPrivacyNameSet", function()
       env.IsInGroup = function() return false end
       env.IsInRaid = function() return false end
 
-      -- Note: substring matching is intentional behavior
-      local result = Core.SanitizeText("Announce Ann")
-      assert.are.equal("<name>ounce <name>", result)
+      local result = Core.SanitizeText("Announce Ann, Ann's horse and Anns Schwert.")
+      assert.are.equal("Announce <name>, <name>'s horse and <name> Schwert.", result)
+    end)
+
+    it("should redact a name right after a UI escape sequence or next to a digit", function()
+      env.UnitName = function(token)
+        if token == "player" then return "Ann" end
+        return nil
+      end
+      env.IsInGroup = function() return false end
+      env.IsInRaid = function() return false end
+
+      assert.are.equal("|cff00ff00<name>|r and |cffffffff<name>|r", Core.SanitizeText("|cff00ff00Ann|r and |cffffffffAnn|r"))
+      assert.are.equal("|TIcon:0|t<name>|n<name>", Core.SanitizeText("|TIcon:0|tAnn|nAnn"))
+      assert.are.equal("|Hplayer:<name>|h<name>|h", Core.SanitizeText("|Hplayer:Ann|hAnn|h"))
+      assert.are.equal("<name>2 and 2<name>", Core.SanitizeText("Ann2 and 2Ann"))
+    end)
+
+    it("should keep redacting inside words beside a non-ASCII first or last letter", function()
+      env.IsInGroup = function() return true end
+      env.IsInRaid = function() return false end
+      env.UnitName = function(token)
+        if token == "player" then return "Ёжик" end
+        if token == "party1" then return "Ëlwyn" end
+        return nil
+      end
+
+      -- Word boundaries only exist beside the ASCII letters A-Z and a-z.
+      assert.are.equal("Привет, <name>у!", Core.SanitizeText("Привет, Ёжику!"))
+      assert.are.equal("Sir<name> and Ëlwyna", Core.SanitizeText("SirËlwyn and Ëlwyna"),
+        "Only the side ending in an ASCII letter gets a word boundary")
     end)
 
     it("should redact longer overlapping names before shorter names", function()
@@ -419,6 +447,11 @@ describe("GetPrivacyNameSet", function()
 
       local sanitized = Core.SanitizeChatMsgArgs(args)
       assert.are.equal("<name> receives loot.", sanitized[1])
+
+      args[1], args[2] = "Ann receives loot: [Annals of Darrowshire].", "Ann"
+      sanitized = Core.SanitizeChatMsgArgs(args)
+      assert.are.equal("<name> receives loot: [Annals of Darrowshire].", sanitized[1],
+        "The sender's name is redacted as a whole word, leaving item names intact")
     end)
 
     it("should apply SanitizeText as second pass for local player/roster", function()
