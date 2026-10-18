@@ -114,6 +114,7 @@ SessionRecord = {
   events         = EventEntry[],
   functions      = table<string, FunctionStream>,
   functionsDelta = table<string, DeltaStream>,
+  frameUpdates   = FunctionStreamEntry[], -- schema 15+
 }
 ```
 
@@ -128,6 +129,17 @@ produced the trace (`"1.15.9"`/`"70003"` Era, `"5.5.4"` Mists, `"1.60.1"`
 Forever), so replay can pick matching UI source and per-build data. The older
 `GetBuildInfo["player"]` stream, holding only the interface version, is kept
 unchanged for existing readers.
+
+`frameUpdates` (schema 15+, FrameHeartbeat tracker) lists addon frame updates
+(`OnUpdate`) as `{ t, tp, v }`, where `v` is the seconds since the previous
+frame update, or since capture start for the first. It holds the first 10
+updates after capture start, then only updates that end a gap of more than one
+second. A gap entry covers `[tp - v, tp]`: a loading screen longer than one
+second (between `LOADING_SCREEN_ENABLED` and `LOADING_SCREEN_DISABLED`) that
+ran no frame updates lies inside one, and one that did leaves none. Shorter
+loading screens cannot be told apart. The login loading screen starts before
+capture start, so only its `LOADING_SCREEN_DISABLED` is recorded; the first 10
+entries show whether it ran frame updates.
 
 ### Recording contract
 
@@ -334,6 +346,9 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetRealZoneText` | scalar (string) | |
 | `IsInInstance` | tuple (n=2) | inInstance, instanceType |
 | `GetInstanceInfo` | tuple (n=10) | name, instanceType, difficultyID, ... |
+| `IsIndoors` | scalar (boolean) | Position; sampled with the position every 0.2 s, change-only. Schema 15+ |
+| `GetXPExhaustion` | scalar (number/nil) | PlayerProgress; rested experience, nil when not rested. Schema 15+ |
+| `GetMoney` | scalar (number) | PlayerProgress; copper. Schema 15+ |
 | `GetNumLootItems` | scalar (number) | 0 when no loot window |
 | `IsInGroup` | scalar (boolean) | |
 | `GetNumGroupMembers` | scalar (number) | 0 when not in a group |
@@ -395,6 +410,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitLevel` | scalar (number) | |
+| `UnitXP` | scalar (number) | PlayerProgress; experience into the current level. Schema 15+ |
+| `UnitXPMax` | scalar (number) | PlayerProgress; experience needed for the level. Schema 15+ |
 | `UnitRace` | tuple (n=3) | localizedName, englishName, raceID |
 | `UnitClass` | tuple (n=3) | localizedName, englishName, classID |
 | `UnitClassBase` | tuple (n=2) | classFilename, classID; captured when API exists |
@@ -514,6 +531,7 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | Function key | Return type | Notes |
 |---|---|---|
 | `C_Item.GetItemCount` | scalar (number) | ItemCount; `GetItemCount(itemID)` without `includeBank`: bags and equipped items. At `t=0` every item in the bags, keyring and equipment slots is sampled, so an item with no `t=0` entry was not carried (count 0). After that, entries come from the item of each `ITEM_COUNT_CHANGED` and from a rescan of carried items one second after bag changes; a count can trail the real change by up to that second. Schema 15+ |
+| `C_Item.IsItemDataCachedByID` | scalar (boolean) | ItemInfo; only items an addon asked about (`C_Item.GetItemInfo`/`GetItemInfo`/`C_Item.RequestLoadItemDataByID`) before the client had their data. The first entry is `false`, right after the first such request during the capture; `true` follows when `GET_ITEM_INFO_RECEIVED` or `ITEM_DATA_LOAD_RESULT` delivers the data, and a failed load stays `false`. The first 500 streams come from any addon's requests, later ones only from Questie's, up to 1000. An item without a stream was cached when first asked about, never asked about, or asked about only by other addons after the first 500 streams, or by Questie only after three of their refused requests (a session with 500 streams or more reached that switch). Schema 15+ |
 
 ### Parameterized by CVar name
 

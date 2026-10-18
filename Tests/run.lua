@@ -111,7 +111,7 @@ local function NewRuntime(trackerFiles)
   -- (Position movement, ItemCount bags, Display CVars) can be driven separately.
   runtime.frames = {}
   env.CreateFrame = function()
-    local frame = { registered = {} }
+    local frame = { registered = {}, shown = true }
     ---@param self table<string, any>
     ---@param event string
     frame.RegisterEvent = function(self, event) self.registered[event] = true end
@@ -119,8 +119,30 @@ local function NewRuntime(trackerFiles)
     ---@param name string
     ---@param callback function
     frame.SetScript = function(self, name, callback) self[name] = callback end
+    frame.Show = function(self) self.shown = true end
+    frame.Hide = function(self) self.shown = false end
     runtime.frames[#runtime.frames + 1] = frame
     return frame
+  end
+  -- Post-hooks like WoW's: the original runs, then the hook with the same arguments.
+  ---@param tableOrName table|string A table, or the name of a global function
+  ---@param keyOrHook string|function
+  ---@param hookForTable function?
+  env.hooksecurefunc = function(tableOrName, keyOrHook, hookForTable)
+    ---@type table<string, any>, string, function
+    local tbl, key, hook
+    if type(tableOrName) == "string" then
+      tbl, key, hook = env, tableOrName, keyOrHook --[[@as function]]
+    else
+      tbl, key, hook = tableOrName, keyOrHook --[[@as string]], hookForTable --[[@as function]]
+    end
+    local original = tbl[key]
+    local function Pack(...) return { n = select("#", ...), ... } end
+    tbl[key] = function(...)
+      local results = Pack(original(...))
+      hook(...)
+      return unpack(results, 1, results.n)
+    end
   end
 
   env.YES = "Yes"
@@ -2468,7 +2490,7 @@ end
 local function TestDisplayRecordsOnlyAllowlistedCVars()
   local runtime = NewRuntime({ "Modules/Trackers/Display.lua" })
   local env = runtime.env
-  local cvars = { uiScale = "0.65", useUiScale = "0", questPOI = "1", realmName = "Secret Realm" }
+  local cvars = { uiScale = "0.65", useUiScale = "0", questPOI = "1", closedInfoFrames = "\002@@B", realmName = "Secret Realm" }
   env.GetCVar = function(name) return cvars[name] end
   env.GetPhysicalScreenSize = function() return 2560, 1440 end
   env.GetScreenWidth = function() return 1920 end
@@ -2485,6 +2507,7 @@ local function TestDisplayRecordsOnlyAllowlistedCVars()
     "UI scale and screen size are recorded at capture start")
   assert(cvarStreams.uiscale[1].v == "0.65" and cvarStreams.uiScale == nil, "CVar streams are keyed by lowercase name")
   assert(#cvarStreams.mapfade == 1 and cvarStreams.mapfade[1].v == nil, "A nil CVar answer is recorded explicitly")
+  assert(cvarStreams.closedinfoframes[1].v == "\002@@B", "The help-tip bitfield is recorded as the raw string")
 
   -- SetCVar can pass an event name instead of the CVar name, so any update re-reads the allowlist.
   cvars.questPOI = "0"
@@ -2679,13 +2702,15 @@ end
 ---@field mapID number
 ---@field explored table<number, table[]>
 ---@field exploredCalls number
+---@field indoors boolean
 
 ---@param runtime TestRuntime
 ---@return PositionFixture
 local function MockPositionApis(runtime)
   ---@type PositionFixture
-  local state = { mapID = 1429, explored = { [1429] = { { fileDataIDs = { 8061955 } } } }, exploredCalls = 0 }
+  local state = { mapID = 1429, explored = { [1429] = { { fileDataIDs = { 8061955 } } } }, exploredCalls = 0, indoors = false }
   local env = runtime.env
+  env.IsIndoors = function() return state.indoors end
   env.GetZoneText = function() return "Elwynn Forest" end
   env.GetSubZoneText = function() return "" end
   env.GetRealZoneText = env.GetZoneText
@@ -2727,6 +2752,13 @@ local function TestPositionRecordsExploredMap()
   assert(#explored[1429] == 2 and #explored[1429][2].v == 2, "Returning to a map re-reads its overlays")
   assert(state.exploredCalls == 4, "MAP_EXPLORATION_UPDATED re-reads the current map")
   assert(functions.GetPlayerFacing == nil, "Facing is not recorded")
+
+  -- Stepping into a building, without ZONE_CHANGED_INDOORS
+  state.indoors = true
+  AdvanceTo(runtime, 1.7)
+  local indoors = functions.IsIndoors
+  assert(#indoors == 2 and indoors[1].v == false and indoors[2].v == true and math.abs(indoors[2].t - 1.6) < 1e-9,
+    "IsIndoors is sampled on the next position tick, change-only")
 end
 
 local function TestResetTimeRecordsCalendarTime()
@@ -2749,6 +2781,220 @@ local function TestResetTimeRecordsCalendarTime()
   assert(#calendar == 2 and calendar[2].t == 60 and calendar[2].v.minute == 5, "A changed calendar time is appended")
 end
 
+local function TestPlayerProgressRecordsExperienceAndMoney()
+  local runtime = NewRuntime({ "Modules/Trackers/PlayerProgress.lua" })
+  local env = runtime.env
+  local xp, rested, money = 3109, nil, 12345
+  env.UnitXP = function(unit) if unit == "player" then return xp end end
+  env.UnitXPMax = function(unit) if unit == "player" then return 4500 end end
+  env.GetXPExhaustion = function() return rested end
+  env.GetMoney = function() return money end
+  runtime.core.StartCapture("progress")
+  local session = Session(runtime)
+  local functions = session.functions --[[@as table<string, any>]]
+
+  assert(functions.UnitXP.player[1].v == 3109 and functions.UnitXPMax.player[1].v == 4500, "Experience is read at capture start")
+  assert(#functions.GetXPExhaustion == 1 and functions.GetXPExhaustion[1].v == nil, "No rested bonus is recorded as nil")
+
+  runtime.now = 5
+  xp, rested = 3209, 900
+  SendEvent(runtime, "PLAYER_XP_UPDATE", "player")
+  money = 12400
+  runtime.now = 6
+  SendEvent(runtime, "PLAYER_MONEY")
+
+  assert(#functions.UnitXP.player == 2 and functions.UnitXP.player[2].t == 5, "A kill's experience is appended")
+  assert(#functions.UnitXPMax.player == 1, "Unchanged values are not re-appended")
+  assert(functions.GetXPExhaustion[2].v == 900 and functions.GetMoney[2].v == 12400 and functions.GetMoney[2].t == 6,
+    "Rested experience and money follow their events")
+  local recorded = {}
+  for _, entry in ipairs(session.events) do recorded[entry.e] = true end
+  assert(recorded.PLAYER_XP_UPDATE and recorded.PLAYER_MONEY, "The trigger events are recorded raw")
+end
+
+local function TestItemInfoRecordsUncachedItemsUntilArrival()
+  local runtime = NewRuntime({ "Modules/Trackers/ItemInfo.lua" })
+  local env = runtime.env
+  local cached = { [2589] = true }
+  env.C_Item = {
+    GetItemInfo = function(item) if cached[item] then return "Linen Cloth" end end,
+    IsItemDataCachedByID = function(itemID) return cached[itemID] == true end,
+    RequestLoadItemDataByID = function() end,
+  }
+  env.GetItemInfo = env.C_Item.GetItemInfo
+  runtime.core.StartCapture("item info")
+  local session = Session(runtime)
+  local streams = session.functions["C_Item.IsItemDataCachedByID"] --[[@as table<number, FunctionStreamEntry[]>]]
+
+  runtime.now = 1
+  assert(env.C_Item.GetItemInfo(2589) == "Linen Cloth", "The hook keeps the original answer")
+  env.GetItemInfo(4306)
+  runtime.now = 1.5
+  env.C_Item.GetItemInfo("|cffffffff|Hitem:4306::::::::60:::::::::|h[Silk Cloth]|h|r")
+  env.C_Item.GetItemInfo("Silk Cloth")
+  assert(streams[2589] == nil, "An item that was already cached gets no stream")
+  assert(#streams[4306] == 1 and streams[4306][1].v == false and streams[4306][1].t == 1,
+    "The first call that finds an item uncached is recorded once, through either name")
+
+  runtime.now = 2.5
+  cached[4306] = true
+  SendEvent(runtime, "GET_ITEM_INFO_RECEIVED", 4306, true)
+  SendEvent(runtime, "GET_ITEM_INFO_RECEIVED", 2589, true)
+  assert(#streams[4306] == 2 and streams[4306][2].v == true and streams[4306][2].t == 2.5, "The data's arrival is recorded")
+  assert(streams[2589] == nil, "Arrivals of items without a stream are ignored")
+  env.C_Item.GetItemInfo(30000)
+
+  -- Item:ContinueOnItemLoad requests through RequestLoadItemDataByID; that load reports ITEM_DATA_LOAD_RESULT.
+  runtime.now = 3
+  env.C_Item.RequestLoadItemDataByID(5000)
+  runtime.now = 3.2
+  cached[5000] = true
+  SendEvent(runtime, "ITEM_DATA_LOAD_RESULT", 5000, true)
+  assert(#streams[5000] == 2 and streams[5000][1].t == 3 and streams[5000][2].t == 3.2,
+    "A load requested by item ID is recorded until ITEM_DATA_LOAD_RESULT")
+
+  for _, entry in ipairs(session.events) do
+    assert(entry.e ~= "GET_ITEM_INFO_RECEIVED" and entry.e ~= "ITEM_DATA_LOAD_RESULT",
+      "Item data arrivals are private triggers, never recorded")
+  end
+
+  -- Hooks cannot be removed: after capture stop they stay installed but record nothing.
+  runtime.core.StopCapture()
+  env.C_Item.GetItemInfo(20000)
+  assert(streams[20000] == nil, "The hook does nothing without an active capture")
+
+  -- A new capture checks every item again, through the same hooks.
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("item info again")
+  local newStreams = Session(runtime).functions["C_Item.IsItemDataCachedByID"] --[[@as table<number, FunctionStreamEntry[]>]]
+  env.C_Item.GetItemInfo(30000)
+  assert(#newStreams[30000] == 1, "An item checked in the last capture is checked again")
+
+  -- The hook runs inside every addon's calls, so odd arguments must not raise, and
+  -- only whole item IDs become keys: infinity would not survive SavedVariables.
+  env.issecretvalue = function(value) return value == 4444 end
+  local isCached = env.C_Item.IsItemDataCachedByID
+  env.C_Item.IsItemDataCachedByID = function(itemID)
+    if itemID == 6666 then error("unknown item") end
+    return isCached(itemID)
+  end
+  for _, item in ipairs({ 0, -1, 1.5, 2 ^ 31, math.huge, string.rep("9", 400), 4444, 6666 }) do
+    env.C_Item.GetItemInfo(item)
+  end
+  env.C_Item.GetItemInfo(0 / 0)
+  env.C_Item.GetItemInfo(nil)
+  env.C_Item.GetItemInfo({})
+  local keys = 0
+  for _ in pairs(newStreams) do keys = keys + 1 end
+  assert(keys == 1, "Junk numbers, secret values and failed cache checks get no stream")
+end
+
+local function TestItemInfoKeepsOnlyQuestieRequestsPastTheCap()
+  local runtime = NewRuntime({ "Modules/Trackers/ItemInfo.lua" })
+  local env = runtime.env
+  local cached = { [7000] = true }
+  env.C_Item = {
+    GetItemInfo = function() end,
+    IsItemDataCachedByID = function(itemID) return cached[itemID] == true end,
+    RequestLoadItemDataByID = function() end,
+  }
+  -- Callers as Forever 1.60.1 prints them, below QuestieTrace's own frames
+  -- (levels 1-3: the stack check, the hook and hooksecurefunc's C wrapper).
+  local auctionScan = { "[Interface/AddOns/Auctionator/Source/Scan.lua]:40: in function 'Scan'" }
+  local questieCompat = { "[Interface/AddOns/Questie/Modules/QuestieCompat.lua]:566: in function 'GetItemInfo'" }
+  local questieContinueOnItemLoad = {
+    "[Interface/AddOns/Blizzard_ObjectAPI/Classic/Item.lua]:274: in function 'AddCallback'",
+    "[Interface/AddOns/Blizzard_ObjectAPI/Classic/Item.lua]:238: in function 'ContinueOnItemLoad'",
+    "[Interface/AddOns/Questie/Modules/Libs/QuestieLib.lua]:407: in function 'CacheItemNames'",
+  }
+  local callers, stackReads = auctionScan, 0
+  ---@param start number
+  ---@param count number
+  env.debugstack = function(start, count)
+    stackReads = stackReads + 1
+    local frames = {
+      "[Interface/AddOns/QuestieTrace/Modules/Trackers/ItemInfo.lua]:90: in function 'IsQuestieOnStack'",
+      "[Interface/AddOns/QuestieTrace/Modules/Trackers/ItemInfo.lua]:118: in function <...>",
+      "[C]: in function 'GetItemInfo'",
+    }
+    for _, frame in ipairs(callers) do frames[#frames + 1] = frame end
+    return table.concat(frames, "\n", start, math.min(#frames, start + count - 1))
+  end
+  runtime.core.StartCapture("item info cap")
+  local streams = Session(runtime).functions["C_Item.IsItemDataCachedByID"] --[[@as table<number, FunctionStreamEntry[]>]]
+  local function CountStreams()
+    local count = 0
+    for _ in pairs(streams) do count = count + 1 end
+    return count
+  end
+
+  for itemID = 10001, 10500 do env.C_Item.GetItemInfo(itemID) end
+  assert(CountStreams() == 500 and stackReads == 0, "The first 500 items come from any addon, without reading the stack")
+
+  env.C_Item.GetItemInfo(20000)
+  env.C_Item.GetItemInfo(7000)
+  assert(streams[20000] == nil, "Past 500, another addon's uncached request gets no stream")
+  assert(stackReads == 1, "Only uncached requests read the stack")
+
+  runtime.now = 4
+  callers = questieContinueOnItemLoad
+  env.C_Item.RequestLoadItemDataByID(20000)
+  assert(streams[20000] and streams[20000][1].t == 4, "Questie asking for an item another addon was refused still gets a stream")
+
+  callers = auctionScan
+  for _ = 1, 5 do env.C_Item.GetItemInfo(40000) end
+  assert(streams[40000] == nil and stackReads == 2 + 3, "Another addon polling an uncached item reads the stack at most 3 times")
+
+  callers = questieCompat
+  for itemID = 30001, 31000 do env.C_Item.GetItemInfo(itemID) end
+  assert(CountStreams() == 1000, "Questie's requests stop at 1000 streams")
+  local readsAtCap = stackReads
+  callers = auctionScan
+  env.C_Item.GetItemInfo(50000)
+  assert(stackReads == readsAtCap, "Past 1000 streams, requests return before reading the stack")
+end
+
+local function TestFrameHeartbeatRecordsFirstFramesAndGaps()
+  local runtime = NewRuntime({ "Modules/Trackers/FrameHeartbeat.lua" })
+  local heartbeat
+  for _, frame in ipairs(runtime.frames) do
+    if frame.OnUpdate then heartbeat = frame end
+  end
+  assert(heartbeat and not heartbeat.shown, "The heartbeat frame is hidden until capture starts")
+  runtime.core.StartCapture("heartbeat")
+  local session = Session(runtime)
+  assert(heartbeat.shown, "Capture start shows the heartbeat frame")
+
+  for frame = 1, 12 do
+    runtime.now = 0.5 + frame * 0.02
+    heartbeat.OnUpdate(heartbeat, 0.02)
+  end
+  local updates = assert(session.frameUpdates)
+  assert(#updates == 10 and updates[1].v == 0.52, "The first ten frame updates are recorded, since capture start")
+
+  -- A loading screen that stops frame updates for five seconds
+  SendEvent(runtime, "LOADING_SCREEN_ENABLED")
+  runtime.now = runtime.now + 5
+  heartbeat.OnUpdate(heartbeat, 5)
+  runtime.now = runtime.now + 0.02
+  heartbeat.OnUpdate(heartbeat, 0.02)
+  assert(#updates == 11 and math.abs(updates[11].v - 5) < 1e-9, "Only a frame update that ends a gap over 1 s is recorded")
+  assert(session.events[#session.events].e == "LOADING_SCREEN_ENABLED", "The start of a loading screen is recorded")
+
+  runtime.core.StopCapture()
+  assert(not heartbeat.shown, "Capture stop hides the heartbeat frame")
+
+  -- A new capture (e.g. after /reload) records its own first frame updates.
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("heartbeat again")
+  local restarted = runtime.now
+  runtime.now = restarted + 0.02
+  heartbeat.OnUpdate(heartbeat, 0.02)
+  local newUpdates = assert(Session(runtime).frameUpdates)
+  assert(newUpdates ~= updates and #newUpdates == 1 and math.abs(newUpdates[1].v - 0.02) < 1e-9,
+    "Each capture starts its own first frame updates, timed from its own start")
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
@@ -2756,6 +3002,10 @@ local tests = {
   { name = "quest log records legacy timer slots raw", run = TestQuestLogRecordsLegacyTimerSlots },
   { name = "position records explored map overlays", run = TestPositionRecordsExploredMap },
   { name = "reset time records realm calendar time", run = TestResetTimeRecordsCalendarTime },
+  { name = "player progress records experience, rested bonus and money", run = TestPlayerProgressRecordsExperienceAndMoney },
+  { name = "item info records uncached items until their data arrives", run = TestItemInfoRecordsUncachedItemsUntilArrival },
+  { name = "item info keeps only Questie's requests past 500 items", run = TestItemInfoKeepsOnlyQuestieRequestsPastTheCap },
+  { name = "frame heartbeat records the first frame updates and gaps", run = TestFrameHeartbeatRecordsFirstFramesAndGaps },
   { name = "quest dialog records reward items per type and index", run = TestQuestDialogRecordsRewardItems },
   { name = "quest dialog records Mists reward currencies up to the maximum", run = TestQuestDialogRecordsMistsRewardCurrencies },
   { name = "display records screen size and only allowlisted CVars", run = TestDisplayRecordsOnlyAllowlistedCVars },

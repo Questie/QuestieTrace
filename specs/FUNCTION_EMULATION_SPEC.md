@@ -129,6 +129,11 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestCurrencyInfo("reward", index)` | `functions["GetQuestCurrencyInfo"]["reward"][index]` (same) |
 | `GetQuestCurrencyID("reward", index)` | `functions["GetQuestCurrencyID"]["reward"][index]` (same) |
 | `C_Item.GetItemCount(itemID)` | `functions["C_Item.GetItemCount"][itemID]`; answers calls without `includeBank` only (trailing nil arguments are skipped by `getStream`) |
+| `C_Item.IsItemDataCachedByID(itemID)` | `functions["C_Item.IsItemDataCachedByID"][itemID]`; see the item data note below |
+| `IsIndoors()` | `functions["IsIndoors"]` |
+| `UnitXP("player")` / `UnitXPMax("player")` | `functions["UnitXP"]["player"]` / `functions["UnitXPMax"]["player"]` |
+| `GetXPExhaustion()` | `functions["GetXPExhaustion"]` |
+| `GetMoney()` | `functions["GetMoney"]` |
 | `UnitGUID("nameplateN")` | `functions["UnitGUID"]["nameplateN"]`; see the nameplate note below |
 | `GetPhysicalScreenSize()` | `functions["GetPhysicalScreenSize"]` |
 | `UIParent:GetScale()` | `functions["UIParent:GetScale"]` |
@@ -192,6 +197,8 @@ Notes:
 - Nameplate `UnitGUID` entries are change-only per token. A nil entry means the token's unit was withheld (a player, a player's pet or minion, a game object, an unrecognized or restricted GUID, or a failed call), not that the client returned nil. `UnitName("nameplateN")` is not recorded: answer it from the NPC ID in the GUID (QuestieDB), or nil when the GUID is nil. Instances are sampled too (Forever's restricted instance GUIDs record nil). `NAME_PLATE_UNIT_REMOVED` writes no entry, so a token keeps its last value until its next add.
 - Session metadata: `session.buildInfo` (schema 15+) is the raw `GetBuildInfo()` tuple at capture start. Use it to choose the client flavor's API set and data; answer `GetBuildInfo()` with `unpack(buildInfo, 1, buildInfo.n)`. Sessions without it only have the interface version, in `functions["GetBuildInfo"]["player"]`.
 - `C_Item.GetItemCount`: an item with no entry at `t=0` was not in the bags, keyring or equipment at capture start (count 0). Later entries come from `ITEM_COUNT_CHANGED` and from a rescan one second after bag changes, so a count can trail the real change by up to a second.
+- Item data: `C_Item.IsItemDataCachedByID[itemID]` exists only for items some addon asked about (`C_Item.GetItemInfo`/`GetItemInfo`/`C_Item.RequestLoadItemDataByID`) before the client had their data. Its first entry, `false`, is the time of the first such request during the capture (the load may have started earlier, before capture start); `true` is when the data arrived, which is not recorded as an event. Replay can answer item info calls for such an item with nil until then, and at the switch fire the event matching the replayed request: `GET_ITEM_INFO_RECEIVED(itemID, true)` after `GetItemInfo`, `ITEM_DATA_LOAD_RESULT(itemID, true)` after `RequestLoadItemDataByID` (the Forever 1.60.1 client fired only the matching one). The first 500 streams come from any addon's requests, later ones only from Questie's, up to 1000. An item without a stream was cached when first asked about, never asked about, or asked about only by other addons after the first 500 streams, or by Questie only after three of their refused requests (a session with 500 streams or more reached that switch).
+- `session.frameUpdates` (schema 15+) holds the client's addon frame updates at capture start and after gaps over one second; see SCHEMA_SPEC. Replay can use it to decide whether `OnUpdate` scripts and timers ran during a loading screen.
 - `GetPlayerFacing()` is not recorded. Derive the heading from consecutive `C_Map.GetPlayerMapPosition["player"]` samples; it is wrong only while strafing, backpedaling or turning in place.
 - `GetQuestLogIndexByID`/`C_QuestLog.GetLogIndexForQuestID`, `GetQuestLogQuestText`, `GetQuestLogCompletionText` and `GetQuestLogSpecialItemInfo` are sampled with the native quest-log index but stored by `questId`. Native index emulation should map index → questId via the `QuestLog` synthetic stream first. After a quest leaves the active log, there is no valid quest-log index to probe for these streams.
 - `GetQuestTimers[questId]` and `GetQuestLogTimeLeft[questId]` are derived compatibility streams from `GetQuestTimers()` and `GetQuestIndexForTimer(timerIndex)`; they do not mutate quest-log selection. Their nil entries indicate derived timer mapping invalidation, not raw native API returns.
@@ -239,7 +246,7 @@ end
 
 ## 5) Event replay
 
-Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount) and `CVAR_UPDATE` (Display). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams.
+Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount), `CVAR_UPDATE` (Display), and `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` (ItemInfo). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams, and the item data events from the switches to `true` in `C_Item.IsItemDataCachedByID`.
 
 ## 6) Known limits
 

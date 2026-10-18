@@ -17,6 +17,7 @@ time T?" for every captured function.
 SessionRecord = {
   schemaVersion = 9,
   recordingContractVersion = 1,
+  buildInfo = { "1.60.1", "70425", "Oct 14 2026", 16001, "", " ", n = 6 }, -- schema 15+
   name = "2026-02-10_12-34-56",       -- session identifier
 
   -- Absolute clock baselines (seconds)
@@ -30,6 +31,7 @@ SessionRecord = {
   events         = { EventEntry, ... },
   functions      = { [functionKey] = FunctionStream, ... },
   functionsDelta = { [functionKey] = DeltaStream, ... },
+  frameUpdates   = { FunctionStreamEntry, ... }, -- schema 15+
 }
 ```
 
@@ -44,6 +46,8 @@ the storage schema remains v9.
 - `events` — ordered time-series of game events that fired during the session.
 - `functions` — captured WoW API return values over time (change-only).
 - `functionsDelta` — large-set functions stored as initial + deltas.
+- `buildInfo` and `frameUpdates` (schema 15+) — the client build and the addon
+  frame-update heartbeat; see SCHEMA_SPEC section 2.
 
 ---
 
