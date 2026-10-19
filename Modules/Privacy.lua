@@ -202,11 +202,15 @@ function Core.SanitizeChatMsgArgs(args)
   local out = Core.CopyPacked(args)
 
   local text = out[1]
+  if issecretvalue and issecretvalue(text) then
+    text = nil
+  end
+
   if type(text) == "string" and text ~= "" then
     local senderNames = {}
     for index in pairs(CHAT_MSG_NAME_ARG_INDICES) do
       local name = out[index]
-      if type(name) == "string" and name ~= "" then
+      if (not (issecretvalue and issecretvalue(name))) and type(name) == "string" and name ~= "" then
         senderNames[#senderNames + 1] = name
       end
     end
