@@ -21,6 +21,37 @@ local function LoadAddonFile(runtime, path)
   chunk("QuestieTrace", runtime.env.QuestLog)
 end
 
+--- Mocks the codec APIs with a lossless round trip: the "CBOR" is a handle to
+--- a deep copy of the serialized table, so decoding yields fresh tables.
+---@param runtime TestRuntime
+local function LoadRoundTripEncoding(runtime)
+  local env = runtime.env
+  local stored = {}
+  local function Copy(value)
+    if type(value) ~= "table" then return value end
+    local out = {}
+    for k, v in pairs(value) do out[k] = Copy(v) end
+    return out
+  end
+  env.C_EncodingUtil = {
+    SerializeCBOR = function(value)
+      stored[#stored + 1] = Copy(value)
+      return "CBOR" .. #stored
+    end,
+    DeserializeCBOR = function(source) return Copy(stored[tonumber(source:sub(5))]) end,
+    CompressString = function(source) return "Z" .. source end,
+    DecompressString = function(source) return source:sub(2) end,
+  }
+  env.Enum = { CompressionMethod = { Deflate = 1 }, CompressionLevel = { Default = 1 } }
+  local libDeflate = {
+    EncodeForPrint = function(_, source) return "P" .. source end,
+    DecodeForPrint = function(_, source) return source:sub(2) end,
+  }
+  env.LibStub = function(name) return name == "LibDeflate" and libDeflate or nil end
+  LoadAddonFile(runtime, "Modules/Export/Encoding.lua")
+end
+
+
 -- WoW creates these controls from Widgets/Dialog.xml and Modules/Consent.xml. Tests exercise
 -- the Lua bindings; XML loading and taint still need in-client validation.
 local function NewConsentFrame()
@@ -167,6 +198,7 @@ local function NewRuntime(trackerFiles)
   LoadAddonFile(runtime, "Modules/Consent.lua")
   env.QuestieTraceCore.OnConsentFrameLoad(runtime.consentFrame)
   for _, path in ipairs(trackerFiles) do LoadAddonFile(runtime, path) end
+  LoadRoundTripEncoding(runtime)
   LoadAddonFile(runtime, "QuestieTrace.lua")
   -- QuestieTrace.lua creates the main event frame last.
   runtime.frame = runtime.frames[#runtime.frames]
@@ -472,10 +504,13 @@ local function TestSessionContract()
   assert(current.buildInfo.n == 6 and current.buildInfo[1] == "1.15.9" and current.buildInfo[2] == "70003"
     and current.buildInfo[4] == 11509, "New captures record the client build they were made on")
   runtime.core.SaveCapture()
-  assert(env.QuestieTraceCharacter.sessions[2] == current and current.recordingContractVersion == 1,
+  local sessions = env.QuestieTraceCharacter.sessions
+  local saved = runtime.core.DecodeExportPayload(sessions[2].encoded)
+  local savedLegacy = runtime.core.DecodeExportPayload(sessions[1].encoded)
+  assert(saved.name == current.name and saved.recordingContractVersion == 1,
     "Saving must retain the recording contract")
-  assert(env.QuestieTraceCharacter.sessions[1] == legacy and legacy.recordingContractVersion == nil,
-    "Legacy sessions must survive unchanged and unmarked")
+  assert(savedLegacy.name == "legacy" and savedLegacy.recordingContractVersion == nil,
+    "Legacy sessions must survive unmarked")
 end
 
 local function TestSpellBookArity()
@@ -526,8 +561,8 @@ local function TestExportScrubsPlayerIdentity()
   assert(exported.functions.UnitGUID.player == nil, "Player GUID must be scrubbed from export")
   assert(exported.functions.UnitGUID.npc ~= nil, "NPC GUID must remain in export")
 
-  local savedSession = runtime.env.QuestieTraceCharacter.sessions[1]
-  assert(savedSession.functions.UnitName.player ~= nil, "BuildExportPayload must not mutate the saved session")
+  local saved = runtime.core.GetDiagnosticSession()
+  assert(saved.functions.UnitName.player ~= nil, "BuildExportPayload must not change the saved session")
 end
 
 --- The payload handed to the encoder (i.e. what Core.BuildExportString
@@ -743,39 +778,8 @@ local function TestExportSerializationRoundTrips()
   assert(text:find("PRINT:", 1, true), "Export must be print-encoded")
 end
 
---- Mocks the codec APIs with a lossless round trip: the "CBOR" is a handle to
---- a deep copy of the serialized table, so decoding yields fresh tables.
----@param runtime TestRuntime
-local function LoadRoundTripEncoding(runtime)
-  local env = runtime.env
-  local stored = {}
-  local function Copy(value)
-    if type(value) ~= "table" then return value end
-    local out = {}
-    for k, v in pairs(value) do out[k] = Copy(v) end
-    return out
-  end
-  env.C_EncodingUtil = {
-    SerializeCBOR = function(value)
-      stored[#stored + 1] = Copy(value)
-      return "CBOR" .. #stored
-    end,
-    DeserializeCBOR = function(source) return Copy(stored[tonumber(source:sub(5))]) end,
-    CompressString = function(source) return "Z" .. source end,
-    DecompressString = function(source) return source:sub(2) end,
-  }
-  env.Enum = { CompressionMethod = { Deflate = 1 }, CompressionLevel = { Default = 1 } }
-  local libDeflate = {
-    EncodeForPrint = function(_, source) return "P" .. source end,
-    DecodeForPrint = function(_, source) return source:sub(2) end,
-  }
-  env.LibStub = function(name) return name == "LibDeflate" and libDeflate or nil end
-  LoadAddonFile(runtime, "Modules/Export/Encoding.lua")
-end
-
 local function TestSaveCaptureStoresSessionEncoded()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
-  LoadRoundTripEncoding(runtime)
   runtime.core.StartCapture("encoded")
   local session = Session(runtime)
   session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
@@ -806,18 +810,59 @@ local function TestSaveCaptureStoresSessionEncoded()
   assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A reported encoded session must be deleted")
 end
 
-local function TestExportReadsPlainAndEncodedSessions()
-  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
-  LoadRoundTripEncoding(runtime)
-  local legacy = { schemaVersion = 14, name = "legacy", startedAt = 0, startedAtPrecise = 0, events = {}, functions = {}, functionsDelta = {} }
-  runtime.env.QuestieTraceCharacter.sessions[1] = legacy
-  runtime.core.StartCapture("new")
-  runtime.core.SaveCapture()
+local function TestLoginEncodesPlainSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua", "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  local env = runtime.env
+  local legacy = {
+    schemaVersion = 14, name = "legacy", startedAt = 0, startedAtPrecise = 0, duration = 5,
+    events = { { t = 0, tp = 0, e = "TEST_EVENT", a = {} } }, functions = {}, functionsDelta = {},
+  }
+  env.QuestieTraceCharacter.sessions = { legacy, "broken" }
+  SendEvent(runtime, "PLAYER_LOGIN")
 
-  local payload = runtime.core.BuildExportPayload()
-  assert(#payload.sessions == 2, "Plain sessions saved before encoding must still be exported")
-  assert(payload.sessions[1].name == "legacy" and payload.sessions[1] ~= legacy, "A plain session must be exported as a copy")
-  assert(payload.sessions[2].name == "new", "An encoded session must be exported decoded")
+  local sessions = env.QuestieTraceCharacter.sessions
+  assert(#sessions == 1, "Entries that cannot be encoded must be dropped")
+  local saved = sessions[1]
+  assert(type(saved.encoded) == "string" and saved.events == nil, "A plain session must be encoded at login")
+  assert(saved.name == "legacy" and saved.schemaVersion == 14 and saved.duration == 5 and saved.eventCount == 1,
+    "An encoded plain session must keep its metadata")
+
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  assert(payload.sessions[1].name == "legacy" and payload.sessions[1].events[1].e == "TEST_EVENT",
+    "An encoded plain session must export its data")
+  runtime.core.DeleteReportedSessions(sourceSessions)
+  assert(#sessions == 0, "An encoded plain session must be deleted once reported")
+end
+
+local function TestLoginKeepsPlainSessionsWithoutCodec()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  runtime.env.C_EncodingUtil = nil
+  local legacy = { name = "legacy", events = {}, functions = {}, functionsDelta = {} }
+  runtime.env.QuestieTraceCharacter.sessions = { legacy }
+  SendEvent(runtime, "PLAYER_LOGIN")
+  assert(runtime.env.QuestieTraceCharacter.sessions[1] == legacy, "Plain sessions must be kept until they can be encoded")
+end
+
+local function TestLoginDropsPlainSessionsThatFailToEncode()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  runtime.core.EncodeExportPayload = function() return nil end
+  local legacy = { name = "legacy", events = {}, functions = {}, functionsDelta = {} }
+  runtime.env.QuestieTraceCharacter.sessions = { legacy, "broken" }
+  SendEvent(runtime, "PLAYER_LOGIN")
+  local sessions = runtime.env.QuestieTraceCharacter.sessions
+  assert(#sessions == 0, "Sessions that fail to encode must be dropped")
+end
+
+local function TestSaveCaptureSkipsSessionThatCannotBeEncoded()
+  local runtime = NewRuntime({})
+  runtime.core.EncodeExportPayload = function() return nil end
+  runtime.core.StartCapture("unencodable")
+  runtime.core.SaveCapture()
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A session that cannot be encoded must not be saved")
+  assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "A session that cannot be encoded must be dropped")
 end
 
 local function TestCurrentSessionLinkedOnStartCapture()
@@ -879,7 +924,8 @@ local function TestRecoverCurrentSessionOnLogin()
   -- The recovered session should now be in sessions[] (auto-finalized), not in capture.session
   assert(#env.QuestieTraceCharacter.sessions == 1, "Recovered session must be auto-finalized into sessions[]")
   local recovered = env.QuestieTraceCharacter.sessions[1]
-  assert(recovered == leftover, "Recovered session must be the same table reference")
+  assert(recovered.name == "recovered" and type(recovered.encoded) == "string", "Recovered session must be saved encoded")
+  recovered = runtime.core.DecodeExportPayload(recovered.encoded)
   assert(recovered.stoppedAt == 150, "Recovery must fill stoppedAt with current virtual time")
   assert(recovered.duration == 50, "Recovery must compute correct non-negative duration (150 - 100)")
   assert(recovered.durationPrecise == 50, "Recovery must compute correct durationPrecise")
@@ -3108,7 +3154,10 @@ local tests = {
   { name = "export deletes and restarts live session after report", run = TestExportPayloadLiveSessionDeletedAndRestarted },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "SaveCapture stores the session encoded", run = TestSaveCaptureStoresSessionEncoded },
-  { name = "export reads plain and encoded saved sessions", run = TestExportReadsPlainAndEncodedSessions },
+  { name = "login encodes sessions saved as plain tables", run = TestLoginEncodesPlainSessions },
+  { name = "login keeps plain sessions without codec support", run = TestLoginKeepsPlainSessionsWithoutCodec },
+  { name = "login drops plain sessions that fail to encode", run = TestLoginDropsPlainSessionsThatFailToEncode },
+  { name = "SaveCapture skips a session that cannot be encoded", run = TestSaveCaptureSkipsSessionThatCannotBeEncoded },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
   { name = "fresh character login initializes SavedVariables", run = TestLoginInitializesFreshCharacter },

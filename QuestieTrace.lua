@@ -273,6 +273,46 @@ end
 -- SavedVariables
 ---------------------------------------------------------------------------
 
+--- Encode a session for QuestieTraceCharacter.sessions: as a plain table it is
+--- several times larger in SavedVariables, which the client reads at login and
+--- writes at logout.
+---@param session SessionRecord
+---@return EncodedSessionRecord? record Nil if encoding fails.
+local function EncodeSessionRecord(session)
+  local encoded = Core.EncodeExportPayload(session)
+  if (not encoded) then
+    return nil
+  end
+  return {
+    name = session.name,
+    schemaVersion = session.schemaVersion,
+    duration = session.duration,
+    eventCount = type(session.events) == "table" and #session.events or 0,
+    encoded = encoded,
+  }
+end
+
+--- Encode sessions saved as plain tables by older versions, once. Sessions
+--- that cannot be encoded are dropped on purpose: encoding is not expected to
+--- fail, and keeping them would need a plain-session path in every reader.
+local function EncodePlainSessions()
+  if (not Core.HasCodecSupport()) then
+    return
+  end
+  local sessions = QuestieTraceCharacter.sessions
+  for i = #sessions, 1, -1 do
+    local session = sessions[i]
+    if type(session) ~= "table" or type(session.encoded) ~= "string" then
+      local record = type(session) == "table" and EncodeSessionRecord(session) or nil
+      if record then
+        sessions[i] = record
+      else
+        table.remove(sessions, i)
+      end
+    end
+  end
+end
+
 --- Ensure SavedVariables tables exist and match the current schema version.
 local function EnsureSavedVariables()
   ---@type table?
@@ -311,6 +351,7 @@ local function EnsureSavedVariables()
 
   QuestieTraceCharacter = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter or {}
   QuestieTraceCharacter.sessions = type(QuestieTraceCharacter.sessions) == "table" and QuestieTraceCharacter.sessions or {}
+  EncodePlainSessions()
 
   -- Share-reminder state (sessionStart, lastReminderAt). Shape-checked, no SCHEMA_VERSION bump.
   QuestieTraceCharacter.reminder = type(QuestieTraceCharacter.reminder) == "table" and QuestieTraceCharacter.reminder or {}
@@ -385,11 +426,9 @@ function Core.GetDiagnosticSession()
 
   local characterDb = QuestieTraceCharacter
   if type(characterDb) == "table" and type(characterDb.sessions) == "table" then
-    local session = characterDb.sessions[#characterDb.sessions]
-    if type(session) == "table" and type(session.encoded) == "string" then
-      session = Core.DecodeExportPayload(session.encoded)
-    end
-    if type(session) == "table" then
+    local record = characterDb.sessions[#characterDb.sessions]
+    local session = type(record) == "table" and Core.DecodeExportPayload(record.encoded) or nil
+    if session then
       return session, "saved"
     end
   end
@@ -516,22 +555,13 @@ function Core.SaveCapture(nameOverride)
     session.durationPrecise  = session.stoppedAtPrecise - session.startedAtPrecise
   end
 
-  -- Store the session encoded: as a plain table it is several times larger in
-  -- SavedVariables, which the client reads at login and writes at logout.
-  local encoded = Core.EncodeExportPayload and Core.EncodeExportPayload(session)
-  ---@type SessionRecord|EncodedSessionRecord
-  local record = session
-  if encoded then
-    record = {
-      name = session.name,
-      schemaVersion = session.schemaVersion,
-      duration = session.duration,
-      eventCount = #session.events,
-      encoded = encoded,
-    }
+  -- A session that cannot be encoded is dropped on purpose: encoding is not
+  -- expected to fail, and retrying is not worth the extra code.
+  local record = EncodeSessionRecord(session)
+  if record then
+    QuestieTraceCharacter.sessions[#QuestieTraceCharacter.sessions + 1] = record
+    QuestieTraceCharacter.lastSavedSession = session.name
   end
-  QuestieTraceCharacter.sessions[#QuestieTraceCharacter.sessions + 1] = record
-  QuestieTraceCharacter.lastSavedSession = session.name
 
   PruneSessionsIfNeeded()
 

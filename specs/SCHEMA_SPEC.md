@@ -30,7 +30,7 @@ QuestieTraceDumps = {
 QuestieTraceCharacter = {
   lastSavedSession = "2026-02-10_12-34-56",
   currentSession = SessionRecord?,          -- live/stopped-unsaved session, linked by reference
-  sessions = { EncodedSessionRecord|SessionRecord, ... },
+  sessions = { EncodedSessionRecord, ... },
   reminder = {
     sessionStart = 0,                       -- GetTime() when the current session started (0 = no active session)
     lastReminderAt = 0,                     -- GetTime() when the last reminder was shown (0 = never)
@@ -45,8 +45,9 @@ On `PLAYER_LOGIN`, if a leftover `currentSession` exists, it is recovered as a s
 Saved sessions are stored encoded (`EncodedSessionRecord`): `{ name, schemaVersion, duration, eventCount, encoded }`,
 where `encoded` is the `SessionRecord` run through the export pipeline (`Core.EncodeExportPayload`: CBOR, Deflate,
 `EncodeForPrint`). As plain tables they would be several times larger in SavedVariables. Readers decode with
-`Core.DecodeExportPayload`. Entries saved before this change, or without codec support, are plain `SessionRecord`s
-and are read as they are.
+`Core.DecodeExportPayload`. Sessions saved as plain `SessionRecord`s by older versions are encoded once at
+`PLAYER_LOGIN` (skipped without codec support). Entries that cannot be encoded, at login or on save, are dropped on purpose:
+encoding is not expected to fail, and keeping them is not worth the extra code.
 
 `lastSavedSession` is only set on explicit save — it is not initialized
 on fresh install or migration.
