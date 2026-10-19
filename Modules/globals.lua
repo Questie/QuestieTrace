@@ -59,8 +59,7 @@ local Core = QuestieTraceCore
 
 --- A saved session as stored in QuestieTraceCharacter.sessions: the full
 --- SessionRecord encoded like the export string, plus metadata readable
---- without decoding. Older saves (and saves made without codec support) hold
---- a plain SessionRecord instead.
+--- without decoding. Older plain-table saves are encoded at login.
 ---@class EncodedSessionRecord
 ---@field name string?
 ---@field schemaVersion number

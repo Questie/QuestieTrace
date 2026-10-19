@@ -26,6 +26,7 @@ local function LoadExportUIModules(env)
   env.QuestieTraceCore.DiscardCapture = function() end
   env.QuestieTraceCore.StartCapture = function() end
   env.QuestieTraceCore.MarkExportOpened = function() end
+  env.QuestieTraceCore.DecodeExportPayload = function() return { functions = {} } end
 
   local exportChunk = assert(loadfile("Modules/Export/Export.lua"))
   setfenv(exportChunk, env)
@@ -49,7 +50,7 @@ describe("ExportUI.ShowExportWindow encoding state transition", function()
   before_each(function()
     env = {}
     Core = LoadExportUIModules(env)
-    session = { functions = {} }
+    session = { encoded = "SESSION" }
     env.QuestieTraceCharacter = { sessions = { session } }
   end)
 
@@ -179,7 +180,7 @@ describe("ExportUI export edit box read-only handling", function()
     env = {}
     Core = LoadExportUIModules(env)
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
-    env.QuestieTraceCharacter = { sessions = { { functions = {} } } }
+    env.QuestieTraceCharacter = { sessions = { { encoded = "SESSION" } } }
     setTextCalls = 0
     editBoxes = {}
     exportEditBox = nil

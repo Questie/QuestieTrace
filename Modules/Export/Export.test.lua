@@ -1,3 +1,24 @@
+---@type table<string, table>
+local encodedSessions = {}
+
+---@param value any
+---@return any
+local function DeepCopy(value)
+  if type(value) ~= "table" then return value end
+  local out = {}
+  for k, v in pairs(value) do out[k] = DeepCopy(v) end
+  return out
+end
+
+--- Store a session the way SaveCapture does: as a record with an encoded string.
+---@param session table
+---@return EncodedSessionRecord
+local function Encoded(session)
+  local key = tostring(session)
+  encodedSessions[key] = session
+  return { name = session.name, schemaVersion = 15, eventCount = 0, encoded = key }
+end
+
 ---@param env table<string, any>
 ---@return QuestieTraceCore
 local function LoadExportModule(env)
@@ -7,6 +28,8 @@ local function LoadExportModule(env)
 
   -- Mock EncodeExportPayload to return a test string
   env.QuestieTraceCore.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
+  -- Saved sessions built by Encoded() decode to a fresh copy, like the real codec.
+  env.QuestieTraceCore.DecodeExportPayload = function(encoded) return DeepCopy(encodedSessions[encoded]) end
 
   local chunk = assert(loadfile("Modules/Export/Export.lua"))
   setfenv(chunk, env)
@@ -19,7 +42,7 @@ end
 ---@param functions table
 local function SetSessionFunctions(env, functions)
   env.QuestieTraceCharacter = {
-    sessions = { { functions = functions } },
+    sessions = { Encoded({ functions = functions }) },
   }
 end
 
@@ -115,19 +138,6 @@ describe("Export.ScrubFunctions", function()
     assert.is_not_nil(functions.UnitName.questnpc)
   end)
 
-  it("should not mutate the original saved session", function()
-    SetSessionFunctions(env, {
-      UnitGUID = { player = { { t = 0, tp = 0, v = "Player-1-000001" } } },
-      UnitName = { player = { { t = 0, tp = 0, v = { "Hero", "Realm", n = 2 } } } },
-    })
-
-    Core.BuildExportPayload()
-
-    local savedSession = env.QuestieTraceCharacter.sessions[1]
-    assert.is_not_nil(savedSession.functions.UnitGUID.player)
-    assert.is_not_nil(savedSession.functions.UnitName.player)
-  end)
-
   it("should not error when functions is missing UnitGUID or UnitName", function()
     SetSessionFunctions(env, {})
 
@@ -197,7 +207,7 @@ describe("Export.currentSession inclusion", function()
 
   it("should include both saved sessions and the current unsaved session", function()
     env.QuestieTraceCharacter = {
-      sessions = { { name = "saved", functions = {} } },
+      sessions = { Encoded({ name = "saved", functions = {} }) },
       currentSession = {
         name = "unsaved",
         functions = {},
@@ -318,7 +328,7 @@ describe("Export.BuildExportPayload", function()
   end)
 
   it("should set hasExportableData to true when there are saved sessions", function()
-    env.QuestieTraceCharacter = { sessions = { { functions = {} } } }
+    env.QuestieTraceCharacter = { sessions = { Encoded({ functions = {} }) } }
 
     local payload = Core.BuildExportPayload()
 
