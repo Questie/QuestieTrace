@@ -743,6 +743,83 @@ local function TestExportSerializationRoundTrips()
   assert(text:find("PRINT:", 1, true), "Export must be print-encoded")
 end
 
+--- Mocks the codec APIs with a lossless round trip: the "CBOR" is a handle to
+--- a deep copy of the serialized table, so decoding yields fresh tables.
+---@param runtime TestRuntime
+local function LoadRoundTripEncoding(runtime)
+  local env = runtime.env
+  local stored = {}
+  local function Copy(value)
+    if type(value) ~= "table" then return value end
+    local out = {}
+    for k, v in pairs(value) do out[k] = Copy(v) end
+    return out
+  end
+  env.C_EncodingUtil = {
+    SerializeCBOR = function(value)
+      stored[#stored + 1] = Copy(value)
+      return "CBOR" .. #stored
+    end,
+    DeserializeCBOR = function(source) return Copy(stored[tonumber(source:sub(5))]) end,
+    CompressString = function(source) return "Z" .. source end,
+    DecompressString = function(source) return source:sub(2) end,
+  }
+  env.Enum = { CompressionMethod = { Deflate = 1 }, CompressionLevel = { Default = 1 } }
+  local libDeflate = {
+    EncodeForPrint = function(_, source) return "P" .. source end,
+    DecodeForPrint = function(_, source) return source:sub(2) end,
+  }
+  env.LibStub = function(name) return name == "LibDeflate" and libDeflate or nil end
+  LoadAddonFile(runtime, "Modules/Export/Encoding.lua")
+end
+
+local function TestSaveCaptureStoresSessionEncoded()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  LoadRoundTripEncoding(runtime)
+  runtime.core.StartCapture("encoded")
+  local session = Session(runtime)
+  session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
+  session.functions.UnitGUID = {
+    player = { { t = 0, tp = 0, v = "Player-1-000001" } },
+    npc = { { t = 0, tp = 0, v = "Creature-0-1-1-1-123-000001" } },
+  }
+  session.functions.UnitName = { player = { { t = 0, tp = 0, v = { "Hero", "Realm", n = 2 } } } }
+  runtime.core.SaveCapture()
+
+  local saved = runtime.env.QuestieTraceCharacter.sessions[1]
+  assert(type(saved.encoded) == "string", "A saved session must be stored as an encoded string")
+  assert(saved.events == nil and saved.functions == nil, "The plain session tables must not be stored next to the string")
+  assert(saved.name == "encoded" and saved.schemaVersion == 15 and saved.eventCount == 1 and saved.duration ~= nil,
+    "Metadata must stay readable without decoding")
+
+  local diagnostic, source = runtime.core.GetDiagnosticSession()
+  assert(source == "saved" and diagnostic.events[1].e == "TEST_EVENT", "Diagnostics must decode the saved session")
+
+  local payload, sourceSessions = runtime.core.BuildExportPayload()
+  local exported = payload.sessions[1]
+  assert(exported.events[1].e == "TEST_EVENT", "Export must decode the saved session")
+  assert(exported.functions.UnitGUID.player == nil and exported.functions.UnitGUID.npc ~= nil,
+    "A decoded session must still be scrubbed")
+  assert(sourceSessions[1] == saved, "The stored record must back the exported session")
+
+  runtime.core.DeleteReportedSessions(sourceSessions)
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A reported encoded session must be deleted")
+end
+
+local function TestExportReadsPlainAndEncodedSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  LoadRoundTripEncoding(runtime)
+  local legacy = { schemaVersion = 14, name = "legacy", startedAt = 0, startedAtPrecise = 0, events = {}, functions = {}, functionsDelta = {} }
+  runtime.env.QuestieTraceCharacter.sessions[1] = legacy
+  runtime.core.StartCapture("new")
+  runtime.core.SaveCapture()
+
+  local payload = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 2, "Plain sessions saved before encoding must still be exported")
+  assert(payload.sessions[1].name == "legacy" and payload.sessions[1] ~= legacy, "A plain session must be exported as a copy")
+  assert(payload.sessions[2].name == "new", "An encoded session must be exported decoded")
+end
+
 local function TestCurrentSessionLinkedOnStartCapture()
   local runtime = NewRuntime({})
   runtime.core.StartCapture("link test")
@@ -3030,6 +3107,8 @@ local tests = {
   { name = "SaveCapture prunes oldest sessions past the cap", run = TestSaveCapturePrunesOldestSessionsPastCap },
   { name = "export deletes and restarts live session after report", run = TestExportPayloadLiveSessionDeletedAndRestarted },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
+  { name = "SaveCapture stores the session encoded", run = TestSaveCaptureStoresSessionEncoded },
+  { name = "export reads plain and encoded saved sessions", run = TestExportReadsPlainAndEncodedSessions },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
   { name = "fresh character login initializes SavedVariables", run = TestLoginInitializesFreshCharacter },

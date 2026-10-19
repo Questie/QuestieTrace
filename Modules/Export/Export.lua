@@ -154,7 +154,7 @@ end
 --- window) should pass `sourceSessions` to Core.DeleteReportedSessions()
 --- afterwards so that data is not offered again next time.
 ---@return table payload
----@return SessionRecord[] sourceSessions Real session tables backing `payload.sessions`, in the same order.
+---@return (SessionRecord|EncodedSessionRecord)[] sourceSessions Stored records backing `payload.sessions`, in the same order.
 function Core.BuildExportPayload()
   ---@type SessionRecord[]
   local sessions = {}
@@ -163,16 +163,24 @@ function Core.BuildExportPayload()
 
   ---@type table?
   local characterDb = QuestieTraceCharacter
-  ---@type SessionRecord[]
+  ---@type (SessionRecord|EncodedSessionRecord)[]
   local savedSessions = (type(characterDb) == "table" and type(characterDb.sessions) == "table") and characterDb.sessions or {}
 
   for i = 1, #savedSessions do
-    ---@type SessionRecord
     local source = savedSessions[i]
-    local session = DeepCopy(source)
-    ScrubFunctions(session.functions)
-    sessions[#sessions + 1] = session
-    sourceSessions[#sourceSessions + 1] = source
+    ---@type SessionRecord?
+    local session
+    if type(source.encoded) == "string" then
+      -- Decoding yields a fresh table, so no copy is needed.
+      session = Core.DecodeExportPayload(source.encoded)
+    else
+      session = DeepCopy(source)
+    end
+    if session then
+      ScrubFunctions(session.functions)
+      sessions[#sessions + 1] = session
+      sourceSessions[#sourceSessions + 1] = source
+    end
   end
 
   ---@type SessionRecord?

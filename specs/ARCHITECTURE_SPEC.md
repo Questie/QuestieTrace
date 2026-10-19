@@ -124,7 +124,7 @@ QuestieTraceDumps = {
 QuestieTraceCharacter = {
   lastSavedSession = "2026-02-10_12-34-56", -- set on save only
   currentSession = SessionRecord?,          -- live session, linked by reference; never leftover across loads
-  sessions = { SessionRecord, ... },
+  sessions = { EncodedSessionRecord|SessionRecord, ... },
   reminder = {
     sessionStart = 0,                       -- GetTime() when the current session started (0 = no active session)
     lastReminderAt = 0,                     -- GetTime() when the last reminder was shown (0 = never)
@@ -133,6 +133,12 @@ QuestieTraceCharacter = {
 ```
 
 `currentSession` is a direct reference to the in-memory `capture.session` table established by `Core.StartCapture()`. Since trackers mutate the table in place, no periodic sync is needed — the reference remains valid for the session's lifetime. It is cleared by `Core.SaveCapture()` (session moved to `sessions[]`). On `PLAYER_LOGIN`, if a leftover `currentSession` exists, it is automatically finalized into `sessions[]` immediately, so no lingering unsaved state ever remains.
+
+Saved sessions are stored encoded (`EncodedSessionRecord`): `{ name, schemaVersion, duration, eventCount, encoded }`,
+where `encoded` is the `SessionRecord` run through the export pipeline (`Core.EncodeExportPayload`: CBOR, Deflate,
+`EncodeForPrint`). As plain tables they would be several times larger in SavedVariables. Readers decode with
+`Core.DecodeExportPayload`. Entries saved before this change, or without codec support, are plain `SessionRecord`s
+and are read as they are.
 
 There is no `exportedAt` field or similar marker on `SessionRecord`: a session is only ever kept around while unreported. See "Export and deletion" in `specs/SCHEMA_SPEC.md`.
 
