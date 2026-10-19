@@ -57,6 +57,17 @@ local Core = QuestieTraceCore
 ---@field functionsDelta table<string, DeltaStream>
 ---@field frameUpdates FunctionStreamEntry[]? Addon frame updates that start the session or end a gap (schema 15+); v = seconds since the previous one.
 
+--- A saved session as stored in QuestieTraceCharacter.sessions: the full
+--- SessionRecord encoded like the export string, plus metadata readable
+--- without decoding. Older saves (and saves made without codec support) hold
+--- a plain SessionRecord instead.
+---@class EncodedSessionRecord
+---@field name string?
+---@field schemaVersion number
+---@field duration number?
+---@field eventCount number
+---@field encoded string Core.EncodeExportPayload(session)
+
 ---@class CaptureState
 ---@field active boolean
 ---@field token number

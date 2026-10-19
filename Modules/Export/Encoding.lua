@@ -64,3 +64,24 @@ function Core.EncodeExportPayload(payload)
 
   return nil
 end
+
+--- Decode a string built by Core.EncodeExportPayload back into a table.
+---@param encoded string
+---@return table? payload Nil if codec support is missing or decoding fails.
+function Core.DecodeExportPayload(encoded)
+  if (not Core.HasCodecSupport()) then
+    return nil
+  end
+
+  local ok, decoded = pcall(function()
+    local compressed = LibDeflate:DecodeForPrint(encoded)
+    local cbor = C_EncodingUtil.DecompressString(compressed, Enum.CompressionMethod.Deflate)
+    return C_EncodingUtil.DeserializeCBOR(cbor)
+  end)
+
+  if ok and type(decoded) == "table" then
+    return decoded
+  end
+
+  return nil
+end

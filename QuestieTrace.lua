@@ -374,8 +374,8 @@ end
 --- Return the live or newest saved session for external diagnostics.
 ---
 --- This is intended for read-only bridge/testing inspection. The returned
---- session table is the actual live/saved table, not a defensive copy; callers
---- MUST treat it as read-only by convention.
+--- session table is the actual live table (or a decoded copy of an encoded
+--- saved session), not a defensive copy; callers MUST treat it as read-only.
 ---@return SessionRecord? session The active/stopped unsaved session, newest saved session, or nil.
 ---@return "active"|"stopped_unsaved"|"saved"|"none" source Where the session came from.
 function Core.GetDiagnosticSession()
@@ -386,6 +386,9 @@ function Core.GetDiagnosticSession()
   local characterDb = QuestieTraceCharacter
   if type(characterDb) == "table" and type(characterDb.sessions) == "table" then
     local session = characterDb.sessions[#characterDb.sessions]
+    if type(session) == "table" and type(session.encoded) == "string" then
+      session = Core.DecodeExportPayload(session.encoded)
+    end
     if type(session) == "table" then
       return session, "saved"
     end
@@ -513,9 +516,21 @@ function Core.SaveCapture(nameOverride)
     session.durationPrecise  = session.stoppedAtPrecise - session.startedAtPrecise
   end
 
-  -- The session IS the record — events, functions, functionsDelta are already
-  -- populated in-place by the trackers. No serialization step needed.
-  QuestieTraceCharacter.sessions[#QuestieTraceCharacter.sessions + 1] = session
+  -- Store the session encoded: as a plain table it is several times larger in
+  -- SavedVariables, which the client reads at login and writes at logout.
+  local encoded = Core.EncodeExportPayload and Core.EncodeExportPayload(session)
+  ---@type SessionRecord|EncodedSessionRecord
+  local record = session
+  if encoded then
+    record = {
+      name = session.name,
+      schemaVersion = session.schemaVersion,
+      duration = session.duration,
+      eventCount = #session.events,
+      encoded = encoded,
+    }
+  end
+  QuestieTraceCharacter.sessions[#QuestieTraceCharacter.sessions + 1] = record
   QuestieTraceCharacter.lastSavedSession = session.name
 
   PruneSessionsIfNeeded()

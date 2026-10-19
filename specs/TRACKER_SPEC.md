@@ -114,8 +114,9 @@ stream = capture.session.functions["UnitLevel"]["player"]
 stream[#stream + 1] = { t = t, tp = tp, v = 13 }
 ```
 
-There is no serialization step on save. The session object built by
-trackers IS the SessionRecord stored in SavedVariables.
+While recording, the session object built by trackers is the SessionRecord
+linked into SavedVariables as `currentSession`. On save it is encoded into an
+`EncodedSessionRecord` (see SCHEMA_SPEC).
 
 ---
 
@@ -148,7 +149,7 @@ trackers IS the SessionRecord stored in SavedVariables.
 ### On SaveCapture
 
 1. Auto-stops if still running.
-2. Session is appended directly to `QuestieTraceCharacter.sessions`.
+2. Session is encoded (see `EncodedSessionRecord` in SCHEMA_SPEC) and appended to `QuestieTraceCharacter.sessions`.
 3. `capture.session` is set to `nil`.
 
 ---
