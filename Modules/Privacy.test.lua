@@ -420,6 +420,26 @@ describe("GetPrivacyNameSet", function()
       assert.are.equal(guid, args[12])
     end)
 
+    it("should drop secret message text without comparing it", function()
+      local secret = setmetatable({}, {__eq = function() error("compared secret") end})
+      env.issecretvalue = function(value) return value == secret end
+      local args = {n = 2, [1] = secret, [2] = "Grimtotem"}
+      local sanitized
+      assert.has_no.errors(function() sanitized = Core.SanitizeChatMsgArgs(args) end)
+      assert.is_nil(sanitized[1])
+      assert.is_nil(sanitized[2])
+    end)
+
+    it("should ignore secret sender names when redacting text", function()
+      local secret = "SecretName"
+      env.issecretvalue = function(value) return value == secret end
+      local args = {n = 5, [1] = "Hello Bob", [2] = secret, [5] = "Bob"}
+      local sanitized = Core.SanitizeChatMsgArgs(args)
+      assert.is_nil(sanitized[2])
+      assert.is_nil(sanitized[5])
+      assert.is_nil(string.find(sanitized[1], "Bob", 1, true))
+    end)
+
     it("should strip playerName (arg 2) and playerName2 (arg 5)", function()
       env.UnitName = function() return nil end
       env.IsInGroup = function() return false end
