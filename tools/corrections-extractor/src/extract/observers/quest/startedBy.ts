@@ -9,9 +9,10 @@
 //     against the current questnpc/npc (Available = can be accepted/started here).
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → creature starter
 //   - At same times, UnitGUID for GameObject tokens → object starter
-//   - Use questnpc when it identifies a giver; npc is only a fallback, not a second giver.
-//   - Object starters always show up on questnpc. An object on npc alone is whatever the player
-//     is using (e.g. a Mailbox while a party member shares a quest), so it never falls back.
+//   - Use questnpc when it identifies a giver. npc is only a fallback for gossip, where questnpc
+//     is never set. At QUEST_DETAIL/QUEST_ACCEPTED npc is whatever the player is using (e.g. a
+//     Mailbox or vendor while a party member shares a quest), so it is never used there.
+//   - Object starters always show up on questnpc, so npc never yields an object.
 //   - "target" is intentionally excluded: unlike questnpc/npc, it can point at anything the player
 //     happens to be targeting and is not tied to the quest interaction.
 //
@@ -30,6 +31,9 @@ function questIdAt(lookup: InteractionLookup): number | null {
 interface GossipQuestEntry {
   questID?: number;
 }
+
+const GOSSIP_TOKENS = ["questnpc", "npc"] as const;
+const QUEST_DIALOG_TOKENS = ["questnpc"] as const;
 
 export interface StartedByStarter {
   creatureId?: number;
@@ -68,9 +72,8 @@ function pushGuidObservations(
   t: number,
   lookup: InteractionLookup,
   observations: Observation<StartedByStarter>[],
+  tokens: readonly ("questnpc" | "npc")[],
 ): void {
-  const tokens = ["questnpc", "npc"] as const;
-
   for (const token of tokens) {
     const guid = lookup("UnitGUID", token);
     if (guid === AMBIGUOUS_INTERACTION) return;
@@ -115,7 +118,7 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
       if (Array.isArray(quests)) {
         for (const quest of quests) {
           if (typeof quest?.questID === "number" && quest.questID > 0) {
-            pushGuidObservations(session, quest.questID, ev.t, lookup, observations);
+            pushGuidObservations(session, quest.questID, ev.t, lookup, observations, GOSSIP_TOKENS);
           }
         }
       }
@@ -138,7 +141,7 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
 
     if (questID === null) continue;
 
-    pushGuidObservations(session, questID, ev.t, lookup, observations);
+    pushGuidObservations(session, questID, ev.t, lookup, observations, QUEST_DIALOG_TOKENS);
 
     if (starterItemID !== null && starterItemID > 0) {
       observations.push({

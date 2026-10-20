@@ -26,7 +26,7 @@ describe("observeStartedBy", () => {
     ]);
   });
 
-  it("should capture a creature starter from npc GUID when questnpc is absent", () => {
+  it("should not take a creature starter from npc GUID at QUEST_DETAIL when questnpc is absent", () => {
     const session = makeSession(
       {
         GetQuestID: [apiSample(3, 3, 96659)],
@@ -39,14 +39,7 @@ describe("observeStartedBy", () => {
       ]
     );
 
-    expect(observeStartedBy(session)).toEqual([
-      {
-        entityId: 96659,
-        value: { creatureId: 197 },
-        confidence: "medium",
-        provenance: { session: "test-session", t: 3 },
-      },
-    ]);
+    expect(observeStartedBy(session)).toEqual([]);
   });
 
   it("should capture an item starter from QUEST_DETAIL questStartItemID", () => {
@@ -412,7 +405,7 @@ describe("observeStartedBy interaction correlation", () => {
     expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ objectId: 410369 }]);
   });
 
-  it("should fall back to npc when questnpc is explicitly nil", () => {
+  it("should not fall back to an npc creature at QUEST_ACCEPTED when questnpc is explicitly nil", () => {
     const session = makeSession(
       {
         UnitGUID: {
@@ -428,7 +421,23 @@ describe("observeStartedBy interaction correlation", () => {
       ]
     );
 
-    expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ creatureId: 276172 }]);
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
+  it("should fall back to an npc creature for gossip available quests", () => {
+    const session = makeSession(
+      {
+        "C_GossipInfo.GetAvailableQuests": [apiSample(3, 3.001, [{ questID: 5042 }])],
+        UnitGUID: {
+          npc: [apiSample(3, 3.001, creatureGuid(3430))],
+        },
+      },
+      [
+        traceEvent("GOSSIP_SHOW", 3, 3),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => [o.entityId, o.value])).toEqual([[5042, { creatureId: 3430 }]]);
   });
 
   it("should not fall back to an npc object like a mailbox when a quest is shared", () => {
