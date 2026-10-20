@@ -119,7 +119,7 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 15, settings = { dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 16, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   runtime.printedMessages = {}
   env.print = function(...)
@@ -499,7 +499,7 @@ local function TestSessionContract()
 
   runtime.core.StartCapture("new capture")
   local current = Session(runtime)
-  assert(current.schemaVersion == 15 and current.recordingContractVersion == 1,
+  assert(current.schemaVersion == 16 and current.recordingContractVersion == 1,
     "New captures need contract provenance without a storage schema bump")
   assert(current.buildInfo.n == 6 and current.buildInfo[1] == "1.15.9" and current.buildInfo[2] == "70003"
     and current.buildInfo[4] == 11509, "New captures record the client build they were made on")
@@ -685,7 +685,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 15, settings = { dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 16, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -793,7 +793,7 @@ local function TestSaveCaptureStoresSessionEncoded()
   local saved = runtime.env.QuestieTraceCharacter.sessions[1]
   assert(type(saved.encoded) == "string", "A saved session must be stored as an encoded string")
   assert(saved.events == nil and saved.functions == nil, "The plain session tables must not be stored next to the string")
-  assert(saved.name == "encoded" and saved.schemaVersion == 15 and saved.eventCount == 1 and saved.duration ~= nil,
+  assert(saved.name == "encoded" and saved.schemaVersion == 16 and saved.eventCount == 1 and saved.duration ~= nil,
     "Metadata must stay readable without decoding")
 
   local diagnostic, source = runtime.core.GetDiagnosticSession()
