@@ -1713,8 +1713,8 @@ local function TestUnitInteractionSkipsPlayerTarget()
   local session = Session(runtime)
   local guidStream = session.functions.UnitGUID.target
   local nameStream = session.functions.UnitName.target
-  assert(#guidStream == 0, "A player target's GUID must never be recorded")
-  assert(#nameStream == 0, "A player target's name must never be recorded")
+  assert(#guidStream == 1 and guidStream[1].v == nil, "A player target's GUID must never be recorded")
+  assert(#nameStream == 1 and nameStream[1].v.n == 2 and nameStream[1].v[1] == nil, "A player target's name must never be recorded")
 end
 
 local function TestUnitInteractionRecordsNpcTarget()
@@ -1960,9 +1960,9 @@ local function TestUnitInteractionMouseoverPlayerIsSkipped()
 
   -- Verify neither the player GUID nor its name leaked into the mouseover streams
   assert(functions.UnitGUID and functions.UnitGUID.mouseover, "UnitGUID[mouseover] stream must exist")
-  assert(#functions.UnitGUID.mouseover == 0, "A mouseover player's GUID must never be recorded")
+  assert(#functions.UnitGUID.mouseover == 1 and functions.UnitGUID.mouseover[1].v == nil, "A mouseover player's GUID must never be recorded")
   assert(functions.UnitName and functions.UnitName.mouseover, "UnitName[mouseover] stream must exist")
-  assert(#functions.UnitName.mouseover == 0, "A mouseover player's name must never be recorded")
+  assert(#functions.UnitName.mouseover == 1 and functions.UnitName.mouseover[1].v[1] == nil, "A mouseover player's name must never be recorded")
 end
 
 local function TestUnitStateTracker()
@@ -2372,7 +2372,7 @@ local function TestRestrictedUnitIdentityDoesNotInterruptCapture()
   SendEvent(runtime, "GOSSIP_SHOW")
   local functions = Session(runtime).functions
   assert(#functions.UnitGUID.target == 0 and #functions.UnitName.target == 0, "Restricted identity must not be recorded")
-  assert(#functions.UnitGUID.questnpc == 0, "Readable player identity must still be filtered")
+  assert(#functions.UnitGUID.questnpc == 1 and functions.UnitGUID.questnpc[1].v == nil, "Readable player identity must be recorded as no unit")
   assert(functions.UnitGUID.npc[1].v == npcGuid, "Other readable units must still be recorded")
   assert(functions["C_GossipInfo.GetAvailableQuests"][1].v[1].questID == 123, "Gossip recording must continue")
   restricted = false
