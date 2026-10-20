@@ -425,6 +425,14 @@ Rules:
   locale entry or regenerating an existing one with AI, add the marker in the same commit.
 - The marker is a Lua comment, so it never affects the string value at runtime.
 
+## Schema Version
+
+Bump `SCHEMA_VERSION` in `QuestieTrace.lua` whenever a tracker changes what or how data is recorded
+(e.g. new/removed streams, changed values), so traces from before and after the change can be told apart.
+
+- Update the current-version expectations in `Modules/Consent.test.lua` and `Tests/run.lua` (leave legacy fixtures alone).
+- Commit the bump on its own as `chore: bump schema version to <N>`.
+
 ## Specifications
 
 All design decisions are documented in `specs/`. Before implementing significant changes:
