@@ -10,6 +10,8 @@
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → creature starter
 //   - At same times, UnitGUID for GameObject tokens → object starter
 //   - Use questnpc when it identifies a giver; npc is only a fallback, not a second giver.
+//   - Object starters always show up on questnpc. An object on npc alone is whatever the player
+//     is using (e.g. a Mailbox while a party member shares a quest), so it never falls back.
 //   - "target" is intentionally excluded: unlike questnpc/npc, it can point at anything the player
 //     happens to be targeting and is not tied to the quest interaction.
 //
@@ -85,7 +87,7 @@ function pushGuidObservations(
         provenance: { session: sessionLabel(session), t },
       });
       return;
-    } else if (parsed.kind === "object" && parsed.id) {
+    } else if (parsed.kind === "object" && parsed.id && token === "questnpc") {
       observations.push({
         entityId: questID,
         value: { objectId: parsed.id },
