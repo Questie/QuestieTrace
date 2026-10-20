@@ -81,4 +81,22 @@ describe("UnitInteraction tracker", function()
     assert.is_nil(capture.session.functions.UnitGUID.target[1].v)
     assert.are.same({ { t = 0, tp = 0, v = { n = 2 } } }, capture.session.functions.UnitName.target)
   end)
+
+  it("should record a player target as no unit so the previous NPC does not linger", function()
+    local guid = "Creature-0-1-1-1-999-000001"
+    local name = "Some Mob"
+    local tracker = LoadUnitInteractionTracker(TargetEnv("ignored", "ignored", false))
+    local env = getfenv(tracker.OnEvent)
+    env.UnitGUID = function(token) if token == "target" then return guid end end
+    env.UnitName = function(token) if token == "target" then return name end end
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    guid, name = "Player-1-000001", "Someplayer"
+    tracker.OnEvent(capture, "QUEST_DETAIL")
+
+    assert.are.equal(2, #capture.session.functions.UnitGUID.target)
+    assert.is_nil(capture.session.functions.UnitGUID.target[2].v)
+    assert.are.same({ n = 2 }, capture.session.functions.UnitName.target[2].v)
+  end)
 end)

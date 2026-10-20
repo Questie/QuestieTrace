@@ -92,18 +92,20 @@ local function SampleAll(t, tp)
     if guidOk then
       -- Privacy: `target`/`npc`/`questnpc` tokens can resolve to another
       -- player character just as easily as an NPC (e.g. targeting a party
-      -- member). Never record a player's GUID or name. A nil guid (no
-      -- unit) is still recorded, since that's a state transition, not PII.
+      -- member). Never record a player's GUID or name; players are blanked
+      -- to "no unit" below. A nil guid (no unit) is still recorded, since
+      -- that's a state transition, not PII.
       ---@type "player"|"npc"|"object"|"item"|nil
       local kind = Core.ParseGUIDKind(guid)
       ---@type boolean
-      local allowed = guid == nil or kind == "npc" or kind == "object" or kind == "item"
+      local allowed = guid == nil or kind == "player" or kind == "npc" or kind == "object" or kind == "item"
 
-      -- Player pets and minions (hunter pets, warlock demons, ...) are not
-      -- world NPCs and hunter pets carry player-chosen names. Record them as
-      -- "no unit" so the token's previous NPC doesn't appear to linger.
+      -- Players (e.g. a party member sharing a quest) and their pets and
+      -- minions (hunter pets, warlock demons, ...) are not world NPCs and
+      -- carry player-chosen names. Record them as "no unit" so the token's
+      -- previous NPC doesn't appear to linger.
       ---@type boolean
-      local playerControlled = allowed and guid ~= nil and IsPlayerControlled(token, guid)
+      local playerControlled = kind == "player" or (allowed and guid ~= nil and IsPlayerControlled(token, guid))
       if playerControlled then
         guid = nil
       end
