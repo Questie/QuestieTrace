@@ -431,6 +431,24 @@ describe("observeStartedBy interaction correlation", () => {
     expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ creatureId: 276172 }]);
   });
 
+  it("should not fall back to an npc object like a mailbox when a quest is shared", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [apiSample(3, 3, 1486)],
+        UnitGUID: {
+          npc: [apiSample(1, 1, objectGuid(659159))],
+        },
+      },
+      [
+        traceEvent("MAIL_SHOW", 1, 1),
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
+        traceEvent("QUEST_ACCEPTED", 4, 4, 1486),
+      ]
+    );
+
+    expect(observeStartedBy(session)).toEqual([]);
+  });
+
   it("should include synchronous probes without borrowing a later same-frame quest or giver", () => {
     const session = makeSession(
       {
@@ -480,7 +498,7 @@ describe("observeStartedBy interaction correlation", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          npc: [
+          questnpc: [
             apiSample(1, 1, objectGuid(410369)),
             apiSample(3, 3.012),
           ],
@@ -500,7 +518,7 @@ describe("observeStartedBy interaction correlation", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          npc: [apiSample(1, 1, objectGuid(410369))],
+          questnpc: [apiSample(1, 1, objectGuid(410369))],
         },
       },
       [
