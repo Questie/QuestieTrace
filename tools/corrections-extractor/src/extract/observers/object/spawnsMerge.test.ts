@@ -82,7 +82,7 @@ describe("mergeSpawns (object)", () => {
     const observations: TaggedSpawnObservation[] = [
       // Multiple questnpc observations at different coords
       obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 10, "questnpc"),
-      obs(2843, { zoneID: 40, x: 31.0, y: 87.0 }, 20, "questnpc"),
+      obs(2843, { zoneID: 40, x: 35.0, y: 90.0 }, 20, "questnpc"),
       obs(2843, { zoneID: 12, x: 47.46, y: 62.18 }, 30, "questnpc"),
       // Lower priority observations should be discarded
       obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 40, "target"),
@@ -91,7 +91,7 @@ describe("mergeSpawns (object)", () => {
     expect(mergeSpawns(observations)).toEqual({
       40: [
         [30.01, 86.02],
-        [31.0, 87.0],
+        [35.0, 90.0],
       ],
       12: [[47.46, 62.18]],
     });
@@ -202,6 +202,43 @@ describe("mergeSpawns (object)", () => {
     });
   });
 
+  it("should merge clusters whose centroids end up within the threshold", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
+      obs(2843, { zoneID: 40, x: 10.3, y: 50.45 }, 2, "target"),
+      obs(2843, { zoneID: 40, x: 10.31, y: 50.0 }, 3, "target"),
+      obs(2843, { zoneID: 40, x: 10.32, y: 50.4 }, 4, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[10.23, 50.21]],
+    });
+  });
+
+  it("should collapse an object's spawns into one when they all lie close together", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 1537, x: 50.0, y: 50.0 }, 1),
+      obs(2843, { zoneID: 1537, x: 51.0, y: 50.0 }, 2),
+      obs(2843, { zoneID: 1537, x: 50.5, y: 51.2 }, 3),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      1537: [[50.5, 50.4]],
+    });
+  });
+
+  it("should keep an object's spawns separate when they are spread out", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 10.0, y: 10.0 }, 1),
+      obs(2843, { zoneID: 40, x: 10.0, y: 11.0 }, 2),
+      obs(2843, { zoneID: 40, x: 10.0, y: 12.1 }, 3),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[10, 10], [10, 11], [10, 12.1]],
+    });
+  });
+
   it("should not chain a line of nearby points into a single cluster", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 1),
@@ -209,10 +246,12 @@ describe("mergeSpawns (object)", () => {
       obs(2843, { zoneID: 40, x: 10.8, y: 50.0 }, 3),
       obs(2843, { zoneID: 40, x: 11.2, y: 50.0 }, 4),
       obs(2843, { zoneID: 40, x: 11.6, y: 50.0 }, 5),
+      obs(2843, { zoneID: 40, x: 12.0, y: 50.0 }, 6),
+      obs(2843, { zoneID: 40, x: 12.4, y: 50.0 }, 7),
     ];
 
     expect(mergeSpawns(observations)).toEqual({
-      40: [[10.2, 50], [11, 50], [11.6, 50]],
+      40: [[10.2, 50], [11, 50], [11.8, 50], [12.4, 50]],
     });
   });
 
@@ -241,13 +280,13 @@ describe("mergeSpawns (object)", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 1),
       obs(2843, { zoneID: 12, x: 47.46, y: 62.18 }, 2),
-      obs(2843, { zoneID: 40, x: 31.0, y: 87.0 }, 3),
-      obs(2843, { zoneID: 12, x: 48.0, y: 63.0 }, 4),
+      obs(2843, { zoneID: 40, x: 35.0, y: 90.0 }, 3),
+      obs(2843, { zoneID: 12, x: 52.0, y: 66.0 }, 4),
     ];
 
     const result = mergeSpawns(observations);
-    expect(result[40]).toEqual(expect.arrayContaining([[30.01, 86.02], [31.0, 87.0]]));
-    expect(result[12]).toEqual(expect.arrayContaining([[47.46, 62.18], [48.0, 63.0]]));
+    expect(result[40]).toEqual(expect.arrayContaining([[30.01, 86.02], [35.0, 90.0]]));
+    expect(result[12]).toEqual(expect.arrayContaining([[47.46, 62.18], [52.0, 66.0]]));
     expect(result[40]!.length).toBe(2);
     expect(result[12]!.length).toBe(2);
   });

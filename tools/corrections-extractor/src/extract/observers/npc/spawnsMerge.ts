@@ -30,6 +30,36 @@ function findExclusiveToken(observations: TaggedSpawnObservation[]): string | un
 }
 
 /**
+ * Greedy clustering can leave two clusters whose centroids are closer than the
+ * threshold. Merges such pairs until all centroids are further apart.
+ */
+function mergeCloseClusters<C extends { members: Array<[number, number]>; count: number; sumX: number; sumY: number }>(
+  clusters: C[],
+  threshold: number,
+): void {
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < clusters.length && !merged; i++) {
+      for (let j = i + 1; j < clusters.length && !merged; j++) {
+        const a = clusters[i];
+        const b = clusters[j];
+        const dx = a.sumX / a.count - b.sumX / b.count;
+        const dy = a.sumY / a.count - b.sumY / b.count;
+        if (Math.sqrt(dx * dx + dy * dy) <= threshold + CLUSTER_EPSILON) {
+          a.members.push(...b.members);
+          a.count += b.count;
+          a.sumX += b.sumX;
+          a.sumY += b.sumY;
+          clusters.splice(j, 1);
+          merged = true;
+        }
+      }
+    }
+  }
+}
+
+/**
  * Clusters nearby spawn coordinates and averages each cluster.
  * A point joins the nearest cluster whose centroid is within threshold, which
  * avoids chaining a long line of points (e.g. a patrol) into one cluster.
@@ -66,6 +96,8 @@ function clusterAndAverageCoordinatess(
       clusters.push({ members: [[x, y]], count: 1, sumX: x, sumY: y });
     }
   }
+
+  mergeCloseClusters(clusters, threshold);
 
   // Return the centroid of each cluster, rounded to 2 decimal places
   return clusters.map((c) => ({

@@ -18,6 +18,10 @@ const TOKEN_PRIORITY: Record<string, number> = {
 // spread caused by recording the player's position within interaction range.
 const SPAWN_CLUSTER_THRESHOLD = 0.5;
 const CLUSTER_EPSILON = 1e-9; // Tolerance for floating point comparisons
+// Objects whose spawns in a zone all lie within this distance of each other are
+// one object seen from different sides. Capital maps are small, so the
+// interaction range spreads further there than SPAWN_CLUSTER_THRESHOLD covers.
+const OBJECT_COMPACT_EXTENT = 2.0;
 
 function tokenPriority(token: string): number {
   return TOKEN_PRIORITY[token] ?? 0;
@@ -28,6 +32,36 @@ const EXCLUSIVE_TOKENS = ["questpoi", "questnpc"];
 
 function findExclusiveToken(observations: TaggedSpawnObservation[]): string | undefined {
   return EXCLUSIVE_TOKENS.find((token) => observations.some((obs) => obs.token === token));
+}
+
+/**
+ * Greedy clustering can leave two clusters whose centroids are closer than the
+ * threshold. Merges such pairs until all centroids are further apart.
+ */
+function mergeCloseClusters<C extends { members: Array<[number, number]>; count: number; sumX: number; sumY: number }>(
+  clusters: C[],
+  threshold: number,
+): void {
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < clusters.length && !merged; i++) {
+      for (let j = i + 1; j < clusters.length && !merged; j++) {
+        const a = clusters[i];
+        const b = clusters[j];
+        const dx = a.sumX / a.count - b.sumX / b.count;
+        const dy = a.sumY / a.count - b.sumY / b.count;
+        if (Math.sqrt(dx * dx + dy * dy) <= threshold + CLUSTER_EPSILON) {
+          a.members.push(...b.members);
+          a.count += b.count;
+          a.sumX += b.sumX;
+          a.sumY += b.sumY;
+          clusters.splice(j, 1);
+          merged = true;
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -68,6 +102,8 @@ function clusterAndAverageCoordinatess(
     }
   }
 
+  mergeCloseClusters(clusters, threshold);
+
   // Return the centroid of each cluster, rounded to 2 decimal places
   return clusters.map((c) => ({
     coord: [
@@ -76,6 +112,12 @@ function clusterAndAverageCoordinatess(
     ],
     members: c.members,
   }));
+}
+
+function isCompact(coords: Array<[number, number]>): boolean {
+  return coords.every(([ax, ay], i) =>
+    coords.slice(i + 1).every(([bx, by]) => Math.hypot(ax - bx, ay - by) <= OBJECT_COMPACT_EXTENT + CLUSTER_EPSILON),
+  );
 }
 
 function coordKey(zoneID: number, x: number, y: number): string {
@@ -98,6 +140,16 @@ function clusterByZone(
       const weight = (members: Array<[number, number]>) =>
         members.reduce((sum, [x, y]) => sum + (observationCounts.get(coordKey(zoneID, x, y)) ?? 1), 0);
       clusters = [clusters.reduce((best, c) => (weight(c.members) > weight(best.members) ? c : best))];
+    }
+    if (clusters.length > 1 && isCompact(clusters.map((c) => c.coord))) {
+      const members = clusters.flatMap((c) => c.members);
+      clusters = [{
+        coord: [
+          Math.round((members.reduce((sum, [x]) => sum + x, 0) / members.length) * 100) / 100,
+          Math.round((members.reduce((sum, [, y]) => sum + y, 0) / members.length) * 100) / 100,
+        ],
+        members,
+      }];
     }
     const spawns = clusters.map((c) => c.coord);
     spawns.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
