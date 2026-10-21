@@ -202,6 +202,19 @@ describe("mergeSpawns", () => {
     });
   });
 
+  it("should merge clusters whose centroids end up within the threshold", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "npc"),
+      obs(823, { zoneID: 40, x: 10.3, y: 50.45 }, 2, "npc"),
+      obs(823, { zoneID: 40, x: 10.31, y: 50.0 }, 3, "npc"),
+      obs(823, { zoneID: 40, x: 10.32, y: 50.4 }, 4, "npc"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[10.23, 50.21]],
+    });
+  });
+
   it("should not chain a line of nearby points into a single cluster", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
