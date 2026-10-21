@@ -126,6 +126,8 @@ filesToInclude = [
     "QuestieTrace_UI.lua",
     "QuestieTrace-Classic.toc",
     "QuestieTrace-Camelot.toc",
+    "LICENSE.md",
+    "gpl-3.0.md",
 ]
 ignorePatterns = ["*.test.lua"]
 
