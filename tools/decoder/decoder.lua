@@ -354,7 +354,7 @@ local function RunBatch(inputDir, outputDir)
       end
     end
 
-    if total > 0 and i % 100 == 0 or i == total then
+    if total > 0 and i % 500 == 0 or i == total then
       io.stderr:write(string.format("decode: %d / %d - skipped %d\n", i, total, skippedExisting))
     end
   end

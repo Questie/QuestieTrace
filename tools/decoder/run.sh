@@ -44,7 +44,7 @@ else
       mv -f "$f" "$dest"
       ((++moved))
     fi
-    if (( i % 100 == 0 || i == total )); then
+    if (( i % 500 == 0 || i == total )); then
       echo "move: $i / $total - skipped $skipped" >&2
     fi
   done
