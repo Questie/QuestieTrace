@@ -76,5 +76,6 @@ This runs, in order:
 3. Moves every decoded `output/*.lua` file into `../../Traces/`, rewriting
    its `return { ... }` header to `QuestieTraceCharacter = { ... }` so it
    matches the SavedVariables format `tools/trace-analyzer` expects.
-   Existing files with the same name are overwritten.
+   Destinations that already exist in `Traces/` are skipped rather than
+   overwritten; the skipped files remain in `output/`.
 
