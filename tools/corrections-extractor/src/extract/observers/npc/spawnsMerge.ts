@@ -13,7 +13,9 @@ const TOKEN_PRIORITY: Record<string, number> = {
   target: 1,
 };
 
-const SPAWN_CLUSTER_THRESHOLD = 0.05; // 5% of map coordinate range
+// Max distance (in Questie 0-100 map units) from a cluster's centroid. Covers the
+// spread caused by recording the player's position within interaction range.
+const SPAWN_CLUSTER_THRESHOLD = 0.5;
 const CLUSTER_EPSILON = 1e-9; // Tolerance for floating point comparisons
 
 function tokenPriority(token: string): number {
@@ -29,7 +31,8 @@ function findExclusiveToken(observations: TaggedSpawnObservation[]): string | un
 
 /**
  * Clusters nearby spawn coordinates and averages each cluster.
- * Two points are in the same cluster if their Euclidean distance is <= threshold.
+ * A point joins the nearest cluster whose centroid is within threshold, which
+ * avoids chaining a long line of points (e.g. a patrol) into one cluster.
  */
 function clusterAndAverageCoordinatess(
   coords: Array<[number, number]>,
@@ -48,51 +51,34 @@ function clusterAndAverageCoordinatess(
   // Sort coords first to ensure consistent clustering order
   coords = [...coords].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 
-  // Simple greedy clustering: for each point, find if it belongs to an existing cluster
-  const clusters: Array<{ points: Array<[number, number]>; sumX: number; sumY: number }> = [];
+  const clusters: Array<{ count: number; sumX: number; sumY: number }> = [];
 
   for (const [x, y] of coords) {
-    // Find every existing cluster containing a point within threshold of (x, y)
-    const matched: Array<{ points: Array<[number, number]>; sumX: number; sumY: number }> = [];
+    let nearest: { count: number; sumX: number; sumY: number } | undefined;
+    let nearestDist = Infinity;
     for (const cluster of clusters) {
-      // Check if this point is within threshold of any point in the cluster
-      for (const [cx, cy] of cluster.points) {
-        const dx = x - cx;
-        const dy = y - cy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist <= threshold + CLUSTER_EPSILON) {
-          matched.push(cluster);
-          break;
-        }
+      const dx = x - cluster.sumX / cluster.count;
+      const dy = y - cluster.sumY / cluster.count;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = cluster;
       }
     }
 
-    if (matched.length === 0) {
-      // Start a new cluster
-      clusters.push({
-        points: [[x, y]],
-        sumX: x,
-        sumY: y,
-      });
+    if (nearest && nearestDist <= threshold + CLUSTER_EPSILON) {
+      nearest.count += 1;
+      nearest.sumX += x;
+      nearest.sumY += y;
     } else {
-      // Merge all matched clusters into the first one, then add the new point
-      const [primary, ...others] = matched;
-      for (const cluster of others) {
-        primary.points.push(...cluster.points);
-        primary.sumX += cluster.sumX;
-        primary.sumY += cluster.sumY;
-        clusters.splice(clusters.indexOf(cluster), 1);
-      }
-      primary.points.push([x, y]);
-      primary.sumX += x;
-      primary.sumY += y;
+      clusters.push({ count: 1, sumX: x, sumY: y });
     }
   }
 
   // Return the centroid of each cluster, rounded to 2 decimal places
   return clusters.map((c) => [
-    Math.round((c.sumX / c.points.length) * 100) / 100,
-    Math.round((c.sumY / c.points.length) * 100) / 100,
+    Math.round((c.sumX / c.count) * 100) / 100,
+    Math.round((c.sumY / c.count) * 100) / 100,
   ]);
 }
 
