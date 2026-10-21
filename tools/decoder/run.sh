@@ -31,17 +31,24 @@ else
   # Traces/ needs real SavedVariables-style files, i.e. "QuestieTraceCharacter
   # = { ... }", which is what tools/trace-analyzer expects as a global.
   moved=0
+  skipped=0
+  total=${#outputFiles[@]}
+  i=0
   for f in "${outputFiles[@]}"; do
+    ((++i))
     dest="$tracesDir/$(basename "$f")"
     if [ -f "$dest" ]; then
-      echo "skip: $(basename "$f") already exists in Traces"
-      continue
+      ((++skipped))
+    else
+      sed '1s/^return {/QuestieTraceCharacter = {/' "$f" > "$f.tmp" && mv -f "$f.tmp" "$f"
+      mv -f "$f" "$dest"
+      ((++moved))
     fi
-    sed '1s/^return {/QuestieTraceCharacter = {/' "$f" > "$f.tmp" && mv -f "$f.tmp" "$f"
-    mv -f "$f" "$dest"
-    ((++moved))
+    if (( i % 100 == 0 || i == total )); then
+      echo "move: $i / $total - skipped $skipped" >&2
+    fi
   done
-  echo "moved $moved file(s) to '$tracesDir'"
+  echo "moved $moved file(s) to '$tracesDir', $skipped skipped (already in Traces)"
 fi
 
 exit "$decodeStatus"
