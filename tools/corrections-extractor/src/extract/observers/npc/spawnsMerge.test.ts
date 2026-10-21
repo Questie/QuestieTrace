@@ -139,40 +139,46 @@ describe("mergeSpawns", () => {
     expect(result[40]).toHaveLength(2);
   });
 
-  it("should merge clusters when a point is within threshold of multiple clusters", () => {
+  it("should collapse observations around a static entity into one spawn", () => {
     const observations: TaggedSpawnObservation[] = [
-      // A and B are > 0.05 apart, so they form separate clusters
-      obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "questnpc"),
-      obs(823, { zoneID: 40, x: 10.01, y: 50.06 }, 2, "questnpc"),
-      // C is within 0.05 of both A and B: it must merge the two clusters into one
-      obs(823, { zoneID: 40, x: 10.02, y: 50.03 }, 3, "questnpc"),
+      obs(823, { zoneID: 267, x: 62.52, y: 19.74 }, 1, "target"),
+      obs(823, { zoneID: 267, x: 62.57, y: 19.9 }, 2, "target"),
+      obs(823, { zoneID: 267, x: 62.59, y: 19.75 }, 3, "target"),
     ];
 
-    const result = mergeSpawns(observations);
-    // Joining only the first match would leave 2 clusters; merging all matches yields 1
-    expect(result[40]).toHaveLength(1);
-    // Centroid of (10.00, 50.00), (10.01, 50.06), (10.02, 50.03) rounded to 2 decimals
-    expect(result[40]![0]).toEqual([10.01, 50.03]);
+    expect(mergeSpawns(observations)).toEqual({
+      267: [[62.56, 19.8]],
+    });
+  });
+
+  it("should not chain a line of nearby points into a single cluster", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
+      obs(823, { zoneID: 40, x: 10.4, y: 50.0 }, 2, "target"),
+      obs(823, { zoneID: 40, x: 10.8, y: 50.0 }, 3, "target"),
+      obs(823, { zoneID: 40, x: 11.2, y: 50.0 }, 4, "target"),
+      obs(823, { zoneID: 40, x: 11.6, y: 50.0 }, 5, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({
+      40: [[10.2, 50], [11, 50], [11.6, 50]],
+    });
   });
 
   it("should cluster points exactly at threshold distance", () => {
     const observations: TaggedSpawnObservation[] = [
-      // Points exactly 0.05 apart (at threshold) - use simpler values to avoid floating point issues
       obs(823, { zoneID: 40, x: 30.0, y: 86.0 }, 1, "questnpc"),
-      obs(823, { zoneID: 40, x: 30.05, y: 86.0 }, 2, "questnpc"),
+      obs(823, { zoneID: 40, x: 30.5, y: 86.0 }, 2, "questnpc"),
     ];
 
     const result = mergeSpawns(observations);
-    // Points exactly 0.05 apart may or may not cluster due to floating point precision.
-    // The important thing is that points closer than 0.05 cluster and points farther don't.
     expect(result[40]).toHaveLength(1);
   });
 
   it("should NOT cluster points just beyond threshold", () => {
     const observations: TaggedSpawnObservation[] = [
-      // Points 0.051 apart (just beyond threshold)
       obs(823, { zoneID: 40, x: 30.0, y: 86.0 }, 1, "questnpc"),
-      obs(823, { zoneID: 40, x: 30.051, y: 86.0 }, 2, "questnpc"),
+      obs(823, { zoneID: 40, x: 30.51, y: 86.0 }, 2, "questnpc"),
     ];
 
     const result = mergeSpawns(observations);
