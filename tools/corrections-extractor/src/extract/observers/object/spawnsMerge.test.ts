@@ -151,6 +151,57 @@ describe("mergeSpawns (object)", () => {
     });
   });
 
+  it("should keep only the most observed cluster per zone for quest entities", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
+      obs(2843, { zoneID: 40, x: 30.0, y: 60.0 }, 2, "target"),
+      obs(2843, { zoneID: 40, x: 30.2, y: 60.0 }, 3, "target"),
+      obs(2843, { zoneID: 12, x: 47.46, y: 62.18 }, 4, "target"),
+    ];
+
+    expect(mergeSpawns(observations, true)).toEqual({
+      40: [[30.1, 60]],
+      12: [[47.46, 62.18]],
+    });
+  });
+
+  it("should keep only the most observed questnpc cluster per zone for quest entities", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "questnpc"),
+      obs(2843, { zoneID: 40, x: 10.2, y: 50.0 }, 2, "questnpc"),
+      obs(2843, { zoneID: 40, x: 30.0, y: 60.0 }, 3, "questnpc"),
+    ];
+
+    expect(mergeSpawns(observations, true)).toEqual({
+      40: [[10.1, 50]],
+    });
+  });
+
+  it("should count repeated observations of the same spot when picking the quest entity spawn", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
+      obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 2, "target"),
+      obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 3, "target"),
+      obs(2843, { zoneID: 40, x: 30.0, y: 60.0 }, 4, "target"),
+      obs(2843, { zoneID: 40, x: 30.2, y: 60.0 }, 5, "target"),
+    ];
+
+    expect(mergeSpawns(observations, true)).toEqual({
+      40: [[10, 50]],
+    });
+  });
+
+  it("should keep every cluster for entities that are not quest entities", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
+      obs(2843, { zoneID: 40, x: 30.0, y: 60.0 }, 2, "target"),
+    ];
+
+    expect(mergeSpawns(observations, false)).toEqual({
+      40: [[10, 50], [30, 60]],
+    });
+  });
+
   it("should not chain a line of nearby points into a single cluster", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(2843, { zoneID: 40, x: 10.0, y: 50.0 }, 1),

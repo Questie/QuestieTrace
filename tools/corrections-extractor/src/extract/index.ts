@@ -251,13 +251,24 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     finishedBy: finishedByFacts,
   });
 
+  // Quest givers and enders stand still, so they get a single spawn per zone.
+  const questNpcIds = new Set<number>();
+  const questObjectIds = new Set<number>();
+  for (const record of questRecords.values()) {
+    for (const field of ["startedBy", "finishedBy"] as const) {
+      const relation = record[field] as { creatures: number[]; objects: number[] } | undefined;
+      relation?.creatures.forEach((id) => questNpcIds.add(id));
+      relation?.objects.forEach((id) => questObjectIds.add(id));
+    }
+  }
+
   const npcRecords = emitNpcRecords({
     name: aggregateScalarSummary(scalars.npcName),
     minLevel: aggregateScalarSummary(scalars.minLevel),
     maxLevel: aggregateScalarSummary(scalars.maxLevel),
     spawns: aggregateField(
       [...observations.npcSpawns, ...turnInSpawns.npcs],
-      mergeNpcSpawns,
+      (obs) => mergeNpcSpawns(obs, questNpcIds.has(obs[0].entityId)),
     ),
     zoneID: aggregateField(
       [...observations.npcZoneID, ...turnInSpawns.npcs],
@@ -279,7 +290,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     name: aggregateScalarSummary(scalars.objectName),
     spawns: aggregateField(
       [...observations.objectSpawns, ...turnInSpawns.objects],
-      mergeObjectSpawns,
+      (obs) => mergeObjectSpawns(obs, questObjectIds.has(obs[0].entityId)),
     ),
     zoneID: aggregateField(
       [...observations.objectZoneID, ...turnInSpawns.objects],

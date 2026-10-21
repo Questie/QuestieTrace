@@ -389,6 +389,35 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     expect(npcFixes).toContain("[npcKeys.questEnds_add] = {99196},");
   });
 
+  it("should export a single spawn per zone for an npc that finishes a quest", () => {
+    const guid = "Creature-0-5208-0-7-276171-00002DDB54";
+    const session = makeForeverSession({
+      GetLocale: { player: [apiSample(0, 0, "enUS")] },
+      UnitGUID: {
+        questnpc: [apiSample(3, 3, guid), apiSample(10, 10, guid), apiSample(11, 11, guid)],
+      },
+      UnitName: {
+        target: [apiSample(3, 3, { 1: "Oura Stormspinner", 2: "", n: 2 })],
+      },
+      "C_Map.GetBestMapForUnit": { player: [apiSample(0, 0, 1436)] },
+      "C_Map.GetPlayerMapPosition": {
+        player: [
+          apiSample(3, 3, { x: 0.1, y: 0.1 }),
+          apiSample(10, 10, { x: 0.5, y: 0.5 }),
+          apiSample(11, 11, { x: 0.5002, y: 0.5 }),
+        ],
+      },
+    });
+    session.events.push(traceEvent("QUEST_TURNED_IN", 3, 3, 99196));
+
+    const { npcFixes } = extractAll([session], {
+      sourceFileNames: ["test.lua"],
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    expect(npcFixes).toContain("[npcKeys.spawns] = {[40]={{50.01,50}}},");
+  });
+
   function turnInSession(questId: number) {
     const session = makeForeverSession({
       GetLocale: { player: [apiSample(0, 0, "enUS")] },

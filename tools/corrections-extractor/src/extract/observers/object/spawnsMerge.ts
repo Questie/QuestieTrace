@@ -34,28 +34,19 @@ function findExclusiveToken(observations: TaggedSpawnObservation[]): string | un
  * Clusters nearby spawn coordinates and averages each cluster.
  * A point joins the nearest cluster whose centroid is within threshold, which
  * avoids chaining a long line of points (e.g. a patrol) into one cluster.
+ * Each centroid is returned with the number of points in its cluster.
  */
 function clusterAndAverageCoordinatess(
   coords: Array<[number, number]>,
   threshold: number,
-): Array<[number, number]> {
-  if (coords.length === 0) return [];
-  if (coords.length === 1) {
-    // Round singletons too, so every returned coordinate matches the 2-decimal
-    // precision of cluster centroids.
-    return [[
-      Math.round(coords[0][0] * 100) / 100,
-      Math.round(coords[0][1] * 100) / 100,
-    ]];
-  }
-
+): Array<{ coord: [number, number]; members: Array<[number, number]> }> {
   // Sort coords first to ensure consistent clustering order
   coords = [...coords].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 
-  const clusters: Array<{ count: number; sumX: number; sumY: number }> = [];
+  const clusters: Array<{ members: Array<[number, number]>; count: number; sumX: number; sumY: number }> = [];
 
   for (const [x, y] of coords) {
-    let nearest: { count: number; sumX: number; sumY: number } | undefined;
+    let nearest: (typeof clusters)[number] | undefined;
     let nearestDist = Infinity;
     for (const cluster of clusters) {
       const dx = x - cluster.sumX / cluster.count;
@@ -68,27 +59,66 @@ function clusterAndAverageCoordinatess(
     }
 
     if (nearest && nearestDist <= threshold + CLUSTER_EPSILON) {
+      nearest.members.push([x, y]);
       nearest.count += 1;
       nearest.sumX += x;
       nearest.sumY += y;
     } else {
-      clusters.push({ count: 1, sumX: x, sumY: y });
+      clusters.push({ members: [[x, y]], count: 1, sumX: x, sumY: y });
     }
   }
 
   // Return the centroid of each cluster, rounded to 2 decimal places
-  return clusters.map((c) => [
-    Math.round((c.sumX / c.count) * 100) / 100,
-    Math.round((c.sumY / c.count) * 100) / 100,
-  ]);
+  return clusters.map((c) => ({
+    coord: [
+      Math.round((c.sumX / c.count) * 100) / 100,
+      Math.round((c.sumY / c.count) * 100) / 100,
+    ],
+    members: c.members,
+  }));
+}
+
+function coordKey(zoneID: number, x: number, y: number): string {
+  return `${zoneID}:${x.toFixed(4)},${y.toFixed(4)}`;
+}
+
+/**
+ * Clusters each zone's distinct coordinates. With `singleSpawnPerZone`, only
+ * the centroid of the cluster with the most observations is kept per zone.
+ */
+function clusterByZone(
+  byZone: Map<number, Array<[number, number]>>,
+  observationCounts: Map<string, number>,
+  singleSpawnPerZone: boolean,
+): Record<number, Array<[number, number]>> {
+  const result: Record<number, Array<[number, number]>> = {};
+  for (const [zoneID, coords] of byZone) {
+    let clusters = clusterAndAverageCoordinatess(coords, SPAWN_CLUSTER_THRESHOLD);
+    if (singleSpawnPerZone) {
+      const weight = (members: Array<[number, number]>) =>
+        members.reduce((sum, [x, y]) => sum + (observationCounts.get(coordKey(zoneID, x, y)) ?? 1), 0);
+      clusters = [clusters.reduce((best, c) => (weight(c.members) > weight(best.members) ? c : best))];
+    }
+    const spawns = clusters.map((c) => c.coord);
+    spawns.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    result[zoneID] = spawns;
+  }
+  return result;
 }
 
 export function mergeSpawns(
   observations: Observation<SpawnObservationValue>[],
+  singleSpawnPerZone = false,
 ): Record<number, Array<[number, number]>> {
   const tagged = observations as TaggedSpawnObservation[];
 
   const exclusiveToken = findExclusiveToken(tagged);
+  const observationCounts = new Map<string, number>();
+  for (const obs of tagged) {
+    if (exclusiveToken && obs.token !== exclusiveToken) continue;
+    const key = coordKey(obs.value.zoneID, obs.value.x, obs.value.y);
+    observationCounts.set(key, (observationCounts.get(key) ?? 0) + 1);
+  }
 
   if (exclusiveToken) {
     // questpoi/questnpc override everything: only keep coordinates of that token
@@ -107,14 +137,7 @@ export function mergeSpawns(
       }
     }
 
-    const result: Record<number, Array<[number, number]>> = {};
-    for (const [zoneID, coords] of byZone) {
-      // Cluster nearby coordinates and average each cluster
-      const clustered = clusterAndAverageCoordinatess(coords, SPAWN_CLUSTER_THRESHOLD);
-      clustered.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-      result[zoneID] = clustered;
-    }
-    return result;
+    return clusterByZone(byZone, observationCounts, singleSpawnPerZone);
   }
 
   // No questnpc observations: fall back to per-coordinate priority merging
@@ -122,7 +145,7 @@ export function mergeSpawns(
 
   for (const obs of tagged) {
     const { zoneID, x, y } = obs.value;
-    const key = `${zoneID}:${x.toFixed(4)},${y.toFixed(4)}`;
+    const key = coordKey(zoneID, x, y);
     const existing = bestPerCoord.get(key);
     if (!existing || tokenPriority(obs.token) > tokenPriority(existing.token)) {
       bestPerCoord.set(key, obs);
@@ -140,15 +163,7 @@ export function mergeSpawns(
     }
   }
 
-  const result: Record<number, Array<[number, number]>> = {};
-  for (const [zoneID, coords] of byZone) {
-    // Cluster nearby coordinates and average each cluster
-    const clustered = clusterAndAverageCoordinatess(coords, SPAWN_CLUSTER_THRESHOLD);
-    clustered.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    result[zoneID] = clustered;
-  }
-
-  return result;
+  return clusterByZone(byZone, observationCounts, singleSpawnPerZone);
 }
 
 export function mergeZoneID(
