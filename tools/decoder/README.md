@@ -25,7 +25,9 @@ lua5.1 tools/decoder/decoder.lua
 
 Every `.txt` file in `input/` is decoded and written to `output/` as `<basename>.lua`. Both directories live next to the script and are created automatically if they don't exist yet — nothing to set up beforehand. Files without a `.txt` extension are ignored.
 
-Files that fail to decode (empty, corrupt, not a QuestieTrace export, ...) are reported to stderr and skipped; the rest of the batch still runs. A summary line (`decoded N file(s), M failed`) is printed at the end, and the process exits with code `1` if anything failed.
+Files that fail to decode (empty, corrupt, not a QuestieTrace export, ...) are reported to stderr and skipped; the rest of the batch still runs. A summary line is printed at the end, followed by the list of files that could not be decoded, and the process exits with code `1` if anything failed.
+
+Files containing several pasted export strings are split: each complete export is decoded and identical copies are written once, as `<name>.lua`, `<name>-2.lua`, ... Copies that are cut off or can't be decoded are dropped and listed as warnings.
 
 ### Single file mode
 

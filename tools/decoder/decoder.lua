@@ -221,6 +221,54 @@ local function DecodeFile(inputPath)
   return "return " .. Serialize(payload, ""), nil
 end
 
+local START_MARKER = "!QuestieTrace:%d+!"
+local END_MARKER = "!End:QuestieTrace:%d+!"
+
+--- Decodes a file containing several pasted export strings. A copy that is
+--- cut off by the next start marker, or whose payload can't be decoded, is
+--- dropped with a warning; identical copies are decoded once.
+---@param raw string
+---@return string[]|nil exports serialized exports in their original order
+---@return string[]|string warnings, or the error when nothing could be decoded
+local function DecodeConcatenated(raw)
+  local starts = {}
+  local searchFrom = 1
+  while true do
+    local markerStart, markerEnd = raw:find(START_MARKER, searchFrom)
+    if (not markerStart) then
+      break
+    end
+    starts[#starts + 1] = { markerStart = markerStart, payloadStart = markerEnd + 1 }
+    searchFrom = markerEnd + 1
+  end
+
+  local exports, warnings, seenPayloads = {}, {}, {}
+  for i, start in ipairs(starts) do
+    local nextStart = starts[i + 1] and starts[i + 1].markerStart or math.huge
+    local endStart = raw:find(END_MARKER, start.payloadStart)
+    if (not endStart) or endStart > nextStart then
+      warnings[#warnings + 1] = string.format("export #%d is incomplete and was dropped", i)
+    else
+      local encoded = raw:sub(start.payloadStart, endStart - 1)
+      if (not seenPayloads[encoded]) then
+        seenPayloads[encoded] = true
+        local payload, err = DecodePayload(encoded)
+        if payload then
+          exports[#exports + 1] = "return " .. Serialize(payload, "")
+        else
+          warnings[#warnings + 1] = string.format("export #%d was dropped: %s", i, err)
+        end
+      end
+    end
+  end
+
+  if #exports == 0 then
+    local reasons = #warnings > 0 and " (" .. table.concat(warnings, "; ") .. ")" or ""
+    return nil, "no complete export could be decoded from " .. #starts .. " concatenated export(s)" .. reasons
+  end
+  return exports, warnings
+end
+
 ---@param serialized string
 ---@param outputPath string
 ---@return boolean ok
@@ -303,9 +351,10 @@ local function RunBatch(inputDir, outputDir)
   end
 
   local total = #files
-  local succeeded, failed, skippedExisting = 0, 0, 0
+  local succeeded, failed, skippedExisting, recovered = 0, 0, 0, 0
   local usedOutputPaths = {}
   local failures = {}
+  local warnings = {}
   for i, name in ipairs(files) do
     local outputName = ReplaceExtensionWithLua(name)
     local outputPath = outputDir .. "/" .. outputName
@@ -326,8 +375,64 @@ local function RunBatch(inputDir, outputDir)
           if startCount > 1 then isConcat = true end
         end
         if isConcat then
-          io.stderr:write("MANUAL_REVIEW_NEEDED (concatenated): " .. name .. "\n")
-          failures[#failures + 1] = name .. ": manual review needed (concatenated export strings)"
+          local exports, concatResult = DecodeConcatenated(raw)
+          local clashingName = usedOutputPaths[outputPath]
+          if (not exports) then
+            io.stderr:write("skip " .. name .. ": " .. concatResult .. "\n")
+            failures[#failures + 1] = name .. ": " .. concatResult
+            failed = failed + 1
+          elseif clashingName then
+            io.stderr:write("skip " .. name .. ": output path '" .. outputPath ..
+              "' collides with '" .. clashingName .. "'\n")
+            failures[#failures + 1] = name .. ": output path collides with '" .. clashingName .. "'"
+            failed = failed + 1
+          else
+            -- <name>.lua is written last: it marks the file as done for reruns.
+            local baseName = outputName:gsub("%.lua$", "")
+            local writeErr
+            local exportPaths = {}
+            for index = 1, #exports do
+              local exportPath = index == 1 and outputPath or string.format("%s/%s-%d.lua", outputDir, baseName, index)
+              exportPaths[index] = exportPath
+              if index > 1 then
+                if PathMode(exportPath) then
+                  writeErr = "output path '" .. exportPath .. "' already exists"
+                elseif usedOutputPaths[exportPath] then
+                  writeErr = "output path '" .. exportPath .. "' collides with '" .. usedOutputPaths[exportPath] .. "'"
+                end
+                if writeErr then
+                  break
+                end
+              end
+            end
+            local attempted = {}
+            if (not writeErr) then
+              for index = #exports, 1, -1 do
+                attempted[#attempted + 1] = exportPaths[index]
+                local ok, exportErr = WriteToFile(exports[index], exportPaths[index])
+                if (not ok) then
+                  writeErr = exportErr
+                  break
+                end
+              end
+            end
+            if writeErr then
+              for _, path in ipairs(attempted) do
+                os.remove(path)
+              end
+              io.stderr:write("skip " .. name .. ": " .. writeErr .. "\n")
+              failures[#failures + 1] = name .. ": " .. writeErr
+              failed = failed + 1
+            else
+              for _, warning in ipairs(concatResult) do
+                warnings[#warnings + 1] = name .. ": " .. warning
+              end
+              for _, path in ipairs(exportPaths) do
+                usedOutputPaths[path] = name
+              end
+              recovered = recovered + 1
+            end
+          end
         else
           io.stderr:write("skip " .. name .. ": " .. err .. "\n")
           failures[#failures + 1] = name .. ": " .. err
@@ -359,7 +464,14 @@ local function RunBatch(inputDir, outputDir)
     end
   end
 
-  print(string.format("decoded %d file(s), %d failed, %d skipped (already in output)", succeeded, failed, skippedExisting))
+  print(string.format("decoded %d file(s), %d recovered from concatenated exports, %d failed, %d skipped (already in output)",
+    succeeded, recovered, failed, skippedExisting))
+  if #warnings > 0 then
+    print(string.format("%d warning(s):", #warnings))
+    for _, warning in ipairs(warnings) do
+      print("  " .. warning)
+    end
+  end
   if #failures > 0 then
     print(string.format("%d file(s) not decoded:", #failures))
     for _, failure in ipairs(failures) do
@@ -404,6 +516,7 @@ return {
   Serialize = Serialize,
   DecodePayload = DecodePayload,
   DecodeFile = DecodeFile,
+  DecodeConcatenated = DecodeConcatenated,
   WriteToFile = WriteToFile,
   PathMode = PathMode,
   HasTxtExtension = HasTxtExtension,

@@ -249,6 +249,97 @@ describe("decoder.DecodeFile", function()
   end)
 end)
 
+describe("decoder.DecodeConcatenated", function()
+  local Decoder
+
+  before_each(function()
+    Decoder = LoadDecoder()
+  end)
+
+  ---@param payload any
+  ---@return string
+  local function Export(payload)
+    return "!QuestieTrace:1!" .. EncodePayload(payload) .. "!End:QuestieTrace:1!"
+  end
+
+  it("should decode the same export pasted twice into a single export", function()
+    local export = Export({ sessions = { { name = "a" } } })
+
+    local exports, warnings = Decoder.DecodeConcatenated(export .. export)
+
+    assert.equal(1, #exports)
+    assert.same({ sessions = { { name = "a" } } }, assert(loadstring(exports[1]))())
+    assert.same({}, warnings)
+  end)
+
+  it("should drop a truncated first export with a warning and decode the complete one after it", function()
+    local export = Export({ sessions = { { name = "a" } } })
+    local truncated = export:sub(1, #export - 30)
+
+    local exports, warnings = Decoder.DecodeConcatenated(truncated .. export)
+
+    assert.equal(1, #exports)
+    assert.same({ sessions = { { name = "a" } } }, assert(loadstring(exports[1]))())
+    assert.equal(1, #warnings)
+    assert.matches("incomplete", warnings[1])
+  end)
+
+  it("should decode an export pasted into the middle of another one", function()
+    local export = Export({ sessions = { { name = "a" } } })
+    local cut = #export - 30
+
+    local exports, warnings = Decoder.DecodeConcatenated(export:sub(1, cut) .. export .. export:sub(cut + 1))
+
+    assert.equal(1, #exports)
+    assert.same({ sessions = { { name = "a" } } }, assert(loadstring(exports[1]))())
+    assert.equal(1, #warnings)
+    assert.matches("export #1 is incomplete", warnings[1])
+  end)
+
+  it("should keep distinct exports in their original order", function()
+    local exports, warnings = Decoder.DecodeConcatenated(
+      Export({ sessions = { { name = "a" } } }) .. Export({ sessions = { { name = "b" } } })
+    )
+
+    assert.equal(2, #exports)
+    assert.equal("a", assert(loadstring(exports[1]))().sessions[1].name)
+    assert.equal("b", assert(loadstring(exports[2]))().sessions[1].name)
+    assert.same({}, warnings)
+  end)
+
+  it("should drop an export with a corrupt payload with a warning", function()
+    local exports, warnings = Decoder.DecodeConcatenated(
+      "!QuestieTrace:1!broken!End:QuestieTrace:1!" .. Export({ sessions = { { name = "a" } } })
+    )
+
+    assert.equal(1, #exports)
+    assert.equal(1, #warnings)
+    assert.matches("export #1 was dropped", warnings[1])
+  end)
+
+  it("should keep distinct exports in order when a duplicate follows them", function()
+    local a = Export({ sessions = { { name = "a" } } })
+    local b = Export({ sessions = { { name = "b" } } })
+
+    local exports, warnings = Decoder.DecodeConcatenated(a .. b .. a)
+
+    assert.equal(2, #exports)
+    assert.equal("a", assert(loadstring(exports[1]))().sessions[1].name)
+    assert.equal("b", assert(loadstring(exports[2]))().sessions[1].name)
+    assert.same({}, warnings)
+  end)
+
+  it("should error when no export can be decoded", function()
+    local export = Export({ sessions = {} })
+
+    local exports, err = Decoder.DecodeConcatenated(export:sub(1, #export - 30) .. export:sub(1, #export - 30))
+
+    assert.is_nil(exports)
+    assert.matches("no complete export could be decoded from 2", err)
+    assert.matches("export #1 is incomplete", err)
+  end)
+end)
+
 describe("decoder.WriteToFile", function()
   local Decoder
   local tmpPath
