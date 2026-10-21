@@ -16,7 +16,10 @@ if ! command -v lua5.1 >/dev/null 2>&1; then
 fi
 
 lua5.1 "$scriptDir/extract.lua" "$@"
-lua5.1 "$scriptDir/decoder.lua"
+# Failed inputs never produce an output file, so successfully decoded files
+# are still moved; the decoder's exit status is returned at the end.
+decodeStatus=0
+lua5.1 "$scriptDir/decoder.lua" || decodeStatus=$?
 
 mkdir -p "$tracesDir"
 shopt -s nullglob
@@ -40,3 +43,5 @@ else
   done
   echo "moved $moved file(s) to '$tracesDir'"
 fi
+
+exit "$decodeStatus"
