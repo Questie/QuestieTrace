@@ -305,6 +305,7 @@ local function RunBatch(inputDir, outputDir)
   local total = #files
   local succeeded, failed, skippedExisting = 0, 0, 0
   local usedOutputPaths = {}
+  local failures = {}
   for i, name in ipairs(files) do
     local outputName = ReplaceExtensionWithLua(name)
     local outputPath = outputDir .. "/" .. outputName
@@ -326,8 +327,10 @@ local function RunBatch(inputDir, outputDir)
         end
         if isConcat then
           io.stderr:write("MANUAL_REVIEW_NEEDED (concatenated): " .. name .. "\n")
+          failures[#failures + 1] = name .. ": manual review needed (concatenated export strings)"
         else
           io.stderr:write("skip " .. name .. ": " .. err .. "\n")
+          failures[#failures + 1] = name .. ": " .. err
           failed = failed + 1
         end
       else
@@ -335,11 +338,13 @@ local function RunBatch(inputDir, outputDir)
         if clashingName then
           io.stderr:write("skip " .. name .. ": output path '" .. outputPath ..
             "' collides with '" .. clashingName .. "'\n")
+          failures[#failures + 1] = name .. ": output path collides with '" .. clashingName .. "'"
           failed = failed + 1
         else
           local ok, writeErr = WriteToFile(serialized, outputPath)
           if not ok then
             io.stderr:write("skip " .. name .. ": " .. writeErr .. "\n")
+            failures[#failures + 1] = name .. ": " .. writeErr
             failed = failed + 1
           else
             usedOutputPaths[outputPath] = name
@@ -355,6 +360,12 @@ local function RunBatch(inputDir, outputDir)
   end
 
   print(string.format("decoded %d file(s), %d failed, %d skipped (already in output)", succeeded, failed, skippedExisting))
+  if #failures > 0 then
+    print(string.format("%d file(s) not decoded:", #failures))
+    for _, failure in ipairs(failures) do
+      print("  " .. failure)
+    end
+  end
   if failed > 0 then
     os.exit(1)
   end
