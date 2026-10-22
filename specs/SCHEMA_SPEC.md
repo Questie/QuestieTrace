@@ -507,6 +507,7 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 |---|---|---|
 | `UnitLevel` | scalar (number) | -1 indicates "??" (skull boss); UnitState tracker |
 | `UnitClassification` | scalar (string) | "normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus"; UnitState tracker; raw value recorded verbatim — treat as an open string in consumers |
+| `UnitSubName` | scalar (string) | *(synthetic)* NPC title line (e.g. "Innkeeper") from the Unit TooltipDataProcessor callback; only `UnitSubName["mouseover"]`, recorded when the tooltip GUID matches the mouseover NPC (players and player-controlled units skipped); updates only on hover; `""` = NPC without title; UnitState tracker; Modern/Forever only |
 
 ### Nested parameterized by native arguments (UnitReaction)
 
