@@ -258,6 +258,50 @@ describe("observeObjectives", () => {
     expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(278398);
   });
 
+  it("should match an item objective to a required item of the quest's turn-in window", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "92109": [{ t: 3, tp: 3, v: [{ type: "item", text: "0/5 Empty Vial" }] }],
+      },
+      GetQuestID: [{ t: 9, tp: 9, v: 92109 }],
+      GetQuestItemLink: {
+        required: { "1": [{ t: 9, tp: 9, v: "|cnIQ1:|Hitem:3371::::::::10:1485::::::::::|h[Empty Vial]|h|r" }] },
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value).toEqual([
+      { kind: "item", name: "Empty Vial", text: "0/5 Empty Vial", id: 3371, index: 0 },
+    ]);
+  });
+
+  it("should match an item objective to an item a merchant sells", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "92109": [{ t: 3, tp: 3, v: [{ type: "item", text: "0/5 Empty Vial" }] }],
+      },
+      GetMerchantItemLink: {
+        "4": [{ t: 5, tp: 5, v: "|cnIQ1:|Hitem:3371::::::::10:1485::::::::::|h[Empty Vial]|h|r" }],
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(3371);
+  });
+
+  it("should prefer a required item of the quest over a same-named looted item", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [{ t: 3, tp: 3, v: [{ type: "item", text: "Tough Wolf Meat: 0/8" }] }],
+      },
+      GetLootSlotLink: { "1": [{ t: 4, tp: 4, v: itemLink }] },
+      GetQuestID: [{ t: 9, tp: 9, v: 33 }],
+      GetQuestItemLink: {
+        required: { "1": [{ t: 9, tp: 9, v: "|Hitem:9999::::::::1::::::::::|h[Tough Wolf Meat]|h|r" }] },
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(9999);
+  });
+
   it("should support legacy flat loot streams and traces without GetLocale", () => {
     const session = makeSession({
       "C_QuestLog.GetQuestObjectives": {
