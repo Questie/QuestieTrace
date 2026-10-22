@@ -14,7 +14,8 @@
 // are processed. See PlayerIdentity.lua for how interfaceVersion is captured:
 
 import type { SessionRecord } from "../core/types";
-import { aggregateField, aggregateScalarSummary, addToScalarSummary, type ScalarSummary } from "./aggregate";
+import { aggregateField, aggregateScalarSummary, addToScalarSummary, type Fact, type ScalarSummary } from "./aggregate";
+import type { QuestObjectivesValue } from "./observers/quest/objectives";
 import type { Observation } from "./observation";
 import { emitItemRecords } from "./emit/item";
 import { emitNpcRecords } from "./emit/npc";
@@ -45,7 +46,7 @@ import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, obse
 import { observeQuestLevel } from './observers/quest';
 import { observeRequiredLevel } from './observers/quest';
 import { observeZoneOrSort } from './observers/quest';
-import { observeObjectives, mergeQuestObjectives, observeTriggerEnd, mergeQuestTriggerEnds } from './observers/quest';
+import { observeObjectives, mergeQuestObjectives, observeObjectiveCount, observeTriggerEnd, mergeQuestTriggerEnds } from './observers/quest';
 import { observeObjectivesText } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 import {mergeRequiredLevel} from './observers/quest/requiredLevel';
@@ -115,6 +116,7 @@ const SCALAR_OBSERVERS = {
   questName: observeQuestName,
   questLevel: observeQuestLevel,
   objectivesText: observeObjectivesText,
+  objectiveCount: observeObjectiveCount,
   npcName: observeNpcName,
   minLevel: observeMinLevel,
   maxLevel: observeMaxLevel,
@@ -207,6 +209,19 @@ export function extractAll(sessions: SessionRecord[], options: ExtractOptions): 
   return finalize(acc, options);
 }
 
+/** Drops objectives of quests whose matched id count differs from the objective count the API reports. */
+function withAllObjectivesMatched(
+  objectives: Map<number, Fact<QuestObjectivesValue>>,
+  objectiveCounts: Map<number, Fact<number>>,
+): Map<number, Fact<QuestObjectivesValue>> {
+  const complete = new Map<number, Fact<QuestObjectivesValue>>();
+  for (const [questId, fact] of objectives) {
+    const matched = Object.values(fact.value).reduce((sum, ids) => sum + ids.length, 0);
+    if (matched === objectiveCounts.get(questId)?.value) complete.set(questId, fact);
+  }
+  return complete;
+}
+
 export function finalize(acc: ExtractAccumulator, options: ExtractOptions): FactBundle {
   const { scalars, observations } = acc;
 
@@ -235,9 +250,9 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     questLevel: aggregateScalarSummary(scalars.questLevel),
     requiredLevel: aggregateField(observations.requiredLevel, mergeRequiredLevel),
     zoneOrSort: zoneOrSortFacts,
-    objectives: aggregateField(
-      observations.objectives,
-      mergeQuestObjectives,
+    objectives: withAllObjectivesMatched(
+      aggregateField(observations.objectives, mergeQuestObjectives),
+      aggregateScalarSummary(scalars.objectiveCount),
     ),
     objectivesText: aggregateScalarSummary(scalars.objectivesText),
     triggerEnd: aggregateField(
