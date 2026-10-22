@@ -89,6 +89,54 @@ local exportUILocales = {
     ["zhCN"] = "目前没有新的可分享内容。继续游戏，稍后再来看看。", -- 🤖
     ["zhTW"] = "目前沒有新的可分享內容。繼續遊玩，稍後再回來看看。", -- 🤖
   },
+  ["Events captured: %s"] = {
+    ["enUS"] = true,
+    ["deDE"] = "Erfasste Ereignisse: %s", -- 🤖
+    ["esES"] = "Eventos registrados: %s", -- 🤖
+    ["esMX"] = "Eventos registrados: %s", -- 🤖
+    ["frFR"] = "Événements enregistrés : %s", -- 🤖
+    ["koKR"] = "기록된 이벤트: %s", -- 🤖
+    ["ptBR"] = "Eventos registrados: %s", -- 🤖
+    ["ruRU"] = "Записано событий: %s", -- 🤖
+    ["zhCN"] = "已记录事件：%s", -- 🤖
+    ["zhTW"] = "已記錄事件：%s", -- 🤖
+  },
+  ["Time recorded: %s"] = {
+    ["enUS"] = true,
+    ["deDE"] = "Aufgezeichnete Zeit: %s", -- 🤖
+    ["esES"] = "Tiempo registrado: %s", -- 🤖
+    ["esMX"] = "Tiempo registrado: %s", -- 🤖
+    ["frFR"] = "Temps enregistré : %s", -- 🤖
+    ["koKR"] = "기록된 시간: %s", -- 🤖
+    ["ptBR"] = "Tempo registrado: %s", -- 🤖
+    ["ruRU"] = "Записано времени: %s", -- 🤖
+    ["zhCN"] = "已记录时间：%s", -- 🤖
+    ["zhTW"] = "已記錄時間：%s", -- 🤖
+  },
+  ["Quests accepted: %s"] = {
+    ["enUS"] = true,
+    ["deDE"] = "Angenommene Quests: %s", -- 🤖
+    ["esES"] = "Misiones aceptadas: %s", -- 🤖
+    ["esMX"] = "Misiones aceptadas: %s", -- 🤖
+    ["frFR"] = "Quêtes acceptées : %s", -- 🤖
+    ["koKR"] = "수락한 퀘스트: %s", -- 🤖
+    ["ptBR"] = "Missões aceitas: %s", -- 🤖
+    ["ruRU"] = "Принято заданий: %s", -- 🤖
+    ["zhCN"] = "已接受任务：%s", -- 🤖
+    ["zhTW"] = "已接受任務：%s", -- 🤖
+  },
+  ["Quests turned in: %s"] = {
+    ["enUS"] = true,
+    ["deDE"] = "Abgegebene Quests: %s", -- 🤖
+    ["esES"] = "Misiones entregadas: %s", -- 🤖
+    ["esMX"] = "Misiones entregadas: %s", -- 🤖
+    ["frFR"] = "Quêtes rendues : %s", -- 🤖
+    ["koKR"] = "완료 보고한 퀘스트: %s", -- 🤖
+    ["ptBR"] = "Missões entregues: %s", -- 🤖
+    ["ruRU"] = "Сдано заданий: %s", -- 🤖
+    ["zhCN"] = "已交付任务：%s", -- 🤖
+    ["zhTW"] = "已交付任務：%s", -- 🤖
+  },
   ["ERROR: Client does not have required codec support (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)"] = {
     ["enUS"] = true,
     ["deDE"] = "FEHLER: Der Client verfügt nicht über die erforderliche Codec-Unterstützung (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)", -- 🤖
