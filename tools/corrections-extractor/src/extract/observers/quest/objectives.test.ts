@@ -325,6 +325,38 @@ describe("observeObjectives", () => {
     expect(observeObjectives(session)).toEqual([]);
   });
 
+  it("should match a kill objective that ends in another past-tense verb than 'slain'", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "92465": [{ t: 3, tp: 3, v: [{ type: "monster", text: "0/6 Roiling Winds destroyed" }] }],
+      },
+      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-251143-000123" }] },
+      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Roiling Winds", n: 1 } }] },
+    });
+
+    expect(observeObjectives(session)[0]?.value).toEqual([
+      { kind: "monster", name: "Roiling Winds", text: "0/6 Roiling Winds destroyed", id: 251143, index: 0 },
+    ]);
+  });
+
+  it("should prefer the full objective name over one without its trailing verb", () => {
+    const session = makeSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [{ t: 3, tp: 3, v: [{ type: "object", text: "0/1 Ancient Seed Planted" }] }],
+      },
+      UnitGUID: {
+        target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-100-0000399" }],
+        npc: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-200-0000399" }],
+      },
+      UnitName: {
+        target: [{ t: 3, tp: 3, v: { 1: "Ancient Seed", n: 1 } }],
+        npc: [{ t: 3, tp: 3, v: { 1: "Ancient Seed Planted", n: 1 } }],
+      },
+    });
+
+    expect(observeObjectives(session)[0]?.value[0]?.id).toEqual(200);
+  });
+
   it("should not strip a trailing 'slain' from non-monster objective names", () => {
     const session = makeSession({
       "C_QuestLog.GetQuestObjectives": {

@@ -101,6 +101,18 @@ function objectiveName(text: string, kind: ObjectiveKind): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * "slain" is only the most common kill verb: Blizzard also writes e.g.
+ * "0/6 Roiling Winds destroyed" or "0/5 Sickly Gazelle cured". When the full
+ * name matches nothing, monster/object objectives retry without a trailing
+ * past-tense word. Items are excluded: names like "Cured Ham" end in -ed too.
+ */
+function nameWithoutTrailingVerb(name: string, kind: ObjectiveKind): string | null {
+  if (kind === "item") return null;
+  const stripped = name.replace(/\s+\S+ed$/i, "").trim();
+  return stripped.length > 0 && stripped !== name ? stripped : null;
+}
+
 function objectiveKind(type: unknown): ObjectiveKind | null {
   if (type === "item") return "item";
   if (type === "monster") return "monster";
@@ -291,7 +303,13 @@ export const observeObjectives: FieldObserver<ObjectiveMatch[]> = (session) => {
 
         const source = kind === "item" ? itemEvidence : unitEvidence;
         const id = candidateForObjective({ kind, name }, source, questID);
-        if (id !== null) matches.push({ kind, name, text, id, index });
+        if (id !== null) {
+          matches.push({ kind, name, text, id, index });
+          continue;
+        }
+        const shortName = nameWithoutTrailingVerb(name, kind);
+        const shortId = shortName ? candidateForObjective({ kind, name: shortName }, source, questID) : null;
+        if (shortName && shortId !== null) matches.push({ kind, name: shortName, text, id: shortId, index });
       }
 
       if (matches.length > 0) {
