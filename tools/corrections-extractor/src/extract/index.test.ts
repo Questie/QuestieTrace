@@ -594,6 +594,20 @@ describe("foldSessions + finalize (incremental extraction)", () => {
 
     expect(questFixes).toContain("[questKeys.objectives] = {{{200}}},");
   });
+
+  it("should not export objectives when fewer objectives were matched than the API reports", () => {
+    const session = westfallSession({
+      "C_QuestLog.GetQuestObjectives": {
+        "33": [{ t: 3, tp: 3, v: [{ type: "monster", text: "0/7 Stormhide slain" }, { type: "item", text: "Empty Vial: 0/5" }] }],
+      },
+      UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-200-000031" }] },
+      UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Stormhide", n: 1 } }] },
+    });
+
+    const { questFixes } = extractAll([session], options);
+
+    expect(questFixes).not.toContain("[questKeys.objectives]");
+  });
 });
 
 describe("extractAll (quest-giver correlation)", () => {
