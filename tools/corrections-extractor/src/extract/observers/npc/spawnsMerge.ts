@@ -16,6 +16,10 @@ const TOKEN_PRIORITY: Record<string, number> = {
 // Max distance (in Questie 0-100 map units) from a cluster's centroid. Covers the
 // spread caused by recording the player's position within interaction range.
 const SPAWN_CLUSTER_THRESHOLD = 0.5;
+// Capital city maps are small, so the same interaction range covers more map units.
+const CAPITAL_CITY_CLUSTER_THRESHOLD = 1.0;
+// Stormwind, Ironforge, Darnassus, Orgrimmar, Thunder Bluff, Undercity
+const CAPITAL_CITY_ZONE_IDS = new Set([1519, 1537, 1657, 1637, 1638, 1497]);
 const CLUSTER_EPSILON = 1e-9; // Tolerance for floating point comparisons
 
 function tokenPriority(token: string): number {
@@ -124,7 +128,8 @@ function clusterByZone(
 ): Record<number, Array<[number, number]>> {
   const result: Record<number, Array<[number, number]>> = {};
   for (const [zoneID, coords] of byZone) {
-    let clusters = clusterAndAverageCoordinatess(coords, SPAWN_CLUSTER_THRESHOLD);
+    const threshold = CAPITAL_CITY_ZONE_IDS.has(zoneID) ? CAPITAL_CITY_CLUSTER_THRESHOLD : SPAWN_CLUSTER_THRESHOLD;
+    let clusters = clusterAndAverageCoordinatess(coords, threshold);
     if (singleSpawnPerZone) {
       const weight = (members: Array<[number, number]>) =>
         members.reduce((sum, [x, y]) => sum + (observationCounts.get(coordKey(zoneID, x, y)) ?? 1), 0);
