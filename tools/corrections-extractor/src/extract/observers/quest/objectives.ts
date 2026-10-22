@@ -7,7 +7,8 @@
 // progress, but not the entity IDs required by Questie. This observer matches
 // the three objective types supported by the trace against IDs observed
 // elsewhere in the same session:
-//   item    -> GetLootSlotLink + GetLootSlotInfo
+//   item    -> GetLootSlotLink + GetLootSlotInfo, the turn-in window's
+//              GetQuestItemLink("required", i), and GetMerchantItemLink
 //   monster -> UnitName + UnitGUID
 //   object  -> UnitName + UnitGUID
 //
@@ -72,6 +73,8 @@ interface Evidence {
    * same-named alternatives for that quest, but remains a valid fallback.
    */
   startsQuestId: number | null;
+  /** Quest whose turn-in window listed this item as required. Wins over all other evidence. */
+  requiredForQuestId: number | null;
 }
 
 function normalizeName(name: string): string {
@@ -156,8 +159,50 @@ function collectItemEvidence(session: SessionRecord): Evidence[] {
         id: parsed.itemID,
         preferredFor: () => isQuestItem,
         startsQuestId,
+        requiredForQuestId: null,
       });
     }
+  }
+  return evidence;
+}
+
+/** Item links of one function keyed by index, e.g. GetMerchantItemLink[index] or GetQuestItemLink.required[index]. */
+function linkEntriesByIndex(session: SessionRecord, functionName: string, ...prefix: string[]): FunctionStreamEntry[] {
+  let root: unknown = session.functions[functionName];
+  for (const key of prefix) root = root && !Array.isArray(root) ? (root as Record<string, unknown>)[key] : undefined;
+  if (!root || Array.isArray(root) || typeof root !== "object") return [];
+  return Object.keys(root).flatMap((index) => getStream(session, functionName, ...prefix, index) ?? []);
+}
+
+/**
+ * Required items of a quest's turn-in window (with the quest from GetQuestID)
+ * and items a merchant sells, e.g. vendor-bought objectives like Empty Vial.
+ */
+function collectLinkEvidence(session: SessionRecord): Evidence[] {
+  const evidence: Evidence[] = [];
+  for (const entry of linkEntriesByIndex(session, "GetQuestItemLink", "required")) {
+    const parsed = typeof entry.v === "string" ? parseItemLink(entry.v) : null;
+    if (!parsed) continue;
+    evidence.push({
+      kind: "item",
+      name: parsed.name,
+      id: parsed.itemID,
+      preferredFor: () => false,
+      startsQuestId: null,
+      requiredForQuestId: questIdAt(session, entry.t),
+    });
+  }
+  for (const entry of linkEntriesByIndex(session, "GetMerchantItemLink")) {
+    const parsed = typeof entry.v === "string" ? parseItemLink(entry.v) : null;
+    if (!parsed) continue;
+    evidence.push({
+      kind: "item",
+      name: parsed.name,
+      id: parsed.itemID,
+      preferredFor: () => false,
+      startsQuestId: null,
+      requiredForQuestId: null,
+    });
   }
   return evidence;
 }
@@ -183,6 +228,7 @@ function collectUnitEvidence(session: SessionRecord): Evidence[] {
         id: parsed.id,
         preferredFor: (questId) => dialogQuestId === questId,
         startsQuestId: null,
+        requiredForQuestId: null,
       });
     }
   }
@@ -190,8 +236,9 @@ function collectUnitEvidence(session: SessionRecord): Evidence[] {
 }
 
 /**
- * Find the best evidence match by exact normalized name, ranked: preferred
- * evidence (see `Evidence.preferredFor`), then other evidence, then items that
+ * Find the best evidence match by exact normalized name, ranked: items the
+ * quest's turn-in window requires, then preferred evidence (see
+ * `Evidence.preferredFor`), then other evidence, then items that
  * start the quest. Starter items stay eligible since some quests ask to bring
  * back the very item that started them. Remaining ties go to the lowest id.
  */
@@ -204,7 +251,7 @@ function candidateForObjective(objective: { kind: ObjectiveKind; name: string },
     if (item.kind !== evidenceKind) continue;
     if (normalizeName(item.name) !== wantedName) continue;
 
-    const rank = item.preferredFor(questId) ? 2 : item.startsQuestId === questId ? 0 : 1;
+    const rank = item.requiredForQuestId === questId ? 3 : item.preferredFor(questId) ? 2 : item.startsQuestId === questId ? 0 : 1;
     if (!best || rank > best.rank || (rank === best.rank && item.id < best.id)) {
       best = { id: item.id, rank };
     }
@@ -215,7 +262,7 @@ function candidateForObjective(objective: { kind: ObjectiveKind; name: string },
 
 export const observeObjectives: FieldObserver<ObjectiveMatch[]> = (session) => {
   const observations: Observation<ObjectiveMatch[]>[] = [];
-  const itemEvidence = collectItemEvidence(session);
+  const itemEvidence = [...collectItemEvidence(session), ...collectLinkEvidence(session)];
   const unitEvidence = collectUnitEvidence(session);
 
   const objectivesRoot = session.functions["C_QuestLog.GetQuestObjectives"];
