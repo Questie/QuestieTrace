@@ -9,6 +9,7 @@ local DeepCompare = Core.DeepCompare
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
 -- GetMerchantNumItems() -> number numMerchantItems
+-- GetMerchantItemLink(index) -> string? itemLink  -- carries the item ID
 -- GetMerchantItemInfo(index) ->
 --   string name, number texture, number price, number quantity,
 --   number numAvailable, boolean isPurchasable, boolean isUsable,
@@ -26,6 +27,8 @@ local functions
 local merchantItemStreams
 ---@type table<number, FunctionStreamEntry[]>? [index] -> stream for modern API
 local merchantModernItemStreams
+---@type table<number, FunctionStreamEntry[]>? [index] -> GetMerchantItemLink stream
+local merchantItemLinkStreams
 ---@type boolean?
 local hasModernItemAPI
 
@@ -160,6 +163,15 @@ local function ProbeMerchantItem(t, tp, index)
     AppendIfChanged(stream, t, tp, legacyValue)
   end
 
+  local linkOk, link = SafeScalarCall(GetMerchantItemLink, index)
+  if linkOk and (link ~= nil or (merchantItemLinkStreams and merchantItemLinkStreams[index])) then
+    merchantItemLinkStreams = merchantItemLinkStreams or {}
+    if (not merchantItemLinkStreams[index]) then
+      merchantItemLinkStreams[index] = GetOrCreateParamStream("GetMerchantItemLink", index)
+    end
+    AppendScalarIfChanged(merchantItemLinkStreams[index], t, tp, link)
+  end
+
   -- Modern API: C_MerchantFrame.GetItemInfo (when available)
   if hasModernItemAPI then
     local modernOk, modernValue = SafeScalarCall(C_MerchantFrame.GetItemInfo, index)
@@ -204,6 +216,11 @@ local function SampleMerchantClose(capture)
       ProbeMerchantItem(t, tp, index)
     end
   end
+  if merchantItemLinkStreams then
+    for index in pairs(merchantItemLinkStreams) do
+      ProbeMerchantItem(t, tp, index)
+    end
+  end
 end
 
 Core.RegisterTracker({
@@ -214,12 +231,14 @@ Core.RegisterTracker({
     functions = capture.session.functions
     merchantItemStreams = nil
     merchantModernItemStreams = nil
+    merchantItemLinkStreams = nil
 
     hasModernItemAPI = (C_MerchantFrame ~= nil and type(C_MerchantFrame.GetItemInfo) == "function")
 
     functions["GetMerchantNumItems"] = {}
     functions["GetMerchantItemInfo"] = {}
     functions["C_MerchantFrame.GetItemInfo"] = {}
+    functions["GetMerchantItemLink"] = {}
   end,
 
   ---@param capture CaptureState
