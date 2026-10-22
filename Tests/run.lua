@@ -2041,6 +2041,107 @@ local function TestUnitStateTracker()
   assert(#functions.UnitReaction.player.target == 1, "Player target must not be sampled for reaction")
 end
 
+---@param runtime table
+---@return { callback: function? }
+local function InstallUnitTooltipProcessor(runtime)
+  local holder = {}
+  runtime.env.TooltipDataProcessor = {
+    AddTooltipPostCall = function(tooltipType, callback)
+      if tooltipType == 2 then holder.callback = callback end -- Enum.TooltipDataType.Unit
+    end,
+  }
+  runtime.env.Enum = { TooltipDataType = { Unit = 2 } }
+  return holder
+end
+
+local function TestUnitStateRecordsSubNameFromTooltip()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local holder = InstallUnitTooltipProcessor(runtime)
+  local mouseoverGUID = "Creature-0-1-1-1-6740-000001"
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return mouseoverGUID end end
+
+  runtime.core.StartCapture("unit subname test")
+  holder.callback(nil, {
+    guid = mouseoverGUID,
+    lines = {
+      { type = 2, leftText = "Innkeeper Allison" },
+      { type = 0, leftText = "Innkeeper" },
+      { type = 0, leftText = "Level 30" },
+    },
+  })
+  mouseoverGUID = "Creature-0-1-1-1-1-000002"
+  AdvanceTo(runtime, 1)
+  holder.callback(nil, {
+    guid = mouseoverGUID,
+    lines = {
+      { type = 2, leftText = "Kobold Vermin" },
+      { type = 0, leftText = "Level 1" },
+    },
+  })
+
+  local stream = Session(runtime).functions.UnitSubName.mouseover
+  assert(#stream == 2, "UnitSubName[mouseover] must have two entries")
+  assert(stream[1].v == "Innkeeper", "UnitSubName must record the title line")
+  assert(stream[2].v == "", "UnitSubName must record an empty string for an NPC without title")
+end
+
+local function TestUnitStateSanitizesSubName()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local holder = InstallUnitTooltipProcessor(runtime)
+  local guid = "Creature-0-1-1-1-1-000003"
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return guid end end
+  env.UnitName = function(token) if token == "player" then return "Cruxdruid" end end
+
+  runtime.core.StartCapture("unit subname sanitize test")
+  holder.callback(nil, {
+    guid = guid,
+    lines = {
+      { type = 2, leftText = "Escort" },
+      { type = 0, leftText = "Cruxdruid's Escort" },
+    },
+  })
+
+  local stream = Session(runtime).functions.UnitSubName.mouseover
+  assert(stream[1].v == "<name>'s Escort", "UnitSubName must redact player names: " .. tostring(stream[1].v))
+end
+
+local function TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local holder = InstallUnitTooltipProcessor(runtime)
+  local isPlayer = true
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return isPlayer end
+  env.UnitPlayerControlled = function(_token) return isPlayer end
+  env.UnitGUID = function(token) if token == "mouseover" then return "Player-1-00000001" end end
+
+  runtime.core.StartCapture("unit subname player test")
+  local data = {
+    guid = "Player-1-00000001",
+    lines = { { type = 2, leftText = "Somebody" }, { type = 0, leftText = "<Some Guild>" } },
+  }
+  holder.callback(nil, data)
+  env.UnitIsPlayer = function(_token) return false end
+  holder.callback(nil, data)
+  isPlayer = false
+  holder.callback(nil, { guid = "Creature-0-1-1-1-1-000009", lines = data.lines })
+  env.UnitGUID = function(token) if token == "mouseover" then return "Corpse-0-1-1-1-1-000010" end end
+  holder.callback(nil, { guid = "Corpse-0-1-1-1-1-000010", lines = data.lines })
+  env.UnitGUID = function(token) if token == "mouseover" then return "Player-1-00000001" end end
+  holder.callback(nil, data)
+
+  assert(#Session(runtime).functions.UnitSubName.mouseover == 0,
+    "UnitSubName must not record players, player pets, non-npc guids or other units")
+end
+
 -- Merchant tracker tests
 local function TestMerchantClassicAPIRecordsItems()
   local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
@@ -3210,6 +3311,9 @@ local tests = {
   { name = "unit interaction mouseover records GUID and name", run = TestUnitInteractionMouseover },
   { name = "UnitInteraction skips a mouseover player's guid/name", run = TestUnitInteractionMouseoverPlayerIsSkipped },
   { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
+  { name = "should record npc subname from unit tooltip", run = TestUnitStateRecordsSubNameFromTooltip },
+  { name = "should redact player names in npc subname", run = TestUnitStateSanitizesSubName },
+  { name = "should not record subname for players, player pets or other units", run = TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },
   { name = "Merchant close probes known indices", run = TestMerchantCloseProbesKnownIndices },

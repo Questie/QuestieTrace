@@ -7,6 +7,10 @@ local Core = QuestieTraceCore
 -- UnitLevel(unit)           -> number (or -1 for "??")
 -- UnitClassification(unit)  -> string ("normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus")
 -- UnitReaction(unit, unit)  -> number 1..8 (or nil)
+-- UnitSubName (synthetic)   -> string: NPC title line ("Innkeeper") from
+--   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, func),
+--   i.e. the line after the UnitName line unless it is the level line.
+--   "" when the NPC has no title. mouseover only, Modern/Forever only.
 ---------------------------------------------------------------------------
 
 ---@type string[]
@@ -19,6 +23,12 @@ local levelStreams
 local classificationStreams
 ---@type table<string, FunctionStreamEntry[]>?
 local reactionStreams
+---@type FunctionStreamEntry[]?
+local subNameStream
+---@type CaptureState?
+local currentCapture
+---@type boolean
+local unitTooltipProcessorRegistered = false
 
 ---Safely call a function and return the first result.
 ---@param fn function?
@@ -80,6 +90,84 @@ local function SampleAll(t, tp)
   end
 end
 
+---Safely get a string value from a possibly-secret (tainted) value.
+---@param value any
+---@return string?
+local function SafeString(value)
+  if type(value) ~= "string" then return nil end
+  if issecretvalue and issecretvalue(value) then return nil end
+  return value
+end
+
+---Whether a tooltip line is the localized "Level %s ..." line.
+---@param text string
+---@return boolean
+local function IsLevelLine(text)
+  local template = type(TOOLTIP_UNIT_LEVEL) == "string" and TOOLTIP_UNIT_LEVEL or "Level %s"
+  local prefix, suffix = template:match("^(.-)%%s(.*)$")
+  if not prefix then return false end
+  if prefix ~= "" then
+    return text:sub(1, #prefix) == prefix
+  end
+  return suffix ~= "" and text:find(suffix, 1, true) ~= nil
+end
+
+---Extract the NPC title from unit tooltip data.
+---@param tooltipData TooltipData
+---@return string? subName "" when the NPC has no title, nil when unreadable
+local function ExtractSubName(tooltipData)
+  local lines = tooltipData.lines
+  if not lines then return nil end
+  for i = 1, #lines do
+    if lines[i] and lines[i].type == 2 then -- Enum.TooltipDataLineType.UnitName
+      local nextLine = lines[i + 1]
+      if not nextLine then return "" end
+      if nextLine.type == 16 then return "" end -- Enum.TooltipDataLineType.UnitOwner (pets)
+      local text = SafeString(nextLine.leftText)
+      if not text then return nil end
+      if IsLevelLine(text) then return "" end
+      return Core.SanitizeText(text)
+    end
+  end
+  return nil
+end
+
+---TooltipDataProcessor post-call for unit tooltips.
+---@param _ any tooltip (unused)
+---@param tooltipData TooltipData?
+local function SampleSubName(_, tooltipData)
+  local capture = currentCapture
+  if not subNameStream or not capture or not tooltipData then return end
+  local guid = tooltipData.guid
+  if Core.ParseGUIDKind(guid) ~= "npc" then return end
+
+  -- Unit tooltips are hover-driven (world and unit frames), so only mouseover is tracked.
+  local token = "mouseover"
+  if not UnitExists(token) or UnitIsPlayer(token) or UnitPlayerControlled(token) then return end
+  if UnitGUID(token) ~= guid then return end
+
+  local subName = ExtractSubName(tooltipData)
+  if subName == nil then return end
+  local stream = subNameStream
+  local prev = stream[#stream]
+  if not prev or prev.v ~= subName then
+    stream[#stream + 1] = {
+      t = GetTime() - capture.startedAt,
+      tp = GetTimePreciseSec() - capture.startedAtPrecise,
+      v = subName,
+    }
+  end
+end
+
+---Register the TooltipDataProcessor unit hook (Modern/Forever only).
+local function RegisterUnitTooltipProcessor()
+  if unitTooltipProcessorRegistered then return end
+  if not TooltipDataProcessor or not TooltipDataProcessor.AddTooltipPostCall then return end
+  if not Enum or not Enum.TooltipDataType or not Enum.TooltipDataType.Unit then return end
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, SampleSubName)
+  unitTooltipProcessorRegistered = true
+end
+
 Core.RegisterTracker({
   events = {
     "PLAYER_TARGET_CHANGED",
@@ -94,6 +182,9 @@ Core.RegisterTracker({
     if not functions["UnitClassification"] then functions["UnitClassification"] = {} end
     if not functions["UnitReaction"] then functions["UnitReaction"] = {} end
     if not functions["UnitReaction"]["player"] then functions["UnitReaction"]["player"] = {} end
+    if not functions["UnitSubName"] then functions["UnitSubName"] = {} end
+    functions["UnitSubName"]["mouseover"] = {}
+    subNameStream = functions["UnitSubName"]["mouseover"]
 
     levelStreams = {}
     classificationStreams = {}
@@ -107,8 +198,16 @@ Core.RegisterTracker({
       reactionStreams[token] = functions["UnitReaction"]["player"][token]
     end
 
+    currentCapture = capture
+    RegisterUnitTooltipProcessor()
+
     -- Initial sample at t=0
     SampleAll(0, 0)
+  end,
+
+  ---@param _ CaptureState
+  OnCaptureStopped = function(_)
+    currentCapture = nil
   end,
 
   ---@param capture CaptureState
