@@ -215,6 +215,16 @@ describe("mergeSpawns", () => {
     });
   });
 
+  it("should use a larger grouping radius in capital cities", () => {
+    const spread = (zoneID: number): TaggedSpawnObservation[] => [
+      obs(823, { zoneID, x: 50.0, y: 50.0 }, 1, "npc"),
+      obs(823, { zoneID, x: 50.8, y: 50.0 }, 2, "npc"),
+    ];
+
+    expect(mergeSpawns(spread(1537))).toEqual({ 1537: [[50.4, 50]] });
+    expect(mergeSpawns(spread(40))[40]).toHaveLength(2);
+  });
+
   it("should not chain a line of nearby points into a single cluster", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
