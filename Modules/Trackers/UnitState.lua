@@ -119,10 +119,10 @@ local function ExtractSubName(tooltipData)
   local lines = tooltipData.lines
   if not lines then return nil end
   for i = 1, #lines do
-    if lines[i] and lines[i].type == 2 then -- Enum.TooltipDataLineType.UnitName
+    if lines[i] and lines[i].type == Enum.TooltipDataLineType.UnitName then
       local nextLine = lines[i + 1]
       if not nextLine then return "" end
-      if nextLine.type == 16 then return "" end -- Enum.TooltipDataLineType.UnitOwner (pets)
+      if nextLine.type == Enum.TooltipDataLineType.UnitOwner then return "" end
       local text = SafeString(nextLine.leftText)
       if not text then return nil end
       if IsLevelLine(text) then return "" end
@@ -164,6 +164,7 @@ local function RegisterUnitTooltipProcessor()
   if unitTooltipProcessorRegistered then return end
   if not TooltipDataProcessor or not TooltipDataProcessor.AddTooltipPostCall then return end
   if not Enum or not Enum.TooltipDataType or not Enum.TooltipDataType.Unit then return end
+  if not Enum.TooltipDataLineType then return end
   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, SampleSubName)
   unitTooltipProcessorRegistered = true
 end

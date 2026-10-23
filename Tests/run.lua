@@ -2050,7 +2050,10 @@ local function InstallUnitTooltipProcessor(runtime)
       if tooltipType == 2 then holder.callback = callback end -- Enum.TooltipDataType.Unit
     end,
   }
-  runtime.env.Enum = { TooltipDataType = { Unit = 2 } }
+  runtime.env.Enum = {
+    TooltipDataType = { Unit = 2 },
+    TooltipDataLineType = { UnitName = 2, UnitOwner = 16 },
+  }
   return holder
 end
 
