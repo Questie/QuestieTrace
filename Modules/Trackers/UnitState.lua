@@ -125,7 +125,11 @@ local function ExtractSubName(tooltipData)
       if nextLine.type == Enum.TooltipDataLineType.UnitOwner then return "" end
       local text = SafeString(nextLine.leftText)
       if not text then return nil end
-      if IsLevelLine(text) then return "" end
+      if Enum.TooltipDataLineType.UnitLevel then
+        if nextLine.type == Enum.TooltipDataLineType.UnitLevel then return "" end
+      elseif IsLevelLine(text) then
+        return ""
+      end
       return Core.SanitizeText(text)
     end
   end
