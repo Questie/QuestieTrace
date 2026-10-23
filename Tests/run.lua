@@ -2116,6 +2116,33 @@ local function TestUnitStateSanitizesSubName()
   assert(stream[1].v == "<name>'s Escort", "UnitSubName must redact player names: " .. tostring(stream[1].v))
 end
 
+local function TestUnitStateUsesUnitLevelLineTypeWhenAvailable()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local holder = InstallUnitTooltipProcessor(runtime)
+  env.Enum.TooltipDataLineType.UnitLevel = 47
+  local guid = "Creature-0-1-1-1-1-000004"
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return guid end end
+
+  runtime.core.StartCapture("unit subname level line type test")
+  holder.callback(nil, {
+    guid = guid,
+    lines = { { type = 2, leftText = "Trainer" }, { type = 0, leftText = "Level Trainer" } },
+  })
+  AdvanceTo(runtime, 1)
+  holder.callback(nil, {
+    guid = guid,
+    lines = { { type = 2, leftText = "Kobold" }, { type = 47, leftText = "Level 1" } },
+  })
+
+  local stream = Session(runtime).functions.UnitSubName.mouseover
+  assert(stream[1].v == "Level Trainer", "A title starting with 'Level ' must be kept when UnitLevel exists")
+  assert(stream[2].v == "", "A UnitLevel line must be treated as no title")
+end
+
 local function TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits()
   local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
   local env = runtime.env
@@ -3316,6 +3343,7 @@ local tests = {
   { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
   { name = "should record npc subname from unit tooltip", run = TestUnitStateRecordsSubNameFromTooltip },
   { name = "should redact player names in npc subname", run = TestUnitStateSanitizesSubName },
+  { name = "should detect level lines by line type when UnitLevel exists", run = TestUnitStateUsesUnitLevelLineTypeWhenAvailable },
   { name = "should not record subname for players, player pets or other units", run = TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },
