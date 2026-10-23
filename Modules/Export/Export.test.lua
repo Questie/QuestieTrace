@@ -360,3 +360,150 @@ describe("Export.BuildExportPayload", function()
     assert.equal(0, #payload.sessions)
   end)
 end)
+
+---@param count integer
+---@return table[] events
+local function MakeEvents(count)
+  local events = {}
+  for i = 1, count do
+    events[i] = { t = i, e = "PLAYER_LOGIN" }
+  end
+  return events
+end
+
+describe("Export.BuildExportStats", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+
+  before_each(function()
+    env = {}
+    Core = LoadExportModule(env)
+  end)
+
+  it("should count events across saved sessions and the current session", function()
+    env.QuestieTraceCharacter = {
+      sessions = {
+        Encoded({ functions = {}, events = MakeEvents(3) }),
+        Encoded({ functions = {}, events = MakeEvents(4) }),
+      },
+      currentSession = { functions = {}, events = MakeEvents(5) },
+    }
+
+    local stats = Core.BuildExportStats(Core.BuildExportPayload())
+
+    assert.equal(12, stats.eventCount)
+  end)
+
+  it("should count zero events when there is nothing to export", function()
+    env.QuestieTraceCharacter = { sessions = {} }
+
+    local stats = Core.BuildExportStats(Core.BuildExportPayload())
+
+    assert.equal(0, stats.eventCount)
+  end)
+
+  it("should count zero for a session whose events are missing or not a table", function()
+    local payload = {
+      sessions = {
+        { functions = {} },
+        { functions = {}, events = "not a table" },
+        { functions = {}, events = MakeEvents(2) },
+      },
+    }
+
+    assert.equal(2, Core.BuildExportStats(payload).eventCount)
+  end)
+
+  it("should not error when the payload has no sessions table", function()
+    assert.equal(0, Core.BuildExportStats({}).eventCount)
+  end)
+
+  it("should not modify the payload or the export string", function()
+    env.QuestieTraceCharacter = {
+      sessions = { Encoded({ functions = {}, events = MakeEvents(3) }) },
+    }
+    --- Encode by listing the payload's top-level keys, so any field added by
+    --- BuildExportStats would change the string.
+    Core.EncodeExportPayload = function(payload)
+      local keys = {}
+      for k in pairs(payload) do keys[#keys + 1] = tostring(k) end
+      table.sort(keys)
+      return table.concat(keys, ",") .. ":" .. #payload.sessions
+    end
+    local payload = Core.BuildExportPayload()
+    local before = DeepCopy(payload)
+    local _, stringBefore = Core.BuildExportString(payload)
+
+    Core.BuildExportStats(payload)
+
+    local _, stringAfter = Core.BuildExportString(payload)
+    assert.same(before, payload)
+    assert.equal(stringBefore, stringAfter)
+  end)
+
+  it("should add up time recorded from saved session durations", function()
+    local payload = {
+      sessions = {
+        { functions = {}, duration = 100, events = MakeEvents(1) },
+        { functions = {}, duration = 250.5, events = MakeEvents(1) },
+      },
+    }
+
+    assert.equal(350.5, Core.BuildExportStats(payload).timeRecorded)
+  end)
+
+  it("should use the last event time for a live session that has no duration yet", function()
+    env.QuestieTraceCharacter = {
+      sessions = { Encoded({ functions = {}, duration = 60, events = MakeEvents(2) }) },
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" }, { t = 42.5, e = "PLAYER_LOGIN" } } },
+    }
+
+    local stats = Core.BuildExportStats(Core.BuildExportPayload())
+
+    assert.equal(102.5, stats.timeRecorded)
+  end)
+
+  it("should count zero time for a session with no duration and no events", function()
+    local payload = { sessions = { { functions = {} }, { functions = {}, events = {} } } }
+
+    assert.equal(0, Core.BuildExportStats(payload).timeRecorded)
+  end)
+
+  it("should count accepted and turned-in quests across sessions", function()
+    local payload = {
+      sessions = {
+        {
+          functions = {},
+          events = {
+            { t = 1, e = "QUEST_ACCEPTED", a = { 101, n = 1 } },
+            { t = 2, e = "QUEST_LOG_UPDATE" },
+            { t = 3, e = "QUEST_TURNED_IN", a = { 101, 0, 0, n = 3 } },
+          },
+        },
+        {
+          functions = {},
+          events = {
+            { t = 1, e = "QUEST_ACCEPTED", a = { 102, n = 1 } },
+            "not a table",
+            { t = 2, e = "QUEST_REMOVED", a = { 102, n = 1 } },
+          },
+        },
+      },
+    }
+
+    local stats = Core.BuildExportStats(payload)
+
+    assert.equal(2, stats.questsAccepted)
+    assert.equal(1, stats.questsTurnedIn)
+    assert.equal(6, stats.eventCount)
+  end)
+
+  it("should count zero quests when there is nothing to export", function()
+    local stats = Core.BuildExportStats({ sessions = {} })
+
+    assert.equal(0, stats.questsAccepted)
+    assert.equal(0, stats.questsTurnedIn)
+  end)
+end)

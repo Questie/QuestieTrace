@@ -242,6 +242,79 @@ function Core.DeleteReportedSessions(sourceSessions)
 end
 
 ---------------------------------------------------------------------------
+-- Statistics
+---------------------------------------------------------------------------
+
+---@class ExportStats
+---@field eventCount integer Total events across every session in the payload.
+---@field timeRecorded number Total seconds recorded across every session in the payload.
+---@field questsAccepted integer QUEST_ACCEPTED events across every session in the payload.
+---@field questsTurnedIn integer QUEST_TURNED_IN events across every session in the payload.
+
+--- Seconds a session covers. The live session is copied into the payload
+--- before it is stopped, so it has no `duration` yet; its last event's
+--- session-relative time is the best lower bound the payload itself holds.
+---@param session SessionRecord
+---@return number
+local function _SessionDuration(session)
+  if type(session.duration) == "number" then
+    return session.duration
+  end
+  local events = session.events
+  local lastEvent = type(events) == "table" and events[#events] or nil
+  if type(lastEvent) == "table" and type(lastEvent.t) == "number" then
+    return lastEvent.t
+  end
+  return 0
+end
+
+--- Derive player-facing statistics from a payload previously built by
+--- Core.BuildExportPayload(), to show alongside the export string.
+---
+--- Returned separately rather than stored on the payload, so stats never end
+--- up inside the encoded string and the export format stays unchanged. The
+--- payload is only read, never modified.
+---@param payload table Result of Core.BuildExportPayload().
+---@return ExportStats
+function Core.BuildExportStats(payload)
+  local eventCount = 0
+  local timeRecorded = 0
+  local questsAccepted = 0
+  local questsTurnedIn = 0
+
+  local sessions = type(payload) == "table" and payload.sessions or nil
+  if type(sessions) == "table" then
+    for i = 1, #sessions do
+      local session = sessions[i]
+      if type(session) == "table" then
+        timeRecorded = timeRecorded + _SessionDuration(session)
+
+        local events = session.events
+        if type(events) == "table" then
+          eventCount = eventCount + #events
+          -- One pass over the events shared by every per-event stat.
+          for j = 1, #events do
+            local eventName = type(events[j]) == "table" and events[j].e or nil
+            if eventName == "QUEST_ACCEPTED" then
+              questsAccepted = questsAccepted + 1
+            elseif eventName == "QUEST_TURNED_IN" then
+              questsTurnedIn = questsTurnedIn + 1
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return {
+    eventCount = eventCount,
+    timeRecorded = timeRecorded,
+    questsAccepted = questsAccepted,
+    questsTurnedIn = questsTurnedIn,
+  }
+end
+
+---------------------------------------------------------------------------
 -- Serialization
 ---------------------------------------------------------------------------
 

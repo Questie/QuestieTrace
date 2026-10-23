@@ -15,7 +15,19 @@ local l10n = Core.l10n
 ---@field urlEditBox EditBox
 ---@field hint FontString
 ---@field warningText FontString
+---@field statsFrame Frame Container for every statistic, shown/hidden as one.
+---@field stats ExportStatRows
 ---@field reportedButton Button
+
+---@class ExportStatRow
+---@field icon Texture
+---@field text FontString
+
+---@class ExportStatRows
+---@field events ExportStatRow
+---@field time ExportStatRow
+---@field questsAccepted ExportStatRow
+---@field questsTurnedIn ExportStatRow
 
 ---@type ExportFrame?
 local exportFrame
@@ -29,11 +41,95 @@ local exportFrame
 ---@type SessionRecord[]?
 local pendingSourceSessions
 
+--- Icons shown before each statistic. All ship with the Classic client.
+---@type string
+local ICON_EVENTS = "Interface\\Icons\\INV_Misc_Note_02"
+---@type string
+local ICON_TIME = "Interface\\Icons\\INV_Misc_PocketWatch_01"
+---@type string
+local ICON_QUEST_ACCEPTED = "Interface\\GossipFrame\\AvailableQuestIcon"
+---@type string
+local ICON_QUEST_TURNED_IN = "Interface\\GossipFrame\\ActiveQuestIcon"
+
+---@type integer Icon width/height in pixels.
+local STATS_ICON_SIZE = 16
+---@type integer Gap between an icon and its text.
+local STATS_ICON_GAP = 4
+---@type integer Width of each of the two statistics columns.
+local STATS_COLUMN_WIDTH = 200
+---@type integer Horizontal gap between the two columns.
+local STATS_COLUMN_GAP = 10
+---@type integer Vertical distance from one row's top to the next.
+local STATS_ROW_HEIGHT = 22
+---@type string Gold, matching NORMAL_FONT_COLOR, so values stand out from the white labels.
+local STATS_VALUE_COLOR = "|cffffd100"
+
+--- Color a statistic's value so it stands out from its label.
+---@param value string
+---@return string
+local function _HighlightValue(value)
+  return STATS_VALUE_COLOR .. value .. "|r"
+end
+
+--- Create one statistic: an icon with its text beside it.
+---
+--- The text is anchored LEFT to the icon's RIGHT, which centers it vertically
+--- on the icon. (An inline |T|t icon inside the text sits on the text
+--- baseline instead, so a 16 px icon next to smaller text looks misaligned.)
+--- The text has a fixed width without wrapping, so a long translation is
+--- cut short instead of running into the other column.
+---@param parent Frame
+---@param iconPath string
+---@param column integer 0 = left, 1 = right.
+---@param row integer 0 = top.
+---@return ExportStatRow
+local function _CreateStatRow(parent, iconPath, column, row)
+  local icon = parent:CreateTexture(nil, "ARTWORK")
+  icon:SetSize(STATS_ICON_SIZE, STATS_ICON_SIZE)
+  icon:SetPoint("TOPLEFT", parent, "TOPLEFT", column * (STATS_COLUMN_WIDTH + STATS_COLUMN_GAP), -row * STATS_ROW_HEIGHT)
+  icon:SetTexture(iconPath)
+
+  local text = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  text:SetPoint("LEFT", icon, "RIGHT", STATS_ICON_GAP, 0)
+  text:SetWidth(STATS_COLUMN_WIDTH - STATS_ICON_SIZE - STATS_ICON_GAP)
+  text:SetJustifyH("LEFT")
+  text:SetWordWrap(false)
+
+  return { icon = icon, text = text }
+end
+
+--- Format a count for display, with the client's thousands separators when
+--- available. BreakUpLargeNumbers is looked up on every call, not cached.
+---@param count integer
+---@return string
+local function _FormatCount(count)
+  if type(BreakUpLargeNumbers) == "function" then
+    return BreakUpLargeNumbers(count)
+  end
+  return tostring(count)
+end
+
+--- Format a duration for display, using the client's localized time text
+--- (e.g. "3 Hr 12 Min") when available. SecondsToTime is looked up on every
+--- call, not cached, and returns "" for under a second, so that falls back too.
+---@param seconds number
+---@return string
+local function _FormatDuration(seconds)
+  if type(SecondsToTime) == "function" then
+    local text = SecondsToTime(seconds)
+    if text ~= "" then
+      return text
+    end
+  end
+  local whole = math.floor(seconds)
+  return string.format("%d:%02d:%02d", math.floor(whole / 3600), math.floor(whole % 3600 / 60), whole % 60)
+end
+
 --- Build the export window frame (lazy; created on first use).
 ---@return ExportFrame
 local function BuildExportFrame()
   local frame = CreateFrame("Frame", "QuestieTraceExportFrame", UIParent) --[[@as ExportFrame]]
-  frame:SetSize(450, 200)
+  frame:SetSize(450, 270)
   frame:SetPoint("CENTER")
   frame:SetFrameStrata("DIALOG")
   frame:SetClampedToScreen(true)
@@ -105,6 +201,20 @@ local function BuildExportFrame()
   editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
   editBox:SetScript("OnMouseUp", function(self) self:HighlightText() end)
 
+  --- Two columns: activity on the left, quests on the right.
+  local statsFrame = CreateFrame("Frame", nil, frame) --[[@as Frame]]
+  statsFrame:SetSize(STATS_COLUMN_WIDTH * 2 + STATS_COLUMN_GAP, STATS_ROW_HEIGHT + STATS_ICON_SIZE)
+  statsFrame:SetPoint("TOP", editBox, "BOTTOM", 0, -12)
+  statsFrame:Hide()
+
+  ---@type ExportStatRows
+  local stats = {
+    events = _CreateStatRow(statsFrame, ICON_EVENTS, 0, 0),
+    time = _CreateStatRow(statsFrame, ICON_TIME, 0, 1),
+    questsAccepted = _CreateStatRow(statsFrame, ICON_QUEST_ACCEPTED, 1, 0),
+    questsTurnedIn = _CreateStatRow(statsFrame, ICON_QUEST_TURNED_IN, 1, 1),
+  }
+
   local warningText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   warningText:SetPoint("CENTER")
   warningText:SetJustifyH("CENTER")
@@ -141,6 +251,8 @@ local function BuildExportFrame()
   frame.urlEditBox = urlEditBox
   frame.hint = hint
   frame.warningText = warningText
+  frame.statsFrame = statsFrame
+  frame.stats = stats
   frame.reportedButton = reportedButton
   return frame
 end
@@ -200,6 +312,16 @@ function Core.ShowExportWindow()
     -- data. If the codec is unavailable, `text` is just an error message --
     -- there is nothing real to confirm as reported.
     if ok then
+      -- Counted from the same payload that was just encoded, so the numbers
+      -- match exactly what the player is about to submit.
+      local stats = Core.BuildExportStats(payload)
+      local rows = exportFrame.stats
+      rows.events.text:SetText(l10n("Events captured: %s", _HighlightValue(_FormatCount(stats.eventCount))))
+      rows.time.text:SetText(l10n("Time recorded: %s", _HighlightValue(_FormatDuration(stats.timeRecorded))))
+      rows.questsAccepted.text:SetText(l10n("Quests accepted: %s", _HighlightValue(_FormatCount(stats.questsAccepted))))
+      rows.questsTurnedIn.text:SetText(l10n("Quests turned in: %s", _HighlightValue(_FormatCount(stats.questsTurnedIn))))
+      exportFrame.statsFrame:Show()
+
       -- After successful encoding, save the live session so its events are
       -- persisted and the saved-session counter increments. This ensures the
       -- export watermark (set by MarkExportOpened below) matches the counter,
@@ -215,6 +337,7 @@ function Core.ShowExportWindow()
       exportFrame.reportedButton:Show()
     else
       pendingSourceSessions = nil
+      exportFrame.statsFrame:Hide()
       exportFrame.reportedButton:Hide()
     end
   else
@@ -225,6 +348,7 @@ function Core.ShowExportWindow()
     exportFrame.urlEditBox:Hide()
     exportFrame.hint:Hide()
     exportFrame.editBox:Hide()
+    exportFrame.statsFrame:Hide()
     exportFrame.reportedButton:Hide()
     pendingSourceSessions = nil
   end
