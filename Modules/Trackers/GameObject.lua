@@ -45,7 +45,7 @@ local function ExtractModernGameObject(tooltipData)
   -- from another line (e.g. a requirement/description line).
   for i = 1, #lines do
     local line = lines[i]
-    if line and line.type == 2 then -- Enum.TooltipDataLineType.UnitName = 2
+    if line and line.type == Enum.TooltipDataLineType.UnitName then
       local text = SafeString(line.leftText)
       if text ~= "" then
         return text
@@ -81,6 +81,7 @@ local function RegisterTooltipDataProcessor()
   if modernTooltipProcessorRegistered then return end
   if not TooltipDataProcessor or not TooltipDataProcessor.AddTooltipPostCall then return end
   if not Enum or not Enum.TooltipDataType or not Enum.TooltipDataType.Object then return end
+  if not Enum.TooltipDataLineType then return end
 
   -- Register post-call for Object tooltip type (4)
   -- This fires after the tooltip data is prepared for game objects
