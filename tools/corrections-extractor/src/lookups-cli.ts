@@ -20,3 +20,9 @@ console.log(
 for (const skipped of meta.skippedFiles) {
   console.warn(`Skipped ${skipped.name}: ${skipped.error}`);
 }
+if (meta.duplicateSessions.length > 0) {
+  const fileCount = new Set(meta.duplicateSessions.map((duplicate) => duplicate.name)).size;
+  console.warn(
+    `Warning: skipped ${meta.duplicateSessions.length} duplicate session(s) in ${fileCount} trace file(s)`,
+  );
+}

@@ -51,6 +51,21 @@ describe("extractCorrections", () => {
     expect(meta.skippedFiles[0].name).toBe("broken.lua");
   });
 
+  it("should skip and report sessions already loaded from another trace file", () => {
+    const single = setupDirs();
+    copyFileSync(EXAMPLE_TRACE, join(single.traceDir, "a.lua"));
+    const { traceDir, outputDir } = setupDirs();
+    copyFileSync(EXAMPLE_TRACE, join(traceDir, "a.lua"));
+    copyFileSync(EXAMPLE_TRACE, join(traceDir, "b.lua"));
+
+    const singleMeta = extractCorrections(single.traceDir, single.outputDir, () => undefined);
+    const meta = extractCorrections(traceDir, outputDir, () => undefined);
+
+    expect(meta.sessionCount).toBe(singleMeta.sessionCount);
+    expect(meta.duplicateSessions.length).toBeGreaterThan(0);
+    expect(meta.duplicateSessions.every((d) => d.name === "b.lua" && d.firstName === "a.lua")).toBe(true);
+  });
+
   it("should throw when the trace directory does not exist", () => {
     const { traceDir, outputDir } = setupDirs();
     rmSync(traceDir, { recursive: true });
