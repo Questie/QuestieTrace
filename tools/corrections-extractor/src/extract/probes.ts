@@ -125,3 +125,8 @@ export function playerRaceAt(session: SessionRecord, t: number): string | null {
   if (!raw || typeof raw !== "object") return null;
   return asNonEmptyString((raw as Record<number, unknown>)[2]);
 }
+
+/** The first `GetServerTime()` sample of the session, i.e. the realm time around its start. */
+export function sessionServerTime(session: SessionRecord): number | null {
+  return asNumber(getStream(session, "GetServerTime")?.[0]?.v);
+}
