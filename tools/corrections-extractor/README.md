@@ -22,7 +22,7 @@ npm ci
 npm run extract
 ```
 
-Every `.lua` file in `../../Traces/` is loaded, processed and dropped again one at a time, so memory use does not grow with the size of the trace files. Files that fail to load are reported and skipped; the rest still runs.
+Every `.lua` file in `../../Traces/` is loaded, processed and dropped again one at a time, so memory use does not grow with the size of the trace files. Files that fail to load are reported and skipped; the rest still runs. A session found in more than one file (e.g. when a player exported again without confirming the previous export as reported) is only used once. The run prints a warning with the number of skipped sessions, and `meta.json` lists them with both file names.
 
 The results are written to `output/`:
 
@@ -32,7 +32,7 @@ The results are written to `output/`:
 | `foreverQuestTraces.lua` | Quest corrections |
 | `foreverItemTraces.lua` | Item corrections |
 | `foreverObjectTraces.lua` | Object corrections |
-| `meta.json` | `sessionCount`, `fileCount`, `skippedFiles` and `generatedAt` of the run |
+| `meta.json` | `sessionCount`, `fileCount`, `skippedFiles`, `duplicateSessions` and `generatedAt` of the run |
 
 The trace-analyzer's Extract tab shows these files for copy/download.
 

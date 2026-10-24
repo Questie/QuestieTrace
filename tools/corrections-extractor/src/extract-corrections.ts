@@ -22,17 +22,29 @@ export interface ExtractMeta {
   sessionCount: number;
   fileCount: number;
   skippedFiles: { name: string; error: string }[];
+  duplicateSessions: DuplicateSession[];
   generatedAt: string;
+}
+
+/** A session that was already loaded from another trace file, e.g. an in-progress session exported again once finished. */
+export interface DuplicateSession {
+  name: string;
+  firstName: string;
+  startedAtPrecise: number;
 }
 
 export interface FoldResult {
   loadedFileNames: string[];
   skippedFiles: ExtractMeta["skippedFiles"];
+  duplicateSessions: DuplicateSession[];
 }
 
 /**
  * Loads every trace file in `traceDir` one at a time and passes its sessions to `fold`.
  * `fold` must be all-or-nothing, so a skipped file contributes no data.
+ *
+ * A session that was already loaded from an earlier file (same `startedAtPrecise`) is
+ * skipped and reported, so it is not counted twice.
  */
 export function foldTraceFiles(
   traceDir: string,
@@ -51,6 +63,8 @@ export function foldTraceFiles(
 
   const loadedFileNames: string[] = [];
   const skippedFiles: ExtractMeta["skippedFiles"] = [];
+  const duplicateSessions: DuplicateSession[] = [];
+  const seenSessions = new Map<number, string>();
 
   fileNames.forEach((fileName, index) => {
     let sessions: SessionRecord[] | undefined;
@@ -60,8 +74,18 @@ export function foldTraceFiles(
       skippedFiles.push({ name: fileName, error: `Failed to load: ${String(e)}` });
     }
     if (sessions) {
+      const unique: SessionRecord[] = [];
+      for (const session of sessions) {
+        const firstName = seenSessions.get(session.startedAtPrecise);
+        if (firstName === undefined) {
+          unique.push(session);
+        } else {
+          duplicateSessions.push({ name: fileName, firstName, startedAtPrecise: session.startedAtPrecise });
+        }
+      }
       try {
-        fold(sessions);
+        fold(unique);
+        for (const session of unique) seenSessions.set(session.startedAtPrecise, fileName);
         loadedFileNames.push(fileName);
       } catch (e) {
         skippedFiles.push({ name: fileName, error: `Failed to extract: ${String(e)}` });
@@ -70,7 +94,7 @@ export function foldTraceFiles(
     log(`[${index + 1}/${fileNames.length}] ${fileName}`);
   });
 
-  return { loadedFileNames, skippedFiles };
+  return { loadedFileNames, skippedFiles, duplicateSessions };
 }
 
 export function extractCorrections(
@@ -79,7 +103,7 @@ export function extractCorrections(
   log: (message: string) => void = console.log,
 ): ExtractMeta {
   const acc = createAccumulator();
-  const { loadedFileNames, skippedFiles } = foldTraceFiles(traceDir, (sessions) => foldSessions(acc, sessions), log);
+  const { loadedFileNames, skippedFiles, duplicateSessions } = foldTraceFiles(traceDir, (sessions) => foldSessions(acc, sessions), log);
 
   const now = new Date();
   const bundle = finalize(acc, { sourceFileNames: loadedFileNames, now });
@@ -95,6 +119,7 @@ export function extractCorrections(
     sessionCount: acc.sessionCount,
     fileCount: loadedFileNames.length,
     skippedFiles,
+    duplicateSessions,
     generatedAt: now.toISOString(),
   };
   writeFileSync(join(outputDir, "meta.json"), JSON.stringify(meta, null, 2));
