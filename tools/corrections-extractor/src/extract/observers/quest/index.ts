@@ -12,3 +12,4 @@ export { observeTriggerEnd, mergeQuestTriggerEnds, type QuestTriggerEndValue } f
 export { observeStartedBy, mergeStartedBy } from "./startedBy";
 export { observeFinishedBy, mergeFinishedBy } from "./finishedBy";
 export { observeTurnInPoi, turnInPoiSpawns } from "./turnInPoi";
+export { observeReputationReward, mergeReputationReward } from "./reputationReward";

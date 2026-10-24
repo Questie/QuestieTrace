@@ -50,6 +50,7 @@ import { observeRequiredLevel } from './observers/quest';
 import { observeZoneOrSort } from './observers/quest';
 import { observeObjectives, mergeQuestObjectives, observeObjectiveCount, observeTriggerEnd, mergeQuestTriggerEnds } from './observers/quest';
 import { observeObjectivesText } from './observers/quest';
+import { observeReputationReward, mergeReputationReward } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 import {mergeRequiredLevel} from './observers/quest/requiredLevel';
 
@@ -133,6 +134,7 @@ const OBSERVERS = {
   triggerEnd: observeTriggerEnd,
   startedBy: observeStartedBy,
   finishedBy: observeFinishedBy,
+  reputationReward: observeReputationReward,
   turnInPoi: observeTurnInPoi,
   npcSpawns: observeNpcSpawns,
   npcZoneID: observeNpcZoneID,
@@ -226,10 +228,10 @@ function withAllObjectivesMatched(
 }
 
 /** Drops facts whose merge decided not to export a value. */
-function onlyStringFacts(facts: Map<number, Fact<string | undefined>>): Map<number, Fact<string>> {
-  const out = new Map<number, Fact<string>>();
+function onlyDefinedFacts<T>(facts: Map<number, Fact<T | undefined>>): Map<number, Fact<T>> {
+  const out = new Map<number, Fact<T>>();
   for (const [id, fact] of facts) {
-    if (typeof fact.value === "string") out.set(id, fact as Fact<string>);
+    if (fact.value !== undefined) out.set(id, fact as Fact<T>);
   }
   return out;
 }
@@ -276,6 +278,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
       mergeStartedBy,
     ),
     finishedBy: finishedByFacts,
+    reputationReward: onlyDefinedFacts(aggregateField(observations.reputationReward, mergeReputationReward)),
   });
 
   // Quest givers and enders stand still, so they get a single spawn per zone.
@@ -301,7 +304,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
       [...observations.npcZoneID, ...turnInSpawns.npcs],
       mergeNpcZoneID,
     ),
-    friendlyToFaction: onlyStringFacts(aggregateField(observations.npcFriendlyToFaction, mergeFriendlyToFaction)),
+    friendlyToFaction: onlyDefinedFacts(aggregateField(observations.npcFriendlyToFaction, mergeFriendlyToFaction)),
   });
   const itemRecords = emitItemRecords({
     name: aggregateScalarSummary(scalars.itemName),

@@ -4,6 +4,7 @@ import type { Fact } from "../aggregate";
 import type { QuestObjectivesValue } from "../observers/quest/objectives";
 import type { QuestObjectivesTextValue } from "../observers/quest/objectivesText";
 import type { QuestTriggerEndValue } from "../observers/quest/triggerEnd";
+import type { QuestReputationRewardValue } from "../observers/quest/reputationReward";
 import { emitRecords } from "./records";
 
 export interface QuestFacts {
@@ -17,6 +18,7 @@ export interface QuestFacts {
   triggerEnd: Map<number, Fact<QuestTriggerEndValue>>;
   startedBy: Map<number, Fact<{ creatures: number[]; objects: number[]; items: number[] }>>;
   finishedBy: Map<number, Fact<{ creatures: number[]; objects: number[] }>>;
+  reputationReward: Map<number, Fact<QuestReputationRewardValue>>;
 }
 
 export function emitQuestRecords(facts: QuestFacts): Map<number, Record<string, unknown>> {
