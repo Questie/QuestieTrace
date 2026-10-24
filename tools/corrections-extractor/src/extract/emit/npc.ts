@@ -16,6 +16,7 @@ export interface NpcFacts {
   maxLevel: Map<number, Fact<number>>;
   spawns: Map<number, Fact<Record<number, Array<[number, number]>>>>;
   zoneID: Map<number, Fact<number>>;
+  friendlyToFaction: Map<number, Fact<string>>;
 }
 
 export function emitNpcRecords(facts: NpcFacts): Map<number, Record<string, unknown>> {

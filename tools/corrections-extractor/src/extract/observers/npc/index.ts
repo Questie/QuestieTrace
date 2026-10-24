@@ -6,4 +6,5 @@ export { observeMinLevel } from "./minLevel";
 export { observeMaxLevel } from "./maxLevel";
 export { observeSpawns } from "./spawns";
 export { observeZoneID } from "./zoneID";
+export { observeFriendlyToFaction, mergeFriendlyToFaction } from "./friendlyToFaction";
 export { mergeSpawns, mergeZoneID } from "./spawnsMerge";

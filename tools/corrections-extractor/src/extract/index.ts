@@ -32,6 +32,8 @@ import {
   observeZoneID as observeNpcZoneID,
   mergeSpawns as mergeNpcSpawns,
   mergeZoneID as mergeNpcZoneID,
+  observeFriendlyToFaction,
+  mergeFriendlyToFaction,
 } from './observers/npc';
 import { observeName as observeNpcName } from "./observers/npc/name";
 import { invertQuestRelations, type QuestRelations } from "./questRelations";
@@ -134,6 +136,7 @@ const OBSERVERS = {
   turnInPoi: observeTurnInPoi,
   npcSpawns: observeNpcSpawns,
   npcZoneID: observeNpcZoneID,
+  npcFriendlyToFaction: observeFriendlyToFaction,
   npcDrops: observeNpcDrops,
   objectDrops: observeObjectDrops,
   objectSpawns: observeObjectSpawns,
@@ -222,6 +225,15 @@ function withAllObjectivesMatched(
   return complete;
 }
 
+/** Drops facts whose merge decided not to export a value. */
+function onlyStringFacts(facts: Map<number, Fact<string | undefined>>): Map<number, Fact<string>> {
+  const out = new Map<number, Fact<string>>();
+  for (const [id, fact] of facts) {
+    if (typeof fact.value === "string") out.set(id, fact as Fact<string>);
+  }
+  return out;
+}
+
 export function finalize(acc: ExtractAccumulator, options: ExtractOptions): FactBundle {
   const { scalars, observations } = acc;
 
@@ -289,6 +301,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
       [...observations.npcZoneID, ...turnInSpawns.npcs],
       mergeNpcZoneID,
     ),
+    friendlyToFaction: onlyStringFacts(aggregateField(observations.npcFriendlyToFaction, mergeFriendlyToFaction)),
   });
   const itemRecords = emitItemRecords({
     name: aggregateScalarSummary(scalars.itemName),
