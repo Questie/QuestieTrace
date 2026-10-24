@@ -143,13 +143,79 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     Core.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
   end)
 
-  it("should discard and restart the live session once reported", function()
+  it("should delete the saved live session once reported", function()
+    local liveSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
+    local savedRecord = { encoded = "LIVE" }
+    env.QuestieTraceCharacter = { sessions = {}, currentSession = liveSession }
+    local discardCalls, startCalls = 0, 0
+    Core.SaveCapture = function()
+      table.insert(env.QuestieTraceCharacter.sessions, savedRecord)
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.DiscardCapture = function() discardCalls = discardCalls + 1 end
+    Core.StartCapture = function()
+      startCalls = startCalls + 1
+      env.QuestieTraceCharacter.currentSession = { functions = {}, events = {} }
+    end
+
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.equal(0, #env.QuestieTraceCharacter.sessions)
+    assert.equal(0, discardCalls)
+    assert.equal(1, startCalls)
+  end)
+
+  it("should delete the saved live session once reported when saving pruned the oldest session", function()
+    local oldest, other = { encoded = "OLDEST" }, { encoded = "OTHER" }
+    local savedRecord = { encoded = "LIVE" }
+    env.QuestieTraceCharacter = {
+      sessions = { oldest, other },
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+    Core.SaveCapture = function()
+      table.insert(env.QuestieTraceCharacter.sessions, savedRecord)
+      table.remove(env.QuestieTraceCharacter.sessions, 1)
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function()
+      env.QuestieTraceCharacter.currentSession = { functions = {}, events = {} }
+    end
+
+    Core.ShowExportWindow()
+    Core.ConfirmExportReported()
+
+    assert.same({}, env.QuestieTraceCharacter.sessions)
+  end)
+
+  it("should not delete other sessions when saving the live session fails", function()
+    local other = { encoded = "OTHER" }
+    env.QuestieTraceCharacter = {
+      sessions = { other },
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+    Core.SaveCapture = function()
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function()
+      env.QuestieTraceCharacter.currentSession = { functions = {}, events = {} }
+    end
+
+    Core.ShowExportWindow()
+    local laterRecord = { encoded = "LATER" }
+    table.insert(env.QuestieTraceCharacter.sessions, laterRecord)
+    Core.ConfirmExportReported()
+
+    assert.same({ laterRecord }, env.QuestieTraceCharacter.sessions)
+  end)
+
+  it("should discard and restart the live session once reported when it was not rotated", function()
     env.QuestieTraceCharacter = {
       sessions = {},
       currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
     }
-    local saveCalls, discardCalls, startCalls = 0, 0, 0
-    Core.SaveCapture = function() saveCalls = saveCalls + 1 end
+    local discardCalls, startCalls = 0, 0
+    Core.SaveCapture = function() end
     Core.DiscardCapture = function()
       discardCalls = discardCalls + 1
       env.QuestieTraceCharacter.currentSession = nil
@@ -159,9 +225,27 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     Core.ShowExportWindow()
     Core.ConfirmExportReported()
 
-    assert.equal(1, saveCalls)
     assert.equal(1, discardCalls)
     assert.equal(2, startCalls)
+  end)
+
+  it("should keep sessions saved after the export window was opened", function()
+    local liveSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
+    env.QuestieTraceCharacter = { sessions = {}, currentSession = liveSession }
+    Core.SaveCapture = function()
+      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function()
+      env.QuestieTraceCharacter.currentSession = { functions = {}, events = {} }
+    end
+
+    Core.ShowExportWindow()
+    local laterRecord = { encoded = "LATER" }
+    table.insert(env.QuestieTraceCharacter.sessions, laterRecord)
+    Core.ConfirmExportReported()
+
+    assert.same({ laterRecord }, env.QuestieTraceCharacter.sessions)
   end)
 end)
 

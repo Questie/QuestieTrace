@@ -207,12 +207,11 @@ end
 --- session rather than one that no longer exists.
 ---
 --- Note: Core.ShowExportWindow() already rotates the live session when encoding
---- succeeds, so the live session at deletion time is typically a fresh one that
---- was started after the payload snapshot. The equality check at line 225
---- (session == liveSession) will typically fail for the old session in the
---- payload, so DiscardCapture() is usually not called again here. This is
---- correct: the new live session has fresh events and should be preserved.
---- The check still exists for safety, in case rotation was skipped or failed.
+--- succeeds: it saves the live session and replaces it in `sourceSessions` with
+--- the saved record, so that record is deleted here like any other saved
+--- session. The live session at deletion time is then a fresh one started
+--- after the payload snapshot, and DiscardCapture() is usually not called. The
+--- live-session check still exists for safety, in case rotation was skipped or failed.
 ---@param sourceSessions SessionRecord[] Second return value of Core.BuildExportPayload()
 function Core.DeleteReportedSessions(sourceSessions)
   if type(sourceSessions) ~= "table" then return end
