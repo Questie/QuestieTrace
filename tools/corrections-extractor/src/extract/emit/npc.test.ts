@@ -14,22 +14,25 @@ describe("emitNpcRecords", () => {
       maxLevel: new Map(),
       spawns: new Map(),
       zoneID: new Map(),
+      friendlyToFaction: new Map(),
     });
     expect(records.get(823)).toEqual({ name: "Deputy Willem", minLevel: 18 });
   });
 
-  it("should include spawns and zoneID when present", () => {
+  it("should include spawns, zoneID and friendlyToFaction when present", () => {
     const records = emitNpcRecords({
       name: new Map([[823, fact(823, "Old Murk-Eye")]]),
       minLevel: new Map(),
       maxLevel: new Map(),
       spawns: new Map([[823, fact(823, { 40: [[30.01, 86.02]] })]]),
       zoneID: new Map([[823, fact(823, 40)]]),
+      friendlyToFaction: new Map([[823, fact(823, "AH")]]),
     });
     expect(records.get(823)).toEqual({
       name: "Old Murk-Eye",
       spawns: { 40: [[30.01, 86.02]] },
       zoneID: 40,
+      friendlyToFaction: "AH",
     });
   });
 
@@ -40,6 +43,7 @@ describe("emitNpcRecords", () => {
       maxLevel: new Map(),
       spawns: new Map(),
       zoneID: new Map(),
+      friendlyToFaction: new Map(),
     });
     expect([...records.keys()].sort()).toEqual([1, 2]);
     expect(records.get(1)).toEqual({ name: "Only Named" });
@@ -53,6 +57,7 @@ describe("emitNpcRecords", () => {
       maxLevel: new Map(),
       spawns: new Map(),
       zoneID: new Map(),
+      friendlyToFaction: new Map(),
     });
     expect(records.size).toBe(0);
   });
