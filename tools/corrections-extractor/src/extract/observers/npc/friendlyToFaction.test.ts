@@ -6,10 +6,16 @@ import { mergeFriendlyToFaction, observeFriendlyToFaction, type FactionReactionV
 const ALLIANCE = { n: 2, 1: "Alliance", 2: "Alliance" };
 const HORDE = { n: 2, 1: "Horde", 2: "Horde" };
 
-function vote(entityId: number, sessionKey: number, faction: "A" | "H", friendly: boolean): Observation<FactionReactionValue> {
+function vote(
+  entityId: number,
+  sessionKey: number,
+  faction: "A" | "H",
+  friendly: boolean,
+  sessionTime: number | null = sessionKey * 1000,
+): Observation<FactionReactionValue> {
   return {
     entityId,
-    value: { faction, friendly },
+    value: { faction, friendly, sessionTime },
     confidence: "high",
     provenance: { session: `s${sessionKey}`, sessionKey, t: 0 },
   };
@@ -26,7 +32,7 @@ describe("observeFriendlyToFaction", () => {
     expect(observeFriendlyToFaction(session)).toEqual([
       {
         entityId: 200001,
-        value: { faction: "A", friendly: true },
+        value: { faction: "A", friendly: true, sessionTime: null },
         confidence: "high",
         provenance: { session: "test-session", t: 5 },
       },
@@ -44,8 +50,8 @@ describe("observeFriendlyToFaction", () => {
     );
 
     expect(observeFriendlyToFaction(session).map((obs) => [obs.entityId, obs.value])).toEqual([
-      [200001, { faction: "H", friendly: false }],
-      [200002, { faction: "H", friendly: false }],
+      [200001, { faction: "H", friendly: false, sessionTime: null }],
+      [200002, { faction: "H", friendly: false, sessionTime: null }],
     ]);
   });
 
@@ -98,6 +104,17 @@ describe("observeFriendlyToFaction", () => {
     expect(observeFriendlyToFaction(session)).toHaveLength(1);
   });
 
+  it("should record the first server time of the session", () => {
+    const session = makeSession({
+      GetServerTime: [apiSample(0, 0, 1790000000), apiSample(50, 50, 1790000050)],
+      UnitFactionGroup: { player: [apiSample(0, 0, ALLIANCE)] },
+      UnitGUID: { target: [apiSample(5, 5, creatureGuid(200001))] },
+      UnitReaction: { player: { target: [apiSample(5, 5, 4)] } },
+    });
+
+    expect(observeFriendlyToFaction(session).map((obs) => obs.value.sessionTime)).toEqual([1790000000]);
+  });
+
   it("should skip encounters without a known player faction", () => {
     const session = makeSession({
       UnitGUID: { target: [apiSample(5, 5, creatureGuid(200001))] },
@@ -145,6 +162,105 @@ describe("mergeFriendlyToFaction", () => {
         vote(1, 5, "A", false),
         vote(1, 3, "H", true),
         vote(1, 4, "H", true),
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("should use the newer reaction when sessions switch once over time", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "A", false),
+        vote(1, 2, "A", true),
+        vote(1, 3, "A", true),
+        vote(1, 4, "H", true),
+        vote(1, 5, "H", true),
+      ]),
+    ).toBe("AH");
+  });
+
+  it("should decide without server times when all sessions agree", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "A", true, null),
+        vote(1, 2, "A", true, null),
+        vote(1, 3, "H", true, null),
+        vote(1, 4, "H", true, null),
+      ]),
+    ).toBe("AH");
+  });
+
+  it("should return undefined when the switch happens between sessions with the same server time", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "A", false, 1000),
+        vote(1, 2, "A", true, 1000),
+        vote(1, 3, "A", true, 2000),
+        vote(1, 4, "H", true),
+        vote(1, 5, "H", true),
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("should order sessions by server time rather than by session key", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "H", true, 4000),
+        vote(1, 2, "H", true, 3000),
+        vote(1, 3, "H", false, 2000),
+        vote(1, 4, "H", false, 1000),
+        vote(1, 5, "A", true),
+        vote(1, 6, "A", true),
+      ]),
+    ).toBe("AH");
+  });
+
+  it("should return undefined when the newer reaction was seen in only one session", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "A", false),
+        vote(1, 2, "A", false),
+        vote(1, 3, "A", true),
+        vote(1, 4, "H", true),
+        vote(1, 5, "H", true),
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("should return undefined when sessions switch more than once over time", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "A", true),
+        vote(1, 2, "A", false),
+        vote(1, 3, "A", true),
+        vote(1, 4, "A", true),
+        vote(1, 5, "H", true),
+        vote(1, 6, "H", true),
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("should return undefined when disagreeing sessions have no server time", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "A", false, null),
+        vote(1, 2, "A", true),
+        vote(1, 3, "A", true),
+        vote(1, 4, "H", true),
+        vote(1, 5, "H", true),
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("should return undefined when one session saw both reactions", () => {
+    expect(
+      mergeFriendlyToFaction([
+        vote(1, 1, "A", false),
+        vote(1, 2, "A", true),
+        vote(1, 2, "A", false),
+        vote(1, 3, "A", true),
+        vote(1, 4, "A", true),
+        vote(1, 5, "H", true),
+        vote(1, 6, "H", true),
       ]),
     ).toBeUndefined();
   });
