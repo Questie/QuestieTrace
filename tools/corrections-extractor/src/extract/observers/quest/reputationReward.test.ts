@@ -4,7 +4,7 @@ import { apiSample, makeSession, traceEvent } from "../../../test/fixtures";
 import {
   mergeReputationReward,
   observeReputationReward,
-  withoutSpillover,
+  splitSpillover,
   type ReputationTurnInValue,
 } from "./reputationReward";
 
@@ -37,10 +37,15 @@ function turnIn(t: number, questID: number) {
   return traceEvent("QUEST_TURNED_IN", t, t, questID, 0, 0);
 }
 
-function vote(sessionKey: number, playerFaction: "A" | "H", gains: Record<number, number>): Observation<ReputationTurnInValue> {
+function vote(
+  sessionKey: number,
+  playerFaction: "A" | "H",
+  gains: Record<number, number>,
+  spillover: Record<number, number> = {},
+): Observation<ReputationTurnInValue> {
   return {
     entityId: 1,
-    value: { playerFaction, gains },
+    value: { playerFaction, gains, spillover },
     confidence: "high",
     provenance: { session: `s${sessionKey}`, sessionKey, t: 0 },
   };
@@ -59,14 +64,14 @@ describe("observeReputationReward", () => {
     expect(observations).toEqual([
       {
         entityId: 99001,
-        value: { playerFaction: "H", gains: { 68: 100, 87: -25 } },
+        value: { playerFaction: "H", gains: { 68: 100, 87: -25 }, spillover: {} },
         confidence: "high",
         provenance: { session: "test-session", t: 10 },
       },
     ]);
   });
 
-  it("should drop spillover gains", () => {
+  it("should split off spillover gains", () => {
     const observations = observeReputationReward(
       session([
         turnIn(10, 99001),
@@ -75,7 +80,7 @@ describe("observeReputationReward", () => {
       ]),
     );
 
-    expect(observations.map((obs) => obs.value.gains)).toEqual([{ 68: 100 }]);
+    expect(observations.map((obs) => obs.value)).toEqual([{ playerFaction: "H", gains: { 68: 100 }, spillover: { 76: 68 } }]);
   });
 
   it("should ignore messages outside the turn-in window", () => {
@@ -127,13 +132,21 @@ describe("observeReputationReward", () => {
   });
 });
 
-describe("withoutSpillover", () => {
+describe("splitSpillover", () => {
   it("should keep gains that are not a quarter of another gain", () => {
-    expect(withoutSpillover({ 68: 100, 76: 50 })).toEqual({ 68: 100, 76: 50 });
+    expect(splitSpillover({ 68: 100, 76: 50 })).toEqual({ gains: { 68: 100, 76: 50 }, spillover: {} });
   });
 
-  it("should drop gains rounded either way from a quarter of another gain", () => {
-    expect(withoutSpillover({ 69: 75, 47: 18, 54: 19 })).toEqual({ 69: 75 });
+  it("should split off gains rounded either way from a quarter of another gain", () => {
+    expect(splitSpillover({ 69: 75, 47: 18, 54: 19 })).toEqual({ gains: { 69: 75 }, spillover: { 47: 69, 54: 69 } });
+  });
+
+  it("should pick the largest matching gain as the spillover source", () => {
+    expect(splitSpillover({ 68: 96, 69: 100, 47: 25 })).toEqual({ gains: { 68: 96, 69: 100 }, spillover: { 47: 69 } });
+  });
+
+  it("should not treat a gain in the other direction as spillover", () => {
+    expect(splitSpillover({ 68: 100, 87: -25 })).toEqual({ gains: { 68: 100, 87: -25 }, spillover: {} });
   });
 });
 
@@ -185,6 +198,50 @@ describe("mergeReputationReward", () => {
     expect(
       mergeReputationReward([vote(1, "A", { 59: 75 }), vote(2, "A", { 59: 75 }), vote(3, "H", { 59: 75 }), vote(4, "H", { 59: 75 })]),
     ).toEqual([[59, 75]]);
+  });
+
+  it("should add spillover as a rounded quarter of its decided source reward", () => {
+    expect(
+      mergeReputationReward([
+        vote(1, "A", { 69: 75 }, { 47: 69, 54: 69 }),
+        vote(2, "A", { 69: 75 }, { 47: 69, 54: 69 }),
+        vote(3, "A", { 69: 75 }, { 47: 69 }),
+      ]),
+    ).toEqual([
+      [47, 19],
+      [54, 19],
+      [69, 75],
+    ]);
+  });
+
+  it("should keep the sign of negative spillover", () => {
+    expect(mergeReputationReward([vote(1, "H", { 87: -150 }, { 21: 87 }), vote(2, "H", { 87: -150 }, { 21: 87 })])).toEqual([
+      [21, -38],
+      [87, -150],
+    ]);
+  });
+
+  it("should prefer a decided base reward over spillover for the same faction", () => {
+    expect(
+      mergeReputationReward([
+        vote(1, "A", { 69: 100, 47: 25 }),
+        vote(2, "A", { 69: 100, 47: 25 }),
+        vote(3, "A", { 69: 100 }, { 47: 69 }),
+      ]),
+    ).toEqual([
+      [47, 25],
+      [69, 100],
+    ]);
+  });
+
+  it("should drop spillover seen in only one session", () => {
+    expect(mergeReputationReward([vote(1, "A", { 69: 100 }, { 47: 69 }), vote(2, "A", { 69: 100 })])).toEqual([[69, 100]]);
+  });
+
+  it("should drop spillover whose source reward was not decided", () => {
+    expect(
+      mergeReputationReward([vote(1, "A", { 69: 100 }, { 47: 69 }), vote(2, "A", { 69: 50 }, { 47: 69 })]),
+    ).toBeUndefined();
   });
 
   it("should sort rewards by faction id", () => {
