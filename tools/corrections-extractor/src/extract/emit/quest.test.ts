@@ -18,6 +18,7 @@ describe("emitQuestRecords", () => {
       triggerEnd: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
+      reputationReward: new Map(),
     });
     expect(records.get(96659)).toEqual({ name: "A Threat Within" });
   });
@@ -33,6 +34,7 @@ describe("emitQuestRecords", () => {
       triggerEnd: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
+      reputationReward: new Map(),
     });
     expect(records.size).toBe(0);
   });
@@ -48,6 +50,7 @@ describe("emitQuestRecords", () => {
       triggerEnd: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
+      reputationReward: new Map(),
     });
     // requiredLevel should be clamped to questLevel (30)
     expect(records.get(96659)).toEqual({
@@ -68,6 +71,7 @@ describe("emitQuestRecords", () => {
       triggerEnd: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
+      reputationReward: new Map(),
     });
     // requiredLevel should remain as-is (30)
     expect(records.get(96659)).toEqual({
@@ -88,6 +92,7 @@ describe("emitQuestRecords", () => {
       triggerEnd: new Map(),
       startedBy: new Map(),
       finishedBy: new Map(),
+      reputationReward: new Map(),
     });
     // requiredLevel should remain as-is when no questLevel to compare against
     expect(records.get(96659)).toEqual({
