@@ -20,7 +20,8 @@
 // exported, since nil is Questie's default and corrections cannot express it.
 
 import { getStream, valueAt } from "../../../core/emulator";
-import type { FunctionStreamEntry, SessionRecord } from "../../../core/types";
+import type { FunctionStreamEntry } from "../../../core/types";
+import { playerFactionAt } from "../../probes";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 import { guidEncounters } from "../_guidEncounters";
 
@@ -35,14 +36,6 @@ const MIN_SESSIONS_PER_FACTION = 2;
 const FRIENDLY_REACTION_MIN = 4;
 const REACTION_TOKENS = ["target", "mouseover"] as const;
 const REACTION_SAMPLE_EVENTS = new Set(["PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT"]);
-
-function playerFactionAt(session: SessionRecord, t: number): Faction | null {
-  const raw = valueAt(getStream(session, "UnitFactionGroup", "player") ?? [], t) as Record<number, unknown> | undefined;
-  const faction = raw && typeof raw === "object" ? raw[1] : raw;
-  if (faction === "Alliance") return "A";
-  if (faction === "Horde") return "H";
-  return null;
-}
 
 function reactionAt(stream: FunctionStreamEntry[], sampleTimes: Set<number>, t: number): number | null {
   if (!sampleTimes.has(t)) return null;
