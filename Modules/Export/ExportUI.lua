@@ -207,8 +207,24 @@ function Core.ShowExportWindow()
       -- would otherwise increment the counter past the watermark.
       local liveSession = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter.currentSession or nil
       if liveSession then
+        local savedSessions = QuestieTraceCharacter.sessions
+        local lastBefore = type(savedSessions) == "table" and savedSessions[#savedSessions] or nil
         Core.SaveCapture()
+
+        -- SaveCapture appends the live session as a new record (and may prune
+        -- the oldest one). Confirming must delete that record, or the session
+        -- is exported again next time.
+        savedSessions = QuestieTraceCharacter.sessions
+        local lastAfter = type(savedSessions) == "table" and savedSessions[#savedSessions] or nil
+        local savedRecord = lastAfter ~= lastBefore and lastAfter or nil
         Core.StartCapture()
+        if savedRecord then
+          for i = 1, #sourceSessions do
+            if sourceSessions[i] == liveSession then
+              sourceSessions[i] = savedRecord
+            end
+          end
+        end
       end
 
       pendingSourceSessions = sourceSessions
