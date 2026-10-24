@@ -109,3 +109,19 @@ export function questInfoTitleAt(session: SessionRecord, questID: number, t: num
 export function getLocaleAt(session: SessionRecord, t: number): string | null {
   return asNonEmptyString(valueAt(getStream(session, "GetLocale", "player") ?? [], t));
 }
+
+/** `UnitFactionGroup("player")` at or before time `t` as Questie's "A"/"H", or null (e.g. unfactioned). */
+export function playerFactionAt(session: SessionRecord, t: number): "A" | "H" | null {
+  const raw = valueAt(getStream(session, "UnitFactionGroup", "player") ?? [], t);
+  const faction = raw && typeof raw === "object" ? (raw as Record<number, unknown>)[1] : raw;
+  if (faction === "Alliance") return "A";
+  if (faction === "Horde") return "H";
+  return null;
+}
+
+/** The locale-independent race file name of `UnitRace("player")` at or before time `t`, e.g. "Human". */
+export function playerRaceAt(session: SessionRecord, t: number): string | null {
+  const raw = valueAt(getStream(session, "UnitRace", "player") ?? [], t);
+  if (!raw || typeof raw !== "object") return null;
+  return asNonEmptyString((raw as Record<number, unknown>)[2]);
+}
