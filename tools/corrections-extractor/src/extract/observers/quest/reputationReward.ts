@@ -13,9 +13,12 @@
 // Gains are changed by things the trace cannot see in full, so observations are
 // filtered and merged strictly:
 // - Human sessions, and sessions without a known race, are skipped (Diplomacy adds 10%).
-// - Spillover (25% of another faction's gain, rounded either way) is dropped,
-//   matching Questie's convention of listing base rewards only. A quest that really
-//   rewards a quarter of another reward loses that part; this is accepted.
+// - Spillover (25% of another faction's gain, rounded either way) is randomly
+//   rounded by the game, so it is not merged by amount. A spillover faction is kept
+//   when it passes the presence and session checks below and spills over from the
+//   same decided reward in at least MIN_AMOUNT_SHARE of its turn-ins; its amount is
+//   that reward / 4, rounded. A quest that really rewards a quarter of another
+//   reward is treated as spillover too, which gives the same result.
 // - A faction is kept when it shows up in at least half of the quest's turn-ins with
 //   reputation, in at least MIN_SESSIONS sessions, and one amount covers at least
 //   MIN_AMOUNT_SHARE of those sessions (rested/event bonuses change some of them).
@@ -34,8 +37,10 @@ export type QuestReputationRewardValue = Array<[number, number]>;
 
 export interface ReputationTurnInValue {
   playerFaction: "A" | "H";
-  /** factionID -> reputation change, spillover already removed. */
+  /** factionID -> reputation change, without spillover. */
   gains: Record<number, number>;
+  /** factionID -> factionID of the gain it spilled over from. */
+  spillover: Record<number, number>;
 }
 
 const MESSAGE_WINDOW = 0.5;
@@ -67,20 +72,28 @@ function factionIdsByName(session: SessionRecord): Map<string, number> {
   return ids;
 }
 
-/** Drops gains that are a spillover of a larger gain in the same direction from the same turn-in. */
-export function withoutSpillover(gains: Record<number, number>): Record<number, number> {
-  const amounts = Object.values(gains);
-  const result: Record<number, number> = {};
-  for (const [factionID, amount] of Object.entries(gains)) {
-    const isSpillover = amounts.some(
-      (other) =>
-        Math.sign(other) === Math.sign(amount) &&
-        Math.abs(other) > Math.abs(amount) &&
-        Math.abs(amount - other / SPILLOVER_RATIO) <= SPILLOVER_TOLERANCE,
-    );
-    if (!isSpillover) result[Number(factionID)] = amount;
+/** Splits off gains that are a spillover of a larger gain in the same direction from the same turn-in. The largest matching gain is the source. */
+export function splitSpillover(allGains: Record<number, number>): Pick<ReputationTurnInValue, "gains" | "spillover"> {
+  const entries = Object.entries(allGains).map(([factionID, amount]) => [Number(factionID), amount] as const);
+  const gains: Record<number, number> = {};
+  const spillover: Record<number, number> = {};
+  for (const [factionID, amount] of entries) {
+    const source = entries
+      .filter(
+        ([, other]) =>
+          Math.sign(other) === Math.sign(amount) &&
+          Math.abs(other) > Math.abs(amount) &&
+          Math.abs(amount - other / SPILLOVER_RATIO) <= SPILLOVER_TOLERANCE,
+      )
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+    if (source) spillover[factionID] = source[0];
+    else gains[factionID] = amount;
   }
-  return result;
+  return { gains, spillover };
+}
+
+function spilloverAmount(amount: number): number {
+  return Math.sign(amount) * Math.round(Math.abs(amount) / SPILLOVER_RATIO);
 }
 
 function turnInQuestId(args: unknown): number | null {
@@ -129,7 +142,7 @@ export const observeReputationReward: FieldObserver<ReputationTurnInValue> = (se
 
     observations.push({
       entityId: questID,
-      value: { playerFaction, gains: withoutSpillover(gains) },
+      value: { playerFaction, ...splitSpillover(gains) },
       confidence: "high",
       provenance: { session: sessionLabel(session), t: turnIn.t },
     });
@@ -162,6 +175,32 @@ function mergeForPlayerFaction(observations: Observation<ReputationTurnInValue>[
     const [amount, sessions] = [...amounts.entries()].sort((a, b) => b[1].size - a[1].size)[0];
     if (sessions.size < MIN_SESSIONS || sessions.size < allSessions.size * MIN_AMOUNT_SHARE) continue;
     rewards.push([factionID, amount]);
+  }
+
+  const decided = new Map(rewards);
+  const spilloverSources = new Map<number, Map<number, number>>();
+  const spilloverSessions = new Map<number, Set<number | string>>();
+  for (const obs of observations) {
+    const session = obs.provenance.sessionKey ?? obs.provenance.session;
+    for (const [key, source] of Object.entries(obs.value.spillover)) {
+      const factionID = Number(key);
+      const sources = spilloverSources.get(factionID) ?? new Map<number, number>();
+      sources.set(source, (sources.get(source) ?? 0) + 1);
+      spilloverSources.set(factionID, sources);
+      const sessions = spilloverSessions.get(factionID) ?? new Set<number | string>();
+      sessions.add(session);
+      spilloverSessions.set(factionID, sessions);
+    }
+  }
+  for (const [factionID, sources] of spilloverSources) {
+    if (decided.has(factionID)) continue;
+    const turnIns = [...sources.values()].reduce((sum, count) => sum + count, 0);
+    if (turnIns < observations.length * MIN_PRESENCE_SHARE) continue;
+    if ((spilloverSessions.get(factionID)?.size ?? 0) < MIN_SESSIONS) continue;
+    const [source, count] = [...sources.entries()].sort((a, b) => b[1] - a[1])[0];
+    const sourceAmount = decided.get(source);
+    if (sourceAmount === undefined || count < turnIns * MIN_AMOUNT_SHARE) continue;
+    rewards.push([factionID, spilloverAmount(sourceAmount)]);
   }
   if (rewards.length === 0) return undefined;
   return rewards.sort((a, b) => a[0] - b[0]);
