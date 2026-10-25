@@ -64,7 +64,8 @@ function getQuestieFieldName(fieldName: string): string {
   return QUESTIE_FIELD_MAP[fieldName] ?? fieldName;
 }
 
-/** Set of field names to exclude from export. Internal field names. */
+/** Set of field names to exclude from export. Internal field names.
+ * We exclude these for now as the little data we have might generate too many incorrect entries. */
 const EXPORT_EXCLUDED_FIELDS: Set<string> = new Set([
   "requiredLevel",
   "zoneOrSort",
