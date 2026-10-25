@@ -6,13 +6,8 @@
 // friendly when UnitReaction("player", npc) is 4 (neutral) or higher.
 //
 // Source: UnitReaction["player"][token] from Modules/Trackers/UnitState.lua, paired
-// with UnitGUID[token] for the "target" and "mouseover" tokens. Both streams are only
-// written on change, so a reaction is only trusted at a GUID sample when it was
-// recorded at the same time, or when PLAYER_TARGET_CHANGED/UPDATE_MOUSEOVER_UNIT fired
-// at that time (UnitState samples every token on both, so the last value is still
-// current). Other GUID samples (quest/merchant/loot events) are not paired with a
-// reaction. A failed UnitReaction call at such an event would leave the previous
-// unit's value in place; the strict merge below is what guards against that.
+// with the NPC's GUID (see _unitState.ts). A wrong pairing is possible; the strict
+// merge below is what guards against that.
 //
 // The merge is strict: a faction is only decided when at least
 // MIN_SESSIONS_PER_FACTION sessions agree and no session disagrees, and a value is
@@ -24,11 +19,9 @@
 // without a server time) leaves the faction undecided. NPCs hostile to both are not
 // exported, since nil is Questie's default and corrections cannot express it.
 
-import { getStream, valueAt } from "../../../core/emulator";
-import type { FunctionStreamEntry } from "../../../core/types";
 import { playerFactionAt, sessionServerTime } from "../../probes";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
-import { guidEncounters } from "../_guidEncounters";
+import { unitStateEncounters } from "./_unitState";
 
 export type Faction = "A" | "H";
 
@@ -41,39 +34,25 @@ export interface FactionReactionValue {
 
 const MIN_SESSIONS_PER_FACTION = 2;
 const FRIENDLY_REACTION_MIN = 4;
-const REACTION_TOKENS = ["target", "mouseover"] as const;
-const REACTION_SAMPLE_EVENTS = new Set(["PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT"]);
-
-function reactionAt(stream: FunctionStreamEntry[], sampleTimes: Set<number>, t: number): number | null {
-  if (!sampleTimes.has(t)) return null;
-  const reaction = valueAt(stream, t);
-  return typeof reaction === "number" ? reaction : null;
-}
 
 export const observeFriendlyToFaction: FieldObserver<FactionReactionValue> = (session) => {
   const observations: Observation<FactionReactionValue>[] = [];
   const seen = new Set<string>();
   const sessionTime = sessionServerTime(session);
-  const sampleEventTimes = session.events.filter((event) => REACTION_SAMPLE_EVENTS.has(event.e)).map((event) => event.t);
-  for (const token of REACTION_TOKENS) {
-    const stream = getStream(session, "UnitReaction", "player", token) ?? [];
-    const sampleTimes = new Set([...sampleEventTimes, ...stream.map((entry) => entry.t)]);
-    for (const encounter of guidEncounters(session, "npc", [token])) {
-      const faction = playerFactionAt(session, encounter.t);
-      if (!faction) continue;
-      const reaction = reactionAt(stream, sampleTimes, encounter.t);
-      if (reaction === null) continue;
-      const friendly = reaction >= FRIENDLY_REACTION_MIN;
-      const key = `${encounter.entityId}:${faction}:${friendly}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      observations.push({
-        entityId: encounter.entityId,
-        value: { faction, friendly, sessionTime },
-        confidence: "high",
-        provenance: { session: sessionLabel(session), t: encounter.t },
-      });
-    }
+  for (const encounter of unitStateEncounters(session, "UnitReaction", "player")) {
+    const faction = playerFactionAt(session, encounter.t);
+    if (!faction) continue;
+    if (typeof encounter.value !== "number") continue;
+    const friendly = encounter.value >= FRIENDLY_REACTION_MIN;
+    const key = `${encounter.npcID}:${faction}:${friendly}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    observations.push({
+      entityId: encounter.npcID,
+      value: { faction, friendly, sessionTime },
+      confidence: "high",
+      provenance: { session: sessionLabel(session), t: encounter.t },
+    });
   }
   return observations;
 };
