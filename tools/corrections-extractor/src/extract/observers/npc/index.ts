@@ -2,8 +2,7 @@
 // convenient bulk import by the extract pipeline.
 
 export { observeName } from "./name";
-export { observeMinLevel } from "./minLevel";
-export { observeMaxLevel } from "./maxLevel";
+export { observeLevel, mergeLevelRange } from "./level";
 export { observeSpawns } from "./spawns";
 export { observeZoneID } from "./zoneID";
 export { observeFriendlyToFaction, mergeFriendlyToFaction } from "./friendlyToFaction";
