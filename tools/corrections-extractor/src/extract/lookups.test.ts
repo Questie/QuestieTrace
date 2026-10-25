@@ -14,8 +14,9 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
   };
 }
 
-function itemSession(locale: string, link: string, interfaceVersion = 16001): SessionRecord {
+function itemSession(locale: string, link: string, interfaceVersion = 16001, serverTime?: number): SessionRecord {
   return makeSession({
+    ...(serverTime === undefined ? {} : { GetServerTime: [{ t: 0, tp: 0, v: serverTime }] }),
     GetBuildInfo: { player: [{ t: 0, tp: 0, v: interfaceVersion }] },
     GetLocale: { player: [{ t: 0, tp: 0, v: locale }] },
     GetLootSlotLink: { 1: [{ t: 1, tp: 1, v: link }] },
@@ -32,6 +33,20 @@ function run(sessions: SessionRecord[]) {
 }
 
 describe("finalizeLookups", () => {
+  it("should write the item name of the newest sessions", () => {
+    const renamed = "|cffffffff|Hitem:30000::::::::1:::::::|h[Neues Schwert]|h|r";
+    const bundle = run([
+      itemSession("deDE", ITEM_LINK_DE, 16001, 1000),
+      itemSession("deDE", ITEM_LINK_DE, 16001, 2000),
+      itemSession("deDE", ITEM_LINK_DE, 16001, 3000),
+      itemSession("deDE", renamed, 16001, 4000),
+      itemSession("deDE", renamed, 16001, 5000),
+    ]);
+
+    expect(bundle.lookupItems.deDE).toContain('"Neues Schwert"');
+    expect(bundle.lookupItems.deDE).not.toContain('"Schwert"');
+  });
+
   it("should write one item lookup per non-enUS locale", () => {
     const bundle = run([itemSession("deDE", ITEM_LINK_DE), itemSession("frFR", ITEM_LINK_FR)]);
 

@@ -11,6 +11,8 @@ export interface Provenance {
   session: string;
   /** Unique per folded session (names may repeat or be absent); set by foldSessions. */
   sessionKey?: number;
+  /** First GetServerTime() of the session, used to order sessions; set by foldSessions, null when not recorded. */
+  sessionTime?: number | null;
   /** Time (seconds) within the session at which this value was observed. */
   t: number;
 }

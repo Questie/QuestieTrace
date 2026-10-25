@@ -4,13 +4,14 @@
 // (see index.ts). enUS is skipped: its names already go into forever*Traces.lua.
 
 import type { SessionRecord } from "../core/types";
-import { addToScalarSummary, aggregateScalarSummary, type ScalarSummary } from "./aggregate";
+import { addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarSummary } from "./aggregate";
 import { isForeverSession, MAX_IDS } from "./index";
 import type { Localized, Observation } from "./observation";
 import { observeLocalizedName as observeItemName } from "./observers/item/name";
 import { observeLocalizedName as observeNpcName } from "./observers/npc/name";
 import { observeLocalizedName as observeObjectName } from "./observers/object/name";
 import { observeLocalizedName as observeQuestName, observeLocalizedObjectivesText } from "./observers/quest";
+import { sessionServerTime } from "./probes";
 import { writeLookupLua } from "./schema/lookup-writer";
 
 const SKIPPED_LOCALE = "enUS";
@@ -24,6 +25,9 @@ const OBSERVERS = {
 };
 
 type ObserverKey = keyof typeof OBSERVERS;
+
+/** Names can change over time (e.g. a renamed NPC), so the newest one wins. */
+const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName", "objectName"]);
 
 /** Per field, a scalar summary per locale. */
 export interface LookupAccumulator {
@@ -56,13 +60,18 @@ function addLocalized(byLocale: Map<string, ScalarSummary<unknown>>, observation
 
 /** All observers run before anything is added, so a throwing observer leaves `acc` untouched. */
 export function foldLookupSessions(acc: LookupAccumulator, sessions: SessionRecord[]): void {
-  const staged = sessions
-    .filter(isForeverSession)
-    .map((session) => (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session)] as const));
+  const staged = sessions.filter(isForeverSession).map((session) => ({
+    sessionTime: sessionServerTime(session),
+    observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session)] as const),
+  }));
 
   for (const session of staged) {
     acc.sessionCount++;
-    for (const [key, observations] of session) {
+    for (const [key, observations] of session.observations) {
+      for (const observation of observations) {
+        observation.provenance.sessionKey = acc.sessionCount;
+        observation.provenance.sessionTime = session.sessionTime;
+      }
       addLocalized(acc.summaries[key], observations);
     }
   }
@@ -75,7 +84,8 @@ export function finalizeLookups(acc: LookupAccumulator): LookupBundle {
     const values = new Map<number, unknown>();
     const summary = acc.summaries[key].get(locale);
     if (!summary) return values;
-    for (const [id, fact] of aggregateScalarSummary(summary)) {
+    const aggregate = NEWEST_WINS.has(key) ? aggregateNewestScalarSummary : aggregateScalarSummary;
+    for (const [id, fact] of aggregate(summary)) {
       if (id > maxId) values.set(id, fact.value);
     }
     return values;

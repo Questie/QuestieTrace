@@ -34,6 +34,11 @@ interface ScalarGroup<T> {
   confidence: Confidence;
   count: number;
   latestT: number;
+  /** Distinct sessions (by provenance.sessionKey) with a server time that observed this value. */
+  timedSessionCount: number;
+  lastSessionKey: number | undefined;
+  /** Newest provenance.sessionTime among those sessions, null when none had one. */
+  newestSessionTime: number | null;
 }
 
 /**
@@ -51,9 +56,19 @@ export function addToScalarSummary<T>(summary: ScalarSummary<T>, observations: O
       summary.set(obs.entityId, groups);
     }
     const key = JSON.stringify(obs.value);
+    const sessionKey = obs.provenance.sessionKey;
+    const sessionTime = obs.provenance.sessionTime ?? null;
     const existing = groups.get(key);
     if (!existing) {
-      groups.set(key, { value: obs.value, confidence: obs.confidence, count: 1, latestT: obs.provenance.t });
+      groups.set(key, {
+        value: obs.value,
+        confidence: obs.confidence,
+        count: 1,
+        latestT: obs.provenance.t,
+        timedSessionCount: sessionTime === null ? 0 : 1,
+        lastSessionKey: sessionKey,
+        newestSessionTime: sessionTime,
+      });
       continue;
     }
     existing.count++;
@@ -63,31 +78,65 @@ export function addToScalarSummary<T>(summary: ScalarSummary<T>, observations: O
     if (obs.provenance.t > existing.latestT) {
       existing.latestT = obs.provenance.t;
     }
+    // Observations of one session are added together, so a new key means a new session.
+    if (sessionTime !== null && (sessionKey === undefined || sessionKey !== existing.lastSessionKey)) {
+      existing.timedSessionCount++;
+    }
+    existing.lastSessionKey = sessionKey;
+    if (sessionTime !== null && (existing.newestSessionTime === null || sessionTime > existing.newestSessionTime)) {
+      existing.newestSessionTime = sessionTime;
+    }
   }
+}
+
+function defaultOrder<T>(a: ScalarGroup<T>, b: ScalarGroup<T>): number {
+  if (CONFIDENCE_RANK[b.confidence] !== CONFIDENCE_RANK[a.confidence]) {
+    return CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
+  }
+  if (b.count !== a.count) {
+    return b.count - a.count;
+  }
+  return b.latestT - a.latestT;
+}
+
+function toFact<T>(entityId: number, winner: ScalarGroup<T>, groups: ScalarGroup<T>[]): Fact<T> {
+  return {
+    entityId,
+    value: winner.value,
+    confidence: winner.confidence,
+    observationCount: groups.reduce((total, group) => total + group.count, 0),
+    alternativeCount: groups.length - 1,
+  };
 }
 
 /** Picks one Fact per entity from a scalar summary (see the default merge policy above). */
 export function aggregateScalarSummary<T>(summary: ScalarSummary<T>): Map<number, Fact<T>> {
   const facts = new Map<number, Fact<T>>();
   for (const [entityId, groups] of summary) {
-    const sorted = [...groups.values()].sort((a, b) => {
-      if (CONFIDENCE_RANK[b.confidence] !== CONFIDENCE_RANK[a.confidence]) {
-        return CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
-      }
-      if (b.count !== a.count) {
-        return b.count - a.count;
-      }
-      return b.latestT - a.latestT;
-    });
+    const sorted = [...groups.values()].sort(defaultOrder);
+    facts.set(entityId, toFact(entityId, sorted[0], sorted));
+  }
+  return facts;
+}
 
-    const winner = sorted[0];
-    facts.set(entityId, {
-      entityId,
-      value: winner.value,
-      confidence: winner.confidence,
-      observationCount: sorted.reduce((total, group) => total + group.count, 0),
-      alternativeCount: sorted.length - 1,
-    });
+/** Sessions a value needs before it can win by being the newest. */
+const NEWEST_MIN_SESSIONS = 2;
+
+/**
+ * Like aggregateScalarSummary, but for values that change over time (e.g. a
+ * renamed NPC): among the values seen in at least NEWEST_MIN_SESSIONS sessions
+ * with a server time, the one seen in the newest session wins. Without such a
+ * value, the default merge policy decides. Requires provenance.sessionKey, as
+ * set by foldSessions.
+ */
+export function aggregateNewestScalarSummary<T>(summary: ScalarSummary<T>): Map<number, Fact<T>> {
+  const facts = new Map<number, Fact<T>>();
+  for (const [entityId, groups] of summary) {
+    const all = [...groups.values()];
+    const candidates = all
+      .filter((group) => group.timedSessionCount >= NEWEST_MIN_SESSIONS)
+      .sort((a, b) => (b.newestSessionTime as number) - (a.newestSessionTime as number) || defaultOrder(a, b));
+    facts.set(entityId, toFact(entityId, candidates[0] ?? all.sort(defaultOrder)[0], all));
   }
   return facts;
 }
