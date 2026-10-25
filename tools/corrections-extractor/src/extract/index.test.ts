@@ -20,6 +20,30 @@ function makeTBCSession(functions: SessionRecord["functions"]): SessionRecord {
 }
 
 describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () => {
+  it("should export the name of the newest sessions for a renamed npc", () => {
+    const sighting = (name: string, serverTime: number) =>
+      makeForeverSession({
+        GetLocale: { player: [apiSample(0, 0, "enUS")] },
+        GetServerTime: [apiSample(0, 0, serverTime)],
+        UnitGUID: { npc: [apiSample(3, 3, creatureGuid(277055))] },
+        UnitName: { npc: [apiSample(3, 3, { 1: name, n: 1 })] },
+      });
+
+    const { npcFixes } = extractAll(
+      [
+        sighting("Axle Smoothslice", 1000),
+        sighting("Axle Smoothslice", 2000),
+        sighting("Axle Smoothslice", 3000),
+        sighting("Edine Sharphorn", 4000),
+        sighting("Edine Sharphorn", 5000),
+      ],
+      { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
+    );
+
+    expect(npcFixes).toContain('[npcKeys.name] = "Edine Sharphorn",');
+    expect(npcFixes).not.toContain("Axle Smoothslice");
+  });
+
   it("should produce a paste-ready foreverNpcTraces.lua correction for an npc encountered in the session", () => {
     const session = makeForeverSession({
       GetLocale: { player: [apiSample(0, 0, "enUS")] },

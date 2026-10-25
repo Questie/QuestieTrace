@@ -14,7 +14,7 @@
 // are processed. See PlayerIdentity.lua for how interfaceVersion is captured:
 
 import type { SessionRecord } from "../core/types";
-import { aggregateField, aggregateScalarSummary, addToScalarSummary, type Fact, type ScalarSummary } from "./aggregate";
+import { aggregateField, aggregateNewestScalarSummary, aggregateScalarSummary, addToScalarSummary, type Fact, type ScalarSummary } from "./aggregate";
 import type { QuestObjectivesValue } from "./observers/quest/objectives";
 import type { Observation } from "./observation";
 import { emitItemRecords } from "./emit/item";
@@ -37,6 +37,7 @@ import {
 } from './observers/npc';
 import { observeName as observeNpcName } from "./observers/npc/name";
 import { invertQuestRelations, type QuestRelations } from "./questRelations";
+import { sessionServerTime } from "./probes";
 import { observeName as observeObjectName } from "./observers/object/name";
 import {
   observeSpawns as observeObjectSpawns,
@@ -189,19 +190,26 @@ export function createAccumulator(): ExtractAccumulator {
  */
 export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[]): void {
   const staged = sessions.filter(isForeverSession).map((session) => ({
+    sessionTime: sessionServerTime(session),
     scalars: (Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]).map((key) => [key, SCALAR_OBSERVERS[key](session)] as const),
     observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session)] as const),
   }));
 
   for (const session of staged) {
     acc.sessionCount++;
+    const sessionKey = acc.sessionCount;
     for (const [key, observations] of session.scalars) {
+      for (const observation of observations) {
+        observation.provenance.sessionKey = sessionKey;
+        observation.provenance.sessionTime = session.sessionTime;
+      }
       addToScalarSummary(acc.scalars[key] as ScalarSummary<unknown>, observations as Observation<unknown>[]);
     }
     for (const [key, observations] of session.observations) {
       const target = acc.observations[key] as unknown[];
       for (const observation of observations) {
-        observation.provenance.sessionKey = acc.sessionCount;
+        observation.provenance.sessionKey = sessionKey;
+        observation.provenance.sessionTime = session.sessionTime;
         target.push(observation);
       }
     }
@@ -260,7 +268,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
   const finishedByFacts = aggregateField(observations.finishedBy, mergeFinishedBy);
   const turnInSpawns = turnInPoiSpawns(observations.turnInPoi, finishedByFacts);
   const questRecords = emitQuestRecords({
-    name: aggregateScalarSummary(scalars.questName),
+    name: aggregateNewestScalarSummary(scalars.questName),
     questLevel: aggregateScalarSummary(scalars.questLevel),
     requiredLevel: aggregateField(observations.requiredLevel, mergeRequiredLevel),
     zoneOrSort: zoneOrSortFacts,
@@ -293,7 +301,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
   }
 
   const npcRecords = emitNpcRecords({
-    name: aggregateScalarSummary(scalars.npcName),
+    name: aggregateNewestScalarSummary(scalars.npcName),
     minLevel: aggregateScalarSummary(scalars.minLevel),
     maxLevel: aggregateScalarSummary(scalars.maxLevel),
     spawns: aggregateField(
@@ -307,7 +315,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     friendlyToFaction: onlyDefinedFacts(aggregateField(observations.npcFriendlyToFaction, mergeFriendlyToFaction)),
   });
   const itemRecords = emitItemRecords({
-    name: aggregateScalarSummary(scalars.itemName),
+    name: aggregateNewestScalarSummary(scalars.itemName),
     npcDrops: aggregateField(
       observations.npcDrops,
       mergeNpcDrops,
@@ -318,7 +326,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     ),
   });
   const objectRecords = emitObjectRecords({
-    name: aggregateScalarSummary(scalars.objectName),
+    name: aggregateNewestScalarSummary(scalars.objectName),
     spawns: aggregateField(
       [...observations.objectSpawns, ...turnInSpawns.objects],
       (obs) => mergeObjectSpawns(obs, questObjectIds.has(obs[0].entityId)),
