@@ -44,6 +44,23 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
     expect(npcFixes).not.toContain("Axle Smoothslice");
   });
 
+  it("should export the level range of an npc seen in several sessions", () => {
+    const sighting = (level: number) =>
+      makeForeverSession({
+        UnitGUID: { target: [apiSample(3, 3, creatureGuid(200001))] },
+        UnitLevel: { target: [apiSample(3, 3, level)] },
+      });
+
+    const { npcFixes } = extractAll([sighting(12), sighting(12), sighting(13), sighting(13)], {
+      sourceFileNames: ["test.lua"],
+      now: new Date("2020-01-01T00:00:00.000Z"),
+      maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
+    });
+
+    expect(npcFixes).toContain("[npcKeys.minLevel] = 12,");
+    expect(npcFixes).toContain("[npcKeys.maxLevel] = 13,");
+  });
+
   it("should produce a paste-ready foreverNpcTraces.lua correction for an npc encountered in the session", () => {
     const session = makeForeverSession({
       GetLocale: { player: [apiSample(0, 0, "enUS")] },
@@ -75,8 +92,8 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
 
     const { npcFixes } = extractAll([session], { sourceFileNames: ["test.lua"] });
 
-    // minLevel/maxLevel have no observer yet (see observers/npc/minLevel.ts), so
-    // they must not appear in the correction at all - no defaulting to 0/nil.
+    // No level was observed, so the levels must not appear in the correction at
+    // all - no defaulting to 0/nil.
     expect(npcFixes).not.toContain("npcKeys.minLevel");
     expect(npcFixes).not.toContain("npcKeys.maxLevel");
   });

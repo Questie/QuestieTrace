@@ -1,10 +1,8 @@
 // Top-level orchestration: sessions -> per-entity Questie "forever*Traces"
 // correction modules.
 //
-// Wires up all four entity kinds (npc/quest/item/object), each currently only
-// their `name` field (plus npc's minLevel/maxLevel stubs). More fields follow
-// the same shape and will be added incrementally (see observers/<entity>/ +
-// emit/<entity>.ts).
+// Wires up all four entity kinds (npc/quest/item/object). Fields are added
+// incrementally (see observers/<entity>/ + emit/<entity>.ts).
 //
 // This produces CORRECTIONS layered on top of Questie's base DB (matching
 // `Database/Custom/Fixes/foreverNPCFixes.lua`'s shape), not a full DB dump:
@@ -26,8 +24,8 @@ import { observeNpcDrops } from "./observers/item/npcDrops";
 import { observeObjectDrops } from "./observers/item/objectDrops";
 import { mergeNpcDrops, mergeObjectDrops } from "./observers/item/dropsMerge";
 import {
-  observeMaxLevel,
-  observeMinLevel,
+  observeLevel as observeNpcLevel,
+  mergeLevelRange as mergeNpcLevelRange,
   observeSpawns as observeNpcSpawns,
   observeZoneID as observeNpcZoneID,
   mergeSpawns as mergeNpcSpawns,
@@ -122,8 +120,6 @@ const SCALAR_OBSERVERS = {
   objectivesText: observeObjectivesText,
   objectiveCount: observeObjectiveCount,
   npcName: observeNpcName,
-  minLevel: observeMinLevel,
-  maxLevel: observeMaxLevel,
   itemName: observeItemName,
   objectName: observeObjectName,
 };
@@ -139,6 +135,7 @@ const OBSERVERS = {
   turnInPoi: observeTurnInPoi,
   npcSpawns: observeNpcSpawns,
   npcZoneID: observeNpcZoneID,
+  npcLevel: observeNpcLevel,
   npcFriendlyToFaction: observeFriendlyToFaction,
   npcDrops: observeNpcDrops,
   objectDrops: observeObjectDrops,
@@ -244,6 +241,12 @@ function onlyDefinedFacts<T>(facts: Map<number, Fact<T | undefined>>): Map<numbe
   return out;
 }
 
+function mapFacts<T, R>(facts: Map<number, Fact<T>>, map: (value: T) => R): Map<number, Fact<R>> {
+  const out = new Map<number, Fact<R>>();
+  for (const [id, fact] of facts) out.set(id, { ...fact, value: map(fact.value) });
+  return out;
+}
+
 export function finalize(acc: ExtractAccumulator, options: ExtractOptions): FactBundle {
   const { scalars, observations } = acc;
 
@@ -300,10 +303,11 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     }
   }
 
+  const npcLevelRanges = onlyDefinedFacts(aggregateField(observations.npcLevel, mergeNpcLevelRange));
   const npcRecords = emitNpcRecords({
     name: aggregateNewestScalarSummary(scalars.npcName),
-    minLevel: aggregateScalarSummary(scalars.minLevel),
-    maxLevel: aggregateScalarSummary(scalars.maxLevel),
+    minLevel: mapFacts(npcLevelRanges, (range) => range.min),
+    maxLevel: mapFacts(npcLevelRanges, (range) => range.max),
     spawns: aggregateField(
       [...observations.npcSpawns, ...turnInSpawns.npcs],
       (obs) => mergeNpcSpawns(obs, questNpcIds.has(obs[0].entityId)),
