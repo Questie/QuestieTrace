@@ -32,10 +32,22 @@ export function unitStateEncounters(session: SessionRecord, ...streamPath: [stri
   const sampleEventTimes = session.events.filter((event) => UNIT_STATE_SAMPLE_EVENTS.has(event.e)).map((event) => event.t);
   for (const token of UNIT_STATE_TOKENS) {
     const stream = getStream(session, ...streamPath, token) ?? [];
+    const guidTps = new Map<number, number[]>();
+    for (const entry of getStream(session, "UnitGUID", token) ?? []) {
+      const tps = guidTps.get(entry.t) ?? [];
+      tps.push(entry.tp);
+      guidTps.set(entry.t, tps);
+    }
     const sampleTimes = new Set([...sampleEventTimes, ...stream.map((entry) => entry.t)]);
     for (const encounter of guidEncounters(session, "npc", [token])) {
       if (!sampleTimes.has(encounter.t)) continue;
-      const value = valueAt(stream, encounter.t);
+      // A later GUID sample in the same frame starts another unit, so its value must not be used.
+      // Relies on UnitInteraction.lua sampling the GUID before UnitState.lua samples the value (.toc order).
+      const nextTp = guidTps.get(encounter.t)?.find((tp) => tp > encounter.tp);
+      const value = valueAt(
+        nextTp === undefined ? stream : stream.filter((entry) => entry.t < encounter.t || entry.tp < nextTp),
+        encounter.t,
+      );
       if (value === undefined) continue;
       out.push({ npcID: encounter.entityId, token, t: encounter.t, value });
     }

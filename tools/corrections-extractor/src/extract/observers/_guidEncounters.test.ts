@@ -29,9 +29,9 @@ describe("guidEncounters", () => {
     });
 
     expect(guidEncounters(session, "npc")).toEqual([
-      { entityId: 823, token: "target", t: 0 },
-      { entityId: 197, token: "npc", t: 5 },
-      { entityId: 197, token: "questnpc", t: 10 },
+      { entityId: 823, token: "target", t: 0, tp: 0 },
+      { entityId: 197, token: "npc", t: 5, tp: 5 },
+      { entityId: 197, token: "questnpc", t: 10, tp: 10 },
     ]);
   });
 
@@ -46,8 +46,8 @@ describe("guidEncounters", () => {
       },
     });
 
-    expect(guidEncounters(session, "object")).toEqual([{ entityId: 2843, token: "target", t: 0 }]);
-    expect(guidEncounters(session, "npc")).toEqual([{ entityId: 823, token: "target", t: 2 }]);
+    expect(guidEncounters(session, "object")).toEqual([{ entityId: 2843, token: "target", t: 0, tp: 0 }]);
+    expect(guidEncounters(session, "npc")).toEqual([{ entityId: 823, token: "target", t: 2, tp: 2 }]);
   });
 
   it("should return an empty array when no UnitGUID stream exists", () => {
