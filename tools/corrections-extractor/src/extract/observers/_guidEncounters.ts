@@ -18,6 +18,8 @@ export interface GuidEncounter {
   /** The unit token this encounter came from, so field observers can read UnitName(token)/UnitLevel(token) etc. at the same t. */
   token: string;
   t: number;
+  /** Precise time of the sample, which tells apart samples that share `t`. */
+  tp: number;
 }
 
 /**
@@ -39,7 +41,7 @@ export function guidEncounters(
       if (typeof entry.v !== "string") continue;
       const parsed = parseGuid(entry.v);
       if (parsed.kind === kind && parsed.id !== null) {
-        out.push({ entityId: parsed.id, token, t: entry.t });
+        out.push({ entityId: parsed.id, token, t: entry.t, tp: entry.tp });
       }
     }
   }

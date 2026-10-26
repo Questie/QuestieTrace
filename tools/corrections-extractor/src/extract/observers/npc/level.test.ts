@@ -46,6 +46,18 @@ describe("observeLevel", () => {
     expect(observeLevel(session).map((obs) => obs.entityId)).toEqual([200001]);
   });
 
+  it("should pair each guid with its own level when the target changed twice at the same time", () => {
+    const session = makeSession({
+      UnitGUID: { target: [apiSample(5, 5.1, creatureGuid(200001)), apiSample(5, 5.3, creatureGuid(200002))] },
+      UnitLevel: { target: [apiSample(5, 5.2, 12), apiSample(5, 5.4, 30)] },
+    });
+
+    expect(observeLevel(session).map((obs) => [obs.entityId, obs.value])).toEqual([
+      [200001, 12],
+      [200002, 30],
+    ]);
+  });
+
   it("should skip unknown levels", () => {
     const session = makeSession({
       UnitGUID: { target: [apiSample(5, 5, creatureGuid(200001))] },
