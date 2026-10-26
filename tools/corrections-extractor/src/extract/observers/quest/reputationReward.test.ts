@@ -200,7 +200,7 @@ describe("mergeReputationReward", () => {
     ).toEqual([[59, 75]]);
   });
 
-  it("should add spillover as a rounded quarter of its decided source reward", () => {
+  it("should add spillover as an unrounded quarter of its decided source reward", () => {
     expect(
       mergeReputationReward([
         vote(1, "A", { 69: 75 }, { 47: 69, 54: 69 }),
@@ -208,15 +208,15 @@ describe("mergeReputationReward", () => {
         vote(3, "A", { 69: 75 }, { 47: 69 }),
       ]),
     ).toEqual([
-      [47, 19],
-      [54, 19],
+      [47, 18.75],
+      [54, 18.75],
       [69, 75],
     ]);
   });
 
   it("should keep the sign of negative spillover", () => {
     expect(mergeReputationReward([vote(1, "H", { 87: -150 }, { 21: 87 }), vote(2, "H", { 87: -150 }, { 21: 87 })])).toEqual([
-      [21, -38],
+      [21, -37.5],
       [87, -150],
     ]);
   });
