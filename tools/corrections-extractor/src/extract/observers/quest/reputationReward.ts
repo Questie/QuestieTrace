@@ -13,12 +13,12 @@
 // Gains are changed by things the trace cannot see in full, so observations are
 // filtered and merged strictly:
 // - Human sessions, and sessions without a known race, are skipped (Diplomacy adds 10%).
-// - Spillover (25% of another faction's gain, rounded either way) is randomly
-//   rounded by the game, so it is not merged by amount. A spillover faction is kept
+// - Spillover (25% of another faction's gain) is printed rounded either way by the
+//   game, so it is not merged by amount. A spillover faction is kept
 //   when it passes the presence and session checks below and spills over from the
 //   same decided reward in at least MIN_AMOUNT_SHARE of its turn-ins; its amount is
-//   that reward / 4, rounded. A quest that really rewards a quarter of another
-//   reward is treated as spillover too, which gives the same result.
+//   that reward / 4, unrounded. A quest that really rewards about a quarter of
+//   another reward is treated as spillover too, so its amount may be off by under 1.
 // - A faction is kept when it shows up in at least half of the quest's turn-ins with
 //   reputation, in at least MIN_SESSIONS sessions, and one amount covers at least
 //   MIN_AMOUNT_SHARE of those sessions (rested/event bonuses change some of them).
@@ -93,7 +93,7 @@ export function splitSpillover(allGains: Record<number, number>): Pick<Reputatio
 }
 
 function spilloverAmount(amount: number): number {
-  return Math.sign(amount) * Math.round(Math.abs(amount) / SPILLOVER_RATIO);
+  return amount / SPILLOVER_RATIO;
 }
 
 function turnInQuestId(args: unknown): number | null {
