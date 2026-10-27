@@ -451,8 +451,8 @@ describe("ExportUI export statistics", function()
     local expected = {
       events = { icon = "Interface\\Icons\\INV_Misc_Note_02", x = 0, y = 0 },
       time = { icon = "Interface\\Icons\\INV_Misc_PocketWatch_01", x = 0, y = -22 },
-      questsAccepted = { icon = "Interface\\GossipFrame\\AvailableQuestIcon", x = 210, y = 0 },
-      questsTurnedIn = { icon = "Interface\\GossipFrame\\ActiveQuestIcon", x = 210, y = -22 },
+      questsAccepted = { icon = "Interface\\GossipFrame\\AvailableQuestIcon", x = 235, y = 0 },
+      questsTurnedIn = { icon = "Interface\\GossipFrame\\ActiveQuestIcon", x = 235, y = -22 },
     }
     for key, want in pairs(expected) do
       local icon = Rows()[key].icon
