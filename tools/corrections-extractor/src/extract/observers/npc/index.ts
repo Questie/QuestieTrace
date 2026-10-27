@@ -6,4 +6,5 @@ export { observeLevel, mergeLevelRange } from "./level";
 export { observeSpawns } from "./spawns";
 export { observeZoneID } from "./zoneID";
 export { observeFriendlyToFaction, mergeFriendlyToFaction } from "./friendlyToFaction";
+export { observeRank, mergeRank } from "./rank";
 export { mergeSpawns, mergeZoneID } from "./spawnsMerge";

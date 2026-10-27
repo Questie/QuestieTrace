@@ -32,6 +32,8 @@ import {
   mergeZoneID as mergeNpcZoneID,
   observeFriendlyToFaction,
   mergeFriendlyToFaction,
+  observeRank as observeNpcRank,
+  mergeRank as mergeNpcRank,
 } from './observers/npc';
 import { observeName as observeNpcName } from "./observers/npc/name";
 import { invertQuestRelations, type QuestRelations } from "./questRelations";
@@ -137,6 +139,7 @@ const OBSERVERS = {
   npcZoneID: observeNpcZoneID,
   npcLevel: observeNpcLevel,
   npcFriendlyToFaction: observeFriendlyToFaction,
+  npcRank: observeNpcRank,
   npcDrops: observeNpcDrops,
   objectDrops: observeObjectDrops,
   objectSpawns: observeObjectSpawns,
@@ -317,6 +320,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
       mergeNpcZoneID,
     ),
     friendlyToFaction: onlyDefinedFacts(aggregateField(observations.npcFriendlyToFaction, mergeFriendlyToFaction)),
+    rank: onlyDefinedFacts(aggregateField(observations.npcRank, mergeNpcRank)),
   });
   const itemRecords = emitItemRecords({
     name: aggregateNewestScalarSummary(scalars.itemName),
