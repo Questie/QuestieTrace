@@ -56,7 +56,7 @@ local STATS_ICON_SIZE = 16
 ---@type integer Gap between an icon and its text.
 local STATS_ICON_GAP = 4
 ---@type integer Width of each of the two statistics columns.
-local STATS_COLUMN_WIDTH = 200
+local STATS_COLUMN_WIDTH = 225
 ---@type integer Horizontal gap between the two columns.
 local STATS_COLUMN_GAP = 10
 ---@type integer Vertical distance from one row's top to the next.
@@ -129,7 +129,7 @@ end
 ---@return ExportFrame
 local function BuildExportFrame()
   local frame = CreateFrame("Frame", "QuestieTraceExportFrame", UIParent) --[[@as ExportFrame]]
-  frame:SetSize(450, 270)
+  frame:SetSize(500, 270)
   frame:SetPoint("CENTER")
   frame:SetFrameStrata("DIALOG")
   frame:SetClampedToScreen(true)
