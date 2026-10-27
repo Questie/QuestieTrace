@@ -277,6 +277,15 @@ function Core.ConfirmExportReported()
   end
 end
 
+--- Hide the statistics and the "I reported this" button, and forget the pending
+--- sessions, for when there is no valid export string to report.
+---@param frame ExportFrame
+local function _HideReportingControls(frame)
+  pendingSourceSessions = nil
+  frame.statsFrame:Hide()
+  frame.reportedButton:Hide()
+end
+
 --- Show the export window, populated with the current export string.
 --- If there is nothing to export, displays a warning and hides the input elements.
 --- After successfully encoding the payload, the live session is saved (if present)
@@ -352,9 +361,7 @@ function Core.ShowExportWindow()
       pendingSourceSessions = sourceSessions
       exportFrame.reportedButton:Show()
     else
-      pendingSourceSessions = nil
-      exportFrame.statsFrame:Hide()
-      exportFrame.reportedButton:Hide()
+      _HideReportingControls(exportFrame)
     end
   else
     -- Show warning, hide export data
@@ -364,9 +371,7 @@ function Core.ShowExportWindow()
     exportFrame.urlEditBox:Hide()
     exportFrame.hint:Hide()
     exportFrame.editBox:Hide()
-    exportFrame.statsFrame:Hide()
-    exportFrame.reportedButton:Hide()
-    pendingSourceSessions = nil
+    _HideReportingControls(exportFrame)
   end
 
   exportFrame:Show()
