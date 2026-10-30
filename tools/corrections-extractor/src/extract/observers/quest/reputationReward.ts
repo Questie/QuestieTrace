@@ -2,13 +2,24 @@
 // type: table, default: nil
 // comment: "table: {{faction(int), value(int)},...}, a list of reputation rewarded upon quest completion"
 //
-// Source: the "Reputation with %s increased by %d." chat messages
-// (CHAT_MSG_COMBAT_FACTION_CHANGE) the client prints around QUEST_TURNED_IN. The
-// message can arrive shortly before or after the turn-in event, so messages within
-// MESSAGE_WINDOW seconds count, and a turn-in is skipped when another one happened
-// within TURN_IN_ISOLATION seconds. The faction name is mapped to its id with the
-// session's own reputation streams. Only enUS sessions are used, since the message
-// is localized.
+// Source: the change of each faction's reputation around QUEST_TURNED_IN, read from
+// C_Reputation.GetFactionDataByID (currentStanding) or, when a faction has no such
+// stream, GetFactionInfoByID (barValue). The client updates reputation shortly
+// before or after the turn-in event, so a gain is the value at turn-in +
+// CHANGE_WINDOW minus the last value strictly before turn-in - CHANGE_WINDOW. A turn-in is skipped
+// when another one happened within TURN_IN_ISOLATION seconds. This works in every
+// client language.
+//
+// A turn-in can unlock a faction, which is then first seen inside the window and
+// has no value before it, or only shows up in the reputation streams minutes later.
+// The second case is caught by counting the reputation messages with an amount in
+// the window (one per changed faction, in every language): more messages than
+// changes means a faction is missing. The first value of such a faction is not a fixed starting
+// point, so these turn-ins fall back to the "Reputation with %s increased by %d." chat messages
+// (CHAT_MSG_COMBAT_FACTION_CHANGE) within CHANGE_WINDOW. The faction name is
+// mapped to its id with the session's own reputation streams. The message is
+// localized, so the fallback only works in enUS sessions; other sessions skip
+// such a turn-in.
 //
 // Gains are changed by things the trace cannot see in full, so observations are
 // filtered and merged strictly:
@@ -22,7 +33,7 @@
 // - A faction is kept when it shows up in at least half of the quest's turn-ins with
 //   reputation, in at least MIN_SESSIONS sessions, and one amount covers at least
 //   MIN_AMOUNT_SHARE of those sessions (rested/event bonuses change some of them).
-// - Turn-ins without any message are ignored: they happen when every faction is capped.
+// - Turn-ins without any change are ignored: they happen when every faction is capped.
 // - Some quests reward different factions per player faction, which the static
 //   corrections cannot express, so a quest is dropped when both Alliance and Horde
 //   turned it in and their results differ, including when one side has too little
@@ -43,7 +54,7 @@ export interface ReputationTurnInValue {
   spillover: Record<number, number>;
 }
 
-const MESSAGE_WINDOW = 0.5;
+const CHANGE_WINDOW = 0.5;
 const TURN_IN_ISOLATION = 1;
 const MIN_SESSIONS = 2;
 const MIN_AMOUNT_SHARE = 0.8;
@@ -52,6 +63,39 @@ const SPILLOVER_RATIO = 4;
 const SPILLOVER_TOLERANCE = 1;
 const REPUTATION_MESSAGE = /^Reputation with (.+) (increased|decreased) by (\d+)\.$/;
 const FACTION_APIS = ["C_Reputation.GetFactionDataByID", "GetFactionInfoByID"] as const;
+
+type FactionApi = (typeof FACTION_APIS)[number];
+type StandingSample = { t: number; standing: number | null };
+
+/** Reputation value of one faction sample, or null when the sample has none. */
+function standingOf(api: FactionApi, value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  const standing =
+    api === "GetFactionInfoByID"
+      ? (value as Record<number, unknown>)[6]
+      : (value as Record<string, unknown>).currentStanding;
+  return typeof standing === "number" ? standing : null;
+}
+
+/** factionID -> standing stream, preferring C_Reputation over the legacy api per faction. */
+function standingStreams(session: SessionRecord): Map<number, StandingSample[]> {
+  const streams = new Map<number, StandingSample[]>();
+  for (const api of FACTION_APIS) {
+    const root = session.functions[api];
+    if (!root || Array.isArray(root)) continue;
+    for (const key of getParamKeys(root)) {
+      const factionID = Number(key);
+      if (!Number.isInteger(factionID) || streams.has(factionID)) continue;
+      const entries = getStream(session, api, key) ?? [];
+      if (entries.length === 0) continue;
+      streams.set(
+        factionID,
+        entries.map((entry) => ({ t: entry.t, standing: standingOf(api, entry.v) })),
+      );
+    }
+  }
+  return streams;
+}
 
 function factionIdsByName(session: SessionRecord): Map<string, number> {
   const ids = new Map<string, number>();
@@ -70,6 +114,43 @@ function factionIdsByName(session: SessionRecord): Map<string, number> {
     }
   }
   return ids;
+}
+
+/** Gains from the enUS chat `messages` of a turn-in, or null when a message cannot be used. */
+function chatGains(messages: string[], factionIds: Map<string, number>): Record<number, number> | null {
+  const gains: Record<number, number> = {};
+  for (const text of messages) {
+    const match = REPUTATION_MESSAGE.exec(text);
+    if (!match) continue;
+    const factionID = factionIds.get(match[1]);
+    if (factionID === undefined || factionID in gains) return null;
+    gains[factionID] = (match[2] === "increased" ? 1 : -1) * Number(match[3]);
+  }
+  return gains;
+}
+
+/** Gains from the reputation values around `t`, or null when a faction was first seen within CHANGE_WINDOW. */
+function standingGains(streams: Map<number, StandingSample[]>, t: number): Record<number, number> | null {
+  const gains: Record<number, number> = {};
+  for (const [factionID, stream] of streams) {
+    const before = standingAt(stream, t - CHANGE_WINDOW, true);
+    const after = standingAt(stream, t + CHANGE_WINDOW, false);
+    if (after === undefined) continue;
+    if (before === undefined) return null;
+    if (before === null || after === null || before === after) continue;
+    gains[factionID] = after - before;
+  }
+  return gains;
+}
+
+/** Last standing at or before `t` (strictly before when `strict`), undefined when none was sampled yet. */
+function standingAt(stream: StandingSample[], t: number, strict: boolean): number | null | undefined {
+  let result: number | null | undefined;
+  for (const entry of stream) {
+    if (strict ? entry.t >= t : entry.t > t) break;
+    result = entry.standing;
+  }
+  return result;
 }
 
 /** Splits off gains that are a spillover of a larger gain in the same direction from the same turn-in. The largest matching gain is the source. */
@@ -104,6 +185,7 @@ function turnInQuestId(args: unknown): number | null {
 export const observeReputationReward: FieldObserver<ReputationTurnInValue> = (session) => {
   const observations: Observation<ReputationTurnInValue>[] = [];
   const events = session.events;
+  let streams: Map<number, StandingSample[]> | null = null;
   let factionIds: Map<string, number> | null = null;
 
   for (let i = 0; i < events.length; i++) {
@@ -111,7 +193,6 @@ export const observeReputationReward: FieldObserver<ReputationTurnInValue> = (se
     if (turnIn.e !== "QUEST_TURNED_IN") continue;
     const questID = turnInQuestId(turnIn.a);
     if (questID === null) continue;
-    if (getLocaleAt(session, turnIn.t) !== "enUS") continue;
     const race = playerRaceAt(session, turnIn.t);
     if (race === null || race === "Human") continue;
     const playerFaction = playerFactionAt(session, turnIn.t);
@@ -119,26 +200,29 @@ export const observeReputationReward: FieldObserver<ReputationTurnInValue> = (se
 
     let start = i;
     while (start > 0 && events[start - 1].t > turnIn.t - TURN_IN_ISOLATION) start--;
-    const gains: Record<number, number> = {};
-    let usable = true;
+    const messages: string[] = [];
+    let isolated = true;
     for (let j = start; j < events.length && events[j].t < turnIn.t + TURN_IN_ISOLATION; j++) {
       const event = events[j];
       if (j !== i && event.e === "QUEST_TURNED_IN") {
-        usable = false;
+        isolated = false;
         break;
       }
-      if (event.e !== "CHAT_MSG_COMBAT_FACTION_CHANGE" || Math.abs(event.t - turnIn.t) > MESSAGE_WINDOW) continue;
-      const match = REPUTATION_MESSAGE.exec(String(event.a[1]));
-      if (!match) continue;
-      factionIds ??= factionIdsByName(session);
-      const factionID = factionIds.get(match[1]);
-      if (factionID === undefined || factionID in gains) {
-        usable = false;
-        break;
+      if (event.e === "CHAT_MSG_COMBAT_FACTION_CHANGE" && Math.abs(event.t - turnIn.t) <= CHANGE_WINDOW) {
+        messages.push(String(event.a[1]));
       }
-      gains[factionID] = (match[2] === "increased" ? 1 : -1) * Number(match[3]);
     }
-    if (!usable || Object.keys(gains).length === 0) continue;
+    if (!isolated) continue;
+
+    streams ??= standingStreams(session);
+    let gains = standingGains(streams, turnIn.t);
+    const amountMessages = messages.filter((text) => /\d/.test(text)).length;
+    if (gains === null || amountMessages > Object.keys(gains).length) {
+      if (getLocaleAt(session, turnIn.t) !== "enUS") continue;
+      factionIds ??= factionIdsByName(session);
+      gains = chatGains(messages, factionIds);
+    }
+    if (gains === null || Object.keys(gains).length === 0) continue;
 
     observations.push({
       entityId: questID,
