@@ -97,6 +97,25 @@ describe("observeReputationReward", () => {
     expect(observations.map((obs) => obs.value)).toEqual([{ playerFaction: "H", gains: { 68: 250 }, spillover: {} }]);
   });
 
+  it("should fall back to the legacy faction api when the modern samples have no standing", () => {
+    const legacy = (t: number, barValue: number) =>
+      apiSample(t, t, { n: 14, 1: "Unterstadt", 3: 5, 4: 3000, 5: 9000, 6: barValue, 14: 68 });
+    const observations = observeReputationReward(
+      makeSession(
+        {
+          GetLocale: { player: [apiSample(0, 0, "deDE")] },
+          UnitRace: { player: [apiSample(0, 0, ORC)] },
+          UnitFactionGroup: { player: [apiSample(0, 0, HORDE)] },
+          "C_Reputation.GetFactionDataByID": { 68: [apiSample(0, 0, null)] },
+          GetFactionInfoByID: { 68: [legacy(0, 3000), legacy(10, 3250)] },
+        },
+        [turnIn(10, 99001), message(10, "Euer Ruf bei der Fraktion Unterstadt hat sich um 250 verbessert.")],
+      ),
+    );
+
+    expect(observations.map((obs) => obs.value)).toEqual([{ playerFaction: "H", gains: { 68: 250 }, spillover: {} }]);
+  });
+
   it("should split off spillover gains", () => {
     const observations = observeReputationReward(
       session([turnIn(10, 99001)], {

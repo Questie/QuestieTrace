@@ -77,21 +77,20 @@ function standingOf(api: FactionApi, value: unknown): number | null {
   return typeof standing === "number" ? standing : null;
 }
 
-/** factionID -> standing stream, preferring C_Reputation over the legacy api per faction. */
-function standingStreams(session: SessionRecord): Map<number, StandingSample[]> {
-  const streams = new Map<number, StandingSample[]>();
+/** factionID -> standing streams, C_Reputation before the legacy api. */
+function standingStreams(session: SessionRecord): Map<number, StandingSample[][]> {
+  const streams = new Map<number, StandingSample[][]>();
   for (const api of FACTION_APIS) {
     const root = session.functions[api];
     if (!root || Array.isArray(root)) continue;
     for (const key of getParamKeys(root)) {
       const factionID = Number(key);
-      if (!Number.isInteger(factionID) || streams.has(factionID)) continue;
+      if (!Number.isInteger(factionID)) continue;
       const entries = getStream(session, api, key) ?? [];
       if (entries.length === 0) continue;
-      streams.set(
-        factionID,
-        entries.map((entry) => ({ t: entry.t, standing: standingOf(api, entry.v) })),
-      );
+      const factionStreams = streams.get(factionID) ?? [];
+      factionStreams.push(entries.map((entry) => ({ t: entry.t, standing: standingOf(api, entry.v) })));
+      streams.set(factionID, factionStreams);
     }
   }
   return streams;
@@ -130,11 +129,16 @@ function chatGains(messages: string[], factionIds: Map<string, number>): Record<
 }
 
 /** Gains from the reputation values around `t`, or null when a faction was first seen within CHANGE_WINDOW. */
-function standingGains(streams: Map<number, StandingSample[]>, t: number): Record<number, number> | null {
+function standingGains(streams: Map<number, StandingSample[][]>, t: number): Record<number, number> | null {
   const gains: Record<number, number> = {};
-  for (const [factionID, stream] of streams) {
-    const before = standingAt(stream, t - CHANGE_WINDOW, true);
-    const after = standingAt(stream, t + CHANGE_WINDOW, false);
+  for (const [factionID, factionStreams] of streams) {
+    const boundaries = factionStreams.map((stream) => ({
+      before: standingAt(stream, t - CHANGE_WINDOW, true),
+      after: standingAt(stream, t + CHANGE_WINDOW, false),
+    }));
+    // The first stream with a standing at both boundaries wins; otherwise the preferred one decides.
+    const { before, after } =
+      boundaries.find((b) => typeof b.before === "number" && typeof b.after === "number") ?? boundaries[0];
     if (after === undefined) continue;
     if (before === undefined) return null;
     if (before === null || after === null || before === after) continue;
@@ -185,7 +189,7 @@ function turnInQuestId(args: unknown): number | null {
 export const observeReputationReward: FieldObserver<ReputationTurnInValue> = (session) => {
   const observations: Observation<ReputationTurnInValue>[] = [];
   const events = session.events;
-  let streams: Map<number, StandingSample[]> | null = null;
+  let streams: Map<number, StandingSample[][]> | null = null;
   let factionIds: Map<string, number> | null = null;
 
   for (let i = 0; i < events.length; i++) {
