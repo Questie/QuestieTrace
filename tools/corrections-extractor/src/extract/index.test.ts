@@ -617,15 +617,29 @@ describe("foldSessions + finalize (incremental extraction)", () => {
   ];
 
   it("should produce the same corrections when folding files one at a time as extracting all sessions at once", () => {
-    const acc = createAccumulator();
+    const acc = createAccumulator(options.maxIds);
     foldSessions(acc, fileA);
     foldSessions(acc, fileB);
 
     expect(finalize(acc, options)).toEqual(extractAll([...fileA, ...fileB], options));
   });
 
+  it("should only keep npc and object observations above MAX_IDS, the only ones exported", () => {
+    const atLimit = createAccumulator({ npc: 823, object: 2843 });
+    const belowLimit = createAccumulator({ npc: 822, object: 2842 });
+    for (const acc of [atLimit, belowLimit]) {
+      foldSessions(acc, fileA);
+      foldSessions(acc, fileB);
+    }
+
+    expect(atLimit.observations.npcSpawns).toEqual([]);
+    expect(atLimit.observations.objectZoneID).toEqual([]);
+    expect(belowLimit.observations.npcSpawns.map((obs) => obs.entityId)).toEqual([823]);
+    expect(belowLimit.observations.objectZoneID.map((obs) => obs.entityId)).toEqual([2843]);
+  });
+
   it("should only count and observe sessions from Forever builds", () => {
-    const acc = createAccumulator();
+    const acc = createAccumulator(options.maxIds);
     foldSessions(acc, fileB);
 
     expect(acc.sessionCount).toBe(1);

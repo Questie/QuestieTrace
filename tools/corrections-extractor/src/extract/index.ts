@@ -68,7 +68,8 @@ export interface ExtractOptions {
   now?: Date;
   /** Maximum known IDs per entity from classic data. Entities at or below
    * these thresholds are skipped -- only "new Forever IDs" are exported.
-   * Injectable for tests. */
+   * Injectable for tests. Only for extractAll: finalize uses the ones the
+   * accumulator was created with (see createAccumulator). */
   maxIds?: Partial<typeof MAX_IDS>;
 }
 
@@ -146,6 +147,22 @@ const OBSERVERS = {
   objectZoneID: observeObjectZoneID,
 };
 
+/**
+ * The entity each npc, item and object field is about. Only entities above MAX_IDS are
+ * exported, so their observations at or below it are dropped while folding.
+ */
+const OBSERVER_ENTITIES: Partial<Record<keyof typeof OBSERVERS, keyof typeof MAX_IDS>> = {
+  npcSpawns: "npc",
+  npcZoneID: "npc",
+  npcLevel: "npc",
+  npcFriendlyToFaction: "npc",
+  npcRank: "npc",
+  npcDrops: "item",
+  objectDrops: "item",
+  objectSpawns: "object",
+  objectZoneID: "object",
+};
+
 type ScalarObserverKey = keyof typeof SCALAR_OBSERVERS;
 type ObserverKey = keyof typeof OBSERVERS;
 type ObservedValue<F extends (session: SessionRecord) => unknown> =
@@ -157,11 +174,12 @@ type ObservedValue<F extends (session: SessionRecord) => unknown> =
  */
 export interface ExtractAccumulator {
   sessionCount: number;
+  maxIds: typeof MAX_IDS;
   scalars: { [K in ScalarObserverKey]: ScalarSummary<ObservedValue<(typeof SCALAR_OBSERVERS)[K]>> };
   observations: { [K in ObserverKey]: ReturnType<(typeof OBSERVERS)[K]> };
 }
 
-export function createAccumulator(): ExtractAccumulator {
+export function createAccumulator(maxIds: Partial<typeof MAX_IDS> = {}): ExtractAccumulator {
   const scalars = {} as Record<ScalarObserverKey, ScalarSummary<unknown>>;
   for (const key of Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]) {
     scalars[key] = new Map();
@@ -172,6 +190,7 @@ export function createAccumulator(): ExtractAccumulator {
   }
   return {
     sessionCount: 0,
+    maxIds: { ...MAX_IDS, ...maxIds },
     scalars: scalars as ExtractAccumulator["scalars"],
     observations: observations as ExtractAccumulator["observations"],
   };
@@ -207,7 +226,10 @@ export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[])
     }
     for (const [key, observations] of session.observations) {
       const target = acc.observations[key] as unknown[];
+      const entity = OBSERVER_ENTITIES[key];
+      const maxId = entity === undefined ? -Infinity : acc.maxIds[entity];
       for (const observation of observations) {
+        if (observation.entityId <= maxId) continue;
         observation.provenance.sessionKey = sessionKey;
         observation.provenance.sessionTime = session.sessionTime;
         target.push(observation);
@@ -217,7 +239,7 @@ export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[])
 }
 
 export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
-  const acc = createAccumulator();
+  const acc = createAccumulator(options.maxIds);
   foldSessions(acc, sessions);
   return finalize(acc, options);
 }
@@ -250,7 +272,7 @@ function mapFacts<T, R>(facts: Map<number, Fact<T>>, map: (value: T) => R): Map<
   return out;
 }
 
-export function finalize(acc: ExtractAccumulator, options: ExtractOptions): FactBundle {
+export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, "maxIds">): FactBundle {
   const { scalars, observations } = acc;
 
   const header = {
@@ -259,7 +281,7 @@ export function finalize(acc: ExtractAccumulator, options: ExtractOptions): Fact
     generatedAt: options.now ?? new Date(),
   };
 
-  const effectiveMaxIds = { ...MAX_IDS, ...options.maxIds };
+  const effectiveMaxIds = acc.maxIds;
   function filterBelowMax(records: Map<number, Record<string, unknown>>, entity: keyof typeof MAX_IDS): Map<number, Record<string, unknown>> {
     const filtered = new Map<number, Record<string, unknown>>();
     const threshold = effectiveMaxIds[entity];
