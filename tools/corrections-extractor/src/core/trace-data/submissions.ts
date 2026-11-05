@@ -55,6 +55,8 @@ export interface Submission {
   receivedAt: string;
   /** One per export in `export_string` (usually one), each with a `sessions` array. */
   traces: TraceFile[];
+  /** Why each export of `export_string` that could not be decoded was dropped. */
+  droppedExports: string[];
   error?: string;
 }
 
@@ -80,13 +82,19 @@ export function readSubmission(path: string): Submission {
   const submissionId = typeof raw?.id === "string" && raw.id.length > 0 ? raw.id : submissionIdFromPath(path);
   const contributorId = typeof raw?.contributor_id === "string" ? raw.contributor_id : "";
   const receivedAt = typeof raw?.received_at === "string" ? raw.received_at : "";
-  const failed = (error: string): Submission => ({ submissionId, contributorId, receivedAt, traces: [], error });
+  const failed = (error: string): Submission => ({ submissionId, contributorId, receivedAt, traces: [], droppedExports: [], error });
   if (!raw) return failed("unreadable submission JSON");
   if (typeof raw.export_string !== "string") return failed("no export_string");
 
   try {
-    const traces = decodeExportString(raw.export_string).map((trace) => (Array.isArray(trace.sessions) ? trace : { ...trace, sessions: [] }));
-    return { submissionId, contributorId, receivedAt, traces };
+    const { traces, dropped } = decodeExportString(raw.export_string);
+    return {
+      submissionId,
+      contributorId,
+      receivedAt,
+      traces: traces.map((trace) => (Array.isArray(trace.sessions) ? trace : { ...trace, sessions: [] })),
+      droppedExports: dropped,
+    };
   } catch (e) {
     return failed(e instanceof Error ? e.message : String(e));
   }

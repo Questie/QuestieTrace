@@ -20,6 +20,9 @@ console.log(
 for (const skipped of meta.skippedFiles) {
   console.warn(`Skipped ${skipped.name}: ${skipped.error}`);
 }
+for (const partial of meta.partialFiles) {
+  console.warn(`Partly decoded ${partial.name}: ${partial.droppedExports.join("; ")}`);
+}
 if (meta.duplicateSessionsSkipped > 0) {
   console.log(`Skipped ${meta.duplicateSessionsSkipped} older copies of sessions found in newer submissions`);
 }

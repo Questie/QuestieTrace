@@ -33,6 +33,8 @@ export interface ExtractMeta {
   exportCount: number;
   /** Submission files, relative to submissions/, that failed to load. */
   skippedFiles: { name: string; error: string }[];
+  /** Submission files, relative to submissions/, of which only some exports could be decoded. */
+  partialFiles: { name: string; droppedExports: string[] }[];
   /** Session copies skipped because a newer copy was already folded in. */
   duplicateSessionsSkipped: number;
   generatedAt: string;
@@ -52,6 +54,7 @@ export function extractCorrections(
   const foldedKeys = new Set<string>();
   const foldedSubmissionIds: string[] = [];
   const skippedFiles: ExtractMeta["skippedFiles"] = [];
+  const partialFiles: ExtractMeta["partialFiles"] = [];
   let exportCount = 0;
   let duplicateSessionsSkipped = 0;
 
@@ -82,6 +85,7 @@ export function extractCorrections(
       duplicateSessionsSkipped += duplicates;
       foldedSubmissionIds.push(submission.submissionId);
       exportCount += submission.traces.length;
+      if (submission.droppedExports.length > 0) partialFiles.push({ name, droppedExports: submission.droppedExports });
     }
     if ((index + 1) % 250 === 0 || index + 1 === files.length) log(`[${index + 1}/${files.length}] submissions`);
   });
@@ -106,6 +110,7 @@ export function extractCorrections(
     submissionCount: foldedSubmissionIds.length,
     exportCount,
     skippedFiles,
+    partialFiles,
     duplicateSessionsSkipped,
     generatedAt: now.toISOString(),
   };
