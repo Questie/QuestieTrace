@@ -1,15 +1,22 @@
-// Runs the corrections extraction over every trace file in a directory and
-// writes the forever*Traces.lua modules plus a meta.json summary.
+// Runs the corrections and lookup extraction over every submission in a trace-data checkout
+// and writes the forever*Traces.lua modules, one lookup<Entity>/<locale>.lua module per
+// entity and locale, plus a meta.json summary.
 //
-// Trace files are loaded and folded in one at a time and then dropped, so
-// memory use is bounded by the collected observations rather than by the
-// total size of all trace files.
+// Submissions are decoded and folded in one at a time and then dropped, so memory use is
+// bounded by the collected observations rather than by the total size of the input.
+//
+// Exports are cumulative and include the in-progress session, so one session shows up in
+// many submissions, growing as play continues. Submissions are read newest first and only
+// the first copy of each session met (the newest, so the most complete: see
+// core/trace-data/session-key.ts) is folded in.
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
-import { loadTraceFile } from "./core/loader";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "fs";
+import { join, relative, resolve } from "path";
+import { sessionKey } from "./core/trace-data/session-key";
+import { listSubmissionFiles, readSubmission } from "./core/trace-data/submissions";
 import type { SessionRecord } from "./core/types";
-import { createAccumulator, finalize, foldSessions } from './extract';
+import { createAccumulator, finalize, foldSessions } from "./extract";
+import { createLookupAccumulator, finalizeLookups, foldLookupSessions, type LookupBundle } from "./extract/lookups";
 
 const OUTPUT_FILES = {
   npcFixes: "foreverNpcTraces.lua",
@@ -20,93 +27,76 @@ const OUTPUT_FILES = {
 
 export interface ExtractMeta {
   sessionCount: number;
-  fileCount: number;
+  /** Submissions folded in. */
+  submissionCount: number;
+  /** Exports decoded from the folded submissions; a submission may hold several. */
+  exportCount: number;
+  /** Submission files, relative to submissions/, that failed to load or fold. */
   skippedFiles: { name: string; error: string }[];
-  duplicateSessions: DuplicateSession[];
+  /** Session copies skipped because a newer copy was already folded in. */
+  duplicateSessionsSkipped: number;
   generatedAt: string;
 }
 
-/** A session that was already loaded from another trace file, e.g. an in-progress session exported again once finished. */
-export interface DuplicateSession {
-  name: string;
-  firstName: string;
-  startedAtPrecise: number;
-}
-
-export interface FoldResult {
-  loadedFileNames: string[];
-  skippedFiles: ExtractMeta["skippedFiles"];
-  duplicateSessions: DuplicateSession[];
-}
-
-/**
- * Loads every trace file in `traceDir` one at a time and passes its sessions to `fold`.
- * `fold` must be all-or-nothing, so a skipped file contributes no data.
- *
- * A session that was already loaded from an earlier file (same `startedAtPrecise`) is
- * skipped and reported, so it is not counted twice.
- */
-export function foldTraceFiles(
-  traceDir: string,
-  fold: (sessions: SessionRecord[]) => void,
-  log: (message: string) => void,
-): FoldResult {
-  if (!existsSync(traceDir)) {
-    throw new Error(`Trace directory not found: ${traceDir}`);
-  }
-  const fileNames = readdirSync(traceDir)
-    .filter((f) => f.endsWith(".lua"))
-    .sort();
-  if (fileNames.length === 0) {
-    throw new Error(`No .lua trace files found in ${traceDir}`);
-  }
-
-  const loadedFileNames: string[] = [];
-  const skippedFiles: ExtractMeta["skippedFiles"] = [];
-  const duplicateSessions: DuplicateSession[] = [];
-  const seenSessions = new Map<number, string>();
-
-  fileNames.forEach((fileName, index) => {
-    let sessions: SessionRecord[] | undefined;
-    try {
-      sessions = loadTraceFile(join(traceDir, fileName)).sessions;
-    } catch (e) {
-      skippedFiles.push({ name: fileName, error: `Failed to load: ${String(e)}` });
-    }
-    if (sessions) {
-      const unique: SessionRecord[] = [];
-      for (const session of sessions) {
-        const firstName = seenSessions.get(session.startedAtPrecise);
-        if (firstName === undefined) {
-          unique.push(session);
-        } else {
-          duplicateSessions.push({ name: fileName, firstName, startedAtPrecise: session.startedAtPrecise });
-        }
-      }
-      try {
-        fold(unique);
-        for (const session of unique) seenSessions.set(session.startedAtPrecise, fileName);
-        loadedFileNames.push(fileName);
-      } catch (e) {
-        skippedFiles.push({ name: fileName, error: `Failed to extract: ${String(e)}` });
-      }
-    }
-    log(`[${index + 1}/${fileNames.length}] ${fileName}`);
-  });
-
-  return { loadedFileNames, skippedFiles, duplicateSessions };
-}
-
 export function extractCorrections(
-  traceDir: string,
+  traceDataDir: string,
   outputDir: string,
   log: (message: string) => void = console.log,
 ): ExtractMeta {
+  // Newest first: the first copy of a session met is then its most complete one.
+  const files = listSubmissionFiles(traceDataDir).reverse();
+  const submissionsDir = resolve(traceDataDir, "submissions");
+
   const acc = createAccumulator();
-  const { loadedFileNames, skippedFiles, duplicateSessions } = foldTraceFiles(traceDir, (sessions) => foldSessions(acc, sessions), log);
+  const lookupAcc = createLookupAccumulator();
+  const foldedKeys = new Set<string>();
+  const foldedSubmissionIds: string[] = [];
+  const skippedFiles: ExtractMeta["skippedFiles"] = [];
+  let exportCount = 0;
+  let duplicateSessionsSkipped = 0;
+
+  files.forEach((file, index) => {
+    const name = relative(submissionsDir, file.path);
+    const submission = readSubmission(file.path);
+    if (submission.error) {
+      skippedFiles.push({ name, error: submission.error });
+    } else {
+      const keys = new Set<string>();
+      const sessions: SessionRecord[] = [];
+      let duplicates = 0;
+      for (const session of submission.traces.flatMap((trace) => trace.sessions)) {
+        // A session without a key cannot be matched with its copies, so every copy is folded in.
+        const key = sessionKey(session);
+        if (key !== undefined && (foldedKeys.has(key) || keys.has(key))) {
+          duplicates++;
+        } else {
+          if (key !== undefined) keys.add(key);
+          sessions.push(session);
+        }
+      }
+      try {
+        foldSessions(acc, sessions);
+        foldLookupSessions(lookupAcc, sessions);
+        // Keys count as folded only once the whole submission is: when it fails, the older
+        // copies of its sessions are folded in instead.
+        for (const key of keys) foldedKeys.add(key);
+        duplicateSessionsSkipped += duplicates;
+        foldedSubmissionIds.push(submission.submissionId);
+        exportCount += submission.traces.length;
+      } catch (e) {
+        // Only the error's name: its message can quote trace data.
+        skippedFiles.push({ name, error: `folding the sessions failed (${e instanceof Error ? e.name : typeof e})` });
+      }
+    }
+    if ((index + 1) % 250 === 0 || index + 1 === files.length) log(`[${index + 1}/${files.length}] submissions`);
+  });
+
+  if (foldedSubmissionIds.length === 0) {
+    throw new Error(`No submission in ${submissionsDir} could be loaded; keeping the previous output`);
+  }
 
   const now = new Date();
-  const bundle = finalize(acc, { sourceFileNames: loadedFileNames, now });
+  const bundle = finalize(acc, { sourceFileNames: foldedSubmissionIds, now });
 
   mkdirSync(outputDir, { recursive: true });
   // meta.json marks a complete run: remove it until all modules are written.
@@ -114,14 +104,38 @@ export function extractCorrections(
   for (const [field, fileName] of Object.entries(OUTPUT_FILES)) {
     writeFileSync(join(outputDir, fileName), bundle[field as keyof typeof OUTPUT_FILES]);
   }
+  writeLookups(finalizeLookups(lookupAcc), outputDir);
 
   const meta: ExtractMeta = {
     sessionCount: acc.sessionCount,
-    fileCount: loadedFileNames.length,
+    submissionCount: foldedSubmissionIds.length,
+    exportCount,
     skippedFiles,
-    duplicateSessions,
+    duplicateSessionsSkipped,
     generatedAt: now.toISOString(),
   };
   writeFileSync(join(outputDir, "meta.json"), JSON.stringify(meta, null, 2));
   return meta;
+}
+
+function writeLookups(bundle: LookupBundle, outputDir: string): void {
+  // Write everything to a staging directory first, so a failed write keeps the previous lookups.
+  const stagingDir = join(outputDir, ".lookups-staging");
+  rmSync(stagingDir, { recursive: true, force: true });
+  try {
+    for (const [dirName, files] of Object.entries(bundle)) {
+      const dir = join(stagingDir, dirName);
+      mkdirSync(dir, { recursive: true });
+      for (const [locale, content] of Object.entries(files)) {
+        writeFileSync(join(dir, `${locale}.lua`), content);
+      }
+    }
+    for (const dirName of Object.keys(bundle)) {
+      // Replacing the whole directory also drops stale locales from a previous run.
+      rmSync(join(outputDir, dirName), { recursive: true, force: true });
+      renameSync(join(stagingDir, dirName), join(outputDir, dirName));
+    }
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
 }

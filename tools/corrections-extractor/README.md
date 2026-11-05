@@ -1,6 +1,6 @@
 # corrections-extractor
 
-Extracts Questie DB corrections from every QuestieTrace trace file in `Traces/` and writes them as paste-ready `forever*Traces.lua` modules.
+Extracts Questie DB corrections and translations from every submission in a [trace-data](https://github.com/Questie/trace-data) checkout and writes them as paste-ready `forever*Traces.lua` and lookup modules.
 
 The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported.
 
@@ -22,7 +22,9 @@ npm ci
 npm run extract
 ```
 
-Every `.lua` file in `../../Traces/` is loaded, processed and dropped again one at a time, so memory use does not grow with the size of the trace files. Files that fail to load are reported and skipped; the rest still runs. A session found in more than one file (e.g. when a player exported again without confirming the previous export as reported) is only used once. The run prints a warning with the number of skipped sessions, and `meta.json` lists them with both file names.
+Reads `TRACE_DATA_DIR`, or by default the `trace-data` checkout next to the QuestieTrace checkout (`../../../trace-data`). Every `submissions/<yyyy-mm>/*.json` file is decoded natively (print encoding, raw deflate, CBOR), processed and dropped again one at a time, so memory use does not grow with the size of the input. Submissions that fail to load are reported and skipped; the rest still runs.
+
+Exports are cumulative, so one session shows up in many submissions. Submissions are read newest first and only the newest copy of each session is used.
 
 The results are written to `output/`:
 
@@ -32,23 +34,20 @@ The results are written to `output/`:
 | `foreverQuestTraces.lua` | Quest corrections |
 | `foreverItemTraces.lua` | Item corrections |
 | `foreverObjectTraces.lua` | Object corrections |
-| `meta.json` | `sessionCount`, `fileCount`, `skippedFiles`, `duplicateSessions` and `generatedAt` of the run |
+| `lookup{Npcs,Quests,Items,Objects}/<locale>.lua` | Translations, see below |
+| `meta.json` | `sessionCount`, `submissionCount`, `exportCount`, `skippedFiles`, `duplicateSessionsSkipped` and `generatedAt` of the run |
 
 The trace-analyzer's Extract tab shows these files for copy/download.
 
 ### Translations
 
-```sh
-npm run extract:lookups
-```
-
-Writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Like the corrections, only IDs above the known Classic maximum are exported. NPC subnames are not traced and are always `nil`.
+The same run writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Like the corrections, only IDs above the known Classic maximum are exported. NPC subnames are not traced and are always `nil`.
 
 ## How it works
 
-1. `src/core/loader.ts` parses a trace file via `lua-state`.
-2. `foldSessions` (`src/extract/index.ts`) runs every observer in `src/extract/observers/` over the file's sessions and collects their observations. Fields with the default scalar merge only keep a per-value summary; fields with a custom merge (spawns, drops, ...) keep every observation.
-3. After the last file, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
+1. `src/core/trace-data/` lists and decodes the submissions.
+2. `foldSessions` (`src/extract/index.ts`) runs every observer in `src/extract/observers/` over the submission's sessions and collects their observations. Fields with the default scalar merge only keep a per-value summary; fields with a custom merge (spawns, drops, ...) keep every observation.
+3. After the last submission, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
 
 ### Quest-giver correlation
 
