@@ -4,7 +4,7 @@ import { decodeCbor } from "./cbor";
 const cbor = (...bytes: number[]) => Buffer.from(bytes);
 const ascii = (text: string) => [...Buffer.from(text, "utf8")];
 
-describe("decodeCbor (BlizzardCBOR semantics as seen through lua-state)", () => {
+describe("decodeCbor (BlizzardCBOR semantics as seen through lua-state and normalizeLuaValue)", () => {
   it("should decode integers as doubles, like the Lua reference's byte-by-byte accumulation", () => {
     expect(decodeCbor(cbor(0x38, 0x63))).toBe(-100);
     // 2^53 + 1 cannot be represented; Lua and this decoder both round to 2^53.
@@ -19,15 +19,37 @@ describe("decodeCbor (BlizzardCBOR semantics as seen through lua-state)", () => 
     expect(decodeCbor(cbor(0xfb, 0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a))).toBe(1.1);
   });
 
-  it("should turn arrays into Lua tables keyed from 1, leaving holes for null", () => {
+  it("should turn arrays into JS arrays, and arrays with holes into objects keyed from 1", () => {
+    expect(decodeCbor(cbor(0x82, 0x01, 0x02))).toEqual([1, 2]);
     expect(decodeCbor(cbor(0x83, 0x01, 0xf6, 0x03))).toEqual({ "1": 1, "3": 3 });
-    expect(decodeCbor(cbor(0x80))).toEqual({});
+    expect(decodeCbor(cbor(0x83, 0x01, 0x02, 0xf6))).toEqual([1, 2]);
+    expect(decodeCbor(cbor(0x80))).toEqual([]);
+    expect(decodeCbor(cbor(0xa0))).toEqual([]);
+  });
+
+  it("should turn maps keyed 1..n into arrays", () => {
+    expect(decodeCbor(cbor(0xa2, 0x02, 0x61, ...ascii("b"), 0x01, 0x61, ...ascii("a")))).toEqual(["a", "b"]);
+    expect(decodeCbor(cbor(0xa1, 0x02, 0x61, ...ascii("b")))).toEqual({ "2": "b" });
+    expect(decodeCbor(cbor(0xa2, 0x61, ...ascii("1"), 0x0a, 0x61, ...ascii("2"), 0x14))).toEqual([10, 20]);
+    expect(decodeCbor(cbor(0xa3, 0x61, ...ascii("a"), 0x01, 0x61, ...ascii("a"), 0xf6, 0x01, 0x05))).toEqual([5]);
+  });
+
+  it("should keep packed args and tables with string keys as objects", () => {
+    expect(decodeCbor(cbor(0xa2, 0x01, 0x07, 0x61, ...ascii("n"), 0x01))).toEqual({ "1": 7, n: 1 });
+    expect(decodeCbor(cbor(0xa1, 0x61, ...ascii("x"), 0x82, 0x01, 0x02))).toEqual({ x: [1, 2] });
+  });
+
+  it("should keep tables whose first value is an integer-keyed table as objects, like index-keyed streams", () => {
+    expect(decodeCbor(cbor(0x82, 0x81, 0x01, 0x81, 0x02))).toEqual({ "1": [1], "2": [2] });
+    expect(decodeCbor(cbor(0x82, 0xa1, 0x02, 0x01, 0x81, 0x02))).toEqual({ "1": { "2": 1 }, "2": [2] });
+    expect(decodeCbor(cbor(0x82, 0x80, 0x81, 0x02))).toEqual([[], [2]]);
+    expect(decodeCbor(cbor(0x82, 0xa1, 0x61, ...ascii("x"), 0x01, 0x81, 0x02))).toEqual([{ x: 1 }, [2]]);
   });
 
   it("should keep only the keys lua-state can represent and let a nil value remove an earlier key", () => {
-    expect(decodeCbor(cbor(0xa1, 0x01, 0x61, ...ascii("x")))).toEqual({ "1": "x" });
-    expect(decodeCbor(cbor(0xa2, 0x61, ...ascii("a"), 0x01, 0x61, ...ascii("a"), 0xf6))).toEqual({});
-    expect(decodeCbor(cbor(0xa2, 0xf5, 0x01, 0x80, 0x02))).toEqual({});
+    expect(decodeCbor(cbor(0xa1, 0x01, 0x61, ...ascii("x")))).toEqual(["x"]);
+    expect(decodeCbor(cbor(0xa2, 0x61, ...ascii("a"), 0x01, 0x61, ...ascii("a"), 0xf6))).toEqual([]);
+    expect(decodeCbor(cbor(0xa2, 0xf5, 0x01, 0x80, 0x02))).toEqual([]);
   });
 
   it("should read byte strings and text strings as UTF-8", () => {

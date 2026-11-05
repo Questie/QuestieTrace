@@ -3,11 +3,10 @@
 //   "!QuestieTrace:N!" + EncodeForPrint(raw deflate(CBOR(payload))) + "!End:QuestieTrace:N!"
 //
 // The result has exactly the shape `loadTraceFile` (lua-state + normalizeLuaValue) gives
-// for the same data, so the extractor and the relations pipeline work on it unchanged. The
-// Lua toolchain in tools/decoder is the reference; decode.oracle.test.ts compares both.
+// for the same data. The Lua toolchain in tools/decoder is the reference;
+// decode.oracle.test.ts compares both.
 
 import { inflateRawSync } from "zlib";
-import { normalizeLuaValue } from "../normalize";
 import type { TraceFile } from "../types";
 import { decodeCbor } from "./cbor";
 
@@ -47,7 +46,7 @@ export function decodeForPrint(text: string): Buffer {
   return out.subarray(0, size);
 }
 
-/** Decodes one print-encoded payload (the text between the markers) into its raw Lua table shape. */
+/** Decodes one print-encoded payload (the text between the markers) into its normalized table shape. */
 export function decodePayload(encoded: string): unknown {
   const compressed = decodeForPrint(encoded);
   let cbor: Buffer;
@@ -75,6 +74,6 @@ export function decodeExportString(exportString: string): TraceFile[] {
   if (payloads.length === 0) throw new Error("export string must be wrapped in !QuestieTrace:N! and !End:QuestieTrace:N! markers");
   return payloads.map((payload) => {
     if (payload.trim() === "") throw new Error("export markers found but payload is empty");
-    return normalizeLuaValue(decodePayload(payload)) as TraceFile;
+    return decodePayload(payload) as TraceFile;
   });
 }

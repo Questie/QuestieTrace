@@ -1,19 +1,18 @@
 // CBOR decoder matching the Lua reference (tools/decoder/dependencies/BlizzardCBOR.lua)
 // and the way lua-state hands Lua tables to JavaScript.
 //
-// The output is what `loadTraceFile` sees *before* `normalizeLuaValue`: every Lua table
-// becomes a plain object with string keys, nil never appears, and keys lua-state cannot
-// represent (booleans, tables) are dropped. Feeding it through `normalizeLuaValue` then
-// yields exactly the shape every trace consumer already works with.
+// The output is what `normalizeLuaValue` (src/core/normalize.ts) makes of a table lua-state
+// hands over, built in one pass: nil never appears, keys lua-state cannot represent (booleans,
+// tables) are dropped, and every table becomes either a JS array or a plain object with
+// string keys, following the same rules.
 //
 // Supported subset, as in BlizzardCBOR: definite-length items only, no tags, simple
 // values limited to false/true/null/undefined, half/single/double floats.
 
 /** A decoded Lua value. `undefined` stands for Lua nil. */
 export type LuaValue = undefined | boolean | number | string | LuaTable;
-export interface LuaTable {
-  [key: string]: Exclude<LuaValue, undefined>;
-}
+export type LuaTable = Exclude<LuaValue, undefined>[] | { [key: string]: Exclude<LuaValue, undefined> };
+type RawTable = { [key: string]: Exclude<LuaValue, undefined> };
 
 const MAX_NESTING_DEPTH = 100;
 
@@ -22,6 +21,11 @@ export class CborError extends Error {}
 class Reader {
   private pos = 0;
   private readonly view: DataView;
+  /**
+   * Whether the table decoded last had only positive integer keys (and at least one), as seen
+   * by lua-state. normalizeLuaValue keeps a table whose first value is such a table an object.
+   */
+  private lastTableIntegerKeyed = false;
 
   constructor(private readonly bytes: Buffer) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -69,8 +73,7 @@ class Reader {
       case 3: {
         const length = this.argument(info);
         this.need(length);
-        // lua-state builds JS strings from Lua byte strings as UTF-8 (invalid bytes become U+FFFD).
-        const text = this.bytes.toString("utf8", this.pos, this.pos + length);
+        const text = this.text(this.pos, this.pos + length);
         this.pos += length;
         return text;
       }
@@ -85,35 +88,84 @@ class Reader {
     }
   }
 
+  /** lua-state builds JS strings from Lua byte strings as UTF-8 (invalid bytes become U+FFFD). */
+  private text(start: number, end: number): string {
+    // Buffer#toString is slow for the many short keys and values; decode short ASCII in JS.
+    if (end - start > 32) return this.bytes.toString("utf8", start, end);
+    let text = "";
+    for (let i = start; i < end; i++) {
+      const byte = this.bytes[i];
+      if (byte >= 0x80) return this.bytes.toString("utf8", start, end);
+      text += String.fromCharCode(byte);
+    }
+    return text;
+  }
+
   private array(info: number, depth: number): LuaTable {
     if (depth > MAX_NESTING_DEPTH) throw new CborError(`CBOR deserialization exceeded maximum table depth of ${MAX_NESTING_DEPTH}`);
     const length = this.argument(info);
-    const table: LuaTable = {};
+    const items: Exclude<LuaValue, undefined>[] = [];
+    let firstIntegerKeyed = false;
+    let raw: RawTable | undefined;
     for (let index = 1; index <= length; index++) {
       const item = this.value(depth + 1);
-      // Lua: items[index] = nil leaves a hole.
-      if (item !== undefined) table[index] = item;
+      if (index === 1) firstIntegerKeyed = typeof item === "object" && this.lastTableIntegerKeyed;
+      // Lua: items[index] = nil leaves a hole, so the table is no plain array any more.
+      if (item === undefined) raw ??= Object.fromEntries(items.map((value, i) => [i + 1, value]));
+      else if (raw) raw[index] = item;
+      else items.push(item);
     }
-    return table;
+    if (raw) return this.finish(raw, firstIntegerKeyed);
+    this.lastTableIntegerKeyed = items.length > 0;
+    return firstIntegerKeyed ? Object.fromEntries(items.map((value, i) => [i + 1, value])) : items;
   }
 
   private map(info: number, depth: number): LuaTable {
     if (depth > MAX_NESTING_DEPTH) throw new CborError(`CBOR deserialization exceeded maximum table depth of ${MAX_NESTING_DEPTH}`);
     const length = this.argument(info);
-    const table: LuaTable = {};
+    const table: RawTable = {};
+    let firstIntegerKeyed = false;
+    let hasOtherKey = false;
+    let hasDeleted = false;
     for (let i = 0; i < length; i++) {
       const key = this.value(depth + 1);
       if (key === undefined) throw new CborError("CBOR map keys that decode to nil are not supported");
       const item = this.value(depth + 1);
+      const itemIntegerKeyed = typeof item === "object" && this.lastTableIntegerKeyed;
       // lua-state only converts number and string keys; boolean and table keys are skipped.
       if (typeof key !== "number" && typeof key !== "string") continue;
       if (typeof key === "number" && Number.isNaN(key)) throw new CborError("table index is NaN");
       const name = String(key);
       // Lua: map[key] = nil removes an earlier entry with the same key.
-      if (item === undefined) delete table[name];
-      else table[name] = item;
+      if (item === undefined) {
+        delete table[name];
+        hasDeleted = true;
+      } else {
+        table[name] = item;
+        if (!hasOtherKey && !isIntegerKey(key)) hasOtherKey = true;
+      }
+      if (name === "1") firstIntegerKeyed = itemIntegerKeyed;
     }
-    return table;
+    // Fast path for the common case: a key that is no positive integer makes it an object.
+    if (hasOtherKey && !hasDeleted) {
+      this.lastTableIntegerKeyed = false;
+      return table;
+    }
+    return this.finish(table, firstIntegerKeyed);
+  }
+
+  /** Turns a table as lua-state sees it into an array or object, like normalizeLuaValue. */
+  private finish(raw: RawTable, firstIntegerKeyed: boolean): LuaTable {
+    const keys = Object.keys(raw);
+    const integerKeys = keys.map(Number);
+    const integerKeyed = integerKeys.every((n) => Number.isInteger(n) && n >= 1);
+    this.lastTableIntegerKeyed = integerKeyed && keys.length > 0;
+    if (keys.length === 0) return [];
+    // Packed args stay objects through their `n` key, index-keyed streams through firstIntegerKeyed.
+    if (!integerKeyed || firstIntegerKeyed) return raw;
+    integerKeys.sort((a, b) => a - b);
+    if (integerKeys.some((n, i) => n !== i + 1)) return raw;
+    return integerKeys.map((n) => raw[String(n)]);
   }
 
   private simpleOrFloat(info: number): LuaValue {
@@ -147,6 +199,16 @@ class Reader {
         throw new CborError(`unsupported CBOR simple value ${info}`);
     }
   }
+}
+
+/** Whether lua-state's string form of `key` reads back as a positive integer, as normalizeLuaValue checks it. */
+function isIntegerKey(key: number | string): boolean {
+  if (typeof key === "number") return Number.isInteger(key) && key >= 1;
+  const first = key.charCodeAt(0);
+  // Names starting with a letter or underscore never read back as numbers.
+  if ((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first === 95) return false;
+  const n = Number(key);
+  return Number.isInteger(n) && n >= 1;
 }
 
 function decodeHalf(bits: number): number {
