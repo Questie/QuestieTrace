@@ -1,6 +1,6 @@
 // CBOR decoder for the tables the addon exports (Blizzard's CBOR serializer), producing the
-// shape every trace consumer works with. It mirrors the former Lua toolchain (BlizzardCBOR,
-// then lua-state and normalizeLuaValue):
+// shape every trace consumer works with. It keeps the behaviour of the former Lua toolchain
+// (BlizzardCBOR, then lua-state and its normalization):
 //
 // - nil never appears; keys other than numbers and strings (booleans, tables) are dropped
 // - a table whose keys are exactly 1..n becomes a JS array, unless its first value is itself

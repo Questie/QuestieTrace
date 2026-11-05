@@ -31,7 +31,7 @@ export interface ExtractMeta {
   submissionCount: number;
   /** Exports decoded from the folded submissions; a submission may hold several. */
   exportCount: number;
-  /** Submission files, relative to submissions/, that failed to load or fold. */
+  /** Submission files, relative to submissions/, that failed to load. */
   skippedFiles: { name: string; error: string }[];
   /** Session copies skipped because a newer copy was already folded in. */
   duplicateSessionsSkipped: number;
@@ -74,19 +74,14 @@ export function extractCorrections(
           sessions.push(session);
         }
       }
-      try {
-        foldSessions(acc, sessions);
-        foldLookupSessions(lookupAcc, sessions);
-        // Keys count as folded only once the whole submission is: when it fails, the older
-        // copies of its sessions are folded in instead.
-        for (const key of keys) foldedKeys.add(key);
-        duplicateSessionsSkipped += duplicates;
-        foldedSubmissionIds.push(submission.submissionId);
-        exportCount += submission.traces.length;
-      } catch (e) {
-        // Only the error's name: its message can quote trace data.
-        skippedFiles.push({ name, error: `folding the sessions failed (${e instanceof Error ? e.name : typeof e})` });
-      }
+      // Observer errors abort the run, keeping the previous output: a submission folded in
+      // only part way could not be taken out of the accumulators again.
+      foldSessions(acc, sessions);
+      foldLookupSessions(lookupAcc, sessions);
+      for (const key of keys) foldedKeys.add(key);
+      duplicateSessionsSkipped += duplicates;
+      foldedSubmissionIds.push(submission.submissionId);
+      exportCount += submission.traces.length;
     }
     if ((index + 1) % 250 === 0 || index + 1 === files.length) log(`[${index + 1}/${files.length}] submissions`);
   });
