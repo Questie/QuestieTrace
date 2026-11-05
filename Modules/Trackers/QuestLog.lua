@@ -824,8 +824,13 @@ Core.RegisterTracker({
     prevTimedQuestIds = {}
     prevRewardCounts = {}
 
-    -- Immediate sample at t=0
-    SampleQuestLog(capture)
+    -- Initial sample on the next frame: Init can run inside a long export
+    -- click handler, and sampling every quest there hits "script ran too long".
+    local token = capture.token
+    C_After(0, function()
+      if not capture.active or capture.token ~= token then return end
+      SampleQuestLog(capture)
+    end)
 
     -- Schedule delayed re-samples for initial capture (catches server lag)
     ScheduleDelayedSamples(capture)
