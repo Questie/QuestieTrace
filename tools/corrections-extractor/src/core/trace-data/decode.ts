@@ -10,7 +10,10 @@ const PRINT_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123
 const SIX_BIT = new Int8Array(256).fill(-1);
 for (let i = 0; i < PRINT_ALPHABET.length; i++) SIX_BIT[PRINT_ALPHABET.charCodeAt(i)] = i;
 
-const EXPORT_PATTERN = /!QuestieTrace:(\d+)!(.*?)!End:QuestieTrace:\1!/gs;
+// The print alphabet has no "!", so a payload never spans another marker: an export pasted into
+// the middle of another one is matched on its own, and the one it cut off has no end marker.
+const START_PATTERN = /!QuestieTrace:\d+!/g;
+const EXPORT_PATTERN = /!QuestieTrace:(\d+)!([^!]*)!End:QuestieTrace:\1!/g;
 /** Far above any real export (the largest inflate to a few dozen MB); stops a hostile payload from exhausting memory. */
 const MAX_CBOR_BYTES = 512 * 1024 * 1024;
 
@@ -56,20 +59,40 @@ export function decodePayload(encoded: string): unknown {
   return value;
 }
 
-/** The individual "!QuestieTrace:N!...!End:QuestieTrace:N!" exports in a submission (usually one). */
-export function splitExports(exportString: string): string[] {
-  return [...exportString.matchAll(EXPORT_PATTERN)].map((match) => match[2]);
+export interface DecodedExportString {
+  /** One per export that decoded. */
+  traces: TraceFile[];
+  /** Why each other export was dropped. */
+  dropped: string[];
 }
 
 /**
  * Decodes every export in a submission's `export_string`. Some submissions hold several
- * exports pasted back to back; each becomes its own TraceFile.
+ * exports, pasted back to back or one into the middle of another; each becomes its own
+ * TraceFile. Exports that are cut off or don't decode are dropped; it throws only when none
+ * decodes.
  */
-export function decodeExportString(exportString: string): TraceFile[] {
-  const payloads = splitExports(exportString);
-  if (payloads.length === 0) throw new Error("export string must be wrapped in !QuestieTrace:N! and !End:QuestieTrace:N! markers");
-  return payloads.map((payload) => {
-    if (payload.trim() === "") throw new Error("export markers found but payload is empty");
-    return decodePayload(payload) as TraceFile;
+export function decodeExportString(exportString: string): DecodedExportString {
+  const starts = [...exportString.matchAll(START_PATTERN)].map((match) => match.index);
+  if (starts.length === 0) throw new Error("export string must be wrapped in !QuestieTrace:N! and !End:QuestieTrace:N! markers");
+  const complete = new Map([...exportString.matchAll(EXPORT_PATTERN)].map((match) => [match.index, match[2]]));
+
+  const traces: TraceFile[] = [];
+  const dropped: string[] = [];
+  starts.forEach((start, index) => {
+    const payload = complete.get(start);
+    if (payload === undefined) {
+      dropped.push(`export ${index + 1} is cut off`);
+    } else if (payload.trim() === "") {
+      dropped.push(`export ${index + 1}: export markers found but payload is empty`);
+    } else {
+      try {
+        traces.push(decodePayload(payload) as TraceFile);
+      } catch (e) {
+        dropped.push(`export ${index + 1}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
   });
+  if (traces.length === 0) throw new Error(dropped.join("; "));
+  return { traces, dropped };
 }

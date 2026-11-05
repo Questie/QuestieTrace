@@ -52,7 +52,7 @@ describe("extractCorrections", () => {
     expect(readFileSync(join(outputDir, "foreverObjectTraces.lua"), "utf8")).toContain("function ForeverObjectTraces:Load()");
     expect(existsSync(join(outputDir, "lookupNpcs"))).toBe(true);
     expect(JSON.parse(readFileSync(join(outputDir, "meta.json"), "utf8"))).toEqual(meta);
-    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [], duplicateSessionsSkipped: 0 });
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [], partialFiles: [], duplicateSessionsSkipped: 0 });
   });
 
   it("should replace previous lookups, dropping stale locales, and leave no staging directory", () => {
@@ -79,6 +79,17 @@ describe("extractCorrections", () => {
       join("2026-10", "2026-10-03_000000Z_garbled.json"),
       join("2026-10", "2026-10-02_000000Z_broken.json"),
     ]);
+  });
+
+  it("should fold the exports that decode and list the submission in partialFiles", () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-10/2026-10-01_000000Z_a.json": submission("a", `${TINY_EXPORT.slice(0, 200)}${TINY_EXPORT}${TINY_EXPORT.slice(-60)}`),
+    });
+
+    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
+
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [] });
+    expect(meta.partialFiles).toEqual([{ name: join("2026-10", "2026-10-01_000000Z_a.json"), droppedExports: ["export 1 is cut off"] }]);
   });
 
   it("should fold each session once, even when several submissions and exports contain it", () => {

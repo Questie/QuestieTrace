@@ -35,7 +35,7 @@ The results are written to `output/`:
 | `foreverItemTraces.lua` | Item corrections |
 | `foreverObjectTraces.lua` | Object corrections |
 | `lookup{Npcs,Quests,Items,Objects}/<locale>.lua` | Translations, see below |
-| `meta.json` | `sessionCount`, `submissionCount`, `exportCount`, `skippedFiles`, `duplicateSessionsSkipped` and `generatedAt` of the run |
+| `meta.json` | `sessionCount`, `submissionCount`, `exportCount`, `skippedFiles`, `partialFiles` (submissions of which only some exports could be decoded), `duplicateSessionsSkipped` and `generatedAt` of the run |
 
 The trace-analyzer's Extract tab shows these files for copy/download.
 

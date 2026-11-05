@@ -56,7 +56,7 @@ describe("readSubmission", () => {
     const submission = readSubmission(listSubmissionFiles(root)[0].path);
     const { traces, ...rest } = submission;
 
-    expect(rest).toEqual({ submissionId: "submission-id", contributorId: "contributor-id", receivedAt: "2026-10-01T00:00:00Z" });
+    expect(rest).toEqual({ submissionId: "submission-id", contributorId: "contributor-id", receivedAt: "2026-10-01T00:00:00Z", droppedExports: [] });
     expect(traces.map((trace) => trace.sessions.length)).toEqual([1]);
     expect(JSON.stringify(submission)).not.toContain("SomePlayerName");
   });
@@ -68,7 +68,7 @@ describe("readSubmission", () => {
     });
     const [broken, garbled] = listSubmissionFiles(root).map((file) => readSubmission(file.path));
 
-    expect(broken).toEqual({ submissionId: "broken", contributorId: "", receivedAt: "", traces: [], error: "unreadable submission JSON" });
+    expect(broken).toEqual({ submissionId: "broken", contributorId: "", receivedAt: "", traces: [], droppedExports: [], error: "unreadable submission JSON" });
     expect(garbled.submissionId).toBe("garbled");
     expect(garbled.traces).toEqual([]);
     expect(garbled.error).toMatch(/markers/);
