@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join, resolve } from "path";
+import { join } from "path";
+import { TINY_EXPORT } from "./core/trace-data/fixtures";
 import { extractCorrections } from "./extract-corrections";
-
-const EXAMPLE_TRACE = resolve(__dirname, "../../../Traces/human_rogue_1to5_example.lua");
 
 const tempDirs: string[] = [];
 
@@ -14,73 +13,98 @@ afterEach(() => {
   }
 });
 
-function setupDirs() {
+/** A trace-data checkout holding `files` (path under submissions/ -> content), plus an output directory. */
+function setupDirs(files: Record<string, string>) {
   const root = mkdtempSync(join(tmpdir(), "corrections-extractor-"));
   tempDirs.push(root);
-  const traceDir = join(root, "Traces");
+  const traceDataDir = join(root, "trace-data");
   const outputDir = join(root, "output");
-  mkdirSync(traceDir);
-  return { traceDir, outputDir };
+  for (const [path, content] of Object.entries(files)) {
+    const full = join(traceDataDir, "submissions", path);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, content);
+  }
+  return { traceDataDir, outputDir };
+}
+
+function submission(id: string, exportString = TINY_EXPORT): string {
+  return JSON.stringify({ id, contributor_id: "contributor", received_at: "2026-10-01T00:00:00Z", export_string: exportString });
+}
+
+function writePreviousLookup(outputDir: string): string {
+  const file = join(outputDir, "lookupItems", "deDE.lua");
+  mkdirSync(join(outputDir, "lookupItems"), { recursive: true });
+  writeFileSync(file, "previous");
+  return file;
 }
 
 describe("extractCorrections", () => {
-  it("should write all four corrections modules and meta.json to the output directory", () => {
-    const { traceDir, outputDir } = setupDirs();
-    copyFileSync(EXAMPLE_TRACE, join(traceDir, "example.lua"));
+  it("should write all four corrections modules, the lookups and meta.json to the output directory", () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
 
-    const meta = extractCorrections(traceDir, outputDir, () => undefined);
+    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
 
     expect(readFileSync(join(outputDir, "foreverNpcTraces.lua"), "utf8")).toContain("function ForeverNpcTraces:Load()");
     expect(readFileSync(join(outputDir, "foreverQuestTraces.lua"), "utf8")).toContain("function ForeverQuestTraces:Load()");
     expect(readFileSync(join(outputDir, "foreverItemTraces.lua"), "utf8")).toContain("function ForeverItemTraces:Load()");
     expect(readFileSync(join(outputDir, "foreverObjectTraces.lua"), "utf8")).toContain("function ForeverObjectTraces:Load()");
+    expect(existsSync(join(outputDir, "lookupNpcs"))).toBe(true);
     expect(JSON.parse(readFileSync(join(outputDir, "meta.json"), "utf8"))).toEqual(meta);
-    expect(meta.fileCount).toBe(1);
-    expect(meta.skippedFiles).toEqual([]);
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [], duplicateSessionsSkipped: 0 });
   });
 
-  it("should skip trace files that fail to load and report them in meta.json", () => {
-    const { traceDir, outputDir } = setupDirs();
-    writeFileSync(join(traceDir, "broken.lua"), "this is not lua {");
-    writeFileSync(join(traceDir, "ignored.txt"), "not a trace file");
+  it("should replace previous lookups, dropping stale locales, and leave no staging directory", () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
+    const stale = writePreviousLookup(outputDir);
 
-    const meta = extractCorrections(traceDir, outputDir, () => undefined);
+    extractCorrections(traceDataDir, outputDir, () => undefined);
 
-    expect(meta.fileCount).toBe(0);
-    expect(meta.skippedFiles).toHaveLength(1);
-    expect(meta.skippedFiles[0].name).toBe("broken.lua");
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(join(outputDir, ".lookups-staging"))).toBe(false);
   });
 
-  it("should skip and report sessions already loaded from another trace file", () => {
-    const single = setupDirs();
-    copyFileSync(EXAMPLE_TRACE, join(single.traceDir, "a.lua"));
-    const { traceDir, outputDir } = setupDirs();
-    copyFileSync(EXAMPLE_TRACE, join(traceDir, "a.lua"));
-    copyFileSync(EXAMPLE_TRACE, join(traceDir, "b.lua"));
+  it("should skip submissions that fail to load and report them in meta.json", () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-10/2026-10-01_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-02_000000Z_broken.json": "{ not json",
+      "2026-10/2026-10-03_000000Z_garbled.json": submission("garbled", "not an export"),
+    });
 
-    const singleMeta = extractCorrections(single.traceDir, single.outputDir, () => undefined);
-    const meta = extractCorrections(traceDir, outputDir, () => undefined);
+    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
 
-    expect(meta.sessionCount).toBe(singleMeta.sessionCount);
-    expect(meta.duplicateSessions.length).toBeGreaterThan(0);
-    expect(meta.duplicateSessions.every((d) => d.name === "b.lua" && d.firstName === "a.lua")).toBe(true);
+    expect(meta.submissionCount).toBe(1);
+    expect(meta.skippedFiles.map((skipped) => skipped.name)).toEqual([
+      join("2026-10", "2026-10-03_000000Z_garbled.json"),
+      join("2026-10", "2026-10-02_000000Z_broken.json"),
+    ]);
   });
 
-  it("should throw when the trace directory does not exist", () => {
-    const { traceDir, outputDir } = setupDirs();
-    rmSync(traceDir, { recursive: true });
+  it("should fold each session once, even when several submissions and exports contain it", () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-09/2026-09-30_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-01_000000Z_b.json": submission("b", `${TINY_EXPORT}\n${TINY_EXPORT}`),
+    });
 
-    expect(() => extractCorrections(traceDir, outputDir, () => undefined)).toThrow("Trace directory not found");
+    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
+
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 2, exportCount: 3, duplicateSessionsSkipped: 2 });
   });
 
-  it("should throw and keep the previous output when the trace directory has no trace files", () => {
-    const { traceDir, outputDir } = setupDirs();
+  it("should throw and keep the previous output when no submission could be loaded", () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_broken.json": "{ not json" });
     mkdirSync(outputDir);
     writeFileSync(join(outputDir, "meta.json"), "{}");
-    writeFileSync(join(traceDir, "ignored.txt"), "not a trace file");
+    const previous = writePreviousLookup(outputDir);
 
-    expect(() => extractCorrections(traceDir, outputDir, () => undefined)).toThrow("No .lua trace files found");
+    expect(() => extractCorrections(traceDataDir, outputDir, () => undefined)).toThrow("could be loaded");
     expect(readFileSync(join(outputDir, "meta.json"), "utf8")).toBe("{}");
+    expect(readFileSync(previous, "utf8")).toBe("previous");
     expect(existsSync(join(outputDir, "foreverNpcTraces.lua"))).toBe(false);
+  });
+
+  it("should throw when the trace-data checkout has no submissions directory", () => {
+    const { traceDataDir, outputDir } = setupDirs({});
+
+    expect(() => extractCorrections(traceDataDir, outputDir, () => undefined)).toThrow("does not exist");
   });
 });
