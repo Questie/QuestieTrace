@@ -2923,6 +2923,24 @@ local function TestQuestLogExtrasStoredByQuestID()
   assert(#timers == 1 and next(timers[1].v) == nil, "No running timers is recorded once, across the delayed re-samples")
 end
 
+local function TestQuestLogDefersInitialSample()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestLog.lua" })
+  local env = runtime.env
+  env.C_QuestLog = {
+    GetInfo = function(index)
+      if index == 1 then return { title = "Elwynn Forest", isHeader = true, questID = 0 } end
+      if index == 2 then return { title = "A Quest", isHeader = false, questID = 100 } end
+    end,
+    GetLogIndexForQuestID = function(questID) if questID == 100 then return 2 end end,
+  }
+  runtime.core.StartCapture("deferred sample")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(#functions.QuestLog == 0, "StartCapture does not sample the quest log synchronously")
+  AdvanceTo(runtime, 0)
+  assert(#functions.QuestLog == 1 and functions.QuestLog[1].v[1] == 100,
+    "The initial sample runs on the next frame")
+end
+
 local function TestQuestLogRecordsLegacyTimerSlots()
   local runtime = NewRuntime({ "Modules/Trackers/QuestLog.lua" })
   local env = runtime.env
@@ -3253,6 +3271,7 @@ end
 local tests = {
   { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
   { name = "quest log extras are stored by quest ID", run = TestQuestLogExtrasStoredByQuestID },
+  { name = "quest log defers its initial sample to the next frame", run = TestQuestLogDefersInitialSample },
   { name = "quest log records legacy timer slots raw", run = TestQuestLogRecordsLegacyTimerSlots },
   { name = "position records explored map overlays", run = TestPositionRecordsExploredMap },
   { name = "reset time records realm calendar time", run = TestResetTimeRecordsCalendarTime },
