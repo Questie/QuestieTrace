@@ -4,7 +4,12 @@ local function LoadQuestLogTracker(env)
   setmetatable(env, { __index = _G })
   env._G = env
   env.QuestieTraceCore = {}
-  env.C_Timer = { After = function(_delay, _callback) end }
+  env.pendingSamples = {}
+  env.C_Timer = {
+    After = function(delay, callback)
+      if delay == 0 then env.pendingSamples[#env.pendingSamples + 1] = callback end
+    end,
+  }
   env.GetTime = function() return 0 end
   env.GetTimePreciseSec = function() return 0 end
   env.UnitLevel = function(_unit) return 60 end
@@ -64,6 +69,15 @@ local function NewCapture()
   }
 end
 
+---Init the tracker, then run the initial sample it defers to the next frame.
+---@param tracker table
+---@param capture table
+local function InitAndSample(tracker, capture, env)
+  tracker.Init(capture)
+  for _, callback in ipairs(env.pendingSamples) do callback() end
+  env.pendingSamples = {}
+end
+
 describe("QuestLog tracker", function()
   ---@type table<string, any>
   local env
@@ -85,7 +99,7 @@ describe("QuestLog tracker", function()
     }
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     local zone = capture.session.functions["QuestLogZone"]
     assert.are.equal("Westfall", zone[100][1].v)
@@ -100,7 +114,7 @@ describe("QuestLog tracker", function()
     }
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     local questLogStream = capture.session.functions["QuestLog"]
     assert.are.same({ 100 }, questLogStream[1].v)
@@ -113,7 +127,7 @@ describe("QuestLog tracker", function()
     }
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
     tracker.OnEvent(capture, "QUEST_LOG_UPDATE")
 
     local zone = capture.session.functions["QuestLogZone"]
@@ -126,7 +140,7 @@ describe("QuestLog tracker", function()
     }
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     local infoStream = capture.session.functions["C_QuestLog.GetInfo"]
     assert.is_not_nil(infoStream[100], "C_QuestLog.GetInfo stream should exist for quest 100")
@@ -141,7 +155,7 @@ describe("QuestLog tracker", function()
     env.C_QuestLog.IsFailed = function(questID) return questID == 100 and true end
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     local isCompleteStream = capture.session.functions["C_QuestLog.IsComplete"]
     local isFailedStream = capture.session.functions["C_QuestLog.IsFailed"]
@@ -159,7 +173,7 @@ describe("QuestLog tracker", function()
     end
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     local tagStream = capture.session.functions["C_QuestLog.GetQuestTagInfo"]
     assert.are.equal("Group", tagStream[100][1].v.tagName)
@@ -173,7 +187,7 @@ describe("QuestLog tracker", function()
     env.C_QuestLog.IsFailed = function() error("should not be called for header rows") end
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     -- Headers should not appear in the QuestLog stream (only valid quests with questID > 0)
     local questLogStream = capture.session.functions["QuestLog"]
@@ -192,7 +206,7 @@ describe("QuestLog tracker", function()
     end
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     local titleStream = capture.session.functions["GetQuestLogTitle"]
     assert.is_not_nil(titleStream[100], "legacy GetQuestLogTitle stream should exist for quest 100")
@@ -208,7 +222,7 @@ describe("QuestLog tracker", function()
     env.UnitLevel = function(_unit) return 45 end
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     -- Simulate QUEST_ACCEPTED event (Classic: only questLogIndex provided)
     -- Quest is at index 1 in the mock quest log
@@ -228,7 +242,7 @@ describe("QuestLog tracker", function()
     env.UnitLevel = function(_unit) return 30 end
 
     local capture = NewCapture()
-    tracker.Init(capture)
+    InitAndSample(tracker, capture, env)
 
     -- First acceptance at level 30 (quest at index 1)
     tracker.OnEvent(capture, "QUEST_ACCEPTED", 1)
