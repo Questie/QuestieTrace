@@ -10,7 +10,6 @@ exclude_files = {
     "Traces/",
     "Libs/",
     "releases/",
-    "tools/decoder/dependencies/",
     "tools/decoder/input/",
     "tools/decoder/output/",
     ".luacheckrc",

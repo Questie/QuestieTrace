@@ -4,7 +4,7 @@ import { decodeCbor } from "./cbor";
 const cbor = (...bytes: number[]) => Buffer.from(bytes);
 const ascii = (text: string) => [...Buffer.from(text, "utf8")];
 
-describe("decodeCbor (BlizzardCBOR semantics as seen through lua-state and normalizeLuaValue)", () => {
+describe("decodeCbor", () => {
   it("should decode integers as doubles, like the Lua reference's byte-by-byte accumulation", () => {
     expect(decodeCbor(cbor(0x38, 0x63))).toBe(-100);
     // 2^53 + 1 cannot be represented; Lua and this decoder both round to 2^53.
@@ -46,7 +46,7 @@ describe("decodeCbor (BlizzardCBOR semantics as seen through lua-state and norma
     expect(decodeCbor(cbor(0x82, 0xa1, 0x61, ...ascii("x"), 0x01, 0x81, 0x02))).toEqual([{ x: 1 }, [2]]);
   });
 
-  it("should keep only the keys lua-state can represent and let a nil value remove an earlier key", () => {
+  it("should keep only number and string keys and let a nil value remove an earlier key", () => {
     expect(decodeCbor(cbor(0xa1, 0x01, 0x61, ...ascii("x")))).toEqual(["x"]);
     expect(decodeCbor(cbor(0xa2, 0x61, ...ascii("a"), 0x01, 0x61, ...ascii("a"), 0xf6))).toEqual([]);
     expect(decodeCbor(cbor(0xa2, 0xf5, 0x01, 0x80, 0x02))).toEqual([]);
