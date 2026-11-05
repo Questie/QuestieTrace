@@ -33,7 +33,7 @@ describe("decodeExportString", () => {
     const { traces, dropped } = decodeExportString(`${cutOff}${TINY_EXPORT}${tail}`);
 
     expect(traces).toEqual(decodeExportString(TINY_EXPORT).traces);
-    expect(dropped).toEqual(["export 1 is cut off"]);
+    expect(dropped).toEqual(["export 1 has no matching end marker"]);
   });
 
   it("should keep the exports that decode when another export of the submission does not", () => {
@@ -48,6 +48,6 @@ describe("decodeExportString", () => {
   it("should fail when no export decodes, on missing markers and on characters outside the print alphabet", () => {
     expect(() => decodeExportString("not an export")).toThrow(/markers/);
     expect(() => decodeExportString("!QuestieTrace:1!abc$def!End:QuestieTrace:1!")).toThrow(/print-encoded/);
-    expect(() => decodeExportString(TINY_EXPORT.slice(0, 200))).toThrow(/cut off/);
+    expect(() => decodeExportString(TINY_EXPORT.slice(0, 200))).toThrow(/no matching end marker/);
   });
 });
