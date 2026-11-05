@@ -32,6 +32,9 @@ export function traceApiPlugin(): Plugin {
       console.error(`[trace-api] Failed to load ${fileName}: ${submission.error}`);
       return null;
     }
+    if (submission.droppedExports.length > 0) {
+      console.warn(`[trace-api] Dropped exports of ${fileName}: ${submission.droppedExports.join("; ")}`);
+    }
     // A submission can hold several exports; their sessions are listed one after another.
     const data = { sessions: submission.traces.flatMap((trace) => trace.sessions) } as TraceFile;
     loadedFiles.set(fileName, data);

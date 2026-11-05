@@ -89,7 +89,7 @@ describe("extractCorrections", () => {
     const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
 
     expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [] });
-    expect(meta.partialFiles).toEqual([{ name: join("2026-10", "2026-10-01_000000Z_a.json"), droppedExports: ["export 1 is cut off"] }]);
+    expect(meta.partialFiles).toEqual([{ name: join("2026-10", "2026-10-01_000000Z_a.json"), droppedExports: ["export 1 has no matching end marker"] }]);
   });
 
   it("should fold each session once, even when several submissions and exports contain it", () => {

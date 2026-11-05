@@ -82,7 +82,7 @@ export function decodeExportString(exportString: string): DecodedExportString {
   starts.forEach((start, index) => {
     const payload = complete.get(start);
     if (payload === undefined) {
-      dropped.push(`export ${index + 1} is cut off`);
+      dropped.push(`export ${index + 1} has no matching end marker`);
     } else if (payload.trim() === "") {
       dropped.push(`export ${index + 1}: export markers found but payload is empty`);
     } else {
