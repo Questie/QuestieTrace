@@ -2935,10 +2935,12 @@ local function TestQuestLogDefersInitialSample()
   }
   runtime.core.StartCapture("deferred sample")
   local functions = Session(runtime).functions --[[@as table<string, any>]]
-  assert(#functions.QuestLog == 0, "StartCapture does not sample the quest log synchronously")
+  assert(#functions.QuestLog == 1 and functions.QuestLog[1].t == 0 and functions.QuestLog[1].v[1] == 100,
+    "StartCapture records the quest ID list synchronously as a t=0 baseline")
+  assert(functions.QuestLogZone == nil, "Per-quest sampling does not run synchronously")
   AdvanceTo(runtime, 0)
-  assert(#functions.QuestLog == 1 and functions.QuestLog[1].v[1] == 100,
-    "The initial sample runs on the next frame")
+  assert(#functions.QuestLog == 1, "The deferred sample does not duplicate the baseline")
+  assert(functions.QuestLogZone[100][1].v == "Elwynn Forest", "Per-quest sampling runs on the next frame")
 end
 
 local function TestQuestLogRecordsLegacyTimerSlots()
@@ -3271,7 +3273,7 @@ end
 local tests = {
   { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
   { name = "quest log extras are stored by quest ID", run = TestQuestLogExtrasStoredByQuestID },
-  { name = "quest log defers its initial sample to the next frame", run = TestQuestLogDefersInitialSample },
+  { name = "quest log records its quest list at once and defers per-quest sampling", run = TestQuestLogDefersInitialSample },
   { name = "quest log records legacy timer slots raw", run = TestQuestLogRecordsLegacyTimerSlots },
   { name = "position records explored map overlays", run = TestPositionRecordsExploredMap },
   { name = "reset time records realm calendar time", run = TestResetTimeRecordsCalendarTime },
