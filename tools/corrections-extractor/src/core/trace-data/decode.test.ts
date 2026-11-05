@@ -3,7 +3,7 @@ import { decodeExportString } from "./decode";
 import { TINY_EXPORT } from "./fixtures";
 
 describe("decodeExportString", () => {
-  it("should produce the shapes loadTraceFile + normalizeLuaValue produce", () => {
+  it("should produce arrays, packed args and index-keyed streams like the addon recorded them", () => {
     const [trace] = decodeExportString(TINY_EXPORT);
     const session = trace.sessions[0];
     const functions = session.functions as Record<string, any>;

@@ -1,13 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { TINY_EXPORT } from "./core/trace-data/fixtures";
 import { extractCorrections } from "./extract-corrections";
+import * as lookups from "./extract/lookups";
 
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -99,6 +101,19 @@ describe("extractCorrections", () => {
     expect(() => extractCorrections(traceDataDir, outputDir, () => undefined)).toThrow("could be loaded");
     expect(readFileSync(join(outputDir, "meta.json"), "utf8")).toBe("{}");
     expect(readFileSync(previous, "utf8")).toBe("previous");
+    expect(existsSync(join(outputDir, "foreverNpcTraces.lua"))).toBe(false);
+  });
+
+  it("should abort and keep the previous output when folding a submission fails", () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
+    mkdirSync(outputDir);
+    writeFileSync(join(outputDir, "meta.json"), "{}");
+    vi.spyOn(lookups, "foldLookupSessions").mockImplementation(() => {
+      throw new Error("observer failed");
+    });
+
+    expect(() => extractCorrections(traceDataDir, outputDir, () => undefined)).toThrow("observer failed");
+    expect(readFileSync(join(outputDir, "meta.json"), "utf8")).toBe("{}");
     expect(existsSync(join(outputDir, "foreverNpcTraces.lua"))).toBe(false);
   });
 
