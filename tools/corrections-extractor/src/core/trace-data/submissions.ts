@@ -7,7 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { basename, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import type { TraceFile } from "../types";
+import type { SessionRecord, TraceFile } from "../types";
 import { decodeExportString } from "./decode";
 
 const addonsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
@@ -77,6 +77,13 @@ function parseJson(path: string): RawSubmission | undefined {
   }
 }
 
+/** Sessions without events or functions cannot be read by any consumer; they are dropped. */
+function isSessionRecord(session: unknown): session is SessionRecord {
+  if (session === null || typeof session !== "object") return false;
+  const { events, functions } = session as Record<string, unknown>;
+  return Array.isArray(events) && functions !== null && typeof functions === "object" && !Array.isArray(functions);
+}
+
 export function readSubmission(path: string): Submission {
   const raw = parseJson(path);
   const submissionId = typeof raw?.id === "string" && raw.id.length > 0 ? raw.id : submissionIdFromPath(path);
@@ -92,7 +99,7 @@ export function readSubmission(path: string): Submission {
       submissionId,
       contributorId,
       receivedAt,
-      traces: traces.map((trace) => (Array.isArray(trace.sessions) ? trace : { ...trace, sessions: [] })),
+      traces: traces.map((trace) => ({ ...trace, sessions: Array.isArray(trace.sessions) ? trace.sessions.filter(isSessionRecord) : [] })),
       droppedExports: dropped,
     };
   } catch (e) {

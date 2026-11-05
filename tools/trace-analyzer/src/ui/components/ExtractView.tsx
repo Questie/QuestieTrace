@@ -5,6 +5,7 @@ interface ExtractResult {
   sessionCount: number;
   submissionCount: number;
   skippedFiles: { name: string; error: string }[];
+  partialFiles: { name: string; droppedExports: string[] }[];
 }
 
 interface EntitySection {
@@ -73,7 +74,7 @@ export function ExtractView() {
           // Fill in missing entities with placeholder data (so tabs all exist)
           for (const section of SECTIONS) {
             if (!(section.key in result)) {
-              result[section.key] = { fixes: "", sessionCount: 0, submissionCount: 0, skippedFiles: [] };
+              result[section.key] = { fixes: "", sessionCount: 0, submissionCount: 0, skippedFiles: [], partialFiles: [] };
             }
           }
           setStatus({ kind: "done", results: result });
@@ -124,6 +125,18 @@ export function ExtractView() {
                 {status.results.npc.skippedFiles.map((f) => (
                   <li key={f.name}>
                     {f.name}: {f.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {status.results.npc.partialFiles.length > 0 && (
+            <div className="extract-warning">
+              Dropped some exports of {status.results.npc.partialFiles.length} file(s):
+              <ul>
+                {status.results.npc.partialFiles.map((f) => (
+                  <li key={f.name}>
+                    {f.name}: {f.droppedExports.join("; ")}
                   </li>
                 ))}
               </ul>

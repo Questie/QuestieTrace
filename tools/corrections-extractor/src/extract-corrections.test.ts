@@ -65,6 +65,17 @@ describe("extractCorrections", () => {
     expect(existsSync(join(outputDir, ".lookups-staging"))).toBe(false);
   });
 
+  it("should only write lookups for valid locale names", () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
+    vi.spyOn(lookups, "finalizeLookups").mockReturnValue({ lookupItems: { deDE: "de", "../../evil": "evil" } });
+
+    extractCorrections(traceDataDir, outputDir, () => undefined);
+
+    expect(readFileSync(join(outputDir, "lookupItems", "deDE.lua"), "utf8")).toBe("de");
+    expect(existsSync(join(outputDir, "..", "evil.lua"))).toBe(false);
+    expect(existsSync(join(outputDir, ".lookups-previous"))).toBe(false);
+  });
+
   it("should skip submissions that fail to load and report them in meta.json", () => {
     const { traceDataDir, outputDir } = setupDirs({
       "2026-10/2026-10-01_000000Z_a.json": submission("a"),

@@ -142,7 +142,8 @@ class Reader {
         delete table[name];
         hasDeleted = true;
       } else {
-        table[name] = item;
+        // defineProperty, so a "__proto__" key stays an own entry instead of changing the prototype.
+        Object.defineProperty(table, name, { value: item, enumerable: true, writable: true, configurable: true });
         if (!hasOtherKey && !isIntegerKey(key)) hasOtherKey = true;
       }
       if (name === "1") firstIntegerKeyed = itemIntegerKeyed;
