@@ -90,7 +90,7 @@ export function App() {
   if (filesLoading) return <div className="loading">Loading trace files...</div>;
   if (filesError) return <div className="error-msg">Error: {filesError}</div>;
   if (files.length === 0)
-    return <div className="error-msg">No .lua files found in Traces/</div>;
+    return <div className="error-msg">No submissions found in trace-data/submissions/</div>;
 
   return (
     <>

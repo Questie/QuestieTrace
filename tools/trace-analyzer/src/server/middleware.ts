@@ -3,9 +3,9 @@
 // ============================================================
 
 import type { Connect, Plugin } from "vite";
-import { resolve } from "path";
-import { existsSync, readdirSync, readFileSync } from "fs";
-import { loadTraceFile } from "../core/loader.js";
+import { basename, resolve } from "path";
+import { existsSync, readFileSync } from "fs";
+import { defaultTraceDataDir, listSubmissionFiles, readSubmission } from "../../../corrections-extractor/src/core/trace-data/submissions.js";
 import type { TraceFile, SessionSummary, TraceFileSummary } from "../core/types.js";
 
 const EXTRACT_ENTITY_TO_OUTPUT_FILE: Record<string, string> = {
@@ -16,52 +16,51 @@ const EXTRACT_ENTITY_TO_OUTPUT_FILE: Record<string, string> = {
 };
 
 export function traceApiPlugin(): Plugin {
-  let traceDir = "";
+  let traceDataDir = "";
   let extractOutputDir = "";
   let traceFileNames: string[] = [];
+  const traceFilePaths = new Map<string, string>();
   const loadedFiles = new Map<string, TraceFile>();
   const loadErrors = new Map<string, string>();
 
   function getOrLoad(fileName: string): TraceFile | null {
     if (loadedFiles.has(fileName)) return loadedFiles.get(fileName)!;
 
-    const filePath = resolve(traceDir, fileName);
-    try {
-      const data = loadTraceFile(filePath);
-      loadedFiles.set(fileName, data);
-      loadErrors.delete(fileName);
-      console.log(
-        `[trace-api] Loaded ${data.sessions.length} session(s) from ${fileName}`
-      );
-      return data;
-    } catch (e) {
-      const err = String(e);
-      loadErrors.set(fileName, err);
-      console.error(`[trace-api] Failed to load ${fileName}: ${err}`);
+    const submission = readSubmission(traceFilePaths.get(fileName)!);
+    if (submission.error) {
+      loadErrors.set(fileName, submission.error);
+      console.error(`[trace-api] Failed to load ${fileName}: ${submission.error}`);
       return null;
     }
+    // A submission can hold several exports; their sessions are listed one after another.
+    const data = { sessions: submission.traces.flatMap((trace) => trace.sessions) } as TraceFile;
+    loadedFiles.set(fileName, data);
+    loadErrors.delete(fileName);
+    console.log(
+      `[trace-api] Loaded ${data.sessions.length} session(s) from ${fileName}`
+    );
+    return data;
   }
 
   function refreshFileList() {
+    traceFilePaths.clear();
     try {
-      traceFileNames = readdirSync(traceDir)
-        .filter((f) => f.endsWith(".lua"))
-        .sort();
-    } catch {
-      traceFileNames = [];
-      console.error(`[trace-api] Traces directory not found at ${traceDir}`);
+      for (const file of listSubmissionFiles(traceDataDir)) traceFilePaths.set(basename(file.path), file.path);
+    } catch (e) {
+      console.error(`[trace-api] ${e instanceof Error ? e.message : String(e)}`);
     }
+    traceFileNames = [...traceFilePaths.keys()];
   }
 
   return {
     name: "trace-api",
     configureServer(server) {
       const root = server.config.root;
-      traceDir = resolve(root, "../../Traces");
+      traceDataDir = defaultTraceDataDir();
       extractOutputDir = resolve(root, "../corrections-extractor/output");
       refreshFileList();
       console.log(
-        `[trace-api] Found ${traceFileNames.length} trace file(s) in ${traceDir}`
+        `[trace-api] Found ${traceFileNames.length} submission(s) in ${traceDataDir}`
       );
 
       const handleRequest = async (
@@ -190,7 +189,7 @@ export function traceApiPlugin(): Plugin {
             JSON.stringify({
               fixes: readFileSync(fixesPath, "utf8"),
               sessionCount: meta.sessionCount,
-              fileCount: meta.fileCount,
+              submissionCount: meta.submissionCount,
               skippedFiles: meta.skippedFiles,
             }),
           );
