@@ -5,15 +5,15 @@ import { ExtractView } from "./ExtractView";
 interface MockResult {
   fixes: string;
   sessionCount: number;
-  fileCount: number;
+  submissionCount: number;
   skippedFiles: { name: string; error: string }[];
 }
 
 const RESULTS: Record<string, MockResult> = {
-  npc: { fixes: "function ForeverNpcTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
-  quest: { fixes: "function ForeverQuestTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
-  item: { fixes: "function ForeverItemTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
-  object: { fixes: "function ForeverObjectTraces:Load()\nend", sessionCount: 3, fileCount: 2, skippedFiles: [] },
+  npc: { fixes: "function ForeverNpcTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
+  quest: { fixes: "function ForeverQuestTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
+  item: { fixes: "function ForeverItemTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
+  object: { fixes: "function ForeverObjectTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
 };
 
 function mockSuccessFetch(overrides: Partial<Record<string, MockResult>> = {}) {
@@ -83,7 +83,7 @@ describe("ExtractView", () => {
     render(<ExtractView />);
     fireEvent.click(screen.getByText("Load all"));
 
-    await waitFor(() => expect(screen.getByText("3 session(s) from 2 trace file(s)")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("3 session(s) from 2 submission(s)")).toBeInTheDocument());
     expect(screen.getByText("NPC")).toBeInTheDocument();
     expect(screen.getByText("Quest")).toBeInTheDocument();
     expect(screen.getByText("Item")).toBeInTheDocument();
@@ -132,14 +132,14 @@ describe("ExtractView", () => {
     await waitFor(() => expect(screen.getByText(/ForeverItemTraces:Load/)).toBeInTheDocument());
   });
 
-  it("should list skipped files as a warning when some trace files fail to load", async () => {
-    mockSuccessFetch({ npc: { ...RESULTS.npc, skippedFiles: [{ name: "bad.lua", error: "unexpected token" }] } });
+  it("should list skipped files as a warning when some submissions fail to load", async () => {
+    mockSuccessFetch({ npc: { ...RESULTS.npc, skippedFiles: [{ name: "2026-10/bad.json", error: "unexpected token" }] } });
 
     render(<ExtractView />);
     fireEvent.click(screen.getByText("Load all"));
 
     await waitFor(() => expect(screen.getByText(/Skipped 1 file/)).toBeInTheDocument());
-    expect(screen.getByText(/bad\.lua: unexpected token/)).toBeInTheDocument();
+    expect(screen.getByText(/bad\.json: unexpected token/)).toBeInTheDocument();
   });
 
   it("should show an error message and allow retrying when a request fails", async () => {
@@ -153,7 +153,7 @@ describe("ExtractView", () => {
     mockSuccessFetch();
     fireEvent.click(screen.getByText("Load all"));
 
-    await waitFor(() => expect(screen.getByText("3 session(s) from 2 trace file(s)")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("3 session(s) from 2 submission(s)")).toBeInTheDocument());
   });
 
   it("should show placeholder text when a tab has no data", async () => {

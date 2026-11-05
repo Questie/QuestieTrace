@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { TINY_EXPORT } from "../../../corrections-extractor/src/core/trace-data/fixtures";
 import { traceApiPlugin } from "./middleware";
 
 const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -34,7 +36,20 @@ type Response = {
 type Next = ReturnType<typeof vi.fn>;
 type Middleware = (req: Request, res: Response, next: Next) => void;
 
-function setupHandler(root = "/__questie_trace_missing__/a/b") {
+/** Creates a trace-data checkout holding `files` (path under submissions/ -> content); returns its directory. */
+function createTraceData(files: Record<string, string>): string {
+  const traceDataDir = mkdtempSync(join(tmpdir(), "trace-data-"));
+  tempDirs.push(traceDataDir);
+  for (const [path, content] of Object.entries(files)) {
+    const full = join(traceDataDir, "submissions", path);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, content);
+  }
+  return traceDataDir;
+}
+
+function setupHandler(root = "/__questie_trace_missing__/a/b", traceDataDir = "/__questie_trace_missing__/trace-data") {
+  vi.stubEnv("TRACE_DATA_DIR", traceDataDir);
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const use = vi.fn();
@@ -82,7 +97,7 @@ describe("traceApiPlugin middleware", () => {
   it("should serve generated corrections and meta from the corrections-extractor output", async () => {
     const root = createExtractorOutput({
       "foreverQuestTraces.lua": "function ForeverQuestTraces:Load()\nend",
-      "meta.json": JSON.stringify({ sessionCount: 3, fileCount: 2, skippedFiles: [{ name: "bad.lua", error: "boom" }] }),
+      "meta.json": JSON.stringify({ sessionCount: 3, submissionCount: 2, skippedFiles: [{ name: "2026-10/bad.json", error: "boom" }] }),
     });
     const handler = setupHandler(root);
     const response = makeResponse();
@@ -93,8 +108,8 @@ describe("traceApiPlugin middleware", () => {
     expect(JSON.parse(response.end.mock.calls[0]?.[0])).toEqual({
       fixes: "function ForeverQuestTraces:Load()\nend",
       sessionCount: 3,
-      fileCount: 2,
-      skippedFiles: [{ name: "bad.lua", error: "boom" }],
+      submissionCount: 2,
+      skippedFiles: [{ name: "2026-10/bad.json", error: "boom" }],
     });
   });
 
@@ -134,5 +149,27 @@ describe("traceApiPlugin middleware", () => {
     expect(response.setHeader).toHaveBeenCalledWith("Content-Type", "application/json");
     expect(response.end).toHaveBeenCalledWith("[]");
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it("should list trace-data submissions and serve the sessions of every export in one", () => {
+    const traceDataDir = createTraceData({
+      "2026-10/2026-10-01_000000Z_a.json": JSON.stringify({ id: "a", export_string: `${TINY_EXPORT}\n${TINY_EXPORT}` }),
+      "2026-10/2026-10-02_000000Z_broken.json": JSON.stringify({ id: "broken", export_string: "not an export" }),
+    });
+    const handler = setupHandler(undefined, traceDataDir);
+    const request = (url: string) => {
+      const response = makeResponse();
+      handler({ url }, response, vi.fn());
+      return { status: response.statusCode, body: JSON.parse(response.end.mock.calls[0]?.[0]) };
+    };
+
+    expect(request("/api/files/").status).toBe(404);
+    expect(request("/api/file/2026-10-01_000000Z_a.json/sessions").body).toHaveLength(2);
+    expect(request("/api/file/2026-10-01_000000Z_a.json/session/1").body.startedAt).toBe(100.5);
+    expect(request("/api/file/2026-10-02_000000Z_broken.json/sessions").status).toBe(500);
+    expect(request("/api/files").body).toEqual([
+      { name: "2026-10-01_000000Z_a.json", sessionCount: 2, error: null },
+      { name: "2026-10-02_000000Z_broken.json", sessionCount: null, error: expect.stringMatching(/markers/) },
+    ]);
   });
 });

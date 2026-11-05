@@ -3,7 +3,7 @@ import { useState } from "react";
 interface ExtractResult {
   fixes: string;
   sessionCount: number;
-  fileCount: number;
+  submissionCount: number;
   skippedFiles: { name: string; error: string }[];
 }
 
@@ -32,7 +32,7 @@ type Status =
  * /api/extract/{npc,quest,item,object}) and renders them for copy/download.
  *
  * Extraction itself runs in that separate CLI tool, because combining every
- * trace file in Traces/ doesn't fit in the dev server's memory.
+ * trace-data submission doesn't fit in the dev server's memory.
  *
  * These are CORRECTIONS modules (only fields we actually have data for),
  * meant to be layered on top of Questie's base DB - not a full DB dump.
@@ -73,7 +73,7 @@ export function ExtractView() {
           // Fill in missing entities with placeholder data (so tabs all exist)
           for (const section of SECTIONS) {
             if (!(section.key in result)) {
-              result[section.key] = { fixes: "", sessionCount: 0, fileCount: 0, skippedFiles: [] };
+              result[section.key] = { fixes: "", sessionCount: 0, submissionCount: 0, skippedFiles: [] };
             }
           }
           setStatus({ kind: "done", results: result });
@@ -115,7 +115,7 @@ export function ExtractView() {
       {hasResults && (
         <>
           <div className="extract-summary">
-            {status.results.npc.sessionCount} session(s) from {status.results.npc.fileCount} trace file(s)
+            {status.results.npc.sessionCount} session(s) from {status.results.npc.submissionCount} submission(s)
           </div>
           {status.results.npc.skippedFiles.length > 0 && (
             <div className="extract-warning">
