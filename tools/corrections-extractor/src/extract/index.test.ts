@@ -638,6 +638,20 @@ describe("foldSessions + finalize (incremental extraction)", () => {
     expect(belowLimit.observations.objectZoneID.map((obs) => obs.entityId)).toEqual([2843]);
   });
 
+  it("should filter object drops by the item limit, not the object limit", () => {
+    const session = westfallSession({
+      GetLootSlotLink: { "1": [apiSample(3, 3, "|Hitem:750::::::::1::::::::::|h[Tough Wolf Meat]|h[|r")] },
+      GetLootSourceInfo: { "1": [apiSample(3, 3, { 1: "GameObject-0-5208-0-7-2843-0000399", 2: 1, n: 2 })] },
+    });
+    const kept = createAccumulator({ item: 749, object: 2843 });
+    const dropped = createAccumulator({ item: 750, object: 0 });
+    foldSessions(kept, [session]);
+    foldSessions(dropped, [session]);
+
+    expect(kept.observations.objectDrops.map((obs) => [obs.entityId, obs.value.objectID])).toEqual([[750, 2843]]);
+    expect(dropped.observations.objectDrops).toEqual([]);
+  });
+
   it("should only count and observe sessions from Forever builds", () => {
     const acc = createAccumulator(options.maxIds);
     foldSessions(acc, fileB);

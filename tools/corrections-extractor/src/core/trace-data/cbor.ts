@@ -160,7 +160,7 @@ class Reader {
   private finish(raw: RawTable, firstIntegerKeyed: boolean): LuaTable {
     const keys = Object.keys(raw);
     const integerKeys = keys.map(Number);
-    const integerKeyed = integerKeys.every((n) => Number.isInteger(n) && n >= 1);
+    const integerKeyed = keys.every(isIntegerKey);
     this.lastTableIntegerKeyed = integerKeyed && keys.length > 0;
     if (keys.length === 0) return [];
     // Packed args stay objects through their `n` key, index-keyed streams through firstIntegerKeyed.
@@ -209,8 +209,9 @@ function isIntegerKey(key: number | string): boolean {
   const first = key.charCodeAt(0);
   // Names starting with a letter or underscore never read back as numbers.
   if ((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first === 95) return false;
+  // Only canonical forms: "01", "1.0" or " 1" stay object keys.
   const n = Number(key);
-  return Number.isInteger(n) && n >= 1;
+  return Number.isInteger(n) && n >= 1 && String(n) === key;
 }
 
 function decodeHalf(bits: number): number {

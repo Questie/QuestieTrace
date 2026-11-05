@@ -52,6 +52,11 @@ describe("decodeCbor", () => {
     expect(decodeCbor(cbor(0xa2, 0xf5, 0x01, 0x80, 0x02))).toEqual([]);
   });
 
+  it("should keep non-canonical numeric string keys as object keys", () => {
+    expect(decodeCbor(cbor(0xa1, 0x62, ...ascii("01"), 0x05))).toEqual({ "01": 5 });
+    expect(decodeCbor(cbor(0xa1, 0x63, ...ascii("1.0"), 0x05))).toEqual({ "1.0": 5 });
+  });
+
   it("should keep a __proto__ key as an own entry", () => {
     const table = decodeCbor(cbor(0xa1, 0x69, ...ascii("__proto__"), 0x01)) as Record<string, unknown>;
     expect(Object.getPrototypeOf(table)).toBe(Object.prototype);
