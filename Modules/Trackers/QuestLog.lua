@@ -693,18 +693,12 @@ end
 -- Core sampling
 ---------------------------------------------------------------------------
 
---- Sample the entire quest log and record changes.
+--- Record the quest ID list when it differs from the previous one.
 ---@param capture CaptureState
-local function SampleQuestLog(capture)
-  ---@type number
-  local t  = GetTime() - capture.startedAt
-  ---@type number
-  local tp = GetTimePreciseSec() - capture.startedAtPrecise
-
-  ---@type number[]
-  ---@type table<number, string?>
-  local questIds, questZones = GetAllQuestIdsInLog()
-
+---@param t number
+---@param tp number
+---@param questIds number[]
+local function RecordQuestLogMembership(capture, t, tp, questIds)
   -- QuestLog membership discovers which quest IDs are active. When a quest
   -- leaves this list, raw direct questID APIs are probed again rather than
   -- receiving invented inactive values.
@@ -719,6 +713,20 @@ local function SampleQuestLog(capture)
     questLogStream[#questLogStream + 1] = { t = t, tp = tp, v = copy }
     prevQuestLog = copy
   end
+end
+
+--- Sample the entire quest log and record changes.
+---@param capture CaptureState
+local function SampleQuestLog(capture)
+  ---@type number
+  local t  = GetTime() - capture.startedAt
+  ---@type number
+  local tp = GetTimePreciseSec() - capture.startedAtPrecise
+
+  ---@type number[]
+  ---@type table<number, string?>
+  local questIds, questZones = GetAllQuestIdsInLog()
+  RecordQuestLogMembership(capture, t, tp, questIds)
 
   -- Timer APIs are native parameterless varargs; these questId-keyed streams are
   -- explicit derived compatibility streams, so nil writes for disappeared timer
@@ -823,6 +831,10 @@ Core.RegisterTracker({
     prevNested = {}
     prevTimedQuestIds = {}
     prevRewardCounts = {}
+
+    -- The quest ID list is recorded synchronously so the stream has a t=0
+    -- baseline; the heavier per-quest sampling waits for the next frame.
+    RecordQuestLogMembership(capture, 0, 0, (GetAllQuestIdsInLog()))
 
     -- Initial sample on the next frame: Init can run inside a long export
     -- click handler, and sampling every quest there hits "script ran too long".
