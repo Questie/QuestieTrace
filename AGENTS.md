@@ -33,7 +33,7 @@ Rules for any code that touches trackers, dumps, or raw event recording:
 ### Prerequisites
 
 - Lua 5.1, luarocks, luacheck
-- Luarocks packages: `bit32`, `busted`, `luafilesystem`
+- Luarocks packages: `busted`
 
 ### Tests
 

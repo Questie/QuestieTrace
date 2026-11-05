@@ -66,9 +66,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          luarocks install bit32 5.3.5.1-1
           luarocks install busted 2.2.0-1
-          luarocks install luafilesystem 1.8.0-1
 
       - name: Run busted Unit Tests
         run: busted -p ".test.lua" .
