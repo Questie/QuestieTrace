@@ -39,7 +39,7 @@ export function getStream(
   for (const param of params) {
     if (Array.isArray(node)) return undefined;
     const paramMap = node as FunctionStreamMap;
-    // Lua table keys are normalized to strings by the loader.
+    // Lua table keys are normalized to strings by the decoder.
     node = paramMap[String(param)];
     if (!node) return undefined;
   }

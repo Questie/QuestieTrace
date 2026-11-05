@@ -1,10 +1,6 @@
 // Decodes trace-data export strings natively, reversing Modules/Export/Encoding.lua:
 //
 //   "!QuestieTrace:N!" + EncodeForPrint(raw deflate(CBOR(payload))) + "!End:QuestieTrace:N!"
-//
-// The result has exactly the shape `loadTraceFile` (lua-state + normalizeLuaValue) gives
-// for the same data. The Lua toolchain in tools/decoder is the reference;
-// decode.oracle.test.ts compares both.
 
 import { inflateRawSync } from "zlib";
 import type { TraceFile } from "../types";

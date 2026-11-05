@@ -23,7 +23,7 @@ QuestieTrace filters out player names, realm names, and player GUIDs before they
 ## Tools
 
 - **[Trace Analyzer](./tools/trace-analyzer/README.md)** — Local web app to inspect recorded sessions. Pick a trace, scrub a timeline, see what any API call returned at that instant.
-- **[Decoder](./tools/decoder/README.md)** — CLI tool to decode export strings back into Lua tables without the analyzer.
+- **[Corrections Extractor](./tools/corrections-extractor/README.md)** — CLI tool that derives Questie DB corrections and translations from all submissions.
 
 ## Sharing a Trace
 

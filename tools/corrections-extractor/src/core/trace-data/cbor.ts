@@ -1,10 +1,11 @@
-// CBOR decoder matching the Lua reference (tools/decoder/dependencies/BlizzardCBOR.lua)
-// and the way lua-state hands Lua tables to JavaScript.
+// CBOR decoder for the tables the addon exports (Blizzard's CBOR serializer), producing the
+// shape every trace consumer works with. It mirrors the former Lua toolchain (BlizzardCBOR,
+// then lua-state and normalizeLuaValue):
 //
-// The output is what `normalizeLuaValue` (src/core/normalize.ts) makes of a table lua-state
-// hands over, built in one pass: nil never appears, keys lua-state cannot represent (booleans,
-// tables) are dropped, and every table becomes either a JS array or a plain object with
-// string keys, following the same rules.
+// - nil never appears; keys other than numbers and strings (booleans, tables) are dropped
+// - a table whose keys are exactly 1..n becomes a JS array, unless its first value is itself
+//   a table with only positive integer keys (index-keyed streams stay objects)
+// - every other table becomes a plain object with string keys; packed args keep their `n`
 //
 // Supported subset, as in BlizzardCBOR: definite-length items only, no tags, simple
 // values limited to false/true/null/undefined, half/single/double floats.
@@ -22,8 +23,8 @@ class Reader {
   private pos = 0;
   private readonly view: DataView;
   /**
-   * Whether the table decoded last had only positive integer keys (and at least one), as seen
-   * by lua-state. normalizeLuaValue keeps a table whose first value is such a table an object.
+   * Whether the table decoded last had only positive integer keys (and at least one). A table
+   * whose first value is such a table stays an object.
    */
   private lastTableIntegerKeyed = false;
 
@@ -88,7 +89,7 @@ class Reader {
     }
   }
 
-  /** lua-state builds JS strings from Lua byte strings as UTF-8 (invalid bytes become U+FFFD). */
+  /** Byte strings are read as UTF-8, invalid bytes becoming U+FFFD. */
   private text(start: number, end: number): string {
     // Buffer#toString is slow for the many short keys and values; decode short ASCII in JS.
     if (end - start > 32) return this.bytes.toString("utf8", start, end);
@@ -132,7 +133,7 @@ class Reader {
       if (key === undefined) throw new CborError("CBOR map keys that decode to nil are not supported");
       const item = this.value(depth + 1);
       const itemIntegerKeyed = typeof item === "object" && this.lastTableIntegerKeyed;
-      // lua-state only converts number and string keys; boolean and table keys are skipped.
+      // Only number and string keys are kept; boolean and table keys are skipped.
       if (typeof key !== "number" && typeof key !== "string") continue;
       if (typeof key === "number" && Number.isNaN(key)) throw new CborError("table index is NaN");
       const name = String(key);
@@ -154,7 +155,7 @@ class Reader {
     return this.finish(table, firstIntegerKeyed);
   }
 
-  /** Turns a table as lua-state sees it into an array or object, like normalizeLuaValue. */
+  /** Turns a table with string keys into an array or object, following the rules above. */
   private finish(raw: RawTable, firstIntegerKeyed: boolean): LuaTable {
     const keys = Object.keys(raw);
     const integerKeys = keys.map(Number);
@@ -201,7 +202,7 @@ class Reader {
   }
 }
 
-/** Whether lua-state's string form of `key` reads back as a positive integer, as normalizeLuaValue checks it. */
+/** Whether the string form of `key` reads back as a positive integer. */
 function isIntegerKey(key: number | string): boolean {
   if (typeof key === "number") return Number.isInteger(key) && key >= 1;
   const first = key.charCodeAt(0);

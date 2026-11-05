@@ -56,7 +56,7 @@ export interface DeltaStream {
  * composite string keys.
  */
 export interface FunctionStreamMap {
-  /** Lua table keys are normalized to strings by the loader. */
+  /** Lua table keys are normalized to strings by the decoder. */
   [key: string]: FunctionStream;
 }
 

@@ -2,7 +2,7 @@
 
 /**
  * Built with the addon's own pipeline: BlizzardCBOR SerializeCBOR -> LibDeflate CompressDeflate ->
- * EncodeForPrint, from tools/decoder/dependencies. One session covering packed args, a nil hole,
+ * EncodeForPrint. One session covering packed args, a nil hole,
  * nil stream values, index-keyed streams, floats and UTF-8.
  */
 export const TINY_EXPORT =
