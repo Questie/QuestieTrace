@@ -22,7 +22,7 @@ npm ci
 npm run extract
 ```
 
-Reads `TRACE_DATA_DIR`, or by default the `trace-data` checkout next to the QuestieTrace checkout (`../../../trace-data`). Every `submissions/<yyyy-mm>/*.json` file is decoded natively (print encoding, raw deflate, CBOR), processed and dropped again one at a time, so memory use does not grow with the size of the input. Submissions that fail to load are reported and skipped; the rest still runs.
+Reads `TRACE_DATA_DIR`, or by default the `trace-data` checkout next to the QuestieTrace checkout (`../../../trace-data`). Every `submissions/<yyyy-mm>/*.json` file is decoded natively (print encoding, raw deflate, CBOR), processed and dropped again one at a time. Only the extracted observations and the keys of the sessions already used stay in memory; they grow with the number of submissions. Submissions that fail to load are reported and skipped; the rest still runs.
 
 Exports are cumulative, so one session shows up in many submissions. Submissions are read newest first and only the newest copy of each session is used.
 

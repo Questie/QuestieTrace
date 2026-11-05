@@ -10,7 +10,7 @@
 // the first copy of each session met (the newest, so the most complete: see
 // core/trace-data/session-key.ts) is folded in.
 
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join, relative, resolve } from "path";
 import { sessionKey } from "./core/trace-data/session-key";
 import { listSubmissionFiles, readSubmission } from "./core/trace-data/submissions";
@@ -24,6 +24,8 @@ const OUTPUT_FILES = {
   itemFixes: "foreverItemTraces.lua",
   objectFixes: "foreverObjectTraces.lua",
 } as const;
+
+const LOCALE_PATTERN = /^[a-z]{2}[A-Z]{2}$/;
 
 export interface ExtractMeta {
   sessionCount: number;
@@ -127,13 +129,31 @@ function writeLookups(bundle: LookupBundle, outputDir: string): void {
       const dir = join(stagingDir, dirName);
       mkdirSync(dir, { recursive: true });
       for (const [locale, content] of Object.entries(files)) {
+        // Locales come from trace data; anything but a WoW locale name could leave the directory.
+        if (!LOCALE_PATTERN.test(locale)) continue;
         writeFileSync(join(dir, `${locale}.lua`), content);
       }
     }
-    for (const dirName of Object.keys(bundle)) {
-      // Replacing the whole directory also drops stale locales from a previous run.
-      rmSync(join(outputDir, dirName), { recursive: true, force: true });
-      renameSync(join(stagingDir, dirName), join(outputDir, dirName));
+    // Replacing whole directories also drops stale locales from a previous run. The previous
+    // ones are moved aside first and moved back when any rename fails.
+    const previousDir = join(outputDir, ".lookups-previous");
+    rmSync(previousDir, { recursive: true, force: true });
+    mkdirSync(previousDir);
+    const dirNames = Object.keys(bundle);
+    try {
+      for (const dirName of dirNames) {
+        if (existsSync(join(outputDir, dirName))) renameSync(join(outputDir, dirName), join(previousDir, dirName));
+      }
+      for (const dirName of dirNames) renameSync(join(stagingDir, dirName), join(outputDir, dirName));
+    } catch (e) {
+      for (const dirName of dirNames) {
+        if (!existsSync(join(previousDir, dirName))) continue;
+        rmSync(join(outputDir, dirName), { recursive: true, force: true });
+        renameSync(join(previousDir, dirName), join(outputDir, dirName));
+      }
+      throw e;
+    } finally {
+      rmSync(previousDir, { recursive: true, force: true });
     }
   } finally {
     rmSync(stagingDir, { recursive: true, force: true });

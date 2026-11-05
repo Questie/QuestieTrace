@@ -108,14 +108,21 @@ export function traceApiPlugin(): Plugin {
             );
             return;
           }
-          const summaries: SessionSummary[] = data.sessions.map((s, index) => ({
-            index,
-            name: s.name ?? null,
-            duration: s.duration ?? null,
-            startedAt: s.startedAt,
-            eventCount: s.events.length,
-            functionCount: Object.keys(s.functions).length,
-          }));
+          let summaries: SessionSummary[];
+          try {
+            summaries = data.sessions.map((s, index) => ({
+              index,
+              name: s.name ?? null,
+              duration: s.duration ?? null,
+              startedAt: s.startedAt,
+              eventCount: s.events.length,
+              functionCount: Object.keys(s.functions).length,
+            }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: `Could not summarize the sessions of ${fileName}: ${e instanceof Error ? e.name : typeof e}` }));
+            return;
+          }
           res.end(JSON.stringify(summaries));
           return;
         }
@@ -194,6 +201,7 @@ export function traceApiPlugin(): Plugin {
               sessionCount: meta.sessionCount,
               submissionCount: meta.submissionCount,
               skippedFiles: meta.skippedFiles,
+              partialFiles: meta.partialFiles ?? [],
             }),
           );
           return;

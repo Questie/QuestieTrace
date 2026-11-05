@@ -52,6 +52,12 @@ describe("decodeCbor", () => {
     expect(decodeCbor(cbor(0xa2, 0xf5, 0x01, 0x80, 0x02))).toEqual([]);
   });
 
+  it("should keep a __proto__ key as an own entry", () => {
+    const table = decodeCbor(cbor(0xa1, 0x69, ...ascii("__proto__"), 0x01)) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(table)).toBe(Object.prototype);
+    expect(Object.keys(table)).toEqual(["__proto__"]);
+  });
+
   it("should read byte strings and text strings as UTF-8", () => {
     expect(decodeCbor(cbor(0x42, 0xc3, 0xa9))).toBe("é");
     expect(decodeCbor(cbor(0x62, 0xc3, 0xa9))).toBe("é");

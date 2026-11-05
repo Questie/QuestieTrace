@@ -97,7 +97,7 @@ describe("traceApiPlugin middleware", () => {
   it("should serve generated corrections and meta from the corrections-extractor output", async () => {
     const root = createExtractorOutput({
       "foreverQuestTraces.lua": "function ForeverQuestTraces:Load()\nend",
-      "meta.json": JSON.stringify({ sessionCount: 3, submissionCount: 2, skippedFiles: [{ name: "2026-10/bad.json", error: "boom" }] }),
+      "meta.json": JSON.stringify({ sessionCount: 3, submissionCount: 2, skippedFiles: [{ name: "2026-10/bad.json", error: "boom" }], partialFiles: [{ name: "2026-10/partial.json", droppedExports: ["export 1 has no matching end marker"] }] }),
     });
     const handler = setupHandler(root);
     const response = makeResponse();
@@ -110,6 +110,7 @@ describe("traceApiPlugin middleware", () => {
       sessionCount: 3,
       submissionCount: 2,
       skippedFiles: [{ name: "2026-10/bad.json", error: "boom" }],
+      partialFiles: [{ name: "2026-10/partial.json", droppedExports: ["export 1 has no matching end marker"] }],
     });
   });
 

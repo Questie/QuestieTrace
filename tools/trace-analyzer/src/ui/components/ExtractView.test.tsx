@@ -7,13 +7,14 @@ interface MockResult {
   sessionCount: number;
   submissionCount: number;
   skippedFiles: { name: string; error: string }[];
+  partialFiles: { name: string; droppedExports: string[] }[];
 }
 
 const RESULTS: Record<string, MockResult> = {
-  npc: { fixes: "function ForeverNpcTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
-  quest: { fixes: "function ForeverQuestTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
-  item: { fixes: "function ForeverItemTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
-  object: { fixes: "function ForeverObjectTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [] },
+  npc: { fixes: "function ForeverNpcTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [], partialFiles: [] },
+  quest: { fixes: "function ForeverQuestTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [], partialFiles: [] },
+  item: { fixes: "function ForeverItemTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [], partialFiles: [] },
+  object: { fixes: "function ForeverObjectTraces:Load()\nend", sessionCount: 3, submissionCount: 2, skippedFiles: [], partialFiles: [] },
 };
 
 function mockSuccessFetch(overrides: Partial<Record<string, MockResult>> = {}) {
@@ -140,6 +141,16 @@ describe("ExtractView", () => {
 
     await waitFor(() => expect(screen.getByText(/Skipped 1 file/)).toBeInTheDocument());
     expect(screen.getByText(/bad\.json: unexpected token/)).toBeInTheDocument();
+  });
+
+  it("should list partly decoded files as a warning", async () => {
+    mockSuccessFetch({ npc: { ...RESULTS.npc, partialFiles: [{ name: "2026-10/partial.json", droppedExports: ["export 1 has no matching end marker"] }] } });
+
+    render(<ExtractView />);
+    fireEvent.click(screen.getByText("Load all"));
+
+    await waitFor(() => expect(screen.getByText(/Dropped some exports of 1 file/)).toBeInTheDocument());
+    expect(screen.getByText(/partial\.json: export 1 has no matching end marker/)).toBeInTheDocument();
   });
 
   it("should show an error message and allow retrying when a request fails", async () => {
