@@ -2,8 +2,9 @@
 // and writes the forever*Traces.lua modules, one lookup<Entity>/<locale>.lua module per
 // entity and locale, plus a meta.json summary.
 //
-// Submissions are decoded and folded in one at a time and then dropped, so memory use is
-// bounded by the collected observations rather than by the total size of the input.
+// Submissions are decoded and observed in worker threads, then folded in one at a time, in
+// order, and dropped. Raw observations are kept on disk until finalize (see
+// ObservationStore), so memory use stays about flat as submissions come in.
 //
 // Exports are cumulative and include the in-progress session, so one session shows up in
 // many submissions, growing as play continues. Submissions are read newest first and only
@@ -12,11 +13,12 @@
 
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join, relative, resolve } from "path";
-import { sessionKey } from "./core/trace-data/session-key";
-import { listSubmissionFiles, readSubmission } from "./core/trace-data/submissions";
-import type { SessionRecord } from "./core/types";
-import { createAccumulator, finalize, foldSessions } from "./extract";
-import { createLookupAccumulator, finalizeLookups, foldLookupSessions, type LookupBundle } from "./extract/lookups";
+import { availableParallelism } from "os";
+import { Worker } from "worker_threads";
+import { listSubmissionFiles } from "./core/trace-data/submissions";
+import { addStagedSessions, createAccumulator, finalize } from "./extract";
+import { addStagedLookupSessions, createLookupAccumulator, finalizeLookups, type LookupBundle } from "./extract/lookups";
+import { observeSubmission, type ObservedSession, type ObservedSubmission, type ObserveRequest } from "./observe-submission";
 
 const OUTPUT_FILES = {
   npcFixes: "foreverNpcTraces.lua",
@@ -42,16 +44,24 @@ export interface ExtractMeta {
   generatedAt: string;
 }
 
-export function extractCorrections(
+export interface ExtractOptions {
+  log?: (message: string) => void;
+  /** Worker threads that read and observe submissions; 0 does it on the main thread. */
+  workers?: number;
+}
+
+export async function extractCorrections(
   traceDataDir: string,
   outputDir: string,
-  log: (message: string) => void = console.log,
-): ExtractMeta {
+  { log = console.log, workers = Math.max(1, availableParallelism() - 1) }: ExtractOptions = {},
+): Promise<ExtractMeta> {
   // Newest first: the first copy of a session met is then its most complete one.
   const files = listSubmissionFiles(traceDataDir).reverse();
   const submissionsDir = resolve(traceDataDir, "submissions");
 
-  const acc = createAccumulator();
+  // Raw observations go to disk, so memory use does not grow with the number of submissions.
+  const storeDir = join(outputDir, ".observations");
+  const acc = createAccumulator({}, storeDir);
   const lookupAcc = createLookupAccumulator();
   const foldedKeys = new Set<string>();
   const foldedSubmissionIds: string[] = [];
@@ -60,64 +70,126 @@ export function extractCorrections(
   let exportCount = 0;
   let duplicateSessionsSkipped = 0;
 
-  files.forEach((file, index) => {
-    const name = relative(submissionsDir, file.path);
-    const submission = readSubmission(file.path);
-    if (submission.error) {
-      skippedFiles.push({ name, error: submission.error });
-    } else {
-      const keys = new Set<string>();
-      const sessions: SessionRecord[] = [];
-      let duplicates = 0;
-      for (const session of submission.traces.flatMap((trace) => trace.sessions)) {
-        // A session without a key cannot be matched with its copies, so every copy is folded in.
-        const key = sessionKey(session);
-        if (key !== undefined && (foldedKeys.has(key) || keys.has(key))) {
-          duplicates++;
-        } else {
-          if (key !== undefined) keys.add(key);
-          sessions.push(session);
+  try {
+    await observeInOrder(files.map((file) => file.path), acc.maxIds, workers, (file, submission, index) => {
+      const name = relative(submissionsDir, file);
+      if (submission.error) {
+        skippedFiles.push({ name, error: submission.error });
+      } else {
+        const keys = new Set<string>();
+        const sessions: ObservedSession[] = [];
+        let duplicates = 0;
+        for (const session of submission.sessions) {
+          // A session without a key cannot be matched with its copies, so every copy is folded in.
+          if (session.key !== undefined && (foldedKeys.has(session.key) || keys.has(session.key))) {
+            duplicates++;
+          } else {
+            if (session.key !== undefined) keys.add(session.key);
+            sessions.push(session);
+          }
         }
+        // Observer errors abort the run, keeping the previous output: a submission folded in
+        // only part way could not be taken out of the accumulators again.
+        const failed = sessions.find((session) => session.error !== undefined);
+        if (failed) throw new Error(`Observing a session of ${name} failed (${failed.error})`);
+        addStagedSessions(acc, sessions.flatMap((session) => (session.extract ? [session.extract] : [])));
+        addStagedLookupSessions(lookupAcc, sessions.flatMap((session) => (session.lookup ? [session.lookup] : [])));
+        for (const key of keys) foldedKeys.add(key);
+        duplicateSessionsSkipped += duplicates;
+        foldedSubmissionIds.push(submission.submissionId);
+        exportCount += submission.exportCount;
+        if (submission.droppedExports.length > 0) partialFiles.push({ name, droppedExports: submission.droppedExports });
       }
-      // Observer errors abort the run, keeping the previous output: a submission folded in
-      // only part way could not be taken out of the accumulators again.
-      foldSessions(acc, sessions);
-      foldLookupSessions(lookupAcc, sessions);
-      for (const key of keys) foldedKeys.add(key);
-      duplicateSessionsSkipped += duplicates;
-      foldedSubmissionIds.push(submission.submissionId);
-      exportCount += submission.traces.length;
-      if (submission.droppedExports.length > 0) partialFiles.push({ name, droppedExports: submission.droppedExports });
+      if ((index + 1) % 250 === 0 || index + 1 === files.length) log(`[${index + 1}/${files.length}] submissions`);
+    });
+    return writeOutputs();
+  } finally {
+    acc.observations.dispose();
+  }
+
+  function writeOutputs(): ExtractMeta {
+    if (foldedSubmissionIds.length === 0) {
+      throw new Error(`No submission in ${submissionsDir} could be loaded; keeping the previous output`);
     }
-    if ((index + 1) % 250 === 0 || index + 1 === files.length) log(`[${index + 1}/${files.length}] submissions`);
-  });
 
-  if (foldedSubmissionIds.length === 0) {
-    throw new Error(`No submission in ${submissionsDir} could be loaded; keeping the previous output`);
+    const now = new Date();
+    const bundle = finalize(acc, { sourceFileNames: foldedSubmissionIds, now });
+
+    mkdirSync(outputDir, { recursive: true });
+    // meta.json marks a complete run: remove it until all modules are written.
+    rmSync(join(outputDir, "meta.json"), { force: true });
+    for (const [field, fileName] of Object.entries(OUTPUT_FILES)) {
+      writeFileSync(join(outputDir, fileName), bundle[field as keyof typeof OUTPUT_FILES]);
+    }
+    writeLookups(finalizeLookups(lookupAcc), outputDir);
+
+    const meta: ExtractMeta = {
+      sessionCount: acc.sessionCount,
+      submissionCount: foldedSubmissionIds.length,
+      exportCount,
+      skippedFiles,
+      partialFiles,
+      duplicateSessionsSkipped,
+      generatedAt: now.toISOString(),
+    };
+    writeFileSync(join(outputDir, "meta.json"), JSON.stringify(meta, null, 2));
+    return meta;
+  }
+}
+
+/**
+ * Observes every file, `workers` at a time, and hands the results to `fold` in the order of
+ * `files`. At most a few results wait for an earlier one, so memory use stays bounded.
+ */
+async function observeInOrder(
+  files: string[],
+  maxIds: ObserveRequest["maxIds"],
+  workers: number,
+  fold: (file: string, submission: ObservedSubmission, index: number) => void,
+): Promise<void> {
+  if (workers <= 0) {
+    files.forEach((file, index) => fold(file, observeSubmission({ path: file, maxIds }), index));
+    return;
   }
 
-  const now = new Date();
-  const bundle = finalize(acc, { sourceFileNames: foldedSubmissionIds, now });
-
-  mkdirSync(outputDir, { recursive: true });
-  // meta.json marks a complete run: remove it until all modules are written.
-  rmSync(join(outputDir, "meta.json"), { force: true });
-  for (const [field, fileName] of Object.entries(OUTPUT_FILES)) {
-    writeFileSync(join(outputDir, fileName), bundle[field as keyof typeof OUTPUT_FILES]);
+  const pool = Array.from({ length: Math.min(workers, files.length) }, () => new Worker(new URL("./observe-worker.ts", import.meta.url), { execArgv: ["--import", "tsx"] }));
+  const results = new Map<number, ObservedSubmission>();
+  let next = 0;
+  let folded = 0;
+  try {
+    await new Promise<void>((resolveAll, rejectAll) => {
+      const dispatch = (worker: Worker) => {
+        // Workers stop taking files while too many results wait to be folded.
+        if (next >= files.length || next - folded >= pool.length * 4) return false;
+        const index = next++;
+        worker.once("message", (result: ObservedSubmission) => {
+          results.set(index, result);
+          try {
+            while (results.has(folded)) {
+              const ready = results.get(folded)!;
+              results.delete(folded);
+              fold(files[folded], ready, folded);
+              folded++;
+            }
+          } catch (e) {
+            rejectAll(e);
+            return;
+          }
+          if (folded === files.length) resolveAll();
+          for (const idle of pool) if (idle.listenerCount("message") === 0) dispatch(idle);
+        });
+        worker.postMessage({ path: files[index], maxIds } satisfies ObserveRequest);
+        return true;
+      };
+      for (const worker of pool) {
+        worker.on("error", rejectAll);
+        dispatch(worker);
+      }
+      if (files.length === 0) resolveAll();
+    });
+  } finally {
+    await Promise.all(pool.map((worker) => worker.terminate()));
   }
-  writeLookups(finalizeLookups(lookupAcc), outputDir);
-
-  const meta: ExtractMeta = {
-    sessionCount: acc.sessionCount,
-    submissionCount: foldedSubmissionIds.length,
-    exportCount,
-    skippedFiles,
-    partialFiles,
-    duplicateSessionsSkipped,
-    generatedAt: now.toISOString(),
-  };
-  writeFileSync(join(outputDir, "meta.json"), JSON.stringify(meta, null, 2));
-  return meta;
 }
 
 function writeLookups(bundle: LookupBundle, outputDir: string): void {

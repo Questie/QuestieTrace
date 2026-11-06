@@ -8,7 +8,7 @@ const outputDir = resolve(toolDir, "output");
 
 let meta: ExtractMeta;
 try {
-  meta = extractCorrections(defaultTraceDataDir(), outputDir);
+  meta = await extractCorrections(defaultTraceDataDir(), outputDir);
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);

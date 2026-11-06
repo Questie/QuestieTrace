@@ -632,10 +632,10 @@ describe("foldSessions + finalize (incremental extraction)", () => {
       foldSessions(acc, fileB);
     }
 
-    expect(atLimit.observations.npcSpawns).toEqual([]);
-    expect(atLimit.observations.objectZoneID).toEqual([]);
-    expect(belowLimit.observations.npcSpawns.map((obs) => obs.entityId)).toEqual([823]);
-    expect(belowLimit.observations.objectZoneID.map((obs) => obs.entityId)).toEqual([2843]);
+    expect(atLimit.observations.all<any>("npcSpawns")).toEqual([]);
+    expect(atLimit.observations.all<any>("objectSpawns")).toEqual([]);
+    expect(belowLimit.observations.all<any>("npcSpawns").map((obs) => obs.entityId)).toEqual([823]);
+    expect(belowLimit.observations.all<any>("objectSpawns").map((obs) => obs.entityId)).toEqual([2843]);
   });
 
   it("should filter object drops by the item limit, not the object limit", () => {
@@ -648,8 +648,8 @@ describe("foldSessions + finalize (incremental extraction)", () => {
     foldSessions(kept, [session]);
     foldSessions(dropped, [session]);
 
-    expect(kept.observations.objectDrops.map((obs) => [obs.entityId, obs.value.objectID])).toEqual([[750, 2843]]);
-    expect(dropped.observations.objectDrops).toEqual([]);
+    expect(kept.observations.all<any>("objectDrops").map((obs) => [obs.entityId, obs.value.objectID])).toEqual([[750, 2843]]);
+    expect(dropped.observations.all<any>("objectDrops")).toEqual([]);
   });
 
   it("should only count and observe sessions from Forever builds", () => {
