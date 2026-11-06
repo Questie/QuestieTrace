@@ -19,7 +19,7 @@ export interface Fact<T> {
 
 const CONFIDENCE_RANK: Record<Confidence, number> = { high: 3, medium: 2, low: 1 };
 
-function highestConfidence(observations: Observation<unknown>[]): Confidence {
+export function highestConfidence(observations: Observation<unknown>[]): Confidence {
   let best: Confidence = "low";
   for (const obs of observations) {
     if (CONFIDENCE_RANK[obs.confidence] > CONFIDENCE_RANK[best]) {

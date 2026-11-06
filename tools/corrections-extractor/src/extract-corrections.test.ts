@@ -41,10 +41,10 @@ function writePreviousLookup(outputDir: string): string {
 }
 
 describe("extractCorrections", () => {
-  it("should write all four corrections modules, the lookups and meta.json to the output directory", () => {
+  it("should write all four corrections modules, the lookups and meta.json to the output directory", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
 
-    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
+    const meta = await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
     expect(readFileSync(join(outputDir, "foreverNpcTraces.lua"), "utf8")).toContain("function ForeverNpcTraces:Load()");
     expect(readFileSync(join(outputDir, "foreverQuestTraces.lua"), "utf8")).toContain("function ForeverQuestTraces:Load()");
@@ -55,35 +55,35 @@ describe("extractCorrections", () => {
     expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [], partialFiles: [], duplicateSessionsSkipped: 0 });
   });
 
-  it("should replace previous lookups, dropping stale locales, and leave no staging directory", () => {
+  it("should replace previous lookups, dropping stale locales, and leave no staging directory", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
     const stale = writePreviousLookup(outputDir);
 
-    extractCorrections(traceDataDir, outputDir, () => undefined);
+    await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(join(outputDir, ".lookups-staging"))).toBe(false);
   });
 
-  it("should only write lookups for valid locale names", () => {
+  it("should only write lookups for valid locale names", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
     vi.spyOn(lookups, "finalizeLookups").mockReturnValue({ lookupItems: { deDE: "de", "../../evil": "evil" } });
 
-    extractCorrections(traceDataDir, outputDir, () => undefined);
+    await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
     expect(readFileSync(join(outputDir, "lookupItems", "deDE.lua"), "utf8")).toBe("de");
     expect(existsSync(join(outputDir, "..", "evil.lua"))).toBe(false);
     expect(existsSync(join(outputDir, ".lookups-previous"))).toBe(false);
   });
 
-  it("should skip submissions that fail to load and report them in meta.json", () => {
+  it("should skip submissions that fail to load and report them in meta.json", async () => {
     const { traceDataDir, outputDir } = setupDirs({
       "2026-10/2026-10-01_000000Z_a.json": submission("a"),
       "2026-10/2026-10-02_000000Z_broken.json": "{ not json",
       "2026-10/2026-10-03_000000Z_garbled.json": submission("garbled", "not an export"),
     });
 
-    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
+    const meta = await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
     expect(meta.submissionCount).toBe(1);
     expect(meta.skippedFiles.map((skipped) => skipped.name)).toEqual([
@@ -92,56 +92,72 @@ describe("extractCorrections", () => {
     ]);
   });
 
-  it("should fold the exports that decode and list the submission in partialFiles", () => {
+  it("should fold the exports that decode and list the submission in partialFiles", async () => {
     const { traceDataDir, outputDir } = setupDirs({
       "2026-10/2026-10-01_000000Z_a.json": submission("a", `${TINY_EXPORT.slice(0, 200)}${TINY_EXPORT}${TINY_EXPORT.slice(-60)}`),
     });
 
-    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
+    const meta = await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
     expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [] });
     expect(meta.partialFiles).toEqual([{ name: join("2026-10", "2026-10-01_000000Z_a.json"), droppedExports: ["export 1 has no matching end marker"] }]);
   });
 
-  it("should fold each session once, even when several submissions and exports contain it", () => {
+  it("should fold each session once, even when several submissions and exports contain it", async () => {
     const { traceDataDir, outputDir } = setupDirs({
       "2026-09/2026-09-30_000000Z_a.json": submission("a"),
       "2026-10/2026-10-01_000000Z_b.json": submission("b", `${TINY_EXPORT}\n${TINY_EXPORT}`),
     });
 
-    const meta = extractCorrections(traceDataDir, outputDir, () => undefined);
+    const meta = await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
     expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 2, exportCount: 3, duplicateSessionsSkipped: 2 });
   });
 
-  it("should throw and keep the previous output when no submission could be loaded", () => {
+  it("should throw and keep the previous output when no submission could be loaded", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_broken.json": "{ not json" });
     mkdirSync(outputDir);
     writeFileSync(join(outputDir, "meta.json"), "{}");
     const previous = writePreviousLookup(outputDir);
 
-    expect(() => extractCorrections(traceDataDir, outputDir, () => undefined)).toThrow("could be loaded");
+    await expect(extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 })).rejects.toThrow("could be loaded");
     expect(readFileSync(join(outputDir, "meta.json"), "utf8")).toBe("{}");
     expect(readFileSync(previous, "utf8")).toBe("previous");
     expect(existsSync(join(outputDir, "foreverNpcTraces.lua"))).toBe(false);
   });
 
-  it("should abort and keep the previous output when folding a submission fails", () => {
+  it("should abort and keep the previous output when folding a submission fails", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
     mkdirSync(outputDir);
     writeFileSync(join(outputDir, "meta.json"), "{}");
-    vi.spyOn(lookups, "foldLookupSessions").mockImplementation(() => {
+    vi.spyOn(lookups, "observeLookupSession").mockImplementation(() => {
       throw new Error("observer failed");
     });
 
-    expect(() => extractCorrections(traceDataDir, outputDir, () => undefined)).toThrow("observer failed");
+    await expect(extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 })).rejects.toThrow("Observing a session of 2026-10/2026-10-01_000000Z_a.json failed (Error)");
     expect(readFileSync(join(outputDir, "meta.json"), "utf8")).toBe("{}");
     expect(existsSync(join(outputDir, "foreverNpcTraces.lua"))).toBe(false);
   });
 
-  it("should throw when the trace-data checkout has no submissions directory", () => {
+  it("should give the same result with worker threads", async () => {
+    const files = {
+      "2026-09/2026-09-30_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-01_000000Z_b.json": submission("b", `${TINY_EXPORT}\n${TINY_EXPORT}`),
+      "2026-10/2026-10-02_000000Z_broken.json": "{ not json",
+    };
+    const inline = setupDirs(files);
+    const threaded = setupDirs(files);
+
+    const { generatedAt: _a, ...inlineMeta } = await extractCorrections(inline.traceDataDir, inline.outputDir, { log: () => undefined, workers: 0 });
+    const { generatedAt: _b, ...threadedMeta } = await extractCorrections(threaded.traceDataDir, threaded.outputDir, { log: () => undefined, workers: 2 });
+
+    expect(threadedMeta).toEqual(inlineMeta);
+    expect(existsSync(join(threaded.outputDir, ".observations"))).toBe(false);
+  });
+
+  it("should throw when the trace-data checkout has no submissions directory", async () => {
     const { traceDataDir, outputDir } = setupDirs({});
 
-    expect(() => extractCorrections(traceDataDir, outputDir, () => undefined)).toThrow("does not exist");
+    await expect(extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 })).rejects.toThrow("does not exist");
   });
 });

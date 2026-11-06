@@ -12,9 +12,10 @@
 // are processed. See PlayerIdentity.lua for how interfaceVersion is captured:
 
 import type { SessionRecord } from "../core/types";
-import { aggregateField, aggregateNewestScalarSummary, aggregateScalarSummary, addToScalarSummary, type Fact, type ScalarSummary } from "./aggregate";
+import { aggregateNewestScalarSummary, highestConfidence, aggregateScalarSummary, addToScalarSummary, type Fact, type ScalarSummary } from "./aggregate";
 import type { QuestObjectivesValue } from "./observers/quest/objectives";
 import type { Observation } from "./observation";
+import { ObservationStore } from "./observation-store";
 import { emitItemRecords } from "./emit/item";
 import { emitNpcRecords } from "./emit/npc";
 import { emitObjectRecords } from "./emit/object";
@@ -27,7 +28,6 @@ import {
   observeLevel as observeNpcLevel,
   mergeLevelRange as mergeNpcLevelRange,
   observeSpawns as observeNpcSpawns,
-  observeZoneID as observeNpcZoneID,
   mergeSpawns as mergeNpcSpawns,
   mergeZoneID as mergeNpcZoneID,
   observeFriendlyToFaction,
@@ -41,15 +41,16 @@ import { sessionServerTime } from "./probes";
 import { observeName as observeObjectName } from "./observers/object/name";
 import {
   observeSpawns as observeObjectSpawns,
-  observeZoneID as observeObjectZoneID,
   mergeSpawns as mergeObjectSpawns,
   mergeZoneID as mergeObjectZoneID,
 } from "./observers/object";
 import { observeName as observeQuestName, observeStartedBy, mergeStartedBy, observeFinishedBy, mergeFinishedBy, observeTurnInPoi, turnInPoiSpawns } from "./observers/quest";
+import type { TurnInPoiValue } from "./observers/quest/turnInPoi";
+import type { SpawnObservationValue } from "./observers/npc/spawns";
 import { observeQuestLevel } from './observers/quest';
 import { observeRequiredLevel } from './observers/quest';
 import { observeZoneOrSort } from './observers/quest';
-import { observeObjectives, mergeQuestObjectives, observeObjectiveCount, observeTriggerEnd, mergeQuestTriggerEnds } from './observers/quest';
+import { observeObjectives, mergeQuestObjectives, observeObjectiveCount, observeTriggerEnd, mergeQuestTriggerEnds, type QuestTriggerEndValue } from "./observers/quest";
 import { observeObjectivesText } from './observers/quest';
 import { observeReputationReward, mergeReputationReward } from './observers/quest';
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
@@ -136,15 +137,15 @@ const OBSERVERS = {
   finishedBy: observeFinishedBy,
   reputationReward: observeReputationReward,
   turnInPoi: observeTurnInPoi,
+  // npcZoneID and objectZoneID are merged from the spawn observations: their observers
+  // are the spawn observers.
   npcSpawns: observeNpcSpawns,
-  npcZoneID: observeNpcZoneID,
   npcLevel: observeNpcLevel,
   npcFriendlyToFaction: observeFriendlyToFaction,
   npcRank: observeNpcRank,
   npcDrops: observeNpcDrops,
   objectDrops: observeObjectDrops,
   objectSpawns: observeObjectSpawns,
-  objectZoneID: observeObjectZoneID,
 };
 
 /**
@@ -153,14 +154,12 @@ const OBSERVERS = {
  */
 const OBSERVER_ENTITIES: Partial<Record<keyof typeof OBSERVERS, keyof typeof MAX_IDS>> = {
   npcSpawns: "npc",
-  npcZoneID: "npc",
   npcLevel: "npc",
   npcFriendlyToFaction: "npc",
   npcRank: "npc",
   npcDrops: "item",
   objectDrops: "item",
   objectSpawns: "object",
-  objectZoneID: "object",
 };
 
 type ScalarObserverKey = keyof typeof SCALAR_OBSERVERS;
@@ -169,51 +168,63 @@ type ObservedValue<F extends (session: SessionRecord) => unknown> =
   ReturnType<F> extends Observation<infer V>[] ? V : never;
 
 /**
- * Observations collected so far, per field. Holding only observations (not the
+ * What was collected so far: per-value summaries of the scalar fields, and the raw
+ * observations of the other fields in `observations`. Holding only observations (not the
  * sessions they came from) lets callers fold in one trace file at a time.
  */
 export interface ExtractAccumulator {
   sessionCount: number;
   maxIds: typeof MAX_IDS;
   scalars: { [K in ScalarObserverKey]: ScalarSummary<ObservedValue<(typeof SCALAR_OBSERVERS)[K]>> };
-  observations: { [K in ObserverKey]: ReturnType<(typeof OBSERVERS)[K]> };
+  observations: ObservationStore;
 }
 
-export function createAccumulator(maxIds: Partial<typeof MAX_IDS> = {}): ExtractAccumulator {
+/** One session's observations, ready to be added to an accumulator (see observeSession). */
+export interface StagedSession {
+  sessionTime: number | null;
+  scalars: [ScalarObserverKey, Observation<unknown>[]][];
+  observations: [ObserverKey, Observation<unknown>[]][];
+}
+
+/** `storeDir` keeps the raw observations on disk instead of in memory (see ObservationStore). */
+export function createAccumulator(maxIds: Partial<typeof MAX_IDS> = {}, storeDir?: string): ExtractAccumulator {
   const scalars = {} as Record<ScalarObserverKey, ScalarSummary<unknown>>;
   for (const key of Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]) {
     scalars[key] = new Map();
-  }
-  const observations = {} as Record<ObserverKey, unknown[]>;
-  for (const key of Object.keys(OBSERVERS) as ObserverKey[]) {
-    observations[key] = [];
   }
   return {
     sessionCount: 0,
     maxIds: { ...MAX_IDS, ...maxIds },
     scalars: scalars as ExtractAccumulator["scalars"],
-    observations: observations as ExtractAccumulator["observations"],
+    observations: new ObservationStore(storeDir),
   };
 }
 
 /**
- * Runs every observer over `sessions` and adds the results to `acc`.
+ * Runs every observer over one session. Returns undefined for sessions that are not
+ * observed: only sessions from WoW Forever builds are. Sessions without GetBuildInfo are
+ * INCLUDED (they might be early Forever beta traces with valuable data) - any Classic IDs
+ * they contain are filtered out by filterBelowMax in finalize.
  *
- * Only sessions from WoW Forever builds are observed. Sessions without
- * GetBuildInfo are INCLUDED (they might be early Forever beta traces with
- * valuable data) - any Classic IDs they contain are filtered out by
- * filterBelowMax in finalize.
- *
- * All observers run before anything is added, so a throwing observer leaves
- * `acc` untouched.
+ * npc, item and object observations at or below `maxIds` are dropped right away: they are
+ * never exported.
  */
-export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[]): void {
-  const staged = sessions.filter(isForeverSession).map((session) => ({
+export function observeSession(session: SessionRecord, maxIds: Partial<typeof MAX_IDS> = {}): StagedSession | undefined {
+  if (!isForeverSession(session)) return undefined;
+  const limits = { ...MAX_IDS, ...maxIds };
+  return {
     sessionTime: sessionServerTime(session),
-    scalars: (Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]).map((key) => [key, SCALAR_OBSERVERS[key](session)] as const),
-    observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session)] as const),
-  }));
+    scalars: (Object.keys(SCALAR_OBSERVERS) as ScalarObserverKey[]).map((key) => [key, SCALAR_OBSERVERS[key](session) as Observation<unknown>[]]),
+    observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => {
+      const entity = OBSERVER_ENTITIES[key];
+      const maxId = entity === undefined ? -Infinity : limits[entity];
+      return [key, (OBSERVERS[key](session) as Observation<unknown>[]).filter((observation) => observation.entityId > maxId)];
+    }),
+  };
+}
 
+/** Adds sessions observed with the accumulator's maxIds, in order. */
+export function addStagedSessions(acc: ExtractAccumulator, staged: StagedSession[]): void {
   for (const session of staged) {
     acc.sessionCount++;
     const sessionKey = acc.sessionCount;
@@ -222,26 +233,53 @@ export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[])
         observation.provenance.sessionKey = sessionKey;
         observation.provenance.sessionTime = session.sessionTime;
       }
-      addToScalarSummary(acc.scalars[key] as ScalarSummary<unknown>, observations as Observation<unknown>[]);
+      addToScalarSummary(acc.scalars[key] as ScalarSummary<unknown>, observations);
     }
     for (const [key, observations] of session.observations) {
-      const target = acc.observations[key] as unknown[];
-      const entity = OBSERVER_ENTITIES[key];
-      const maxId = entity === undefined ? -Infinity : acc.maxIds[entity];
       for (const observation of observations) {
-        if (observation.entityId <= maxId) continue;
         observation.provenance.sessionKey = sessionKey;
         observation.provenance.sessionTime = session.sessionTime;
-        target.push(observation);
       }
+      acc.observations.add(key, observations);
     }
   }
+}
+
+/**
+ * Runs every observer over `sessions` and adds the results to `acc` (see observeSession).
+ * All observers run before anything is added, so a throwing observer leaves `acc` untouched.
+ */
+export function foldSessions(acc: ExtractAccumulator, sessions: SessionRecord[]): void {
+  const staged = sessions.map((session) => observeSession(session, acc.maxIds)).filter((s): s is StagedSession => s !== undefined);
+  addStagedSessions(acc, staged);
 }
 
 export function extractAll(sessions: SessionRecord[], options: ExtractOptions): FactBundle {
   const acc = createAccumulator(options.maxIds);
   foldSessions(acc, sessions);
   return finalize(acc, options);
+}
+
+/** aggregateField over a stored field, followed per entity by the observations of `extraKey`. */
+function aggregateStoredField<T, R>(
+  store: ObservationStore,
+  key: ObserverKey,
+  merge: (observations: Observation<T>[]) => R,
+  extraKey?: string,
+): Map<number, Fact<R>> {
+  const facts = new Map<number, Fact<R>>();
+  for (const byEntity of store.groups<T>(extraKey === undefined ? [key] : [key, extraKey])) {
+    for (const [entityId, observations] of byEntity) {
+      facts.set(entityId, {
+        entityId,
+        value: merge(observations),
+        confidence: highestConfidence(observations),
+        observationCount: observations.length,
+        alternativeCount: 0,
+      });
+    }
+  }
+  return facts;
 }
 
 /** Drops objectives of quests whose matched id count differs from the objective count the API reports. */
@@ -273,7 +311,7 @@ function mapFacts<T, R>(facts: Map<number, Fact<T>>, map: (value: T) => R): Map<
 }
 
 export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, "maxIds">): FactBundle {
-  const { scalars, observations } = acc;
+  const { scalars, observations: store } = acc;
 
   const header = {
     sourceFileNames: options.sourceFileNames,
@@ -293,28 +331,35 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   }
 
   const zoneOrSortFacts = aggregateScalarSummary(scalars.zoneOrSort);
-  const finishedByFacts = aggregateField(observations.finishedBy, mergeFinishedBy);
-  const turnInSpawns = turnInPoiSpawns(observations.turnInPoi, finishedByFacts);
+  const field = <T, R>(key: ObserverKey, merge: (observations: Observation<T>[]) => R, extraKey?: string) =>
+    aggregateStoredField<T, R>(store, key, merge, extraKey);
+  const finishedByFacts = field("finishedBy", mergeFinishedBy);
+  // Quest turn-in POIs are spawns of the quest's single finisher: they join its spawn observations.
+  // They are kept apart from the observed spawns, so finalize can run again on the same accumulator.
+  store.clear("npcTurnInSpawns");
+  store.clear("objectTurnInSpawns");
+  for (const pois of store.stream<TurnInPoiValue>("turnInPoi")) {
+    const turnInSpawns = turnInPoiSpawns(pois, finishedByFacts);
+    store.add("npcTurnInSpawns", turnInSpawns.npcs);
+    store.add("objectTurnInSpawns", turnInSpawns.objects);
+  }
   const questRecords = emitQuestRecords({
     name: aggregateNewestScalarSummary(scalars.questName),
     questLevel: aggregateScalarSummary(scalars.questLevel),
-    requiredLevel: aggregateField(observations.requiredLevel, mergeRequiredLevel),
+    requiredLevel: field("requiredLevel", mergeRequiredLevel),
     zoneOrSort: zoneOrSortFacts,
     objectives: withAllObjectivesMatched(
-      aggregateField(observations.objectives, mergeQuestObjectives),
+      field("objectives", mergeQuestObjectives),
       aggregateScalarSummary(scalars.objectiveCount),
     ),
     objectivesText: aggregateScalarSummary(scalars.objectivesText),
-    triggerEnd: aggregateField(
-      observations.triggerEnd,
-      (observations) => mergeQuestTriggerEnds(observations, zoneOrSortFacts.get(observations[0]?.entityId)?.value),
+    triggerEnd: field<QuestTriggerEndValue, ReturnType<typeof mergeQuestTriggerEnds>>("triggerEnd", (observations) =>
+      mergeQuestTriggerEnds(observations, zoneOrSortFacts.get(observations[0]?.entityId)?.value),
     ),
-    startedBy: aggregateField(
-      observations.startedBy,
-      mergeStartedBy,
+    startedBy: field("startedBy", mergeStartedBy,
     ),
     finishedBy: finishedByFacts,
-    reputationReward: onlyDefinedFacts(aggregateField(observations.reputationReward, mergeReputationReward)),
+    reputationReward: onlyDefinedFacts(field("reputationReward", mergeReputationReward)),
   });
 
   // Quest givers and enders stand still, so they get a single spawn per zone.
@@ -328,43 +373,27 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
     }
   }
 
-  const npcLevelRanges = onlyDefinedFacts(aggregateField(observations.npcLevel, mergeNpcLevelRange));
+  const npcLevelRanges = onlyDefinedFacts(field("npcLevel", mergeNpcLevelRange));
   const npcRecords = emitNpcRecords({
     name: aggregateNewestScalarSummary(scalars.npcName),
     minLevel: mapFacts(npcLevelRanges, (range) => range.min),
     maxLevel: mapFacts(npcLevelRanges, (range) => range.max),
-    spawns: aggregateField(
-      [...observations.npcSpawns, ...turnInSpawns.npcs],
-      (obs) => mergeNpcSpawns(obs, questNpcIds.has(obs[0].entityId)),
-    ),
-    zoneID: aggregateField(
-      [...observations.npcZoneID, ...turnInSpawns.npcs],
-      mergeNpcZoneID,
-    ),
-    friendlyToFaction: onlyDefinedFacts(aggregateField(observations.npcFriendlyToFaction, mergeFriendlyToFaction)),
-    rank: onlyDefinedFacts(aggregateField(observations.npcRank, mergeNpcRank)),
+    spawns: field<SpawnObservationValue, ReturnType<typeof mergeNpcSpawns>>("npcSpawns", (obs) => mergeNpcSpawns(obs, questNpcIds.has(obs[0].entityId)), "npcTurnInSpawns"),
+    zoneID: field("npcSpawns", mergeNpcZoneID, "npcTurnInSpawns"),
+    friendlyToFaction: onlyDefinedFacts(field("npcFriendlyToFaction", mergeFriendlyToFaction)),
+    rank: onlyDefinedFacts(field("npcRank", mergeNpcRank)),
   });
   const itemRecords = emitItemRecords({
     name: aggregateNewestScalarSummary(scalars.itemName),
-    npcDrops: aggregateField(
-      observations.npcDrops,
-      mergeNpcDrops,
+    npcDrops: field("npcDrops", mergeNpcDrops,
     ),
-    objectDrops: aggregateField(
-      observations.objectDrops,
-      mergeObjectDrops,
+    objectDrops: field("objectDrops", mergeObjectDrops,
     ),
   });
   const objectRecords = emitObjectRecords({
     name: aggregateNewestScalarSummary(scalars.objectName),
-    spawns: aggregateField(
-      [...observations.objectSpawns, ...turnInSpawns.objects],
-      (obs) => mergeObjectSpawns(obs, questObjectIds.has(obs[0].entityId)),
-    ),
-    zoneID: aggregateField(
-      [...observations.objectZoneID, ...turnInSpawns.objects],
-      mergeObjectZoneID,
-    ),
+    spawns: field<SpawnObservationValue, ReturnType<typeof mergeObjectSpawns>>("objectSpawns", (obs) => mergeObjectSpawns(obs, questObjectIds.has(obs[0].entityId)), "objectTurnInSpawns"),
+    zoneID: field("objectSpawns", mergeObjectZoneID, "objectTurnInSpawns"),
   });
 
   // Quests below MAX_IDS are already known to Questie, but may be started/finished by new npcs/objects.

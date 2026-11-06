@@ -58,13 +58,29 @@ function addLocalized(byLocale: Map<string, ScalarSummary<unknown>>, observation
   }
 }
 
+/** One session's lookup observations, ready to be added to an accumulator. */
+export interface StagedLookupSession {
+  sessionTime: number | null;
+  observations: [ObserverKey, Observation<Localized<unknown>>[]][];
+}
+
+/** Runs every lookup observer over one session; undefined for sessions that are not observed. */
+export function observeLookupSession(session: SessionRecord): StagedLookupSession | undefined {
+  if (!isForeverSession(session)) return undefined;
+  return {
+    sessionTime: sessionServerTime(session),
+    observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session) as Observation<Localized<unknown>>[]]),
+  };
+}
+
 /** All observers run before anything is added, so a throwing observer leaves `acc` untouched. */
 export function foldLookupSessions(acc: LookupAccumulator, sessions: SessionRecord[]): void {
-  const staged = sessions.filter(isForeverSession).map((session) => ({
-    sessionTime: sessionServerTime(session),
-    observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session)] as const),
-  }));
+  const staged = sessions.map(observeLookupSession).filter((s): s is StagedLookupSession => s !== undefined);
+  addStagedLookupSessions(acc, staged);
+}
 
+/** Adds observed sessions, in order. */
+export function addStagedLookupSessions(acc: LookupAccumulator, staged: StagedLookupSession[]): void {
   for (const session of staged) {
     acc.sessionCount++;
     for (const [key, observations] of session.observations) {
