@@ -152,15 +152,16 @@ async function observeInOrder(
     return;
   }
 
-  const pool = Array.from({ length: Math.min(workers, files.length) }, () => new Worker(new URL("./observe-worker.ts", import.meta.url), { execArgv: ["--import", "tsx"] }));
+  const pool = Array.from({ length: Math.min(workers, files.length) }, () => new Worker(new URL("./observe-worker.ts", import.meta.url), { execArgv: ["--import", import.meta.resolve("tsx")] }));
   const results = new Map<number, ObservedSubmission>();
   let next = 0;
   let folded = 0;
+  let stopped = false;
   try {
     await new Promise<void>((resolveAll, rejectAll) => {
       const dispatch = (worker: Worker) => {
         // Workers stop taking files while too many results wait to be folded.
-        if (next >= files.length || next - folded >= pool.length * 4) return false;
+        if (stopped || next >= files.length || next - folded >= pool.length * 4) return false;
         const index = next++;
         worker.once("message", (result: ObservedSubmission) => {
           results.set(index, result);
@@ -172,6 +173,7 @@ async function observeInOrder(
               folded++;
             }
           } catch (e) {
+            stopped = true;
             rejectAll(e);
             return;
           }
@@ -182,7 +184,15 @@ async function observeInOrder(
         return true;
       };
       for (const worker of pool) {
-        worker.on("error", rejectAll);
+        worker.on("error", (e) => {
+          stopped = true;
+          rejectAll(e);
+        });
+        // A worker that exits without an error would otherwise leave its file unfolded forever.
+        worker.on("exit", (code) => {
+          stopped = true;
+          rejectAll(new Error(`An observe worker exited early (code ${code})`));
+        });
         dispatch(worker);
       }
       if (files.length === 0) resolveAll();

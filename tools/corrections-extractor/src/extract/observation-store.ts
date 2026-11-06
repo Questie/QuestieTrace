@@ -98,10 +98,13 @@ export class ObservationStore {
 
   /** Removes the files on disk. */
   dispose(): void {
+    this.buffers.clear();
+    this.bufferedBytes = 0;
     if (this.dir !== undefined) rmSync(this.dir, { recursive: true, force: true });
   }
 
   private flush(): void {
+    if (this.buffers.size > 0) mkdirSync(this.dir!, { recursive: true });
     for (const [path, lines] of this.buffers) {
       if (lines.length > 0) appendFileSync(path, lines.join("\n") + "\n");
     }
@@ -120,7 +123,8 @@ export class ObservationStore {
     const out: Observation<T>[] = [];
     let start = 0;
     while (start < text.length) {
-      const end = text.indexOf("\n", start);
+      let end = text.indexOf("\n", start);
+      if (end === -1) end = text.length;
       out.push(JSON.parse(text.slice(start, end)));
       start = end + 1;
     }
