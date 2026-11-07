@@ -71,12 +71,12 @@ export async function extractCorrections(
   let duplicateSessionsSkipped = 0;
 
   try {
-    await observeInOrder(files.map((file) => file.path), acc.maxIds, workers, (file, submission, index) => {
+    await observeInOrder(files.map((file) => file.path), acc.maxIds, workers, foldedKeys, (file, submission, index) => {
       const name = relative(submissionsDir, file);
+      const keys = new Set<string>();
       if (submission.error) {
         skippedFiles.push({ name, error: submission.error });
       } else {
-        const keys = new Set<string>();
         const sessions: ObservedSession[] = [];
         let duplicates = 0;
         for (const session of submission.sessions) {
@@ -101,6 +101,7 @@ export async function extractCorrections(
         if (submission.droppedExports.length > 0) partialFiles.push({ name, droppedExports: submission.droppedExports });
       }
       if ((index + 1) % 250 === 0 || index + 1 === files.length) log(`[${index + 1}/${files.length}] submissions`);
+      return keys;
     });
     return writeOutputs();
   } finally {
@@ -145,10 +146,11 @@ async function observeInOrder(
   files: string[],
   maxIds: ObserveRequest["maxIds"],
   workers: number,
-  fold: (file: string, submission: ObservedSubmission, index: number) => void,
+  usedKeys: ReadonlySet<string>,
+  fold: (file: string, submission: ObservedSubmission, index: number) => Set<string> | void,
 ): Promise<void> {
   if (workers <= 0) {
-    files.forEach((file, index) => fold(file, observeSubmission({ path: file, maxIds }), index));
+    files.forEach((file, index) => fold(file, observeSubmission({ path: file, maxIds }, usedKeys), index));
     return;
   }
 
@@ -169,8 +171,10 @@ async function observeInOrder(
             while (results.has(folded)) {
               const ready = results.get(folded)!;
               results.delete(folded);
-              fold(files[folded], ready, folded);
+              const keys = fold(files[folded], ready, folded);
               folded++;
+              // Older submissions still to be observed hold copies of these sessions: skip them there.
+              if (keys && keys.size > 0) for (const other of pool) other.postMessage({ usedKeys: [...keys] });
             }
           } catch (e) {
             stopped = true;

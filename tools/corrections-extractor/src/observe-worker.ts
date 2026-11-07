@@ -3,6 +3,13 @@
 import { parentPort } from "worker_threads";
 import { observeSubmission, type ObserveRequest } from "./observe-submission";
 
-parentPort!.on("message", (request: ObserveRequest) => {
-  parentPort!.postMessage(observeSubmission(request));
+/** Session keys the main thread already folded in (see UsedKeysMessage). */
+const usedKeys = new Set<string>();
+
+parentPort!.on("message", (message: ObserveRequest | { usedKeys: string[] }) => {
+  if ("usedKeys" in message) {
+    for (const key of message.usedKeys) usedKeys.add(key);
+    return;
+  }
+  parentPort!.postMessage(observeSubmission(message, usedKeys));
 });
