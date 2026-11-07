@@ -41,7 +41,7 @@ function writePreviousLookup(outputDir: string): string {
 }
 
 describe("extractCorrections", () => {
-  it("should write all four corrections modules, the lookups and meta.json to the output directory", async () => {
+  it("should write all four corrections modules, the quest XP file, the lookups and meta.json to the output directory", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
 
     const meta = await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
@@ -50,6 +50,7 @@ describe("extractCorrections", () => {
     expect(readFileSync(join(outputDir, "foreverQuestTraces.lua"), "utf8")).toContain("function ForeverQuestTraces:Load()");
     expect(readFileSync(join(outputDir, "foreverItemTraces.lua"), "utf8")).toContain("function ForeverItemTraces:Load()");
     expect(readFileSync(join(outputDir, "foreverObjectTraces.lua"), "utf8")).toContain("function ForeverObjectTraces:Load()");
+    expect(readFileSync(join(outputDir, "xpDB-traces.lua"), "utf8")).toContain("---@type QuestXP");
     expect(existsSync(join(outputDir, "lookupNpcs"))).toBe(true);
     expect(JSON.parse(readFileSync(join(outputDir, "meta.json"), "utf8"))).toEqual(meta);
     expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [], partialFiles: [], duplicateSessionsSkipped: 0 });
@@ -181,7 +182,7 @@ describe("extractCorrections", () => {
 
     expect(threadedMeta).toEqual(inlineMeta);
     const modules = (outputDir: string) =>
-      ["foreverNpcTraces.lua", "foreverQuestTraces.lua", "foreverItemTraces.lua", "foreverObjectTraces.lua"].map((file) =>
+      ["foreverNpcTraces.lua", "foreverQuestTraces.lua", "foreverItemTraces.lua", "foreverObjectTraces.lua", "xpDB-traces.lua"].map((file) =>
         readFileSync(join(outputDir, file), "utf8").replace(/-- Generated at: .*/, ""),
       );
     expect(modules(threaded.outputDir)).toEqual(modules(inline.outputDir));
