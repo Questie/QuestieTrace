@@ -123,8 +123,8 @@ jobs:
         run: |
           commit=$(git rev-parse HEAD)
           {
-            printf 'Updated TOCs to %s on branch %s.\n\n' "$VERSION" "$TARGET_BRANCH"
-            printf 'Created commit %s and tag v%s.\n\n' "$commit" "$VERSION"
+            printf 'TOCs are at %s on branch %s.\n\n' "$VERSION" "$TARGET_BRANCH"
+            printf 'Tagged commit %s as v%s.\n\n' "$commit" "$VERSION"
             printf 'No GitHub release or platform upload was created.\n'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Save commit sha for later
