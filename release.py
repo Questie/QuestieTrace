@@ -10,6 +10,7 @@ QuestieTrace release script — bumps the TOC version and creates a git tag.
 Usage:
     python release.py <version>          Bump to <version>, commit, and tag
     python release.py <version> --push   Also push the commit and tag
+    python release.py <version> --no-git Only update the TOCs (used by CI)
 
 <version> must be a bare semver string without the "v" prefix (the script
 adds it), optionally with a "-bN" beta suffix, e.g.:
@@ -17,8 +18,8 @@ adds it), optionally with a "-bN" beta suffix, e.g.:
     python release.py 1.2.0
     python release.py 1.2.0-b1
 
-The CI publish pipeline (.github/workflows/publish.yml) triggers on pushed
-"v*" tags, builds the zip via build.py, and creates the GitHub release.
+Prefer the "Publish" workflow (.github/workflows/publish.yml), which can bump the
+version, then builds the zip via build.py and creates the GitHub release.
 """
 
 TOC_FILES = ["QuestieTrace-Classic.toc", "QuestieTrace-Camelot.toc"]
@@ -33,6 +34,7 @@ def main():
 
     version = args[0]
     push = "--push" in args[1:]
+    no_git = "--no-git" in args[1:]
 
     if version.startswith("v"):
         print('Please omit the "v" prefix. The script will add it.')
@@ -43,6 +45,10 @@ def main():
         sys.exit(1)
 
     tag = "v" + version
+
+    if no_git:
+        bump_toc_versions(version)
+        return
 
     if tag_exists(tag):
         print(f"Tag '{tag}' already exists.")
