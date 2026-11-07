@@ -2455,6 +2455,9 @@ local function TestQuestPOTrackerQuestPOIUpdate()
   assert(#functions["C_QuestLog.GetQuestsOnMap"][1453] == 1, "Must have 1 entry initially")
   assert(functions["C_QuestLog.GetQuestsOnMap"][1453][1].v[1].questID == 12345, "Initial POI must match")
 
+  -- Move to the next frame so the event gets its own immediate sample
+  AdvanceTo(runtime, 0)
+
   -- Now change the POI data and send QUEST_POI_UPDATE
   useUpdatedPOI = true
   SendEvent(runtime, "QUEST_POI_UPDATE")

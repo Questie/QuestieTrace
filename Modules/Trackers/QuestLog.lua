@@ -66,6 +66,9 @@ local C_After = C_Timer.After
 ---@type number[]
 local SAMPLE_DELAYS = { 0, 0.10, 0.35, 0.55, 0.75, 1.00 }
 
+---@type boolean
+local recordedChange = false -- set whenever any stream gets a new entry
+
 ---@type table<string, FunctionStream>
 local functions   -- capture.session.functions
 ---@type number[]?
@@ -224,6 +227,7 @@ local function AppendFlatIfChanged(stream, t, tp, v, funcName)
 
   if changed then
     stream[#stream + 1] = { t = t, tp = tp, v = v }
+    recordedChange = true
     prevFlat[funcName] = v
   end
 end
@@ -254,6 +258,7 @@ local function AppendIfChanged(stream, t, tp, v, questId, funcName)
 
   if changed then
     stream[#stream + 1] = { t = t, tp = tp, v = v }
+    recordedChange = true
     if not prevQuest[questId] then prevQuest[questId] = {} end
     prevQuest[questId][funcName] = v
   end
@@ -287,6 +292,7 @@ local function AppendNestedIfChanged(stream, t, tp, v, funcName, key1, key2)
 
   if changed then
     stream[#stream + 1] = { t = t, tp = tp, v = v }
+    recordedChange = true
     prevNested[funcName][key1][key2] = v
   end
 end
@@ -653,6 +659,7 @@ local function SampleQuestTimers(t, tp)
       local previous = slotStream[#slotStream]
       if not previous or previous.v ~= questLogIndex then
         slotStream[#slotStream + 1] = { t = t, tp = tp, v = questLogIndex }
+        recordedChange = true
       end
     end
 
@@ -711,13 +718,16 @@ local function RecordQuestLogMembership(capture, t, tp, questIds)
     local copy = {}
     for i = 1, #questIds do copy[i] = questIds[i] end
     questLogStream[#questLogStream + 1] = { t = t, tp = tp, v = copy }
+    recordedChange = true
     prevQuestLog = copy
   end
 end
 
 --- Sample the entire quest log and record changes.
 ---@param capture CaptureState
+---@return boolean recordedChange
 local function SampleQuestLog(capture)
+  recordedChange = false
   ---@type number
   local t  = GetTime() - capture.startedAt
   ---@type number
@@ -772,28 +782,11 @@ local function SampleQuestLog(capture)
     -- and recorded independently, only when it actually exists.
     ProbeQuestLogIndexAndTitle(t, tp, questId)
   end
+
+  return recordedChange
 end
 
----------------------------------------------------------------------------
--- Delayed re-sample scheduling
----------------------------------------------------------------------------
-
---- Schedule staggered re-samples to catch server lag.
----@param capture CaptureState
-local function ScheduleDelayedSamples(capture)
-  ---@type number
-  local token = capture.token
-  for i = 1, #SAMPLE_DELAYS do
-    ---@type number
-    local delay = SAMPLE_DELAYS[i]
-    if delay > 0 then
-      C_After(delay, function()
-        if not capture.active or capture.token ~= token then return end
-        SampleQuestLog(capture)
-      end)
-    end
-  end
-end
+local RequestSample = Core.CreateSampleScheduler(SampleQuestLog)
 
 ---------------------------------------------------------------------------
 -- Tracker registration
@@ -841,11 +834,8 @@ Core.RegisterTracker({
     local token = capture.token
     C_After(0, function()
       if not capture.active or capture.token ~= token then return end
-      SampleQuestLog(capture)
+      RequestSample(capture)
     end)
-
-    -- Schedule delayed re-samples for initial capture (catches server lag)
-    ScheduleDelayedSamples(capture)
   end,
 
   ---@param capture CaptureState
@@ -871,10 +861,6 @@ Core.RegisterTracker({
       end
     end
 
-    -- Immediate sample in this callstack (the 0-delay entry)
-    SampleQuestLog(capture)
-
-    -- Schedule staggered re-samples
-    ScheduleDelayedSamples(capture)
+    RequestSample(capture)
   end,
 })
