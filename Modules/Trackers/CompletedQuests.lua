@@ -1,8 +1,6 @@
 ---@type QuestieTraceCore
 local Core = QuestieTraceCore
 
-local C_After = C_Timer.After
-
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
@@ -16,15 +14,18 @@ local C_After = C_Timer.After
 -- client exposing both would get both streams recorded independently.
 ---------------------------------------------------------------------------
 
----@type number[]
-local SAMPLE_DELAYS = { 0, 0.10, 0.35, 0.55, 0.75, 1.00 }
-
 ---@type table<string, DeltaStream>
 local functionsDelta  -- capture.session.functionsDelta
 ---@type table<number, boolean>
 local currentModernSet -- [questId] = true -- last C_QuestLog.GetAllCompletedQuestIDs set
 ---@type table<number, boolean>
 local currentLegacySet -- [questId] = true -- last legacy GetQuestsCompleted set
+---@type number
+local currentModernCount
+---@type number
+local currentLegacyCount
+---@type boolean
+local forceFullCompare = false -- compare full sets once, even when counts match
 ---@type table<number, boolean>
 local legacyCompletedScratch = {}
 
@@ -32,8 +33,8 @@ local legacyCompletedScratch = {}
 -- API helpers
 ---------------------------------------------------------------------------
 
---- Get completed quest IDs from C_QuestLog.GetAllCompletedQuestIDs, sorted.
----@return number[]? ids Sorted array of completed quest IDs, or nil if the API doesn't exist
+--- Get completed quest IDs from C_QuestLog.GetAllCompletedQuestIDs, unsorted.
+---@return number[]? ids Array of completed quest IDs, or nil if the API doesn't exist
 local function GetModernCompletedQuestIds()
   if not (C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs) then return nil end
 
@@ -42,12 +43,11 @@ local function GetModernCompletedQuestIds()
   for _, questID in ipairs(C_QuestLog.GetAllCompletedQuestIDs()) do
     ids[#ids + 1] = questID
   end
-  table.sort(ids)
   return ids
 end
 
---- Get completed quest IDs from the legacy GetQuestsCompleted global, sorted.
----@return number[]? ids Sorted array of completed quest IDs, or nil if the API doesn't exist
+--- Get completed quest IDs from the legacy GetQuestsCompleted global, unsorted.
+---@return number[]? ids Array of completed quest IDs, or nil if the API doesn't exist
 local function GetLegacyCompletedQuestIds()
   if not GetQuestsCompleted then return nil end
 
@@ -64,7 +64,6 @@ local function GetLegacyCompletedQuestIds()
       end
     end
   end
-  table.sort(ids)
   return ids
 end
 
@@ -76,12 +75,18 @@ end
 --- previous set, and append a delta entry to its own independent stream.
 ---@param streamKey string
 ---@param currentSet table<number, boolean>
----@param ids number[]? Sorted completed quest IDs from this source, or nil if unavailable
+---@param currentCount number Number of IDs in currentSet
+---@param ids number[]? Completed quest IDs from this source, or nil if unavailable
 ---@param t number
 ---@param tp number
 ---@return table<number, boolean> newSet
-local function SampleCompletedSource(streamKey, currentSet, ids, t, tp)
-  if ids == nil then return currentSet end
+---@return number newCount
+---@return boolean recordedChange
+local function SampleCompletedSource(streamKey, currentSet, currentCount, ids, t, tp)
+  -- Completed quests are only ever added (or all removed on a reset), so an
+  -- unchanged count means an unchanged set; skip rebuilding thousands of IDs.
+  if ids == nil then return currentSet, currentCount, false end
+  if #ids == currentCount and not forceFullCompare then return currentSet, currentCount, false end
 
   ---@type table<number, boolean>
   local newSet = {}
@@ -100,7 +105,8 @@ local function SampleCompletedSource(streamKey, currentSet, ids, t, tp)
     end
   end
 
-  if #added > 0 or #removed > 0 then
+  local recordedChange = #added > 0 or #removed > 0
+  if recordedChange then
     table.sort(added)
     table.sort(removed)
 
@@ -114,42 +120,31 @@ local function SampleCompletedSource(streamKey, currentSet, ids, t, tp)
     stream.delta[#stream.delta + 1] = delta
   end
 
-  return newSet
+  return newSet, #ids, recordedChange
 end
 
 --- Sample completed quests from every available source and record delta
 --- changes independently for each.
 ---@param capture CaptureState
+---@return boolean recordedChange
 local function SampleCompleted(capture)
   ---@type number
   local t  = GetTime() - capture.startedAt
   ---@type number
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
-  currentModernSet = SampleCompletedSource(
-    "C_QuestLog.GetAllCompletedQuestIDs", currentModernSet, GetModernCompletedQuestIds(), t, tp
+  local modernChanged, legacyChanged
+  currentModernSet, currentModernCount, modernChanged = SampleCompletedSource(
+    "C_QuestLog.GetAllCompletedQuestIDs", currentModernSet, currentModernCount, GetModernCompletedQuestIds(), t, tp
   )
-  currentLegacySet = SampleCompletedSource(
-    "GetQuestsCompleted", currentLegacySet, GetLegacyCompletedQuestIds(), t, tp
+  currentLegacySet, currentLegacyCount, legacyChanged = SampleCompletedSource(
+    "GetQuestsCompleted", currentLegacySet, currentLegacyCount, GetLegacyCompletedQuestIds(), t, tp
   )
+  forceFullCompare = false
+  return modernChanged or legacyChanged
 end
 
---- Schedule staggered re-samples to catch server lag.
----@param capture CaptureState
-local function ScheduleDelayedSamples(capture)
-  ---@type number
-  local token = capture.token
-  for i = 1, #SAMPLE_DELAYS do
-    ---@type number
-    local delay = SAMPLE_DELAYS[i]
-    if delay > 0 then
-      C_After(delay, function()
-        if not capture.active or capture.token ~= token then return end
-        SampleCompleted(capture)
-      end)
-    end
-  end
-end
+local RequestSample = Core.CreateSampleScheduler(SampleCompleted)
 
 ---------------------------------------------------------------------------
 -- Tracker registration
@@ -158,21 +153,9 @@ end
 Core.RegisterTracker({
   events = {
     "QUEST_LOG_UPDATE",
-    "QUEST_ACCEPTED",
     "QUEST_REMOVED",
     "QUEST_TURNED_IN",
-    "QUEST_AUTOCOMPLETE",
-    "QUEST_WATCH_UPDATE",
-    "UNIT_QUEST_LOG_CHANGED",
-    "QUEST_POI_UPDATE",
-    "QUEST_ITEM_UPDATE",
-    "QUEST_LOG_CRITERIA_UPDATE",
-    "QUEST_DATA_LOAD_RESULT",
-    "QUEST_WATCH_LIST_CHANGED",
-    "QUESTLINE_UPDATE",
-    "TASK_PROGRESS_UPDATE",
     "PLAYER_ENTERING_WORLD",
-    "SPELLS_CHANGED",
   },
 
   ---@param capture CaptureState
@@ -180,26 +163,32 @@ Core.RegisterTracker({
     functionsDelta = capture.session.functionsDelta
     currentModernSet = {}
     currentLegacySet = {}
+    currentModernCount = 0
+    currentLegacyCount = 0
 
     local modernIds = GetModernCompletedQuestIds()
     if modernIds then
+      table.sort(modernIds)
+      currentModernCount = #modernIds
       functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"] = { t = 0, tp = 0, initial = modernIds, delta = {} }
       for i = 1, #modernIds do currentModernSet[modernIds[i]] = true end
     end
 
     local legacyIds = GetLegacyCompletedQuestIds()
     if legacyIds then
+      table.sort(legacyIds)
+      currentLegacyCount = #legacyIds
       functionsDelta["GetQuestsCompleted"] = { t = 0, tp = 0, initial = legacyIds, delta = {} }
       for i = 1, #legacyIds do currentLegacySet[legacyIds[i]] = true end
     end
-
-    -- Schedule delayed re-samples for initial capture
-    ScheduleDelayedSamples(capture)
   end,
 
   ---@param capture CaptureState
-  OnEvent = function(capture)
-    SampleCompleted(capture)
-    ScheduleDelayedSamples(capture)
+  ---@param event string
+  OnEvent = function(capture, event)
+    if event == "QUEST_TURNED_IN" or event == "PLAYER_ENTERING_WORLD" then
+      forceFullCompare = true
+    end
+    RequestSample(capture)
   end,
 })

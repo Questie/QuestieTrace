@@ -118,4 +118,39 @@ describe("CompletedQuests tracker", function()
     assert.are.equal(1, #stream.delta)
     assert.are.same({ 200 }, stream.delta[1].add)
   end)
+
+  it("should not record a delta when the completed quest count is unchanged", function()
+    local completedIds = { 100, 200 }
+    env.C_QuestLog = {
+      GetAllCompletedQuestIDs = function() return completedIds end,
+    }
+
+    tracker = select(2, LoadCompletedQuestsTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    completedIds = { 200, 100 }
+    tracker.OnEvent(capture, "QUEST_LOG_UPDATE")
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(0, #stream.delta)
+  end)
+
+  it("should record a swapped quest when the count is unchanged on QUEST_TURNED_IN", function()
+    local completedIds = { 100, 200 }
+    env.C_QuestLog = {
+      GetAllCompletedQuestIDs = function() return completedIds end,
+    }
+
+    tracker = select(2, LoadCompletedQuestsTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    completedIds = { 300, 100 }
+    tracker.OnEvent(capture, "QUEST_TURNED_IN")
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.same({ 300 }, stream.delta[1].add)
+    assert.are.same({ 200 }, stream.delta[1].remove)
+  end)
 end)
