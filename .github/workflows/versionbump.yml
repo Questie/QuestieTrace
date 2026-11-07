@@ -106,9 +106,12 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
           git add -- 'QuestieTrace-*.toc'
-          # Credit the original initiator; the app remains the authenticated committer.
-          git commit --author "$AUTHOR_LOGIN <$AUTHOR_ID+$AUTHOR_LOGIN@users.noreply.github.com>" \
-            -m "chore: bump version to v$VERSION"
+          # The TOCs may already carry the version; then tag the checked-out commit.
+          if ! git diff --cached --quiet; then
+            # Credit the original initiator; the app remains the authenticated committer.
+            git commit --author "$AUTHOR_LOGIN <$AUTHOR_ID+$AUTHOR_LOGIN@users.noreply.github.com>" \
+              -m "chore: bump version to v$VERSION"
+          fi
           git tag "v$VERSION"
 
           # Publish both refs together. A rejected branch or tag must leave neither
