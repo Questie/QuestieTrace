@@ -25,7 +25,8 @@ for (const partial of meta.partialFiles) {
   console.warn(`Partly decoded ${partial.name}: ${partial.droppedExports.join("; ")}`);
 }
 if (meta.duplicateSessionsSkipped > 0) {
-  console.log(`Skipped ${meta.duplicateSessionsSkipped} older copies of sessions found in newer submissions`);
+  // Exports contain every saved session, so later submissions repeat earlier sessions.
+  console.log(`Ignored ${meta.duplicateSessionsSkipped} older copies of sessions that later submissions exported again (the newest copy is used)`);
 }
 
 function formatDuration(ms: number): string {

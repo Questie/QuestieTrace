@@ -29,10 +29,15 @@ export interface ObservedSubmission {
   error?: string;
 }
 
-export function observeSubmission({ path, maxIds }: ObserveRequest): ObservedSubmission {
+/**
+ * `usedKeys` are sessions already folded in from newer submissions: their copies here are
+ * duplicates, so they are not observed.
+ */
+export function observeSubmission({ path, maxIds }: ObserveRequest, usedKeys: ReadonlySet<string> = new Set()): ObservedSubmission {
   const submission = readSubmission(path);
   const sessions = submission.traces.flatMap((trace) => trace.sessions).map((session): ObservedSession => {
     const key = sessionKey(session);
+    if (key !== undefined && usedKeys.has(key)) return { key };
     try {
       return { key, extract: observeSession(session, maxIds), lookup: observeLookupSession(session) };
     } catch (e) {

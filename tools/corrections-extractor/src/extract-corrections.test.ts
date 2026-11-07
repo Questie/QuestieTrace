@@ -139,6 +139,19 @@ describe("extractCorrections", () => {
     expect(existsSync(join(outputDir, "foreverNpcTraces.lua"))).toBe(false);
   });
 
+  it("should not observe older copies of sessions already folded in", async () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-09/2026-09-30_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-01_000000Z_b.json": submission("b"),
+    });
+    const observe = vi.spyOn(lookups, "observeLookupSession");
+
+    const meta = await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
+
+    expect(meta.duplicateSessionsSkipped).toBe(1);
+    expect(observe).toHaveBeenCalledOnce();
+  });
+
   it("should give the same result with worker threads", async () => {
     const files = {
       "2026-09/2026-09-30_000000Z_a.json": submission("a"),
