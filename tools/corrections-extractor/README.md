@@ -34,6 +34,7 @@ The results are written to `output/`:
 | `foreverQuestTraces.lua` | Quest corrections |
 | `foreverItemTraces.lua` | Item corrections |
 | `foreverObjectTraces.lua` | Object corrections |
+| `xpDB-traces.lua` | Quest XP rows (`QuestXP.db[questId] = {level, xp}`) for new quests, from `GetRewardXP`. Only samples where the quest is at most five levels below the player are used, as the client scales the reward down beyond that. Place it in QuestieDB `support/Forever/QuestXP/` |
 | `lookup{Npcs,Quests,Items,Objects}/<locale>.lua` | Translations, see below |
 | `meta.json` | `sessionCount`, `submissionCount`, `exportCount`, `skippedFiles`, `partialFiles` (submissions of which only some exports could be decoded), `duplicateSessionsSkipped` and `generatedAt` of the run |
 

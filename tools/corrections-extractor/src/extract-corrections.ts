@@ -25,6 +25,7 @@ const OUTPUT_FILES = {
   questFixes: "foreverQuestTraces.lua",
   itemFixes: "foreverItemTraces.lua",
   objectFixes: "foreverObjectTraces.lua",
+  questXp: "xpDB-traces.lua",
 } as const;
 
 const LOCALE_PATTERN = /^[a-z]{2}[A-Z]{2}$/;

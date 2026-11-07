@@ -53,7 +53,9 @@ import { observeZoneOrSort } from './observers/quest';
 import { observeObjectives, mergeQuestObjectives, observeObjectiveCount, observeTriggerEnd, mergeQuestTriggerEnds, type QuestTriggerEndValue } from "./observers/quest";
 import { observeObjectivesText } from './observers/quest';
 import { observeReputationReward, mergeReputationReward } from './observers/quest';
+import { observeQuestXp, mergeQuestXp, type QuestXpValue } from "./observers/quest/questXp";
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
+import { writeQuestXpLua } from "./schema/quest-xp-writer";
 import {mergeRequiredLevel} from './observers/quest/requiredLevel';
 
 export const MAX_IDS = {
@@ -79,6 +81,7 @@ export interface FactBundle {
   questFixes: string;
   itemFixes: string;
   objectFixes: string;
+  questXp: string;
 }
 
 /**
@@ -136,6 +139,7 @@ const OBSERVERS = {
   startedBy: observeStartedBy,
   finishedBy: observeFinishedBy,
   reputationReward: observeReputationReward,
+  questXp: observeQuestXp,
   turnInPoi: observeTurnInPoi,
   // npcZoneID and objectZoneID are merged from the spawn observations: their observers
   // are the spawn observers.
@@ -153,6 +157,7 @@ const OBSERVERS = {
  * exported, so their observations at or below it are dropped while folding.
  */
 const OBSERVER_ENTITIES: Partial<Record<keyof typeof OBSERVERS, keyof typeof MAX_IDS>> = {
+  questXp: "quest",
   npcSpawns: "npc",
   npcLevel: "npc",
   npcFriendlyToFaction: "npc",
@@ -343,9 +348,17 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
     store.add("npcTurnInSpawns", turnInSpawns.npcs);
     store.add("objectTurnInSpawns", turnInSpawns.objects);
   }
+  const questLevelFacts = aggregateScalarSummary(scalars.questLevel);
+  const questXpRows = new Map<number, { level: number; xp: number }>();
+  const questXpFacts = field<QuestXpValue, number | undefined>("questXp", (observations) =>
+    mergeQuestXp(observations, questLevelFacts.get(observations[0].entityId)?.value),
+  );
+  for (const [questId, fact] of questXpFacts) {
+    if (fact.value !== undefined) questXpRows.set(questId, { level: questLevelFacts.get(questId)!.value, xp: fact.value });
+  }
   const questRecords = emitQuestRecords({
     name: aggregateNewestScalarSummary(scalars.questName),
-    questLevel: aggregateScalarSummary(scalars.questLevel),
+    questLevel: questLevelFacts,
     requiredLevel: field("requiredLevel", mergeRequiredLevel),
     zoneOrSort: zoneOrSortFacts,
     objectives: withAllObjectivesMatched(
@@ -437,5 +450,6 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
     questFixes: writeQuestieCorrectionsLua("ForeverQuestTraces", "questKeys", exportedQuestRecords, header),
     itemFixes: writeQuestieCorrectionsLua("ForeverItemTraces", "itemKeys", filterBelowMax(itemRecords, "item"), header),
     objectFixes: writeQuestieCorrectionsLua("ForeverObjectTraces", "objectKeys", withQuestRelations(objectRecords, questRelations.objects, "object"), header),
+    questXp: writeQuestXpLua(questXpRows, header),
   };
 }
