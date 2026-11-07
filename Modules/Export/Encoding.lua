@@ -47,6 +47,7 @@ end
 --- Pipeline: Lua table -> CBOR -> Deflate compress -> EncodeForPrint
 ---@param payload table
 ---@return string? encodedPayload Nil if codec support is missing or encoding fails.
+---@return string? err Failure reason when encoding was attempted but failed. Nil if codec support is missing.
 function Core.EncodeExportPayload(payload)
   if (not Core.HasCodecSupport()) then
     return nil
@@ -62,7 +63,15 @@ function Core.EncodeExportPayload(payload)
     return encoded
   end
 
-  return nil
+  if (not ok) then
+    local stringOk, message = pcall(tostring, encoded)
+    if stringOk and type(message) == "string" then
+      return nil, message
+    end
+    return nil, "unknown error"
+  end
+
+  return nil, "unexpected result type: " .. type(encoded)
 end
 
 --- Decode a string built by Core.EncodeExportPayload back into a table.

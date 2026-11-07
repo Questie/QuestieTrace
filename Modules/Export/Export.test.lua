@@ -24,7 +24,7 @@ end
 local function LoadExportModule(env)
   setmetatable(env, { __index = _G })
   env._G = env
-  env.QuestieTraceCore = { l10n = function(s) return s end }
+  env.QuestieTraceCore = { l10n = function(s, ...) return string.format(s, ...) end }
 
   -- Mock EncodeExportPayload to return a test string
   env.QuestieTraceCore.EncodeExportPayload = function() return "ENCODED_PAYLOAD" end
@@ -164,6 +164,34 @@ describe("Export.BuildExportString", function()
 
     assert.is_true(ok)
     assert.equal("!QuestieTrace:1!ENCODED_PAYLOAD!End:QuestieTrace:1!", result)
+  end)
+
+  it("should show the encoding error instead of the codec message when encoding fails", function()
+    Core.EncodeExportPayload = function() return nil, "boom" end
+
+    local ok, result = Core.BuildExportString()
+
+    assert.is_false(ok)
+    assert.equal("ERROR: Encoding failed: boom", result)
+  end)
+
+  it("should include the exception detail when a real codec operation throws", function()
+    env.LibStub = function() return { EncodeForPrint = function() end, DecodeForPrint = function() end } end
+    env.C_EncodingUtil = {
+      SerializeCBOR = function() error("cbor exploded") end,
+      DeserializeCBOR = function() end,
+      CompressString = function() end,
+      DecompressString = function() end,
+    }
+    env.Enum = { CompressionMethod = { Deflate = 1 }, CompressionLevel = { Default = 1 } }
+    local chunk = assert(loadfile("Modules/Export/Encoding.lua"))
+    setfenv(chunk, env)
+    chunk()
+
+    local ok, result = Core.BuildExportString({})
+
+    assert.is_false(ok)
+    assert.matches("^ERROR: Encoding failed: .*cbor exploded", result)
   end)
 
   it("should still return a formatted string even when there is nothing to export", function()

@@ -331,9 +331,13 @@ end
 ---@return string text
 function Core.BuildExportString(payload)
   payload = payload or Core.BuildExportPayload()
-  local encoded = Core.EncodeExportPayload(payload)
+  local encoded, err = Core.EncodeExportPayload(payload)
   if encoded then
     return  true, EXPORT_PREFIX .. encoded .. EXPORT_SUFFIX
+  end
+  -- Encoding was attempted and failed; surface the real reason.
+  if err then
+    return false, l10n("ERROR: Encoding failed: %s", err)
   end
   -- Fallback: if codec is missing, return an error message instead of crashing.
   return false, l10n("ERROR: Client does not have required codec support (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)")
