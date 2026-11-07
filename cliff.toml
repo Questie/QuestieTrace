@@ -57,3 +57,5 @@ commit_preprocessors = [
 ]
 # Split generators
 split_commits = false
+# CI prerelease tags must not start a new changelog section
+ignore_tags = "-pre\\."
