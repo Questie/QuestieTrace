@@ -149,6 +149,18 @@ local exportUILocales = {
     ["zhCN"] = "错误：客户端缺少所需的编解码支持 (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)", -- 🤖
     ["zhTW"] = "錯誤：用戶端缺少所需的編解碼支援 (C_EncodingUtil, Enum.CompressionMethod, LibDeflate)", -- 🤖
   },
+  ["ERROR: Encoding failed: %s"] = {
+    ["enUS"] = true,
+    ["deDE"] = "FEHLER: Kodierung fehlgeschlagen: %s", -- 🤖
+    ["esES"] = "ERROR: La codificación ha fallado: %s", -- 🤖
+    ["esMX"] = "ERROR: La codificación falló: %s", -- 🤖
+    ["frFR"] = "ERREUR : Échec de l'encodage : %s", -- 🤖
+    ["koKR"] = "오류: 인코딩에 실패했습니다: %s", -- 🤖
+    ["ptBR"] = "ERRO: Falha na codificação: %s", -- 🤖
+    ["ruRU"] = "ОШИБКА: не удалось выполнить кодирование: %s", -- 🤖
+    ["zhCN"] = "错误：编码失败：%s", -- 🤖
+    ["zhTW"] = "錯誤：編碼失敗：%s", -- 🤖
+  },
 }
 
 for k, v in pairs(exportUILocales) do
