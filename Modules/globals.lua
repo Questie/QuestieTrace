@@ -236,6 +236,73 @@ function Core.RegisterTracker(tracker)
 end
 
 ---------------------------------------------------------------------------
+-- Coalesced re-sampling
+---------------------------------------------------------------------------
+
+---@type number[] Follow-up sample offsets (seconds) after the latest request, to catch server lag
+Core.RESAMPLE_DELAYS = { 0.10, 0.35, 0.55, 0.75, 1.00 }
+local QUIET_SAMPLES_TO_SETTLE = 3
+
+--- Create a scheduler that coalesces bursts of sample requests (e.g. the many
+--- quest events fired by a single quest accept).
+--- The first request in a frame samples immediately, so intermediate states
+--- stay recorded; further requests in the same frame trigger a single extra
+--- sample on the next frame. Every request restarts one chain of follow-up
+--- samples, which stops early once consecutive samples recorded nothing.
+---@param sample fun(capture: CaptureState): boolean Returns true when the sample recorded a change
+---@return fun(capture: CaptureState) request
+function Core.CreateSampleScheduler(sample)
+  local delays = Core.RESAMPLE_DELAYS
+  local sampledThisFrame = false
+  local requestedAgainThisFrame = false
+  local chainGeneration = 0
+
+  ---@param capture CaptureState
+  ---@param token number
+  ---@param generation number
+  ---@param step number
+  ---@param quietSamples number
+  local function ScheduleFollowUp(capture, token, generation, step, quietSamples)
+    local delay = delays[step] - (delays[step - 1] or 0)
+    C_Timer.After(delay, function()
+      if generation ~= chainGeneration or not capture.active or capture.token ~= token then
+        return
+      end
+      if sample(capture) then
+        quietSamples = 0
+      else
+        quietSamples = quietSamples + 1
+      end
+      if quietSamples < QUIET_SAMPLES_TO_SETTLE and step < #delays then
+        ScheduleFollowUp(capture, token, generation, step + 1, quietSamples)
+      end
+    end)
+  end
+
+  return function(capture)
+    local token = capture.token
+    if sampledThisFrame then
+      requestedAgainThisFrame = true
+    else
+      sampledThisFrame = true
+      sample(capture)
+      C_Timer.After(0, function()
+        sampledThisFrame = false
+        if requestedAgainThisFrame then
+          requestedAgainThisFrame = false
+          if capture.active and capture.token == token then
+            sample(capture)
+          end
+        end
+      end)
+    end
+
+    chainGeneration = chainGeneration + 1
+    ScheduleFollowUp(capture, token, chainGeneration, 1, 0)
+  end
+end
+
+---------------------------------------------------------------------------
 -- Dump registration
 ---------------------------------------------------------------------------
 
