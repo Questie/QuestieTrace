@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -53,11 +53,30 @@ describe("ObservationStore", () => {
     expect(store.all<number>("extra").map((o) => o.value)).toEqual([3]);
   });
 
-  it("should remove its files when disposed", () => {
-    const store = diskStore();
+  it("should remove its written and buffered observations when disposed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "observation-store-"));
+    tempDirs.push(dir);
+    const store = new ObservationStore(join(dir, "store"));
     store.add("spawns", [obs(1, 1)]);
+    store.all("spawns");
+    expect(existsSync(join(dir, "store", "spawns.1.ndjson"))).toBe(true);
+    store.add("spawns", [obs(2, 2)]);
+
     store.dispose();
 
+    expect(existsSync(join(dir, "store"))).toBe(false);
     expect(store.all("spawns")).toEqual([]);
+  });
+
+  it("should stream turnInPoi in bounded chunks and refuse partitioned fields", () => {
+    const store = diskStore();
+    const values = Array.from({ length: 25_000 }, (_, i) => i);
+    store.add("turnInPoi", values.map((value) => obs(value % 7, value)));
+
+    const chunks = [...store.stream<number>("turnInPoi")];
+
+    expect(chunks.map((chunk) => chunk.length)).toEqual([10_000, 10_000, 5_000]);
+    expect(chunks.flat().map((o) => o.value)).toEqual(values);
+    expect(() => [...store.stream("spawns")]).toThrow(/partitioned/);
   });
 });

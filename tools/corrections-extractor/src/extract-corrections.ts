@@ -149,6 +149,8 @@ async function observeInOrder(
   usedKeys: ReadonlySet<string>,
   fold: (file: string, submission: ObservedSubmission, index: number) => Set<string> | void,
 ): Promise<void> {
+  // NaN would create no workers and never finish.
+  if (!Number.isInteger(workers)) throw new Error(`workers must be a whole number (got ${workers})`);
   if (workers <= 0) {
     files.forEach((file, index) => fold(file, observeSubmission({ path: file, maxIds }, usedKeys), index));
     return;
