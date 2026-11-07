@@ -57,5 +57,5 @@ commit_preprocessors = [
 ]
 # Split generators
 split_commits = false
-# CI prerelease tags must not start a new changelog section
-ignore_tags = "-pre\\."
+# Only versions created by a bump are releases; CI prerelease tags (-pre.<sha>) are not
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-b[0-9]+)?$"
