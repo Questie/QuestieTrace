@@ -52,7 +52,7 @@ def main():
             with fileinput.FileInput(toc_path, inplace=True) as file:
                 for line in file:
                     if line.startswith("## Version"):
-                        print("## Version: " + versionOverride.lstrip("v"))
+                        print("## Version: " + versionOverride.removeprefix("v"))
                     else:
                         print(line, end="")
 
