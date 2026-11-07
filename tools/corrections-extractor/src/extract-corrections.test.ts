@@ -152,6 +152,21 @@ describe("extractCorrections", () => {
     expect(observe).toHaveBeenCalledOnce();
   });
 
+  it("should observe a session exported twice in one submission once", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_b.json": submission("b", `${TINY_EXPORT}\n${TINY_EXPORT}`) });
+    const observe = vi.spyOn(lookups, "observeLookupSession");
+
+    await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
+
+    expect(observe).toHaveBeenCalledOnce();
+  });
+
+  it("should reject a worker count that is not a whole number", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
+
+    await expect(extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: Number.NaN })).rejects.toThrow(/whole number/);
+  });
+
   it("should give the same result with worker threads", async () => {
     const files = {
       "2026-09/2026-09-30_000000Z_a.json": submission("a"),
@@ -165,6 +180,11 @@ describe("extractCorrections", () => {
     const { generatedAt: _b, ...threadedMeta } = await extractCorrections(threaded.traceDataDir, threaded.outputDir, { log: () => undefined, workers: 2 });
 
     expect(threadedMeta).toEqual(inlineMeta);
+    const modules = (outputDir: string) =>
+      ["foreverNpcTraces.lua", "foreverQuestTraces.lua", "foreverItemTraces.lua", "foreverObjectTraces.lua"].map((file) =>
+        readFileSync(join(outputDir, file), "utf8").replace(/-- Generated at: .*/, ""),
+      );
+    expect(modules(threaded.outputDir)).toEqual(modules(inline.outputDir));
     expect(existsSync(join(threaded.outputDir, ".observations"))).toBe(false);
   });
 

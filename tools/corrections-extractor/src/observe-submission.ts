@@ -35,9 +35,12 @@ export interface ObservedSubmission {
  */
 export function observeSubmission({ path, maxIds }: ObserveRequest, usedKeys: ReadonlySet<string> = new Set()): ObservedSubmission {
   const submission = readSubmission(path);
+  // Only the first copy of a session in a submission is used, so later ones are not observed.
+  const seen = new Set<string>();
   const sessions = submission.traces.flatMap((trace) => trace.sessions).map((session): ObservedSession => {
     const key = sessionKey(session);
-    if (key !== undefined && usedKeys.has(key)) return { key };
+    if (key !== undefined && (usedKeys.has(key) || seen.has(key))) return { key };
+    if (key !== undefined) seen.add(key);
     try {
       return { key, extract: observeSession(session, maxIds), lookup: observeLookupSession(session) };
     } catch (e) {

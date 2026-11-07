@@ -4,13 +4,15 @@
 // field and entity partition instead, so memory use no longer grows with the number of
 // submissions: finalize reads back one partition at a time (see groups).
 
-import { appendFileSync, mkdirSync, readFileSync, rmSync } from "fs";
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from "fs";
 import { join } from "path";
 import type { Observation } from "./observation";
 
 const DISK_PARTITIONS = 64;
 /** Fields read back as a whole in the order they were added (see stream), so never split. */
 const UNPARTITIONED_FIELDS = new Set(["turnInPoi"]);
+/** Observations per chunk of stream. */
+const STREAM_CHUNK = 10_000;
 /** Buffered output is written once it gets this large. */
 const FLUSH_BYTES = 32 * 1024 * 1024;
 
@@ -67,12 +69,49 @@ export class ObservationStore {
     }
   }
 
-  /** Every observation of `field` in chunks, in the order they were added. */
+  /**
+   * Every observation of an unpartitioned `field` in bounded chunks, in the order they were
+   * added. Other fields are spread over partitions, which loses that order.
+   */
   *stream<T>(field: string): Generator<Observation<T>[]> {
+    if (!UNPARTITIONED_FIELDS.has(field)) throw new Error(`${field} is partitioned and cannot be streamed in order`);
     this.flush();
-    for (let partition = 0; partition < this.partitions; partition++) {
-      const chunk = this.read<T>(field, partition);
+    if (this.dir === undefined) {
+      const all = this.read<T>(field, 0);
+      for (let start = 0; start < all.length; start += STREAM_CHUNK) yield all.slice(start, start + STREAM_CHUNK);
+      return;
+    }
+    let fd: number;
+    try {
+      fd = openSync(this.path(field, 0), "r");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw e;
+    }
+    try {
+      const block = Buffer.alloc(8 * 1024 * 1024);
+      let rest = Buffer.alloc(0);
+      let chunk: Observation<T>[] = [];
+      for (;;) {
+        const bytes = readSync(fd, block, 0, block.length, null);
+        // "\n" is never part of a multi-byte UTF-8 character, so lines can be split on the byte.
+        const data = bytes === 0 ? rest : Buffer.concat([rest, block.subarray(0, bytes)]);
+        let start = 0;
+        for (let end = data.indexOf(10, start); end !== -1 || (bytes === 0 && start < data.length); end = data.indexOf(10, start)) {
+          const lineEnd = end === -1 ? data.length : end;
+          chunk.push(JSON.parse(data.toString("utf8", start, lineEnd)));
+          start = lineEnd + 1;
+          if (chunk.length >= STREAM_CHUNK) {
+            yield chunk;
+            chunk = [];
+          }
+        }
+        if (bytes === 0) break;
+        rest = Buffer.from(data.subarray(start));
+      }
       if (chunk.length > 0) yield chunk;
+    } finally {
+      closeSync(fd);
     }
   }
 
@@ -117,8 +156,10 @@ export class ObservationStore {
     let text: string;
     try {
       text = readFileSync(this.path(field, partition), "utf8");
-    } catch {
-      return [];
+    } catch (e) {
+      // Partitions nothing was added to have no file.
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw e;
     }
     const out: Observation<T>[] = [];
     let start = 0;
