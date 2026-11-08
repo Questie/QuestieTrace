@@ -40,7 +40,9 @@ Triggers independent delta capture for `C_QuestLog.GetAllCompletedQuestIDs`
 and the legacy `GetQuestsCompleted` global (whichever exist on the client --
 never merged). Uses coalesced re-sampling (see Pattern 3 in TRACKER_SPEC.md).
 An unchanged completed-quest count skips the full set comparison, except
-for samples triggered by `QUEST_TURNED_IN` or `PLAYER_ENTERING_WORLD`.
+while a window opened by `QUEST_TURNED_IN` or `PLAYER_ENTERING_WORLD` is
+active; any event inside the window extends it past its restarted follow-up
+chain.
 
 - `QUEST_LOG_UPDATE`
 - `QUEST_REMOVED`
