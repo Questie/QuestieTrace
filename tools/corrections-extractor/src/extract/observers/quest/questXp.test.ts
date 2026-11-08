@@ -37,20 +37,31 @@ describe("observeQuestXp", () => {
 });
 
 describe("mergeQuestXp", () => {
+  it("should export the raw table XP for a sample the client rounded", () => {
+    expect(mergeQuestXp([observation(900, 12)], 12)).toBe(910);
+    expect(mergeQuestXp([observation(525, 8)], 8)).toBe(530);
+  });
+
+  it("should ignore samples that match no difficulty of the quest level", () => {
+    expect(mergeQuestXp([observation(1000, 12), observation(900, 12)], 12)).toBe(910);
+    expect(mergeQuestXp([observation(1000, 12)], 12)).toBeUndefined();
+  });
+
   it("should ignore samples of a quest more than five levels below the player", () => {
-    expect(mergeQuestXp([observation(300, 20), observation(900, 14)], 14)).toBe(900);
-    expect(mergeQuestXp([observation(300, 20)], 14)).toBeUndefined();
+    expect(mergeQuestXp([observation(900, 17)], 12)).toBe(910);
+    expect(mergeQuestXp([observation(900, 18)], 12)).toBeUndefined();
   });
 
-  it("should return the most observed XP", () => {
-    expect(mergeQuestXp([observation(900, 10), observation(950, 10), observation(900, 10)], 10)).toBe(900);
+  it("should return the difficulty most samples agree on", () => {
+    expect(mergeQuestXp([observation(900, 12), observation(230, 12), observation(900, 12)], 12)).toBe(910);
   });
 
-  it("should return nothing when the most observed values tie", () => {
-    expect(mergeQuestXp([observation(900, 10), observation(950, 10)], 10)).toBeUndefined();
+  it("should return nothing when the most observed difficulties tie", () => {
+    expect(mergeQuestXp([observation(900, 12), observation(230, 12)], 12)).toBeUndefined();
   });
 
-  it("should return nothing without a quest level", () => {
-    expect(mergeQuestXp([observation(900, 10)], undefined)).toBeUndefined();
+  it("should return nothing without a quest level or a table row for it", () => {
+    expect(mergeQuestXp([observation(900, 12)], undefined)).toBeUndefined();
+    expect(mergeQuestXp([observation(900, 12)], -1)).toBeUndefined();
   });
 });

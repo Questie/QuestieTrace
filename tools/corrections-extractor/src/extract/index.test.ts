@@ -137,11 +137,11 @@ describe("extractAll (quest/item/object entities)", () => {
       GetQuestID: [apiSample(10, 10.5, 96659), apiSample(10, 10.6, 0)],
       GetRewardXP: [apiSample(10, 10.5, 900), apiSample(10, 10.6, 0)],
       UnitLevel: { player: [apiSample(0, 0, 9)] },
-      GetQuestLogTitle: { "96659": [apiSample(3, 3, { 1: "A Threat Within", 2: 10, n: 2 })] },
+      GetQuestLogTitle: { "96659": [apiSample(3, 3, { 1: "A Threat Within", 2: 12, n: 2 })] },
     });
 
     const { questXp } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
-    expect(questXp).toContain("QuestXP.db[96659] = {10, 900}");
+    expect(questXp).toContain("QuestXP.db[96659] = {12, 910}");
 
     const known = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 96659, item: 0, object: 0 } });
     expect(known.questXp).not.toContain("QuestXP.db[");
