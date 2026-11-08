@@ -184,6 +184,51 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questFixes).toContain("[questKeys.objectives] = {nil,nil,{{750}}},");
     expect(questFixes).toContain('[questKeys.triggerEnd] = {"Light the campfire",{[40]={{30.01,86.02}}}},');  });
 
+  describe("requiredRaces", () => {
+    const factionGroup = (faction: string) => ({ player: [apiSample(0, 0, { 1: faction, 2: faction, n: 2 })] });
+    const allianceAccept = (questStart: SessionRecord["functions"] = {}) =>
+      makeSession(
+        {
+          GetBuildInfo: { player: [apiSample(0, 0, 16001)] },
+          UnitFactionGroup: factionGroup("Alliance"),
+          UnitGUID: { questnpc: [apiSample(3, 3, creatureGuid(823))], target: [apiSample(3, 3, creatureGuid(823))] },
+          UnitReaction: { player: { target: [apiSample(3, 3, 5)] } },
+          ...questStart,
+        },
+        [traceEvent("QUEST_ACCEPTED", 3, 3, 96659)],
+      );
+    const hordeSighting = (serverTime: number) =>
+      makeForeverSession({
+        GetServerTime: [apiSample(0, 0, serverTime)],
+        UnitFactionGroup: factionGroup("Horde"),
+        UnitGUID: { target: [apiSample(3, 3, creatureGuid(823))] },
+        UnitReaction: { player: { target: [apiSample(3, 3, 2)] } },
+      });
+    const hordeSightings = Array.from({ length: 20 }, (_, index) => hordeSighting(index));
+    const options = { sourceFileNames: ["test.lua"], maxIds: { npc: 18199, quest: 0, item: 0, object: 0 } };
+
+    it("should export Alliance races for a quest whose Classic quest giver is hostile to the Horde", () => {
+      const { questFixes, npcFixes } = extractAll([allianceAccept(), ...hordeSightings], options);
+
+      expect(questFixes).toContain("[questKeys.requiredRaces] = 4294967373,");
+      expect(npcFixes).not.toContain("friendlyToFaction");
+    });
+
+    it("should not export requiredRaces when the quest giver was hostile to the Horde in fewer than 20 sessions", () => {
+      expect(extractAll([allianceAccept(), ...hordeSightings.slice(1)], options).questFixes).not.toContain("requiredRaces");
+    });
+
+    it("should not export requiredRaces when the quest is also started by an item", () => {
+      const itemStart = { GetQuestID: [apiSample(2, 2, 96659)] };
+      const itemDetail = makeSession(
+        { GetBuildInfo: { player: [apiSample(0, 0, 16001)] }, UnitFactionGroup: factionGroup("Alliance"), ...itemStart },
+        [traceEvent("QUEST_DETAIL", 2, 2, 5000)],
+      );
+
+      expect(extractAll([allianceAccept(), itemDetail, ...hordeSightings], options).questFixes).not.toContain("requiredRaces");
+    });
+  });
+
   it("should export objectivesText as a line list, keeping blank separator lines", () => {
     const session = makeForeverSession({
       GetLocale: { player: [apiSample(0, 0, "enUS")] },

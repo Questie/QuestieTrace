@@ -12,6 +12,7 @@ export interface QuestFacts {
   name: Map<number, Fact<string>>;
   questLevel: Map<number, Fact<number>>;
   requiredLevel: Map<number, Fact<number>>;
+  requiredRaces: Map<number, Fact<number>>;
   zoneOrSort: Map<number, Fact<number>>;
   objectives: Map<number, Fact<QuestObjectivesValue>>;
   objectivesText: Map<number, Fact<QuestObjectivesTextValue>>;
