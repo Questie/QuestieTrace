@@ -51,6 +51,14 @@ export interface ExtractOptions {
   workers?: number;
 }
 
+/** EXTRACT_WORKERS as the number of worker threads, or undefined for the default. */
+export function workersFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const value = env.EXTRACT_WORKERS;
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) throw new Error(`EXTRACT_WORKERS must be a whole number of at least 0 (got "${value}")`);
+  return Number(value);
+}
+
 export async function extractCorrections(
   traceDataDir: string,
   outputDir: string,

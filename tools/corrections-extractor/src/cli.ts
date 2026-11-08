@@ -1,7 +1,7 @@
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { defaultTraceDataDir } from "./core/trace-data/submissions";
-import { extractCorrections, type ExtractMeta } from "./extract-corrections";
+import { extractCorrections, workersFromEnv, type ExtractMeta } from "./extract-corrections";
 
 const toolDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDir = resolve(toolDir, "output");
@@ -9,7 +9,7 @@ const outputDir = resolve(toolDir, "output");
 const startedAt = performance.now();
 let meta: ExtractMeta;
 try {
-  meta = await extractCorrections(defaultTraceDataDir(), outputDir);
+  meta = await extractCorrections(defaultTraceDataDir(), outputDir, { workers: workersFromEnv() });
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);
