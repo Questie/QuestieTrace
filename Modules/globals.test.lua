@@ -120,6 +120,41 @@ describe("globals", function()
       assert.are.equal(2, sampleCount)
     end)
 
+    it("should keep sampling on later frames after a sample throws", function()
+      local shouldThrow = true
+      local request = Core.CreateSampleScheduler(function()
+        sampleCount = sampleCount + 1
+        if shouldThrow then
+          error("boom")
+        end
+        return false
+      end)
+
+      assert.has_error(function() request(capture) end)
+      shouldThrow = false
+      RunTimers(0)
+      request(capture)
+
+      assert.are.equal(2, sampleCount)
+    end)
+
+    it("should continue the follow-up chain after a follow-up sample throws", function()
+      local request = Core.CreateSampleScheduler(function()
+        sampleCount = sampleCount + 1
+        if sampleCount == 2 then
+          error("boom")
+        end
+        return true
+      end)
+
+      request(capture)
+      RunTimers(0)
+      assert.has_error(function() RunTimers() end)
+      RunTimers()
+
+      assert.are.equal(3, sampleCount)
+    end)
+
     it("should not sample on the next frame when only one request happened", function()
       NewScheduler()(capture)
 
