@@ -250,8 +250,11 @@ local QUIET_SAMPLES_TO_SETTLE = 3
 --- sample on the next frame. Every request restarts one chain of follow-up
 --- samples, which skips ahead to the last delay once consecutive samples
 --- recorded nothing.
+--- The second return value restarts only the follow-up chain, for callers that
+--- just took a sample themselves (e.g. a tracker's start snapshot).
 ---@param sample fun(capture: CaptureState): boolean Returns true when the sample recorded a change
 ---@return fun(capture: CaptureState) request
+---@return fun(capture: CaptureState) followUp
 function Core.CreateSampleScheduler(sample)
   local delays = Core.RESAMPLE_DELAYS
   local sampledThisFrame = false
@@ -290,7 +293,13 @@ function Core.CreateSampleScheduler(sample)
     end)
   end
 
-  return function(capture)
+  ---@param capture CaptureState
+  local function RestartFollowUps(capture)
+    chainGeneration = chainGeneration + 1
+    ScheduleFollowUp(capture, capture.token, chainGeneration, 1, 0, 0)
+  end
+
+  local function Request(capture)
     local token = capture.token
     -- A restarted capture must not be suppressed by the previous capture's frame state
     if frameCapture ~= capture or frameToken ~= token then
@@ -300,8 +309,7 @@ function Core.CreateSampleScheduler(sample)
     frameCapture = capture
     frameToken = token
 
-    chainGeneration = chainGeneration + 1
-    ScheduleFollowUp(capture, token, chainGeneration, 1, 0, 0)
+    RestartFollowUps(capture)
 
     if sampledThisFrame then
       requestedAgainThisFrame = true
@@ -324,6 +332,8 @@ function Core.CreateSampleScheduler(sample)
     end)
     sample(capture)
   end
+
+  return Request, RestartFollowUps
 end
 
 ---------------------------------------------------------------------------

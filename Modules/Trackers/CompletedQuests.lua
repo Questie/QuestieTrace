@@ -148,7 +148,7 @@ local function SampleCompleted(capture)
   return modernChanged or legacyChanged
 end
 
-local RequestSample = Core.CreateSampleScheduler(SampleCompleted)
+local RequestSample, FollowUp = Core.CreateSampleScheduler(SampleCompleted)
 
 ---------------------------------------------------------------------------
 -- Tracker registration
@@ -186,6 +186,9 @@ Core.RegisterTracker({
       functionsDelta["GetQuestsCompleted"] = { t = 0, tp = 0, initial = legacyIds, delta = {} }
       for i = 1, #legacyIds do currentLegacySet[legacyIds[i]] = true end
     end
+
+    -- Follow up on the start snapshot in case the completed list is still loading
+    FollowUp(capture)
   end,
 
   ---@param capture CaptureState
