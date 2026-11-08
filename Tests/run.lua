@@ -2480,6 +2480,35 @@ local function TestQuestPOTrackerQuestPOIUpdate()
   assert(updatedPOI[1].isMapIndicatorQuest == true, "Updated POI isMapIndicatorQuest must be true")
 end
 
+local function TestQuestPOTrackerSameFrameQuestPOIUpdate()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestPOI.lua" })
+  local env = runtime.env
+
+  local questID = 12345
+  env.C_QuestLog = {
+    GetMapForQuestPOIs = function() return 1453 end,
+    ---@param uiMapID number
+    GetQuestsOnMap = function(uiMapID)
+      if uiMapID ~= 1453 then return {} end
+      return { { questID = questID, mapID = 1453, x = 0.5, y = 0.5 } }
+    end,
+  }
+
+  runtime.core.StartCapture("quest poi same-frame update test")
+
+  -- The event arrives in the same frame as the capture's immediate sample
+  questID = 67890
+  SendEvent(runtime, "QUEST_POI_UPDATE")
+  local stream = Session(runtime).functions["C_QuestLog.GetQuestsOnMap"][1453]
+  assert(#stream == 1, "Same-frame event must not sample immediately, got " .. #stream)
+
+  AdvanceTo(runtime, 0)
+
+  stream = Session(runtime).functions["C_QuestLog.GetQuestsOnMap"][1453]
+  assert(#stream == 2, "Next frame must sample the update, got " .. #stream)
+  assert(stream[2].v[1].questID == 67890, "Next-frame sample must reflect the updated POI")
+end
+
 -- These tests model restriction flags; native secret-value enforcement is verified in the game client.
 local function TestRestrictedUnitIdentityDoesNotInterruptCapture()
   local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
@@ -3376,6 +3405,7 @@ local tests = {
   { name = "Merchant empty vendor", run = TestMerchantEmptyVendor },
   { name = "quest poi tracker records quest log pois", run = TestQuestPOTracker },
   { name = "quest poi tracker handles QUEST_POI_UPDATE", run = TestQuestPOTrackerQuestPOIUpdate },
+  { name = "quest poi tracker samples a same-frame QUEST_POI_UPDATE on the next frame", run = TestQuestPOTrackerSameFrameQuestPOIUpdate },
   { name = "game object tracker records object name", run = TestGameObjectTrackerRecordsObjectName },
   { name = "game object tracker skips unreadable UnitName line", run = TestGameObjectTrackerSkipsUnreadableUnitNameLine },
   { name = "game object tracker skips when no UnitName line", run = TestGameObjectTrackerSkipsWhenNoUnitNameLine },
