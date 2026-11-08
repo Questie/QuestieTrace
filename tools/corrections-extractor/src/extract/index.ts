@@ -362,16 +362,31 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   }
   const startedByFacts = field("startedBy", mergeStartedBy);
   const npcReactions = field("npcFriendlyToFaction", summarizeReactions);
-  const requiredRacesFacts = onlyDefinedFacts(
-    field<Faction, number | undefined>("questFactions", (observations) => {
-      const starters = startedByFacts.get(observations[0].entityId)?.value;
-      const npcStarters: ReactionSummary[] =
-        !starters || starters.objects.length > 0 || starters.items.length > 0
-          ? []
-          : starters.creatures.map((id) => npcReactions.get(id)?.value ?? summarizeReactions([]));
-      return mergeRequiredRaces(mergeQuestFactions(observations), npcStarters);
-    }),
-  );
+  const questFactions = field("questFactions", mergeQuestFactions);
+  const factionsByStarter = new Map<number, Map<number, Set<Faction>>>();
+  for (const [questId, fact] of questFactions) {
+    for (const npcId of startedByFacts.get(questId)?.value.creatures ?? []) {
+      const quests = factionsByStarter.get(npcId) ?? new Map<number, Set<Faction>>();
+      quests.set(questId, fact.value);
+      factionsByStarter.set(npcId, quests);
+    }
+  }
+  const requiredRacesFacts = new Map<number, Fact<number>>();
+  for (const [questId, fact] of questFactions) {
+    const starters = startedByFacts.get(questId)?.value;
+    const npcStarters: ReactionSummary[] =
+      !starters || starters.objects.length > 0 || starters.items.length > 0
+        ? []
+        : starters.creatures.map((id) => npcReactions.get(id)?.value ?? summarizeReactions([]));
+    const siblingFactions = new Set<Faction>();
+    for (const npcId of starters?.creatures ?? []) {
+      for (const [siblingId, factions] of factionsByStarter.get(npcId) ?? []) {
+        if (siblingId !== questId) factions.forEach((faction) => siblingFactions.add(faction));
+      }
+    }
+    const mask = mergeRequiredRaces(fact.value, npcStarters, siblingFactions);
+    if (mask !== undefined) requiredRacesFacts.set(questId, { ...fact, value: mask });
+  }
   const questRecords = emitQuestRecords({
     name: aggregateNewestScalarSummary(scalars.questName),
     questLevel: questLevelFacts,

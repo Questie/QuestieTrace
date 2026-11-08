@@ -62,7 +62,7 @@ As with GUID replay, missing samples retain the last observed state. The format 
 
 ### Required races
 
-`requiredRaces` hides quests from players, so it is only exported with proof that a whole faction cannot get the quest. Every starter must be an NPC that at least 20 sessions of that faction saw hostile and none saw friendly, while the other faction saw it friendly and never hostile. No session of the excluded faction may have seen the quest at all. The exported mask is Questie's Forever `ALL_ALLIANCE` / `ALL_HORDE`. Race-level restrictions are not inferred. NPC reactions are therefore collected for Classic NPCs too, but only exported for Forever NPCs.
+`requiredRaces` hides quests from players, so it is only exported with proof that a whole faction cannot get the quest. Every starter must be an NPC that at least 3 sessions of that faction saw hostile and none saw friendly, while the other faction saw it friendly and never hostile. No session of the excluded faction may have seen the quest, nor another quest of the same starters (class quests have a counterpart quest giver in the other faction). The exported mask is Questie's Forever `ALL_ALLIANCE` / `ALL_HORDE`. Race-level restrictions are not inferred. NPC reactions are therefore collected for Classic NPCs too, but only exported for Forever NPCs.
 
 ## Development
 
