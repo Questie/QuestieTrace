@@ -269,16 +269,20 @@ function Core.CreateSampleScheduler(sample)
   local function ScheduleFollowUp(capture, token, generation, step, quietSamples)
     local delay = delays[step] - (delays[step - 1] or 0)
     C_Timer.After(delay, function()
-      if generation ~= chainGeneration or not capture.active or capture.token ~= token then
+      if generation ~= chainGeneration or (not capture.active) or capture.token ~= token then
         return
       end
-      if sample(capture) then
+      local ok, changed = pcall(sample, capture)
+      if ok and changed then
         quietSamples = 0
       else
         quietSamples = quietSamples + 1
       end
       if quietSamples < QUIET_SAMPLES_TO_SETTLE and step < #delays then
         ScheduleFollowUp(capture, token, generation, step + 1, quietSamples)
+      end
+      if (not ok) then
+        error(changed, 0)
       end
     end)
   end
@@ -293,25 +297,29 @@ function Core.CreateSampleScheduler(sample)
     frameCapture = capture
     frameToken = token
 
-    if sampledThisFrame then
-      requestedAgainThisFrame = true
-    else
-      sampledThisFrame = true
-      sample(capture)
-      C_Timer.After(0, function()
-        if frameCapture ~= capture or frameToken ~= token then return end
-        sampledThisFrame = false
-        if requestedAgainThisFrame then
-          requestedAgainThisFrame = false
-          if capture.active and capture.token == token then
-            sample(capture)
-          end
-        end
-      end)
-    end
-
     chainGeneration = chainGeneration + 1
     ScheduleFollowUp(capture, token, chainGeneration, 1, 0)
+
+    if sampledThisFrame then
+      requestedAgainThisFrame = true
+      return
+    end
+
+    sampledThisFrame = true
+    -- Schedule the frame reset before sampling so a failing sample cannot block later requests
+    C_Timer.After(0, function()
+      if frameCapture ~= capture or frameToken ~= token then
+        return
+      end
+      sampledThisFrame = false
+      if requestedAgainThisFrame then
+        requestedAgainThisFrame = false
+        if capture.active and capture.token == token then
+          sample(capture)
+        end
+      end
+    end)
+    sample(capture)
   end
 end
 
