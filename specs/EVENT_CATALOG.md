@@ -15,7 +15,7 @@ sampling — each tracker registers which events it cares about via
 ### QuestLog tracker
 
 Triggers quest log membership scan and per-quest function sampling.
-Uses delayed re-samples at `{ 0, 0.10, 0.35, 0.55, 0.75, 1.00 }` seconds.
+Uses coalesced re-sampling (see Pattern 3 in TRACKER_SPEC.md).
 
 - `QUEST_LOG_UPDATE`
 - `QUEST_ACCEPTED`
@@ -38,9 +38,14 @@ Uses delayed re-samples at `{ 0, 0.10, 0.35, 0.55, 0.75, 1.00 }` seconds.
 
 Triggers independent delta capture for `C_QuestLog.GetAllCompletedQuestIDs`
 and the legacy `GetQuestsCompleted` global (whichever exist on the client --
-never merged). Uses the same 14 quest events as the QuestLog tracker plus
-the two login-time sampling events, with the same delayed re-sample
-schedule.
+never merged). Uses coalesced re-sampling (see Pattern 3 in TRACKER_SPEC.md).
+An unchanged completed-quest count skips the full set comparison, except
+for samples triggered by `QUEST_TURNED_IN` or `PLAYER_ENTERING_WORLD`.
+
+- `QUEST_LOG_UPDATE`
+- `QUEST_REMOVED`
+- `QUEST_TURNED_IN`
+- `PLAYER_ENTERING_WORLD` *(login-time sampling)*
 
 ### QuestDialog tracker
 
@@ -226,8 +231,7 @@ tracked independently whenever that API exists.
 
 Triggers quest POI (map marker) sampling for the player's current map.
 Captures regular quest POIs via `C_QuestLog.GetQuestsOnMap` when that API
-exists on the client. Uses delayed re-samples at `{ 0, 0.10, 0.35, 0.55, 0.75, 1.00 }`
-seconds to catch server-side data settling.
+exists on the client. Uses coalesced re-sampling (see Pattern 3 in TRACKER_SPEC.md).
 
 - `QUEST_POI_UPDATE`
 - `QUEST_LOG_UPDATE`
