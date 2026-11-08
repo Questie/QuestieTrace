@@ -182,6 +182,19 @@ server-lag states where the API initially returns incomplete data.
 The 0-delay entry samples in the same call stack as the event. Subsequent
 entries use `C_Timer.After` with token-based invalidation.
 
+**Coalesced variant** (`Core.CreateSampleScheduler`, used by QuestLog,
+CompletedQuests and QuestPOI, which receive bursts of quest events):
+
+- The first request in a frame samples in the same call stack. Further
+  requests in that frame trigger a single extra sample on the next frame.
+- Every request restarts one chain of follow-up samples at
+  `Core.RESAMPLE_DELAYS` (`{ 0.10, 0.35, 0.55, 0.75, 1.00 }` seconds after
+  the latest request); older chains are dropped.
+- The chain stops after 3 consecutive follow-up samples that recorded no
+  change, or after the last delay.
+- Frame state is reset when the capture token changes, so a restarted
+  capture samples immediately.
+
 **Example:** QuestLog — quest objective text may show `" : 0/8"` before
 the server sends the real item name. The delayed re-samples catch the
 correct text when it arrives.
@@ -215,8 +228,8 @@ successful observed returns.
 | Position | `Trackers/Position.lua` | `GetZoneText`, `GetSubZoneText`, `GetRealZoneText`, `C_Map.GetBestMapForUnit["player"]`, `C_Map.GetPlayerMapPosition["player"]`, `IsInInstance`, `GetInstanceInfo`, `IsIndoors`, `C_MapExplorationInfo.GetExploredMapTextures[mapID]` (on map change and `MAP_EXPLORATION_UPDATED` only). `GetPlayerFacing` is not recorded; replay derives the heading from consecutive positions | Timer (0.2s) + event-driven + private movement sampling | zone/map events + `PLAYER_ENTERING_WORLD`, `PLAYER_ALIVE`, `SPELLS_CHANGED`; movement events are private sampling triggers and are not recorded globally |
 | Loot | `Trackers/Loot.lua` | `GetNumLootItems`, `GetLootSlotInfo[slot]`, `GetLootSourceInfo[slot]`, `GetLootSlotLink[slot]`, `GetLootSlotType[slot]` | Event + window lifecycle | `LOOT_READY`, `LOOT_CLOSED` |
 | Reputation | `Trackers/Reputation.lua` | `FactionOrder`, `GetFactionInfoByID[factionID]` and `C_Reputation.GetFactionDataByID[factionID]` (independent, each whenever its own API exists) for every `FactionOrder` faction except the guild faction | Event + index iteration | `CHAT_MSG_COMBAT_FACTION_CHANGE`, `UPDATE_FACTION`, `QUEST_TURNED_IN`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| QuestLog | `Trackers/QuestLog.lua` | `QuestLog`, `C_QuestLog.GetMaxNumQuestsCanAccept`, `IsQuestComplete[qid]`, `HaveQuestData[qid]`, `C_QuestLog.IsOnQuest[qid]`, `C_QuestLog.IsQuestFlaggedCompleted[qid]`, `C_QuestLog.GetQuestObjectives[qid]`, `C_QuestLog.GetInfo[qid]`, `C_QuestLog.GetQuestTagInfo[qid]`, `C_QuestLog.IsComplete[qid]`, `C_QuestLog.IsFailed[qid]`, `C_QuestLog.GetLogIndexForQuestID[qid]`, `GetQuestLogTitle[qid]`, `GetQuestLogIndexByID[qid]`, `GetQuestLogQuestText[qid]`, `GetQuestLogCompletionText[qid]`, `GetQuestLogSpecialItemInfo[qid]`, `C_QuestLog.GetRequiredMoney[qid]`, `QuestLogZone[qid]`, timer streams (`C_QuestLog.GetQuestTimers`, raw `GetQuestIndexForTimer[slot]` and the legacy derived ones), reward streams, `GetQuestTagInfo[qid]` | Event + delayed re-samples + index iteration | 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| CompletedQuests | `Trackers/CompletedQuests.lua` | `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted` (independent functionsDelta streams) | Event + delayed re-samples | Same 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| QuestLog | `Trackers/QuestLog.lua` | `QuestLog`, `C_QuestLog.GetMaxNumQuestsCanAccept`, `IsQuestComplete[qid]`, `HaveQuestData[qid]`, `C_QuestLog.IsOnQuest[qid]`, `C_QuestLog.IsQuestFlaggedCompleted[qid]`, `C_QuestLog.GetQuestObjectives[qid]`, `C_QuestLog.GetInfo[qid]`, `C_QuestLog.GetQuestTagInfo[qid]`, `C_QuestLog.IsComplete[qid]`, `C_QuestLog.IsFailed[qid]`, `C_QuestLog.GetLogIndexForQuestID[qid]`, `GetQuestLogTitle[qid]`, `GetQuestLogIndexByID[qid]`, `GetQuestLogQuestText[qid]`, `GetQuestLogCompletionText[qid]`, `GetQuestLogSpecialItemInfo[qid]`, `C_QuestLog.GetRequiredMoney[qid]`, `QuestLogZone[qid]`, timer streams (`C_QuestLog.GetQuestTimers`, raw `GetQuestIndexForTimer[slot]` and the legacy derived ones), reward streams, `GetQuestTagInfo[qid]` | Event + coalesced re-samples + index iteration | 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| CompletedQuests | `Trackers/CompletedQuests.lua` | `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted` (independent functionsDelta streams) | Event + coalesced re-samples; full set comparison skipped while the count is unchanged, except after `QUEST_TURNED_IN`/`PLAYER_ENTERING_WORLD` | `QUEST_LOG_UPDATE`, `QUEST_REMOVED`, `QUEST_TURNED_IN`, `PLAYER_ENTERING_WORLD` |
 | UnitInteraction | `Trackers/UnitInteraction.lua` | `UnitGUID`/`UnitName` for `target`, `npc`, `questnpc`, `mouseover`; `UnitGUID` only for the `nameplateN` token of each added nameplate; `C_GossipInfo.GetAvailableQuests`; `C_GossipInfo.GetActiveQuests` | Event-driven fixed unit-token fanout; nameplates per event token | target, quest dialog, selected quest state, loot-open, NPC interaction, login-time events, `UPDATE_MOUSEOVER_UNIT`, `NAME_PLATE_UNIT_ADDED` |
 | UnitState | `Trackers/UnitState.lua` | `UnitLevel`/`UnitClassification`/`UnitReaction` for `target`, `mouseover`; `UnitSubName` (synthetic) for `mouseover` | Event-driven fixed unit-token fanout (NPC-only); `UnitSubName` via TooltipDataProcessor Unit callback (Modern/Forever only) | `PLAYER_TARGET_CHANGED`, `UPDATE_MOUSEOVER_UNIT` |
 | GroupState | `Trackers/GroupState.lua` | `IsInGroup`, `GetNumGroupMembers` | Event-driven | `GROUP_JOINED`, `GROUP_LEFT`, `GROUP_ROSTER_UPDATE`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
