@@ -252,7 +252,7 @@ local QUIET_SAMPLES_TO_SETTLE = 3
 --- recorded nothing.
 --- The second return value restarts only the follow-up chain, for callers that
 --- just took a sample themselves (e.g. a tracker's start snapshot).
----@param sample fun(capture: CaptureState): boolean Returns true when the sample recorded a change
+---@param sample fun(capture: CaptureState, chainEnded: boolean?): boolean Returns true when the sample recorded a change; chainEnded is true for the last sample of a follow-up chain
 ---@return fun(capture: CaptureState) request
 ---@return fun(capture: CaptureState) followUp
 function Core.CreateSampleScheduler(sample)
@@ -276,7 +276,7 @@ function Core.CreateSampleScheduler(sample)
       if generation ~= chainGeneration or (not capture.active) or capture.token ~= token then
         return
       end
-      local ok, changed = pcall(sample, capture)
+      local ok, changed = pcall(sample, capture, step == #delays)
       if ok and changed then
         quietSamples = 0
       else

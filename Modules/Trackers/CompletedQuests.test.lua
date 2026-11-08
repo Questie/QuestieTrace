@@ -280,6 +280,37 @@ describe("CompletedQuests tracker", function()
     assert.are.same({ 200 }, stream.delta[1].remove)
   end)
 
+  it("should keep comparing full sets until the turn-in chain ends when its timers fire late", function()
+    env.completedIds = { 100, 200 }
+    local capture, advance, send = SetUpClock()
+
+    send("QUEST_TURNED_IN")
+    advance(0.9)
+    -- A frame hitch delays the last follow-up well past its nominal time
+    local realGetTime = env.GetTime
+    env.GetTime = function() return realGetTime() + 5 end
+    env.completedIds = { 300, 100 }
+    advance(0.2)
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(1, #stream.delta)
+    assert.are.same({ 300 }, stream.delta[1].add)
+  end)
+
+  it("should stop comparing full sets after the turn-in chain ended", function()
+    env.completedIds = { 100, 200 }
+    local capture, advance, send = SetUpClock()
+
+    send("QUEST_TURNED_IN")
+    advance(1.1)
+    env.completedIds = { 300, 100 }
+    send("QUEST_LOG_UPDATE")
+    advance(1.1)
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(0, #stream.delta)
+  end)
+
   it("should skip full comparison for a quest log update outside any turn-in window", function()
     local completedIds = { 100, 200 }
     env.C_QuestLog = {
