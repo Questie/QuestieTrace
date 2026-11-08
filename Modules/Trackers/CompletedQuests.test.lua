@@ -181,35 +181,85 @@ describe("CompletedQuests tracker", function()
     assert.are.same({ 200 }, stream.delta[1].remove)
   end)
 
-  it("should keep comparing full sets through a follow-up chain restarted by a quest log update", function()
-    ---@type function[]
+  ---Set up a tracker driven by a virtual clock; timers fire in chronological order.
+  ---@return table capture
+  ---@return fun(delta: number) advance
+  ---@return fun(event: string) send
+  ---@return number[] sampleTimes
+  local function SetUpClock()
+    local now = 0
+    ---@type { at: number, callback: function }[]
     local timers = {}
+    ---@type number[]
+    local sampleTimes = {}
     env.C_Timer = {
-      After = function(_delay, callback) timers[#timers + 1] = callback end,
+      After = function(delay, callback) timers[#timers + 1] = { at = now + delay, callback = callback } end,
     }
-    local completedIds = { 100, 200 }
     env.C_QuestLog = {
-      GetAllCompletedQuestIDs = function() return completedIds end,
+      GetAllCompletedQuestIDs = function()
+        sampleTimes[#sampleTimes + 1] = now
+        return env.completedIds
+      end,
     }
 
     tracker = select(2, LoadCompletedQuestsTracker(env))
-    local now = 0
     env.GetTime = function() return now end
     local capture = NewCapture()
     tracker.Init(capture)
+    sampleTimes[#sampleTimes] = nil -- ignore the Init snapshot
 
-    tracker.OnEvent(capture, "QUEST_TURNED_IN")
-    now = 0.9
-    tracker.OnEvent(capture, "QUEST_LOG_UPDATE")
-
-    -- Beyond the first window (1.5s), but inside the restarted chain's window
-    now = 2.0
-    completedIds = { 300, 100 }
-    while #timers > 0 do
-      table.remove(timers, 1)()
+    local function Advance(to)
+      while true do
+        local nextIndex
+        for index, timer in ipairs(timers) do
+          if timer.at <= to and (not nextIndex or timer.at < timers[nextIndex].at) then
+            nextIndex = index
+          end
+        end
+        if not nextIndex then break end
+        local timer = table.remove(timers, nextIndex)
+        now = timer.at
+        timer.callback()
+      end
+      now = to
     end
 
+    return capture, function(delta) Advance(now + delta) end, function(event) tracker.OnEvent(capture, event) end, sampleTimes
+  end
+
+  it("should stop the restarted follow-up chain once samples settle", function()
+    env.completedIds = { 100, 200 }
+    local capture, advance, send, sampleTimes = SetUpClock()
+
+    send("QUEST_TURNED_IN")
+    advance(0.9)
+    send("QUEST_LOG_UPDATE")
+    advance(2.1)
+
+    -- Restarted at 0.9: immediate sample, then 3 quiet follow-ups (1.0, 1.25, 1.45)
+    local lastSample = sampleTimes[#sampleTimes]
+    assert.is_true(math.abs(lastSample - 1.45) < 1e-9)
     local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(0, #stream.delta)
+  end)
+
+  it("should keep comparing full sets for a replacement that shows up late in a restarted chain", function()
+    env.completedIds = { 100, 200 }
+    local capture, advance, send = SetUpClock()
+
+    send("QUEST_TURNED_IN")
+    advance(0.9)
+    send("QUEST_LOG_UPDATE")
+    advance(0.5)
+    send("QUEST_LOG_UPDATE") -- 1.4s: the chain from 0.9 is still active and restarts
+
+    -- Visible only after the first window (1.5s) has passed, at the 1.95s sample
+    advance(0.4)
+    env.completedIds = { 300, 100 }
+    advance(1.2)
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(1, #stream.delta)
     assert.are.same({ 300 }, stream.delta[1].add)
     assert.are.same({ 200 }, stream.delta[1].remove)
   end)
