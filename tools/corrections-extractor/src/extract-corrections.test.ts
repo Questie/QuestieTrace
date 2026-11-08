@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "os";
 import { join } from "path";
 import { TINY_EXPORT } from "./core/trace-data/fixtures";
-import { extractCorrections } from "./extract-corrections";
+import { extractCorrections, workersFromEnv } from "./extract-corrections";
 import * as lookups from "./extract/lookups";
 
 const tempDirs: string[] = [];
@@ -193,5 +193,22 @@ describe("extractCorrections", () => {
     const { traceDataDir, outputDir } = setupDirs({});
 
     await expect(extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 })).rejects.toThrow("does not exist");
+  });
+});
+
+describe("workersFromEnv", () => {
+  it("should use the default when EXTRACT_WORKERS is not set", () => {
+    expect(workersFromEnv({})).toBeUndefined();
+  });
+
+  it("should read the number of workers from EXTRACT_WORKERS", () => {
+    expect(workersFromEnv({ EXTRACT_WORKERS: "4" })).toBe(4);
+    expect(workersFromEnv({ EXTRACT_WORKERS: "0" })).toBe(0);
+  });
+
+  it("should reject an EXTRACT_WORKERS that is not a whole number of at least 0", () => {
+    for (const value of ["abc", "-1", "1.5", ""]) {
+      expect(() => workersFromEnv({ EXTRACT_WORKERS: value })).toThrow("EXTRACT_WORKERS");
+    }
   });
 });
