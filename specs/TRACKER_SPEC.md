@@ -190,8 +190,9 @@ CompletedQuests and QuestPOI, which receive bursts of quest events):
 - Every request restarts one chain of follow-up samples at
   `Core.RESAMPLE_DELAYS` (`{ 0.10, 0.35, 0.55, 0.75, 1.00 }` seconds after
   the latest request); older chains are dropped.
-- The chain stops after 3 consecutive follow-up samples that recorded no
-  change, or after the last delay.
+- After 3 consecutive follow-up samples that recorded no change, the chain
+  skips ahead to the last delay, so data arriving up to 1s late is still
+  caught. The extra next-frame sample does not count towards the 3.
 - Frame state is reset when the capture token changes, so a restarted
   capture samples immediately.
 

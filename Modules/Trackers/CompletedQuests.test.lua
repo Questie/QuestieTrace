@@ -229,7 +229,7 @@ describe("CompletedQuests tracker", function()
     return capture, function(delta) Advance(now + delta) end, function(event) tracker.OnEvent(capture, event) end, sampleTimes
   end
 
-  it("should stop the restarted follow-up chain once samples settle", function()
+  it("should end the restarted follow-up chain at the last delay once samples settle", function()
     env.completedIds = { 100, 200 }
     local capture, advance, send, sampleTimes = SetUpClock()
 
@@ -238,9 +238,9 @@ describe("CompletedQuests tracker", function()
     send("QUEST_LOG_UPDATE")
     advance(2.1)
 
-    -- Restarted at 0.9: immediate sample, then 3 quiet follow-ups (1.0, 1.25, 1.45)
+    -- Restarted at 0.9: immediate sample, 3 quiet follow-ups (1.0, 1.25, 1.45), then the last delay (1.9)
     local lastSample = sampleTimes[#sampleTimes]
-    assert.is_true(math.abs(lastSample - 1.45) < 1e-9)
+    assert.is_true(math.abs(lastSample - 1.9) < 1e-9)
     local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
     assert.are.equal(0, #stream.delta)
   end)
