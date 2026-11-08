@@ -180,4 +180,54 @@ describe("CompletedQuests tracker", function()
     assert.are.same({ 300 }, stream.delta[1].add)
     assert.are.same({ 200 }, stream.delta[1].remove)
   end)
+
+  it("should keep comparing full sets through a follow-up chain restarted by a quest log update", function()
+    ---@type function[]
+    local timers = {}
+    env.C_Timer = {
+      After = function(_delay, callback) timers[#timers + 1] = callback end,
+    }
+    local completedIds = { 100, 200 }
+    env.C_QuestLog = {
+      GetAllCompletedQuestIDs = function() return completedIds end,
+    }
+
+    tracker = select(2, LoadCompletedQuestsTracker(env))
+    local now = 0
+    env.GetTime = function() return now end
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    tracker.OnEvent(capture, "QUEST_TURNED_IN")
+    now = 0.9
+    tracker.OnEvent(capture, "QUEST_LOG_UPDATE")
+
+    -- Beyond the first window (1.5s), but inside the restarted chain's window
+    now = 2.0
+    completedIds = { 300, 100 }
+    while #timers > 0 do
+      table.remove(timers, 1)()
+    end
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.same({ 300 }, stream.delta[1].add)
+    assert.are.same({ 200 }, stream.delta[1].remove)
+  end)
+
+  it("should skip full comparison for a quest log update outside any turn-in window", function()
+    local completedIds = { 100, 200 }
+    env.C_QuestLog = {
+      GetAllCompletedQuestIDs = function() return completedIds end,
+    }
+
+    tracker = select(2, LoadCompletedQuestsTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    completedIds = { 300, 100 }
+    tracker.OnEvent(capture, "QUEST_LOG_UPDATE")
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(0, #stream.delta)
+  end)
 end)

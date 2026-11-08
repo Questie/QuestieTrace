@@ -25,7 +25,8 @@ local currentModernCount
 ---@type number
 local currentLegacyCount
 ---@type number
-local forcedFullCompares = 0 -- samples left that compare full sets, even when counts match
+local fullCompareUntil = -math.huge -- GetTime() until which samples compare full sets, even when counts match
+local FULL_COMPARE_MARGIN = 0.5 -- covers follow-up timers firing slightly after their nominal delay
 ---@type table<number, boolean>
 local legacyCompletedScratch = {}
 
@@ -86,7 +87,7 @@ local function SampleCompletedSource(streamKey, currentSet, currentCount, ids, t
   -- Completed quests are only ever added (or all removed on a reset), so an
   -- unchanged count means an unchanged set; skip rebuilding thousands of IDs.
   if ids == nil then return currentSet, currentCount, false end
-  if #ids == currentCount and forcedFullCompares == 0 then return currentSet, currentCount, false end
+  if #ids == currentCount and GetTime() > fullCompareUntil then return currentSet, currentCount, false end
 
   ---@type table<number, boolean>
   local newSet = {}
@@ -140,9 +141,6 @@ local function SampleCompleted(capture)
   currentLegacySet, currentLegacyCount, legacyChanged = SampleCompletedSource(
     "GetQuestsCompleted", currentLegacySet, currentLegacyCount, GetLegacyCompletedQuestIds(), t, tp
   )
-  if forcedFullCompares > 0 then
-    forcedFullCompares = forcedFullCompares - 1
-  end
   return modernChanged or legacyChanged
 end
 
@@ -167,7 +165,7 @@ Core.RegisterTracker({
     currentLegacySet = {}
     currentModernCount = 0
     currentLegacyCount = 0
-    forcedFullCompares = 0
+    fullCompareUntil = -math.huge
 
     local modernIds = GetModernCompletedQuestIds()
     if modernIds then
@@ -189,9 +187,11 @@ Core.RegisterTracker({
   ---@param capture CaptureState
   ---@param event string
   OnEvent = function(capture, event)
-    if event == "QUEST_TURNED_IN" or event == "PLAYER_ENTERING_WORLD" then
-      -- Cover the immediate sample, a next-frame sample and every follow-up
-      forcedFullCompares = 2 + #Core.RESAMPLE_DELAYS
+    -- Every event restarts the follow-up chain, so any event inside an open
+    -- window extends it to cover the restarted chain too.
+    local now = GetTime()
+    if event == "QUEST_TURNED_IN" or event == "PLAYER_ENTERING_WORLD" or now <= fullCompareUntil then
+      fullCompareUntil = now + Core.RESAMPLE_DELAYS[#Core.RESAMPLE_DELAYS] + FULL_COMPARE_MARGIN
     end
     RequestSample(capture)
   end,
