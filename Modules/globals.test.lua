@@ -176,14 +176,19 @@ describe("globals", function()
       assert.are.equal(1, sampleCount)
     end)
 
-    it("should stop following up after three samples without changes", function()
+    it("should skip to the last delay after three samples without changes", function()
       NewScheduler()(capture)
       RunTimers(0)
       sampleCount = 0
 
-      for _ = 1, 10 do RunTimers() end
+      local elapsed = 0
+      while #timers > 0 do
+        elapsed = elapsed + timers[1].delay
+        RunTimers()
+      end
 
-      assert.are.equal(3, sampleCount)
+      assert.are.equal(4, sampleCount)
+      assert.is_true(math.abs(elapsed - Core.RESAMPLE_DELAYS[#Core.RESAMPLE_DELAYS]) < 1e-9)
     end)
 
     it("should keep following up while samples record changes, up to the last delay", function()
@@ -226,7 +231,7 @@ describe("globals", function()
 
       for _ = 1, 10 do RunTimers() end
 
-      assert.are.equal(3, sampleCount)
+      assert.are.equal(4, sampleCount)
     end)
 
     it("should sample immediately for a restarted capture in the same frame", function()

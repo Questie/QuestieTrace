@@ -248,7 +248,8 @@ local QUIET_SAMPLES_TO_SETTLE = 3
 --- The first request in a frame samples immediately, so intermediate states
 --- stay recorded; further requests in the same frame trigger a single extra
 --- sample on the next frame. Every request restarts one chain of follow-up
---- samples, which stops early once consecutive samples recorded nothing.
+--- samples, which skips ahead to the last delay once consecutive samples
+--- recorded nothing.
 ---@param sample fun(capture: CaptureState): boolean Returns true when the sample recorded a change
 ---@return fun(capture: CaptureState) request
 function Core.CreateSampleScheduler(sample)
@@ -266,9 +267,9 @@ function Core.CreateSampleScheduler(sample)
   ---@param generation number
   ---@param step number
   ---@param quietSamples number
-  local function ScheduleFollowUp(capture, token, generation, step, quietSamples)
-    local delay = delays[step] - (delays[step - 1] or 0)
-    C_Timer.After(delay, function()
+  ---@param previousDelay number
+  local function ScheduleFollowUp(capture, token, generation, step, quietSamples, previousDelay)
+    C_Timer.After(delays[step] - previousDelay, function()
       if generation ~= chainGeneration or (not capture.active) or capture.token ~= token then
         return
       end
@@ -278,8 +279,10 @@ function Core.CreateSampleScheduler(sample)
       else
         quietSamples = quietSamples + 1
       end
-      if quietSamples < QUIET_SAMPLES_TO_SETTLE and step < #delays then
-        ScheduleFollowUp(capture, token, generation, step + 1, quietSamples)
+      if step < #delays then
+        -- Once settled, skip ahead to the last delay so late server data is still caught
+        local nextStep = quietSamples < QUIET_SAMPLES_TO_SETTLE and step + 1 or #delays
+        ScheduleFollowUp(capture, token, generation, nextStep, quietSamples, delays[step])
       end
       if (not ok) then
         error(changed, 0)
@@ -298,7 +301,7 @@ function Core.CreateSampleScheduler(sample)
     frameToken = token
 
     chainGeneration = chainGeneration + 1
-    ScheduleFollowUp(capture, token, chainGeneration, 1, 0)
+    ScheduleFollowUp(capture, token, chainGeneration, 1, 0, 0)
 
     if sampledThisFrame then
       requestedAgainThisFrame = true
