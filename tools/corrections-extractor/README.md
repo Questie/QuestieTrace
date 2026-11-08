@@ -34,7 +34,7 @@ The results are written to `output/`:
 | `foreverQuestTraces.lua` | Quest corrections |
 | `foreverItemTraces.lua` | Item corrections |
 | `foreverObjectTraces.lua` | Object corrections |
-| `xpDB-traces.lua` | Quest XP rows (`QuestXP.db[questId] = {level, xp}`) for new quests, from `GetRewardXP`. Only samples where the quest is at most five levels below the player are used, as the client scales the reward down beyond that. Place it in QuestieDB `support/Forever/QuestXP/` |
+| `xpDB-traces.lua` | Quest XP rows (`QuestXP.db[questId] = {level, xp}`) for new quests, from `GetRewardXP`. Only samples where the quest is at most five levels below the player are used, as the client scales the reward down beyond that. The shown XP is rounded, so it is matched with the Forever `QuestXP` DBC table (`src/extract/resources/QuestXP.*.csv`) and the table's raw value is written; samples that match no value of the quest level are dropped. Place it in QuestieDB `support/Forever/QuestXP/` |
 | `lookup{Npcs,Quests,Items,Objects}/<locale>.lua` | Translations, see below |
 | `meta.json` | `sessionCount`, `submissionCount`, `exportCount`, `skippedFiles`, `partialFiles` (submissions of which only some exports could be decoded), `duplicateSessionsSkipped` and `generatedAt` of the run |
 
