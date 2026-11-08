@@ -4,7 +4,7 @@ local function LoadCompletedQuestsTracker(env)
   setmetatable(env, { __index = _G })
   env._G = env
   env.QuestieTraceCore = {}
-  env.C_Timer = { After = function(_delay, _callback) end }
+  env.C_Timer = env.C_Timer or { After = function(_delay, _callback) end }
   env.GetTime = function() return 0 end
   env.GetTimePreciseSec = function() return 0 end
   env.wipe = function(t)
@@ -150,6 +150,33 @@ describe("CompletedQuests tracker", function()
     tracker.OnEvent(capture, "QUEST_TURNED_IN")
 
     local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.same({ 300 }, stream.delta[1].add)
+    assert.are.same({ 200 }, stream.delta[1].remove)
+  end)
+
+  it("should record a same-count replacement that only shows up in a follow-up sample", function()
+    ---@type function[]
+    local timers = {}
+    env.C_Timer = {
+      After = function(_delay, callback) timers[#timers + 1] = callback end,
+    }
+    local completedIds = { 100, 200 }
+    env.C_QuestLog = {
+      GetAllCompletedQuestIDs = function() return completedIds end,
+    }
+
+    tracker = select(2, LoadCompletedQuestsTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    tracker.OnEvent(capture, "QUEST_TURNED_IN")
+    completedIds = { 300, 100 }
+    while #timers > 0 do
+      table.remove(timers, 1)()
+    end
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(1, #stream.delta)
     assert.are.same({ 300 }, stream.delta[1].add)
     assert.are.same({ 200 }, stream.delta[1].remove)
   end)
