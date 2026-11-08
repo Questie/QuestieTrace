@@ -256,6 +256,10 @@ function Core.CreateSampleScheduler(sample)
   local sampledThisFrame = false
   local requestedAgainThisFrame = false
   local chainGeneration = 0
+  ---@type CaptureState?
+  local frameCapture
+  ---@type number?
+  local frameToken
 
   ---@param capture CaptureState
   ---@param token number
@@ -281,12 +285,21 @@ function Core.CreateSampleScheduler(sample)
 
   return function(capture)
     local token = capture.token
+    -- A restarted capture must not be suppressed by the previous capture's frame state
+    if frameCapture ~= capture or frameToken ~= token then
+      sampledThisFrame = false
+      requestedAgainThisFrame = false
+    end
+    frameCapture = capture
+    frameToken = token
+
     if sampledThisFrame then
       requestedAgainThisFrame = true
     else
       sampledThisFrame = true
       sample(capture)
       C_Timer.After(0, function()
+        if frameCapture ~= capture or frameToken ~= token then return end
         sampledThisFrame = false
         if requestedAgainThisFrame then
           requestedAgainThisFrame = false
