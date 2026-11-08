@@ -57,6 +57,8 @@ import { observeQuestXp, mergeQuestXp, type QuestXpValue } from "./observers/que
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 import { writeQuestXpLua } from "./schema/quest-xp-writer";
 import {mergeRequiredLevel} from './observers/quest/requiredLevel';
+import { mergeQuestFactions, mergeRequiredRaces, observeQuestFactions, summarizeReactions, type ReactionSummary } from "./observers/quest/requiredRaces";
+import type { Faction } from "./observers/npc/friendlyToFaction";
 
 export const MAX_IDS = {
     npc: 18199,
@@ -140,6 +142,7 @@ const OBSERVERS = {
   finishedBy: observeFinishedBy,
   reputationReward: observeReputationReward,
   questXp: observeQuestXp,
+  questFactions: observeQuestFactions,
   turnInPoi: observeTurnInPoi,
   // npcZoneID and objectZoneID are merged from the spawn observations: their observers
   // are the spawn observers.
@@ -155,12 +158,13 @@ const OBSERVERS = {
 /**
  * The entity each npc, item and object field is about. Only entities above MAX_IDS are
  * exported, so their observations at or below it are dropped while folding.
+ * npcFriendlyToFaction is kept for every NPC: Classic NPCs start Forever quests, and
+ * their reactions decide those quests' requiredRaces.
  */
 const OBSERVER_ENTITIES: Partial<Record<keyof typeof OBSERVERS, keyof typeof MAX_IDS>> = {
   questXp: "quest",
   npcSpawns: "npc",
   npcLevel: "npc",
-  npcFriendlyToFaction: "npc",
   npcRank: "npc",
   npcDrops: "item",
   objectDrops: "item",
@@ -356,6 +360,18 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   for (const [questId, fact] of questXpFacts) {
     if (fact.value !== undefined) questXpRows.set(questId, { level: questLevelFacts.get(questId)!.value, xp: fact.value });
   }
+  const startedByFacts = field("startedBy", mergeStartedBy);
+  const npcReactions = field("npcFriendlyToFaction", summarizeReactions);
+  const requiredRacesFacts = onlyDefinedFacts(
+    field<Faction, number | undefined>("questFactions", (observations) => {
+      const starters = startedByFacts.get(observations[0].entityId)?.value;
+      const npcStarters: ReactionSummary[] =
+        !starters || starters.objects.length > 0 || starters.items.length > 0
+          ? []
+          : starters.creatures.map((id) => npcReactions.get(id)?.value ?? summarizeReactions([]));
+      return mergeRequiredRaces(mergeQuestFactions(observations), npcStarters);
+    }),
+  );
   const questRecords = emitQuestRecords({
     name: aggregateNewestScalarSummary(scalars.questName),
     questLevel: questLevelFacts,
@@ -369,8 +385,8 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
     triggerEnd: field<QuestTriggerEndValue, ReturnType<typeof mergeQuestTriggerEnds>>("triggerEnd", (observations) =>
       mergeQuestTriggerEnds(observations, zoneOrSortFacts.get(observations[0]?.entityId)?.value),
     ),
-    startedBy: field("startedBy", mergeStartedBy,
-    ),
+    startedBy: startedByFacts,
+    requiredRaces: requiredRacesFacts,
     finishedBy: finishedByFacts,
     reputationReward: onlyDefinedFacts(field("reputationReward", mergeReputationReward)),
   });
