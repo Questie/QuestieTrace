@@ -25,7 +25,7 @@ function reactions(faction: "A" | "H", friendly: boolean, sessions: number, firs
   }));
 }
 
-function factionNpc(hostileFaction: "A" | "H", hostileSessions = 20): ReactionSummary {
+function factionNpc(hostileFaction: "A" | "H", hostileSessions = 3): ReactionSummary {
   const friendlyFaction = hostileFaction === "A" ? "H" : "A";
   return summarizeReactions([...reactions(hostileFaction, false, hostileSessions), ...reactions(friendlyFaction, true, 1, 1000)]);
 }
@@ -83,7 +83,7 @@ describe("summarizeReactions", () => {
 });
 
 describe("mergeRequiredRaces", () => {
-  it("should exclude a faction when the quest giver is hostile to it in 20 sessions", () => {
+  it("should exclude a faction when the quest giver is hostile to it in 3 sessions", () => {
     expect(mergeRequiredRaces(new Set(["A"]), [factionNpc("H")])).toBe(ALLIANCE_RACES);
     expect(mergeRequiredRaces(new Set(["H"]), [factionNpc("A")])).toBe(HORDE_RACES);
   });
@@ -92,28 +92,28 @@ describe("mergeRequiredRaces", () => {
     expect(mergeRequiredRaces(new Set(["A"]), [])).toBeUndefined();
   });
 
-  it("should not exclude a faction when the quest giver was hostile to it in fewer than 20 sessions", () => {
-    expect(mergeRequiredRaces(new Set(["A"]), [factionNpc("H", 19)])).toBeUndefined();
+  it("should not exclude a faction when the quest giver was hostile to it in fewer than 3 sessions", () => {
+    expect(mergeRequiredRaces(new Set(["A"]), [factionNpc("H", 2)])).toBeUndefined();
   });
 
   it("should not exclude a faction when any of its sessions saw the quest giver friendly", () => {
-    const summary = summarizeReactions([...reactions("H", false, 20), ...reactions("H", true, 1, 100), ...reactions("A", true, 1, 200)]);
+    const summary = summarizeReactions([...reactions("H", false, 3), ...reactions("H", true, 1, 100), ...reactions("A", true, 1, 200)]);
 
     expect(mergeRequiredRaces(new Set(["A"]), [summary])).toBeUndefined();
   });
 
   it("should not exclude a faction when the quest giver is unfriendly to both factions", () => {
-    const summary = summarizeReactions([...reactions("H", false, 20), ...reactions("A", false, 1, 100)]);
+    const summary = summarizeReactions([...reactions("H", false, 3), ...reactions("A", false, 1, 100)]);
 
     expect(mergeRequiredRaces(new Set(["A"]), [summary])).toBeUndefined();
   });
 
   it("should not exclude a faction when the quest giver was never seen friendly to the other faction", () => {
-    expect(mergeRequiredRaces(new Set(["A"]), [summarizeReactions(reactions("H", false, 20))])).toBeUndefined();
+    expect(mergeRequiredRaces(new Set(["A"]), [summarizeReactions(reactions("H", false, 3))])).toBeUndefined();
   });
 
   it("should not exclude a faction when the other faction also saw the quest giver hostile", () => {
-    const summary = summarizeReactions([...reactions("H", false, 20), ...reactions("A", true, 5, 100), ...reactions("A", false, 1, 200)]);
+    const summary = summarizeReactions([...reactions("H", false, 3), ...reactions("A", true, 5, 100), ...reactions("A", false, 1, 200)]);
 
     expect(mergeRequiredRaces(new Set(["A"]), [summary])).toBeUndefined();
   });
@@ -133,6 +133,14 @@ describe("mergeRequiredRaces", () => {
 
   it("should not restrict races when no session of the remaining faction saw the quest", () => {
     expect(mergeRequiredRaces(new Set([]), [factionNpc("H")])).toBeUndefined();
+  });
+
+  it("should not exclude a faction that saw another quest of the same quest giver", () => {
+    expect(mergeRequiredRaces(new Set(["A"]), [factionNpc("H")], new Set(["H"]))).toBeUndefined();
+  });
+
+  it("should exclude a faction when only the remaining faction saw other quests of the same quest giver", () => {
+    expect(mergeRequiredRaces(new Set(["A"]), [factionNpc("H")], new Set(["A"]))).toBe(ALLIANCE_RACES);
   });
 });
 

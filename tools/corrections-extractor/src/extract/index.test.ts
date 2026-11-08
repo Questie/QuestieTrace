@@ -214,8 +214,21 @@ describe("extractAll (quest/item/object entities)", () => {
       expect(npcFixes).not.toContain("friendlyToFaction");
     });
 
-    it("should not export requiredRaces when the quest giver was hostile to the Horde in fewer than 20 sessions", () => {
-      expect(extractAll([allianceAccept(), ...hordeSightings.slice(1)], options).questFixes).not.toContain("requiredRaces");
+    it("should not export requiredRaces when the quest giver was hostile to the Horde in fewer than 3 sessions", () => {
+      expect(extractAll([allianceAccept(), ...hordeSightings.slice(-2)], options).questFixes).not.toContain("requiredRaces");
+    });
+
+    it("should not export requiredRaces when the Horde saw another quest of the same quest giver", () => {
+      const hordeSibling = makeSession(
+        {
+          GetBuildInfo: { player: [apiSample(0, 0, 16001)] },
+          UnitFactionGroup: factionGroup("Horde"),
+          UnitGUID: { questnpc: [apiSample(3, 3, creatureGuid(823))] },
+        },
+        [traceEvent("QUEST_ACCEPTED", 3, 3, 96660)],
+      );
+
+      expect(extractAll([allianceAccept(), hordeSibling, ...hordeSightings], options).questFixes).not.toContain("requiredRaces");
     });
 
     it("should not export requiredRaces when the quest is also started by an item", () => {
