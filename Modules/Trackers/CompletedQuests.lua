@@ -86,8 +86,12 @@ end
 local function SampleCompletedSource(streamKey, currentSet, currentCount, ids, t, tp)
   -- Completed quests are only ever added (or all removed on a reset), so an
   -- unchanged count means an unchanged set; skip rebuilding thousands of IDs.
-  if ids == nil then return currentSet, currentCount, false end
-  if #ids == currentCount and GetTime() > fullCompareUntil then return currentSet, currentCount, false end
+  if ids == nil then
+    return currentSet, currentCount, false
+  end
+  if #ids == currentCount and GetTime() > fullCompareUntil then
+    return currentSet, currentCount, false
+  end
 
   ---@type table<number, boolean>
   local newSet = {}

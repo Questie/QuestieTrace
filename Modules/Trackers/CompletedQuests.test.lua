@@ -212,11 +212,13 @@ describe("CompletedQuests tracker", function()
       while true do
         local nextIndex
         for index, timer in ipairs(timers) do
-          if timer.at <= to and (not nextIndex or timer.at < timers[nextIndex].at) then
+          if timer.at <= to and ((not nextIndex) or timer.at < timers[nextIndex].at) then
             nextIndex = index
           end
         end
-        if not nextIndex then break end
+        if (not nextIndex) then
+          break
+        end
         local timer = table.remove(timers, nextIndex)
         now = timer.at
         timer.callback()

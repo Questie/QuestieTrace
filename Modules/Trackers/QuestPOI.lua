@@ -44,8 +44,12 @@ local functions   -- capture.session.functions
 ---@param processedMaps table<number, boolean> Maps already processed this cycle
 ---@return boolean recordedChange
 local function SampleQuestLogPOIs(capture, t, tp, uiMapID, processedMaps)
-  if not (C_QuestLog and C_QuestLog.GetQuestsOnMap) then return false end
-  if processedMaps[uiMapID] then return false end
+  if (not (C_QuestLog and C_QuestLog.GetQuestsOnMap)) then
+    return false
+  end
+  if processedMaps[uiMapID] then
+    return false
+  end
   processedMaps[uiMapID] = true
 
   local ok, pois = pcall(C_QuestLog.GetQuestsOnMap, uiMapID)
