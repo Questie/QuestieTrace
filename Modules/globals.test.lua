@@ -194,6 +194,28 @@ describe("globals", function()
       assert.are.equal(3, sampleCount)
     end)
 
+    it("should sample immediately for a restarted capture in the same frame", function()
+      local request = NewScheduler()
+      request(capture)
+      local restarted = { active = true, token = 2 }
+
+      request(restarted)
+
+      assert.are.equal(2, sampleCount)
+    end)
+
+    it("should take the next-frame sample for a restarted capture", function()
+      local request = NewScheduler()
+      request(capture)
+      local restarted = { active = true, token = 2 }
+      request(restarted)
+      request(restarted)
+
+      RunTimers(0)
+
+      assert.are.equal(3, sampleCount)
+    end)
+
     it("should not sample after the capture stopped", function()
       NewScheduler()(capture)
       capture.active = false
