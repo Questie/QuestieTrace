@@ -68,7 +68,8 @@ describe("globals", function()
     ---@type boolean[]
     local changes
 
-    ---@return fun(capture: table)
+    ---@return fun(capture: table) request
+    ---@return fun(capture: table) followUp
     local function NewScheduler()
       return Core.CreateSampleScheduler(function()
         sampleCount = sampleCount + 1
@@ -153,6 +154,16 @@ describe("globals", function()
       RunTimers()
 
       assert.are.equal(3, sampleCount)
+    end)
+
+    it("should only start the follow-up chain without an immediate sample", function()
+      local _, followUp = NewScheduler()
+
+      followUp(capture)
+      assert.are.equal(0, sampleCount)
+
+      RunTimers()
+      assert.are.equal(1, sampleCount)
     end)
 
     it("should not sample on the next frame when only one request happened", function()

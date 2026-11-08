@@ -206,7 +206,6 @@ describe("CompletedQuests tracker", function()
     env.GetTime = function() return now end
     local capture = NewCapture()
     tracker.Init(capture)
-    sampleTimes[#sampleTimes] = nil -- ignore the Init snapshot
 
     local function Advance(to)
       while true do
@@ -226,8 +225,23 @@ describe("CompletedQuests tracker", function()
       now = to
     end
 
+    Advance(0) -- finish the Init frame
+    for i = #sampleTimes, 1, -1 do sampleTimes[i] = nil end -- ignore the Init samples
+
     return capture, function(delta) Advance(now + delta) end, function(event) tracker.OnEvent(capture, event) end, sampleTimes
   end
+
+  it("should record completed quests that load shortly after Init", function()
+    env.completedIds = { 100 }
+    local capture, advance = SetUpClock()
+
+    env.completedIds = { 100, 200 }
+    advance(2)
+
+    local stream = capture.session.functionsDelta["C_QuestLog.GetAllCompletedQuestIDs"]
+    assert.are.equal(1, #stream.delta)
+    assert.are.same({ 200 }, stream.delta[1].add)
+  end)
 
   it("should end the restarted follow-up chain at the last delay once samples settle", function()
     env.completedIds = { 100, 200 }
