@@ -24,8 +24,8 @@ local currentLegacySet -- [questId] = true -- last legacy GetQuestsCompleted set
 local currentModernCount
 ---@type number
 local currentLegacyCount
----@type boolean
-local forceFullCompare = false -- compare full sets once, even when counts match
+---@type number
+local forcedFullCompares = 0 -- samples left that compare full sets, even when counts match
 ---@type table<number, boolean>
 local legacyCompletedScratch = {}
 
@@ -86,7 +86,7 @@ local function SampleCompletedSource(streamKey, currentSet, currentCount, ids, t
   -- Completed quests are only ever added (or all removed on a reset), so an
   -- unchanged count means an unchanged set; skip rebuilding thousands of IDs.
   if ids == nil then return currentSet, currentCount, false end
-  if #ids == currentCount and not forceFullCompare then return currentSet, currentCount, false end
+  if #ids == currentCount and forcedFullCompares == 0 then return currentSet, currentCount, false end
 
   ---@type table<number, boolean>
   local newSet = {}
@@ -140,7 +140,9 @@ local function SampleCompleted(capture)
   currentLegacySet, currentLegacyCount, legacyChanged = SampleCompletedSource(
     "GetQuestsCompleted", currentLegacySet, currentLegacyCount, GetLegacyCompletedQuestIds(), t, tp
   )
-  forceFullCompare = false
+  if forcedFullCompares > 0 then
+    forcedFullCompares = forcedFullCompares - 1
+  end
   return modernChanged or legacyChanged
 end
 
@@ -165,6 +167,7 @@ Core.RegisterTracker({
     currentLegacySet = {}
     currentModernCount = 0
     currentLegacyCount = 0
+    forcedFullCompares = 0
 
     local modernIds = GetModernCompletedQuestIds()
     if modernIds then
@@ -187,7 +190,8 @@ Core.RegisterTracker({
   ---@param event string
   OnEvent = function(capture, event)
     if event == "QUEST_TURNED_IN" or event == "PLAYER_ENTERING_WORLD" then
-      forceFullCompare = true
+      -- Cover the immediate sample, a next-frame sample and every follow-up
+      forcedFullCompares = 2 + #Core.RESAMPLE_DELAYS
     end
     RequestSample(capture)
   end,
