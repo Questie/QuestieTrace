@@ -56,7 +56,7 @@ function vote(
     entityId: 1,
     value: { playerFaction, gains, spillover },
     confidence: "high",
-    provenance: { session: `s${sessionKey}`, sessionKey, t: 0 },
+    provenance: { session: `s${sessionKey}`, sessionKey: `k${sessionKey}`, t: 0 },
   };
 }
 

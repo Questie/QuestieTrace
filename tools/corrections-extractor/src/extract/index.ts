@@ -190,6 +190,9 @@ export interface ExtractAccumulator {
 
 /** One session's observations, ready to be added to an accumulator (see observeSession). */
 export interface StagedSession {
+  /** Stable key of the session (core/trace-data/session-key.ts); a per-run "#<n>" is used when unknown. */
+  sessionKey?: string;
+  contributorId?: string;
   sessionTime: number | null;
   scalars: [ScalarObserverKey, Observation<unknown>[]][];
   observations: [ObserverKey, Observation<unknown>[]][];
@@ -236,11 +239,13 @@ export function observeSession(session: SessionRecord, maxIds: Partial<typeof MA
 export function addStagedSessions(acc: ExtractAccumulator, staged: StagedSession[]): void {
   for (const session of staged) {
     acc.sessionCount++;
-    const sessionKey = acc.sessionCount;
+    const sessionKey = session.sessionKey ?? `#${acc.sessionCount}`;
+    const { contributorId } = session;
     for (const [key, observations] of session.scalars) {
       for (const observation of observations) {
         observation.provenance.sessionKey = sessionKey;
         observation.provenance.sessionTime = session.sessionTime;
+        if (contributorId !== undefined) observation.provenance.contributorId = contributorId;
       }
       addToScalarSummary(acc.scalars[key] as ScalarSummary<unknown>, observations);
     }
@@ -248,6 +253,7 @@ export function addStagedSessions(acc: ExtractAccumulator, staged: StagedSession
       for (const observation of observations) {
         observation.provenance.sessionKey = sessionKey;
         observation.provenance.sessionTime = session.sessionTime;
+        if (contributorId !== undefined) observation.provenance.contributorId = contributorId;
       }
       acc.observations.add(key, observations);
     }

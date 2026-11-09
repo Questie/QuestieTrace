@@ -74,7 +74,7 @@ describe("scalar summary", () => {
 });
 
 function sessionObs<T>(entityId: number, value: T, sessionKey: number, sessionTime: number | null): Observation<T> {
-  return { entityId, value, confidence: "high", provenance: { session: `s${sessionKey}`, sessionKey, sessionTime, t: 0 } };
+  return { entityId, value, confidence: "high", provenance: { session: `s${sessionKey}`, sessionKey: `k${sessionKey}`, sessionTime, t: 0 } };
 }
 
 describe("aggregateNewestScalarSummary", () => {

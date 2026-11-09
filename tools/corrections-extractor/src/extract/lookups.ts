@@ -60,6 +60,9 @@ function addLocalized(byLocale: Map<string, ScalarSummary<unknown>>, observation
 
 /** One session's lookup observations, ready to be added to an accumulator. */
 export interface StagedLookupSession {
+  /** Stable key of the session (core/trace-data/session-key.ts); a per-run "#<n>" is used when unknown. */
+  sessionKey?: string;
+  contributorId?: string;
   sessionTime: number | null;
   observations: [ObserverKey, Observation<Localized<unknown>>[]][];
 }
@@ -83,10 +86,12 @@ export function foldLookupSessions(acc: LookupAccumulator, sessions: SessionReco
 export function addStagedLookupSessions(acc: LookupAccumulator, staged: StagedLookupSession[]): void {
   for (const session of staged) {
     acc.sessionCount++;
+    const sessionKey = session.sessionKey ?? `#${acc.sessionCount}`;
     for (const [key, observations] of session.observations) {
       for (const observation of observations) {
-        observation.provenance.sessionKey = acc.sessionCount;
+        observation.provenance.sessionKey = sessionKey;
         observation.provenance.sessionTime = session.sessionTime;
+        if (session.contributorId !== undefined) observation.provenance.contributorId = session.contributorId;
       }
       addLocalized(acc.summaries[key], observations);
     }

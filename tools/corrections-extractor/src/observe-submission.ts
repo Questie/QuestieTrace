@@ -42,7 +42,10 @@ export function observeSubmission({ path, maxIds }: ObserveRequest, usedKeys: Re
     if (key !== undefined && (usedKeys.has(key) || seen.has(key))) return { key };
     if (key !== undefined) seen.add(key);
     try {
-      return { key, extract: observeSession(session, maxIds), lookup: observeLookupSession(session) };
+      const extract = observeSession(session, maxIds);
+      const lookup = observeLookupSession(session);
+      const identity = { sessionKey: key, contributorId: submission.contributorId || undefined };
+      return { key, extract: extract && { ...extract, ...identity }, lookup: lookup && { ...lookup, ...identity } };
     } catch (e) {
       // Only the error's name: its message can quote trace data.
       return { key, error: e instanceof Error ? e.name : typeof e };
