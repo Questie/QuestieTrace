@@ -67,6 +67,15 @@ describe("observeQuestFactions", () => {
     ]);
   });
 
+  it("should use the first known faction for sightings before the first faction sample", () => {
+    const session = makeSession({
+      UnitFactionGroup: { player: [apiSample(5, 5, HORDE)] },
+      QuestLog: [apiSample(0, 0, [99001])],
+    });
+
+    expect(observeQuestFactions(session).map((obs) => [obs.entityId, obs.value])).toEqual([[99001, "H"]]);
+  });
+
   it("should record each quest only once per session", () => {
     const session = makeSession(
       { UnitFactionGroup: { player: [apiSample(0, 0, ALLIANCE)] }, GetQuestID: [apiSample(2, 2, 99001)] },
