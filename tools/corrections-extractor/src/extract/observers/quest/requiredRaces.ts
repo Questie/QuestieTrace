@@ -45,13 +45,19 @@ function acceptedQuestId(args: unknown): number | null {
   return typeof value === "number" && value > 0 ? value : null;
 }
 
-/** The player's faction for every quest the session saw: accepted, in a quest frame or in a gossip list. */
+/** The player's faction for every quest the session saw: accepted, in the quest log, in a quest frame or in a gossip list. */
 export const observeQuestFactions: FieldObserver<Faction> = (session) => {
   const sightings: { questID: number; t: number }[] = questEncounters(session);
   for (const event of session.events) {
     if (event.e !== "QUEST_ACCEPTED") continue;
     const questID = acceptedQuestId(event.a);
     if (questID !== null) sightings.push({ questID, t: event.t });
+  }
+  for (const entry of getStream(session, "QuestLog") ?? []) {
+    if (!Array.isArray(entry.v)) continue;
+    for (const questID of entry.v) {
+      if (typeof questID === "number" && questID > 0) sightings.push({ questID, t: entry.t });
+    }
   }
   for (const name of ["C_GossipInfo.GetAvailableQuests", "C_GossipInfo.GetActiveQuests"]) {
     for (const entry of getStream(session, name) ?? []) {

@@ -55,6 +55,18 @@ describe("observeQuestFactions", () => {
     ]);
   });
 
+  it("should record quests that are in the quest log", () => {
+    const session = makeSession({
+      UnitFactionGroup: { player: [apiSample(0, 0, HORDE)] },
+      QuestLog: [apiSample(0, 0, [99001, 99002]), apiSample(5, 5, [99002])],
+    });
+
+    expect(observeQuestFactions(session).map((obs) => [obs.entityId, obs.value])).toEqual([
+      [99001, "H"],
+      [99002, "H"],
+    ]);
+  });
+
   it("should record each quest only once per session", () => {
     const session = makeSession(
       { UnitFactionGroup: { player: [apiSample(0, 0, ALLIANCE)] }, GetQuestID: [apiSample(2, 2, 99001)] },
@@ -148,9 +160,9 @@ describe("mergeQuestFactions", () => {
   it("should collect the factions of all observations", () => {
     const observations: Observation<"A" | "H">[] = [
       { entityId: 1, value: "A", confidence: "high", provenance: { session: "s", t: 0 } },
-      { entityId: 1, value: "A", confidence: "high", provenance: { session: "s", t: 1 } },
+      { entityId: 1, value: "H", confidence: "high", provenance: { session: "s", t: 1 } },
     ];
 
-    expect(mergeQuestFactions(observations)).toEqual(new Set(["A"]));
+    expect(mergeQuestFactions(observations)).toEqual(new Set(["A", "H"]));
   });
 });
