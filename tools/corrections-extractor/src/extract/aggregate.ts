@@ -34,7 +34,10 @@ export interface ScalarGroup<T> {
   confidence: Confidence;
   count: number;
   latestT: number;
-  /** Distinct sessions (by provenance.sessionKey) with a server time that observed this value. */
+  /**
+   * Distinct sessions (by provenance.sessionKey) with a server time that observed this value.
+   * Every folded session has its own key ("#<n>" when it has none), so this is a distinct count.
+   */
   timedSessionCount: number;
   lastSessionKey: string | undefined;
   /** Newest provenance.sessionTime among those sessions, null when none had one. */
@@ -58,7 +61,10 @@ export function addScalarGroup<T>(summary: ScalarSummary<T>, entityId: number, g
     groups = new Map();
     summary.set(entityId, groups);
   }
-  groups.set(JSON.stringify(group.value), { ...group, lastSessionKey: undefined });
+  const key = JSON.stringify(group.value);
+  // Two groups with one key would mean the summarizing grouped values differently than JSON.stringify.
+  if (groups.has(key)) throw new Error(`Value ${key} of entity ${entityId} was summarized twice`);
+  groups.set(key, { ...group, lastSessionKey: undefined });
 }
 
 export function addToScalarSummary<T>(summary: ScalarSummary<T>, observations: Observation<T>[]): void {

@@ -287,15 +287,16 @@ export class ObservedStore {
 
     // A slice of submissions at a time: sorting every observation at once spills tens of GB.
     // Observation files are sorted by submission, so each slice only reads its own row groups.
-    const sorted = entries.map(([key]) => key).sort().reverse();
-    for (let start = 0; start < sorted.length; start += slice) {
-      const newest = sorted[start];
-      const oldest = sorted[Math.min(start + slice, sorted.length) - 1];
-      const range = `BETWEEN ${sqlString(oldest)} AND ${sqlString(newest)}`;
+    // Slices are rank ranges (fold order). The key range of a slice only lets DuckDB skip row
+    // groups; the join with the slice's sessions decides which observations belong to it.
+    for (let start = 0; start < entries.length; start += slice) {
+      const ranks = `BETWEEN ${start} AND ${start + slice - 1}`;
+      const bounds = (await c.runAndReadAll(`SELECT min(submission) AS oldest, max(submission) AS newest FROM live WHERE rank ${ranks}`)).getRowObjectsJS()[0];
+      const range = `BETWEEN ${sqlString(bounds.oldest as string)} AND ${sqlString(bounds.newest as string)}`;
       const result = await c.stream(`
         SELECT w.submission, w.idx, w.session_key, w.contributor, w.session_time, w.has_extract, w.has_lookup, w.error,
                o.kind, o.field, o.entity, o.confidence, o.session_name, o.t, o.value, o.extra
-        FROM (SELECT * FROM winners WHERE submission ${range}) w
+        FROM (SELECT * FROM winners WHERE rank ${ranks}) w
         LEFT JOIN (SELECT * FROM read_parquet(${this.files("observations")}) WHERE submission ${range} ${kindFilter}) o
           ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
         ORDER BY w.rank, w.idx, o.kind, o.pos, o.seq`);
@@ -334,7 +335,7 @@ export class ObservedStore {
           });
         }
       }
-      onProgress?.(Math.min(start + slice, sorted.length), sorted.length);
+      onProgress?.(Math.min(start + slice, entries.length), entries.length);
     }
     flush();
     return { duplicateCopies };
@@ -351,7 +352,7 @@ export class ObservedStore {
     const result = await this.connection.stream(`
       WITH rows AS (
         SELECT o.kind, o.field, o.entity, o.confidence, o.t, w.session_time,
-               w.rank::BIGINT * 1000000 + w.idx AS session,
+               [w.rank, w.idx] AS session,
                [w.rank, w.idx, o.seq] AS seen,
                CASE WHEN o.kind = ${KIND_LOOKUP} THEN json_extract_string(o.value, '$.locale') END AS locale,
                CASE WHEN o.kind = ${KIND_LOOKUP} THEN json_extract(o.value, '$.value')::VARCHAR ELSE o.value END AS value

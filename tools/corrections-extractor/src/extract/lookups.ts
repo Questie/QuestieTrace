@@ -1,7 +1,7 @@
 // Sessions -> per-locale Questie l10n lookup modules (lookup<Entity>/<locale>.lua).
 //
 // Uses the same Forever-session and new-ID filtering as the corrections export
-// (see index.ts). enUS is skipped: its names already go into forever*Traces.lua.
+// (see observe.ts). enUS is skipped: its names already go into forever*Traces.lua.
 
 import type { SessionRecord } from "../core/types";
 import { addScalarGroup, addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarGroup, type ScalarSummary } from "./aggregate";
@@ -35,7 +35,8 @@ export function createLookupAccumulator(): LookupAccumulator {
 }
 
 /** Adds a summarized value group of a lookup field under `locale` (see addScalarGroup). */
-export function addLookupScalarGroup(acc: LookupAccumulator, field: string, locale: string, entityId: number, group: Omit<ScalarGroup<unknown>, "lastSessionKey">): void {
+export function addLookupScalarGroup(acc: LookupAccumulator, field: string, locale: string | null, entityId: number, group: Omit<ScalarGroup<unknown>, "lastSessionKey">): void {
+  if (typeof locale !== "string") throw new Error(`Lookup ${field} of entity ${entityId} has no locale`);
   const byLocale = acc.summaries[field as ObserverKey] as Map<string, ScalarSummary<unknown>> | undefined;
   if (!byLocale) throw new Error(`Unknown lookup field ${field}`);
   if (locale === SKIPPED_LOCALE) return;
