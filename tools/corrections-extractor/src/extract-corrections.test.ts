@@ -207,7 +207,7 @@ describe("workersFromEnv", () => {
   });
 
   it("should reject an EXTRACT_WORKERS that is not a whole number of at least 0", () => {
-    for (const value of ["abc", "-1", "1.5", "", "4\n", "9".repeat(400)]) {
+    for (const value of ["abc", "-1", "1.5", "", "4\n", "9".repeat(400), "9007199254740993"]) {
       expect(() => workersFromEnv({ EXTRACT_WORKERS: value })).toThrow("EXTRACT_WORKERS");
     }
   });
