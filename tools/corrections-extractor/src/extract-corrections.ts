@@ -55,8 +55,11 @@ export interface ExtractOptions {
 export function workersFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
   const value = env.EXTRACT_WORKERS;
   if (value === undefined) return undefined;
-  if (!/^\d+$/.test(value)) throw new Error(`EXTRACT_WORKERS must be a whole number of at least 0 (got "${value}")`);
-  return Number(value);
+  const workers = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(workers)) {
+    throw new Error(`EXTRACT_WORKERS must be a whole number of at least 0 (got "${value}")`);
+  }
+  return workers;
 }
 
 export async function extractCorrections(
