@@ -34,6 +34,19 @@ npm run extract                                       # from a local ../trace-da
 
 Changing any observer code empties the store, and the next run observes everything again. Develop observers on a sample first (see [ADR 0004](adr/0004-develop-observers-on-a-sample.md)).
 
+## Adding an observer
+
+1. Write a test first, next to the observer: `src/extract/observers/<entity>/<field>.test.ts`.
+2. Add the observer, one file per field. It reads one session and returns `Observation[]`, and never merges.
+3. Register it in `src/extract/observe.ts`:
+   - `SCALAR_OBSERVERS` when one value per entity wins by count
+   - `OBSERVERS` with a merge function otherwise. Translations go in `observe-lookups.ts`.
+4. Merge and emit in `src/extract/index.ts` (`finalize`) and `src/extract/emit/<entity>.ts`.
+5. Check on the sample: `EXTRACT_SAMPLE=5 npm run extract`, output in `output/sample-5/`.
+6. Run on all data once it's done. The changed observer code rebuilds the store automatically.
+
+Each person running full runs on one machine should use their own `TRACE_STORE_DIR`.
+
 ## Querying observations
 
 ```sh
