@@ -17,7 +17,7 @@ function vote(
     entityId,
     value: { faction, friendly, sessionTime },
     confidence: "high",
-    provenance: { session: `s${sessionKey}`, sessionKey, t: 0 },
+    provenance: { session: `s${sessionKey}`, sessionKey: `k${sessionKey}`, t: 0 },
   };
 }
 

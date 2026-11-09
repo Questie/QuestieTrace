@@ -21,7 +21,7 @@ function reactions(faction: "A" | "H", friendly: boolean, sessions: number, firs
     entityId: 500,
     value: { faction, friendly, sessionTime: null },
     confidence: "high" as const,
-    provenance: { session: "s", sessionKey: firstSessionKey + index, t: 0 },
+    provenance: { session: "s", sessionKey: `k${firstSessionKey + index}`, t: 0 },
   }));
 }
 

@@ -36,7 +36,7 @@ interface ScalarGroup<T> {
   latestT: number;
   /** Distinct sessions (by provenance.sessionKey) with a server time that observed this value. */
   timedSessionCount: number;
-  lastSessionKey: number | undefined;
+  lastSessionKey: string | undefined;
   /** Newest provenance.sessionTime among those sessions, null when none had one. */
   newestSessionTime: number | null;
 }

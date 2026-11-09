@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../core/types";
-import { createAccumulator, extractAll, finalize, foldSessions } from "./index";
+import { addStagedSessions, createAccumulator, extractAll, finalize, foldSessions, type StagedSession } from "./index";
 import { apiSample, creatureGuid, makeSession, traceEvent } from "../test/fixtures";
 
 /** Creates a session with a Forever interfaceVersion (16001) */
@@ -834,5 +834,30 @@ describe("extractAll (quest-giver correlation)", () => {
     expect(output.questFixes).toContain(`[questKeys.${questField}] = {{276171,276172}}`);
     expect(output.npcFixes).toMatch(new RegExp(`\\[276171\\] = \\{[^}]*\\[npcKeys\\.${npcField}\\] = \\{99196\\}`));
     expect(output.npcFixes).toMatch(new RegExp(`\\[276172\\] = \\{[^}]*\\[npcKeys\\.${npcField}\\] = \\{99196\\}`));
+  });
+});
+
+describe("addStagedSessions provenance", () => {
+  function staged(identity: Pick<StagedSession, "sessionKey" | "contributorId">): StagedSession {
+    return {
+      ...identity,
+      sessionTime: 100,
+      scalars: [],
+      observations: [["npcLevel", [{ entityId: 1, value: 5, confidence: "high", provenance: { session: "s", t: 0 } }]]],
+    };
+  }
+
+  it("should tag observations with the stable session key and the contributor", () => {
+    const acc = createAccumulator();
+    addStagedSessions(acc, [staged({ sessionKey: "abc", contributorId: "c1" })]);
+
+    expect(acc.observations.all("npcLevel")[0].provenance).toMatchObject({ sessionKey: "abc", contributorId: "c1", sessionTime: 100 });
+  });
+
+  it("should fall back to a per-run key when the session has no stable key", () => {
+    const acc = createAccumulator();
+    addStagedSessions(acc, [staged({}), staged({})]);
+
+    expect(acc.observations.all("npcLevel").map((obs) => obs.provenance.sessionKey)).toEqual(["#1", "#2"]);
   });
 });

@@ -9,8 +9,13 @@ export type Confidence = "high" | "medium" | "low";
 
 export interface Provenance {
   session: string;
-  /** Unique per folded session (names may repeat or be absent); set by foldSessions. */
-  sessionKey?: number;
+  /**
+   * Unique per folded session (names may repeat or be absent); set by foldSessions. The stable
+   * key of core/trace-data/session-key.ts when known, else "#<n>" for the n-th folded session.
+   */
+  sessionKey?: string;
+  /** Pseudonymous id of the browser that submitted the session; set by foldSessions when known. */
+  contributorId?: string;
   /** First GetServerTime() of the session, used to order sessions; set by foldSessions, null when not recorded. */
   sessionTime?: number | null;
   /** Time (seconds) within the session at which this value was observed. */

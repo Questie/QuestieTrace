@@ -4,7 +4,7 @@ import { apiSample, creatureGuid, makeSession, traceEvent } from "../../../test/
 import { mergeLevelRange, observeLevel } from "./level";
 
 function sighting(sessionKey: number, level: number): Observation<number> {
-  return { entityId: 1, value: level, confidence: "high", provenance: { session: `s${sessionKey}`, sessionKey, t: 0 } };
+  return { entityId: 1, value: level, confidence: "high", provenance: { session: `s${sessionKey}`, sessionKey: `k${sessionKey}`, t: 0 } };
 }
 
 describe("observeLevel", () => {

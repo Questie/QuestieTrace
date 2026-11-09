@@ -4,7 +4,7 @@ import { apiSample, creatureGuid, makeSession, traceEvent } from "../../../test/
 import { mergeRank, observeRank } from "./rank";
 
 function vote(sessionKey: number, rank: number): Observation<number> {
-  return { entityId: 1, value: rank, confidence: "high", provenance: { session: `s${sessionKey}`, sessionKey, t: 0 } };
+  return { entityId: 1, value: rank, confidence: "high", provenance: { session: `s${sessionKey}`, sessionKey: `k${sessionKey}`, t: 0 } };
 }
 
 describe("observeRank", () => {
