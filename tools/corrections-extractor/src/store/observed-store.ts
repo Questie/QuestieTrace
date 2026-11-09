@@ -27,7 +27,7 @@ import type { Confidence, Observation } from "../extract/observation";
 import { SKIPPED_LOCALE } from "../extract/observe-lookups";
 import type { ObservedSubmission } from "../observe-submission";
 
-const FORMAT_VERSION = 3;
+const FORMAT_VERSION = 4;
 
 export interface ManifestEntry {
   batch: number;
@@ -72,6 +72,12 @@ export interface SummarizedGroup {
   entityId: number;
   group: Omit<ScalarGroup<unknown>, "lastSessionKey">;
 }
+
+/**
+ * Session names are not stored: players can name sessions freely. Replayed observations carry
+ * the session key as their `provenance.session` instead; merges use `provenance.sessionKey`.
+ */
+const UNNAMED_SESSION = "(unnamed session)";
 
 /** Submissions replayed per query. */
 const REPLAY_SLICE = 2000;
@@ -119,6 +125,9 @@ export class ObservedStore {
     if (!manifest || manifest.observerVersion !== observerVersion || manifest.formatVersion !== FORMAT_VERSION) {
       if (manifest) log("The observer code or store format changed: observing every submission again");
       rmSync(join(dir, "batches"), { recursive: true, force: true });
+      // They would point at batches that no longer exist, or at new ones with the same names.
+      rmSync(join(dir, "sessions.parquet"), { force: true });
+      rmSync(join(dir, "views.sql"), { force: true });
       manifest = { formatVersion: FORMAT_VERSION, observerVersion, nextBatch: 0, submissions: {} };
       writeManifest(dir, manifest);
     }
@@ -181,7 +190,7 @@ export class ObservedStore {
     const batch = this.manifest.nextBatch;
     const c = this.connection;
     await c.run(`CREATE OR REPLACE TEMP TABLE sessions (submission VARCHAR, batch INTEGER, idx INTEGER, session_key VARCHAR, duplicate BOOLEAN, contributor VARCHAR, session_time DOUBLE, interface_version INTEGER, build INTEGER, locale VARCHAR, has_extract BOOLEAN, has_lookup BOOLEAN, error VARCHAR)`);
-    await c.run(`CREATE OR REPLACE TEMP TABLE observations (submission VARCHAR, batch INTEGER, idx INTEGER, kind VARCHAR, pos SMALLINT, field VARCHAR, seq INTEGER, entity INTEGER, locale VARCHAR, confidence VARCHAR, session_name VARCHAR, t DOUBLE, value VARCHAR, extra VARCHAR)`);
+    await c.run(`CREATE OR REPLACE TEMP TABLE observations (submission VARCHAR, batch INTEGER, idx INTEGER, kind VARCHAR, pos SMALLINT, field VARCHAR, seq INTEGER, entity INTEGER, locale VARCHAR, confidence VARCHAR, t DOUBLE, value VARCHAR, extra VARCHAR)`);
     const sessions = await c.createAppender("sessions");
     try {
       const observations = await c.createAppender("observations");
@@ -202,7 +211,6 @@ export class ObservedStore {
               observations.appendInteger(observation.entityId);
               appendNullable(observations, typeof localized?.locale === "string" ? localized.locale : null);
               observations.appendVarchar(observation.confidence);
-              appendNullable(observations, observation.provenance.session);
               appendNullable(observations, observation.provenance.t);
               observations.appendVarchar(JSON.stringify(localized ? localized.value : observation.value) ?? "null");
               appendNullable(observations, extraOf(observation));
@@ -285,7 +293,7 @@ export class ObservedStore {
     const duplicateCopies = Number(counts.getRowObjectsJS()[0].duplicates);
     const kindFilter = customOnly ? "AND kind = 'custom'" : "";
 
-    let current: { submission: string; idx: number; session: ReplayedSession; fields: Map<string, Observation<unknown>[]>[] } | undefined;
+    let current: { submission: string; idx: number; label: string; session: ReplayedSession; fields: Map<string, Observation<unknown>[]>[] } | undefined;
     const flush = () => {
       if (!current) return;
       const [scalars, observations, lookups] = current.fields;
@@ -308,7 +316,7 @@ export class ObservedStore {
       const range = `BETWEEN ${sqlString(bounds.oldest as string)} AND ${sqlString(bounds.newest as string)}`;
       const result = await c.stream(`
         SELECT w.submission, w.idx, w.session_key, w.contributor, w.session_time, w.has_extract, w.has_lookup, w.error,
-               o.kind, o.field, o.entity, o.locale, o.confidence, o.session_name, o.t, o.value, o.extra
+               o.kind, o.field, o.entity, o.locale, o.confidence, o.t, o.value, o.extra
         FROM (SELECT * FROM winners WHERE rank ${ranks}) w
         LEFT JOIN (SELECT * FROM read_parquet(${this.files("observations")}) WHERE submission ${range} ${kindFilter}) o
           ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
@@ -328,7 +336,7 @@ export class ObservedStore {
             if (row.error !== null) session.error = row.error as string;
             if (row.has_extract) session.extract = { ...identity, sessionTime, scalars: [], observations: [] };
             if (row.has_lookup) session.lookup = { ...identity, sessionTime, observations: [] };
-            current = { submission, idx, session, fields: KINDS.map(() => new Map()) };
+            current = { submission, idx, label: (row.session_key as string | null) ?? UNNAMED_SESSION, session, fields: KINDS.map(() => new Map()) };
           }
           if (row.kind === null) continue;
           const kind = row.kind as Kind;
@@ -346,7 +354,7 @@ export class ObservedStore {
             entityId: row.entity as number,
             value: kind === "lookup" ? { locale: row.locale, value } : value,
             confidence: row.confidence as Confidence,
-            provenance: { session: row.session_name as string, t: row.t as number, ...extra.p },
+            provenance: { session: current.label, t: row.t as number, ...extra.p },
           });
         }
       }
