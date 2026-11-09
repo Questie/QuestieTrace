@@ -147,7 +147,7 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
     log("Folding stored observations");
     // Scalar and lookup fields only need per-value counts: DuckDB sums them up, the rest is replayed.
     await store.scalarGroups(({ lookup, field, locale, entityId, group }) => {
-      if (lookup) addLookupScalarGroup(lookupAcc, field, locale as string, entityId, group);
+      if (lookup) addLookupScalarGroup(lookupAcc, field, locale, entityId, group);
       else addStagedScalarGroup(acc, field, entityId, group);
     });
     const { duplicateCopies } = await store.replay(

@@ -205,10 +205,12 @@ describe("observerVersion", () => {
       const file = stack.pop()!;
       if (seen.has(file)) continue;
       seen.add(file);
-      for (const [, specifier] of readFileSync(join(srcDir, file), "utf8").matchAll(/from\s+["'](\.[^"']+)["']/g)) {
-        const base = join(dirname(file), specifier);
+      const source = readFileSync(join(srcDir, file), "utf8");
+      for (const [, specifier] of source.matchAll(/(?:from|import|require\()\s*\(?\s*["'](\.[^"']+)["']/g)) {
+        const base = join(dirname(file), specifier.replace(/\.js$/, ""));
         const resolved = [`${base}.ts`, join(base, "index.ts")].find((candidate) => existsSync(join(srcDir, candidate)));
-        if (resolved) stack.push(resolved);
+        if (!resolved) throw new Error(`${file} imports ${specifier}, which this test cannot resolve`);
+        stack.push(resolved);
       }
     }
 

@@ -11,5 +11,6 @@ Stored observations are only valid for the code that made them. A forgotten manu
 ## Consequences
 - No stale observations, and nothing to remember.
 - Merge and emit code (`extract/index.ts`, `lookups.ts`, `emit/`, `schema/`) can change without a rebuild.
-- Merge functions that live next to their observers (`observers/**/…Merge`) do force a full run. That's safe, but costs time.
+- Merge functions inside `extract/observers/` do force a full run. That's safe, but costs time.
+- How the store writes observations (`observed-store.ts`) and npm dependencies used by observers are not hashed. Bump `FORMAT_VERSION` when changing them.
 - Developing observers against the full data is slow, see [0004](0004-develop-observers-on-a-sample.md).

@@ -2,8 +2,9 @@
 // version; when the code changes, they are dropped and every submission is observed again.
 //
 // Hashes the sources the observers run (and the MAX_IDS they filter by, in extract/observe.ts).
-// This includes code that only merges (merge functions live next to their observers), which
-// costs a needless full run but never leaves stale observations.
+// Merge functions inside extract/observers/ are hashed too, which costs a needless full run but
+// never leaves stale observations; index.ts, lookups.ts, emit/ and schema/ are not.
+// How the store writes observations is versioned by hand: FORMAT_VERSION in observed-store.ts.
 
 import { createHash } from "crypto";
 import { readdirSync, readFileSync, statSync } from "fs";
