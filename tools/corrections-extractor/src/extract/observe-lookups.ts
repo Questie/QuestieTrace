@@ -12,6 +12,9 @@ import { observeLocalizedName as observeObjectName } from "./observers/object/na
 import { observeLocalizedName as observeQuestName, observeLocalizedObjectivesText } from "./observers/quest";
 import { sessionServerTime } from "./probes";
 
+/** Lookups are translations: enUS names already go into forever*Traces.lua, so enUS is never exported (or stored). */
+export const SKIPPED_LOCALE = "enUS";
+
 export const LOOKUP_OBSERVERS = {
   npcName: observeNpcName,
   questName: observeQuestName,

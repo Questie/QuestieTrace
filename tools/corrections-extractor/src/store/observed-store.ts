@@ -6,7 +6,9 @@
 //                                     key, its batch, load errors and counts
 //   batches/<n>.sessions.parquet      one row per session copy, including the copies not
 //                                     observed because a newer one was used (`duplicate`)
-//   batches/<n>.observations.parquet  one row per observation of the observed copies
+//   batches/<n>.observations.parquet  one row per observation of the observed copies (enUS
+//                                     lookup observations are left out: lookups skip enUS)
+//   sessions.parquet, views.sql       written by writeQueryViews for ad-hoc SQL
 //
 // Rows are never rewritten. A submission that disappears from the source is dropped from the
 // manifest only, and only the batches and submissions the manifest lists are read. When the
@@ -16,15 +18,16 @@
 // their sessions in export order, and of each session (by key) only the first copy met.
 
 import { DuckDBInstance, type DuckDBAppender, type DuckDBConnection } from "@duckdb/node-api";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { StagedSession } from "../extract";
 import type { StagedLookupSession } from "../extract/lookups";
 import type { ScalarGroup } from "../extract/aggregate";
 import type { Confidence, Observation } from "../extract/observation";
+import { SKIPPED_LOCALE } from "../extract/observe-lookups";
 import type { ObservedSubmission } from "../observe-submission";
 
-const FORMAT_VERSION = 2;
+const FORMAT_VERSION = 3;
 
 export interface ManifestEntry {
   batch: number;
@@ -70,21 +73,22 @@ export interface SummarizedGroup {
   group: Omit<ScalarGroup<unknown>, "lastSessionKey">;
 }
 
-const KINDS = 3;
 /** Submissions replayed per query. */
 const REPLAY_SLICE = 2000;
-const KIND_SCALAR = 0;
-const KIND_OBSERVATION = 1;
-const KIND_LOOKUP = 2;
+/** `kind` of an observation: a scalar field, a field with a custom merge, or a lookup (translation). */
+const KINDS = ["scalar", "custom", "lookup"] as const;
+type Kind = (typeof KINDS)[number];
 
 function sqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function appendNullable(appender: DuckDBAppender, value: string | number | null | undefined): void {
+function appendNullable(appender: DuckDBAppender, value: string | number | null | undefined, integer = false): void {
   if (value === null || value === undefined) appender.appendNull();
-  else if (typeof value === "number") appender.appendDouble(value);
-  else appender.appendVarchar(value);
+  else if (typeof value === "number") {
+    if (integer) appender.appendInteger(value);
+    else appender.appendDouble(value);
+  } else appender.appendVarchar(value);
 }
 
 /** What an observation holds beyond its columns (e.g. the spawn observers' `token`), as JSON; null when nothing. */
@@ -109,10 +113,11 @@ export class ObservedStore {
   ) {}
 
   /** Opens the store in `dir`, dropping its contents when they were made by another observer version. */
-  static async open(dir: string, observerVersion: string): Promise<ObservedStore> {
+  static async open(dir: string, observerVersion: string, log: (message: string) => void = () => undefined): Promise<ObservedStore> {
     mkdirSync(dir, { recursive: true });
-    let manifest = readManifest(dir);
+    let manifest = readManifest(dir, log);
     if (!manifest || manifest.observerVersion !== observerVersion || manifest.formatVersion !== FORMAT_VERSION) {
+      if (manifest) log("The observer code or store format changed: observing every submission again");
       rmSync(join(dir, "batches"), { recursive: true, force: true });
       manifest = { formatVersion: FORMAT_VERSION, observerVersion, nextBatch: 0, submissions: {} };
       writeManifest(dir, manifest);
@@ -120,6 +125,7 @@ export class ObservedStore {
     mkdirSync(join(dir, "batches"), { recursive: true });
     // Left behind by a run that was killed.
     rmSync(join(dir, ".tmp"), { recursive: true, force: true });
+    for (const name of readdirSync(join(dir, "batches"))) if (name.endsWith(".tmp")) rmSync(join(dir, "batches", name));
     const instance = await DuckDBInstance.create(":memory:", { temp_directory: join(dir, ".tmp"), memory_limit: "4GB", max_temp_directory_size: "20GB" });
     try {
       return new ObservedStore(dir, manifest, instance, await instance.connect());
@@ -174,27 +180,31 @@ export class ObservedStore {
     if (submissions.length === 0) return;
     const batch = this.manifest.nextBatch;
     const c = this.connection;
-    await c.run(`CREATE OR REPLACE TEMP TABLE sessions (submission VARCHAR, batch INTEGER, idx INTEGER, session_key VARCHAR, duplicate BOOLEAN, contributor VARCHAR, session_time DOUBLE, has_extract BOOLEAN, has_lookup BOOLEAN, error VARCHAR)`);
-    await c.run(`CREATE OR REPLACE TEMP TABLE observations (submission VARCHAR, batch INTEGER, idx INTEGER, kind TINYINT, pos SMALLINT, field VARCHAR, seq INTEGER, entity DOUBLE, confidence VARCHAR, session_name VARCHAR, t DOUBLE, value VARCHAR, extra VARCHAR)`);
+    await c.run(`CREATE OR REPLACE TEMP TABLE sessions (submission VARCHAR, batch INTEGER, idx INTEGER, session_key VARCHAR, duplicate BOOLEAN, contributor VARCHAR, session_time DOUBLE, interface_version INTEGER, build INTEGER, locale VARCHAR, has_extract BOOLEAN, has_lookup BOOLEAN, error VARCHAR)`);
+    await c.run(`CREATE OR REPLACE TEMP TABLE observations (submission VARCHAR, batch INTEGER, idx INTEGER, kind VARCHAR, pos SMALLINT, field VARCHAR, seq INTEGER, entity INTEGER, locale VARCHAR, confidence VARCHAR, session_name VARCHAR, t DOUBLE, value VARCHAR, extra VARCHAR)`);
     const sessions = await c.createAppender("sessions");
     try {
       const observations = await c.createAppender("observations");
       try {
-        const appendFields = (key: string, idx: number, kind: number, fields: [string, Observation<unknown>[]][]) => {
+        const appendFields = (key: string, idx: number, kind: Kind, fields: [string, Observation<unknown>[]][]) => {
           fields.forEach(([field, list], pos) => {
             list.forEach((observation, seq) => {
+              // Lookup values are {locale, value}: the locale gets its own column.
+              const localized = kind === "lookup" ? (observation.value as { locale?: unknown; value?: unknown }) : undefined;
+              if (localized?.locale === SKIPPED_LOCALE) return;
               observations.appendVarchar(key);
               observations.appendInteger(batch);
               observations.appendInteger(idx);
-              observations.appendTinyInt(kind);
+              observations.appendVarchar(kind);
               observations.appendSmallInt(pos);
               observations.appendVarchar(field);
               observations.appendInteger(seq);
-              observations.appendDouble(observation.entityId);
+              observations.appendInteger(observation.entityId);
+              appendNullable(observations, typeof localized?.locale === "string" ? localized.locale : null);
               observations.appendVarchar(observation.confidence);
               appendNullable(observations, observation.provenance.session);
               appendNullable(observations, observation.provenance.t);
-              observations.appendVarchar(JSON.stringify(observation.value) ?? "null");
+              observations.appendVarchar(JSON.stringify(localized ? localized.value : observation.value) ?? "null");
               appendNullable(observations, extraOf(observation));
               observations.endRow();
             });
@@ -211,13 +221,16 @@ export class ObservedStore {
             sessions.appendBoolean(session.duplicate === true);
             appendNullable(sessions, staged?.contributorId);
             appendNullable(sessions, staged?.sessionTime);
+            appendNullable(sessions, session.client?.interfaceVersion, true);
+            appendNullable(sessions, session.client?.build, true);
+            appendNullable(sessions, session.client?.locale);
             sessions.appendBoolean(session.extract !== undefined);
             sessions.appendBoolean(session.lookup !== undefined);
             appendNullable(sessions, session.error);
             sessions.endRow();
-            appendFields(key, idx, KIND_SCALAR, session.extract?.scalars ?? []);
-            appendFields(key, idx, KIND_OBSERVATION, session.extract?.observations ?? []);
-            appendFields(key, idx, KIND_LOOKUP, (session.lookup?.observations ?? []) as [string, Observation<unknown>[]][]);
+            appendFields(key, idx, "scalar", session.extract?.scalars ?? []);
+            appendFields(key, idx, "custom", session.extract?.observations ?? []);
+            appendFields(key, idx, "lookup", (session.lookup?.observations ?? []) as [string, Observation<unknown>[]][]);
           });
         }
       } finally {
@@ -270,7 +283,7 @@ export class ObservedStore {
     const counts = await c.runAndReadAll(`
       SELECT (SELECT count(*) FROM ${this.sessionsOf("live")} s WHERE NOT s.duplicate) - (SELECT count(*) FROM winners) AS duplicates`);
     const duplicateCopies = Number(counts.getRowObjectsJS()[0].duplicates);
-    const kindFilter = customOnly ? `AND kind = ${KIND_OBSERVATION}` : "";
+    const kindFilter = customOnly ? "AND kind = 'custom'" : "";
 
     let current: { submission: string; idx: number; session: ReplayedSession; fields: Map<string, Observation<unknown>[]>[] } | undefined;
     const flush = () => {
@@ -295,7 +308,7 @@ export class ObservedStore {
       const range = `BETWEEN ${sqlString(bounds.oldest as string)} AND ${sqlString(bounds.newest as string)}`;
       const result = await c.stream(`
         SELECT w.submission, w.idx, w.session_key, w.contributor, w.session_time, w.has_extract, w.has_lookup, w.error,
-               o.kind, o.field, o.entity, o.confidence, o.session_name, o.t, o.value, o.extra
+               o.kind, o.field, o.entity, o.locale, o.confidence, o.session_name, o.t, o.value, o.extra
         FROM (SELECT * FROM winners WHERE rank ${ranks}) w
         LEFT JOIN (SELECT * FROM read_parquet(${this.files("observations")}) WHERE submission ${range} ${kindFilter}) o
           ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
@@ -315,10 +328,11 @@ export class ObservedStore {
             if (row.error !== null) session.error = row.error as string;
             if (row.has_extract) session.extract = { ...identity, sessionTime, scalars: [], observations: [] };
             if (row.has_lookup) session.lookup = { ...identity, sessionTime, observations: [] };
-            current = { submission, idx, session, fields: Array.from({ length: KINDS }, () => new Map()) };
+            current = { submission, idx, session, fields: KINDS.map(() => new Map()) };
           }
           if (row.kind === null) continue;
-          const byField = current.fields[row.kind as number];
+          const kind = row.kind as Kind;
+          const byField = current.fields[KINDS.indexOf(kind)];
           const field = row.field as string;
           let list = byField.get(field);
           if (!list) {
@@ -326,10 +340,11 @@ export class ObservedStore {
             byField.set(field, list);
           }
           const extra = row.extra === null ? {} : (JSON.parse(row.extra as string) as { o?: object; p?: object });
+          const value: unknown = JSON.parse(row.value as string);
           list.push({
             ...extra.o,
             entityId: row.entity as number,
-            value: JSON.parse(row.value as string),
+            value: kind === "lookup" ? { locale: row.locale, value } : value,
             confidence: row.confidence as Confidence,
             provenance: { session: row.session_name as string, t: row.t as number, ...extra.p },
           });
@@ -354,11 +369,10 @@ export class ObservedStore {
         SELECT o.kind, o.field, o.entity, o.confidence, o.t, w.session_time,
                [w.rank, w.idx] AS session,
                [w.rank, w.idx, o.seq] AS seen,
-               CASE WHEN o.kind = ${KIND_LOOKUP} THEN json_extract_string(o.value, '$.locale') END AS locale,
-               CASE WHEN o.kind = ${KIND_LOOKUP} THEN json_extract(o.value, '$.value')::VARCHAR ELSE o.value END AS value
+               o.locale, o.value
         FROM read_parquet(${this.files("observations")}) o
         JOIN winners w ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
-        WHERE o.kind IN (${KIND_SCALAR}, ${KIND_LOOKUP})
+        WHERE o.kind IN ('scalar', 'lookup')
       ), groups AS (
         SELECT kind, field, locale, entity, value,
                max(CASE confidence WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) AS confidence,
@@ -378,7 +392,7 @@ export class ObservedStore {
     for await (const rows of result.yieldRowObjectJs()) {
       for (const row of rows) {
         onGroup({
-          lookup: row.kind === KIND_LOOKUP,
+          lookup: row.kind === "lookup",
           field: row.field as string,
           locale: row.locale as string | null,
           entityId: row.entity as number,
@@ -393,6 +407,35 @@ export class ObservedStore {
         });
       }
     }
+  }
+
+  /**
+   * Writes sessions.parquet (the used sessions, see prepareWinners) and views.sql, so the store
+   * can be queried without filtering stale rows: `duckdb -init views.sql` in the store directory.
+   */
+  async writeQueryViews(): Promise<void> {
+    if (this.entries().length === 0) return;
+    await this.prepareWinners();
+    const path = join(this.dir, "sessions.parquet");
+    await this.connection.run(`
+      COPY (SELECT submission, batch, idx, rank, session_key, contributor, session_time, interface_version, build, locale
+            FROM winners ORDER BY rank, idx)
+      TO ${sqlString(`${path}.tmp`)} (FORMAT parquet, COMPRESSION zstd)`);
+    renameSync(`${path}.tmp`, path);
+    const batches = [...new Set(this.entries().map(([, entry]) => entry.batch))].sort((a, b) => a - b);
+    const files = batches.map((batch) => sqlString(`batches/${batch}.observations.parquet`)).join(", ");
+    writeFileSync(
+      join(this.dir, "views.sql"),
+      `-- Generated by the corrections-extractor. Run from this directory: duckdb -init views.sql
+-- sessions: one row per used session (newest copy), rank 0 being the newest submission.
+-- observations: their observations, with the session's columns joined in.
+CREATE OR REPLACE VIEW sessions AS SELECT * FROM 'sessions.parquet';
+CREATE OR REPLACE VIEW observations AS
+SELECT s.session_key, s.contributor, s.session_time, s.interface_version, s.build, s.locale AS client_locale,
+       o.kind, o.field, o.entity, o.locale, o.value, o.confidence, o.t, o.extra, o.submission, o.idx
+FROM read_parquet([${files}]) o JOIN sessions s USING (submission, batch, idx);
+`,
+    );
   }
 
   /** Table `winners`: the first copy met of each session (every copy of sessions without a key), with its rank. */
@@ -442,13 +485,14 @@ export class ObservedStore {
   }
 }
 
-function readManifest(dir: string): Manifest | undefined {
+function readManifest(dir: string, log: (message: string) => void): Manifest | undefined {
   const path = join(dir, "manifest.json");
   if (!existsSync(path)) return undefined;
   try {
     return JSON.parse(readFileSync(path, "utf8")) as Manifest;
   } catch {
     // A torn write: start over rather than fail every run.
+    log(`${path} is unreadable: observing every submission again`);
     return undefined;
   }
 }

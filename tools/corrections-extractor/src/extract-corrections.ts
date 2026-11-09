@@ -77,7 +77,7 @@ export async function extractCorrections(
   outputDir: string,
   { log = console.log, workers = Math.max(1, availableParallelism() - 1), batchSize = BATCH_SIZE }: ExtractOptions = {},
 ): Promise<ExtractMeta> {
-  const store = await ObservedStore.open(storeDir, observerVersion());
+  const store = await ObservedStore.open(storeDir, observerVersion(), log);
   try {
     await updateStore(store, source, { log, workers, batchSize });
     return await writeOutputs(store, outputDir, log);
@@ -101,7 +101,9 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
     log(`Dropped ${gone.length} submission(s) no longer in the source; observing ${redo.length} older one(s) again`);
   }
   const stored = store.keys();
-  // Newest first: the first copy of a session met is then its most complete one.
+  // Newest first: the first copy of a session met is then its most complete one. Keys start with
+  // the receive time, so new submissions are newer than stored ones; one that is not would only
+  // have its copies of stored sessions observed needlessly (replay still uses the newest copy).
   const added = keys.filter((key) => !stored.has(key)).sort().reverse();
   log(`${stored.size} submission(s) already observed, ${added.length} new`);
 
@@ -159,6 +161,8 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
       },
       { customOnly: true, onProgress: (done, total) => log(`[${done}/${total}] submissions folded`) },
     );
+
+    await store.writeQueryViews();
 
     const now = new Date();
     const bundle = finalize(acc, { sourceFileNames: loaded.map(([, entry]) => entry.submissionId), now });

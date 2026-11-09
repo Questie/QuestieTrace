@@ -7,12 +7,10 @@ import type { SessionRecord } from "../core/types";
 import { addScalarGroup, addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarGroup, type ScalarSummary } from "./aggregate";
 import type { Localized, Observation } from "./observation";
 import { MAX_IDS } from "./observe";
-import { LOOKUP_OBSERVERS as OBSERVERS, observeLookupSession, type LookupObserverKey as ObserverKey, type StagedLookupSession } from "./observe-lookups";
+import { LOOKUP_OBSERVERS as OBSERVERS, observeLookupSession, SKIPPED_LOCALE, type LookupObserverKey as ObserverKey, type StagedLookupSession } from "./observe-lookups";
 import { writeLookupLua } from "./schema/lookup-writer";
 
 export { observeLookupSession, type StagedLookupSession } from "./observe-lookups";
-
-const SKIPPED_LOCALE = "enUS";
 
 /** Names can change over time (e.g. a renamed NPC), so the newest one wins. */
 const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName", "objectName"]);
