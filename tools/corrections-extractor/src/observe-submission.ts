@@ -4,8 +4,8 @@
 
 import { sessionKey } from "./core/trace-data/session-key";
 import { readSubmission } from "./core/trace-data/submissions";
-import { observeSession, type MAX_IDS, type StagedSession } from "./extract";
-import { observeLookupSession, type StagedLookupSession } from "./extract/lookups";
+import { observeSession, type MAX_IDS, type StagedSession } from "./extract/observe";
+import { observeLookupSession, type StagedLookupSession } from "./extract/observe-lookups";
 
 export interface ObserveRequest {
   path: string;

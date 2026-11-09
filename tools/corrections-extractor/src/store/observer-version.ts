@@ -1,7 +1,7 @@
 // Identity of the code that produces observations. Stored observations were made by one
 // version; when the code changes, they are dropped and every submission is observed again.
 //
-// Hashes the sources the observers run (and the MAX_IDS they filter by, in extract/index.ts).
+// Hashes the sources the observers run (and the MAX_IDS they filter by, in extract/observe.ts).
 // This includes code that only merges (merge functions live next to their observers), which
 // costs a needless full run but never leaves stale observations.
 
@@ -12,16 +12,16 @@ import { fileURLToPath } from "url";
 
 const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const OBSERVER_SOURCES = [
+export const OBSERVER_SOURCES = [
   "core",
   "extract/observers",
   "extract/resources",
   "extract/correlate.ts",
   "extract/guid.ts",
-  "extract/index.ts",
   "extract/itemLink.ts",
-  "extract/lookups.ts",
   "extract/observation.ts",
+  "extract/observe.ts",
+  "extract/observe-lookups.ts",
   "extract/probes.ts",
   "observe-submission.ts",
   "observe-worker.ts",

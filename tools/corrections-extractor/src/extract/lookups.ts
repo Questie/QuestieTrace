@@ -5,26 +5,14 @@
 
 import type { SessionRecord } from "../core/types";
 import { addScalarGroup, addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarGroup, type ScalarSummary } from "./aggregate";
-import { isForeverSession, MAX_IDS } from "./index";
 import type { Localized, Observation } from "./observation";
-import { observeLocalizedName as observeItemName } from "./observers/item/name";
-import { observeLocalizedName as observeNpcName } from "./observers/npc/name";
-import { observeLocalizedName as observeObjectName } from "./observers/object/name";
-import { observeLocalizedName as observeQuestName, observeLocalizedObjectivesText } from "./observers/quest";
-import { sessionServerTime } from "./probes";
+import { MAX_IDS } from "./observe";
+import { LOOKUP_OBSERVERS as OBSERVERS, observeLookupSession, type LookupObserverKey as ObserverKey, type StagedLookupSession } from "./observe-lookups";
 import { writeLookupLua } from "./schema/lookup-writer";
 
+export { observeLookupSession, type StagedLookupSession } from "./observe-lookups";
+
 const SKIPPED_LOCALE = "enUS";
-
-const OBSERVERS = {
-  npcName: observeNpcName,
-  questName: observeQuestName,
-  objectivesText: observeLocalizedObjectivesText,
-  itemName: observeItemName,
-  objectName: observeObjectName,
-};
-
-type ObserverKey = keyof typeof OBSERVERS;
 
 /** Names can change over time (e.g. a renamed NPC), so the newest one wins. */
 const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName", "objectName"]);
@@ -69,24 +57,6 @@ function addLocalized(byLocale: Map<string, ScalarSummary<unknown>>, observation
     }
     addToScalarSummary(summary, [{ ...obs, value: obs.value.value }]);
   }
-}
-
-/** One session's lookup observations, ready to be added to an accumulator. */
-export interface StagedLookupSession {
-  /** Stable key of the session (core/trace-data/session-key.ts); a per-run "#<n>" is used when unknown. */
-  sessionKey?: string;
-  contributorId?: string;
-  sessionTime: number | null;
-  observations: [ObserverKey, Observation<Localized<unknown>>[]][];
-}
-
-/** Runs every lookup observer over one session; undefined for sessions that are not observed. */
-export function observeLookupSession(session: SessionRecord): StagedLookupSession | undefined {
-  if (!isForeverSession(session)) return undefined;
-  return {
-    sessionTime: sessionServerTime(session),
-    observations: (Object.keys(OBSERVERS) as ObserverKey[]).map((key) => [key, OBSERVERS[key](session) as Observation<Localized<unknown>>[]]),
-  };
 }
 
 /** All observers run before anything is added, so a throwing observer leaves `acc` untouched. */
