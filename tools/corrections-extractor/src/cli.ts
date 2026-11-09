@@ -2,17 +2,26 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { defaultTraceDataDir } from "./core/trace-data/submissions";
 import { extractCorrections, workersFromEnv, type ExtractMeta } from "./extract-corrections";
-import { sourceFromEnv } from "./store/source";
+import { sampledSource, samplePercentFromEnv, sourceFromEnv } from "./store/source";
 
 const toolDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outputDir = resolve(toolDir, "output");
 /** TRACE_STORE_DIR, else trace-session-store next to the QuestieTrace checkout. */
-const storeDir = process.env.TRACE_STORE_DIR ? resolve(process.env.TRACE_STORE_DIR) : resolve(toolDir, "../../../trace-session-store");
+const fullStoreDir = process.env.TRACE_STORE_DIR ? resolve(process.env.TRACE_STORE_DIR) : resolve(toolDir, "../../../trace-session-store");
 
 const startedAt = performance.now();
 let meta: ExtractMeta;
+let outputDir = resolve(toolDir, "output");
 try {
-  meta = await extractCorrections(sourceFromEnv(defaultTraceDataDir()), storeDir, outputDir, { workers: workersFromEnv() });
+  // A sample gets its own store and output, so it never touches the full ones.
+  const sample = samplePercentFromEnv();
+  let source = sourceFromEnv(defaultTraceDataDir());
+  let storeDir = fullStoreDir;
+  if (sample !== undefined) {
+    source = sampledSource(source, sample);
+    storeDir = resolve(fullStoreDir, `sample-${sample}`);
+    outputDir = resolve(outputDir, `sample-${sample}`);
+  }
+  meta = await extractCorrections(source, storeDir, outputDir, { workers: workersFromEnv() });
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);

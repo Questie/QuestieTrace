@@ -4,6 +4,7 @@
 // sorting them sorts submissions by receive time.
 
 import { execFile } from "child_process";
+import { createHash } from "crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, relative, resolve } from "path";
@@ -62,4 +63,22 @@ export function rcloneSource(remote: string, rclone = "rclone"): SubmissionSourc
 export function sourceFromEnv(defaultTraceDataDir: string, env: NodeJS.ProcessEnv = process.env): SubmissionSource {
   const remote = env.TRACE_REMOTE;
   return remote && remote.length > 0 ? rcloneSource(remote) : localSource(defaultTraceDataDir);
+}
+
+/**
+ * The `percent` of `source`'s submissions whose key hashes below it: the same ones every run,
+ * and a sample grows by adding submissions (never swapping them) as `percent` rises.
+ */
+export function sampledSource(source: SubmissionSource, percent: number): SubmissionSource {
+  const inSample = (key: string) => createHash("sha256").update(key).digest().readUInt32BE(0) / 2 ** 32 < percent / 100;
+  return { ...source, list: async () => (await source.list()).filter(inSample) };
+}
+
+/** EXTRACT_SAMPLE as a percentage of submissions, or undefined for all of them. */
+export function samplePercentFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const value = env.EXTRACT_SAMPLE;
+  if (value === undefined || value === "") return undefined;
+  const percent = Number(value);
+  if (!/^\d+(\.\d+)?$/.test(value) || percent <= 0 || percent > 100) throw new Error(`EXTRACT_SAMPLE must be a percentage above 0 and at most 100 (got "${value}")`);
+  return percent;
 }
