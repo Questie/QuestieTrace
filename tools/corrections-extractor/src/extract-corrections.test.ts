@@ -6,6 +6,7 @@ import { TINY_EXPORT } from "./core/trace-data/fixtures";
 import { extractCorrections as extract, workersFromEnv, type ExtractOptions } from "./extract-corrections";
 import { localSource } from "./store/source";
 import * as lookups from "./extract/lookups";
+import * as observeLookups from "./extract/observe-lookups";
 
 const tempDirs: string[] = [];
 
@@ -137,7 +138,7 @@ describe("extractCorrections", () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
     mkdirSync(outputDir);
     writeFileSync(join(outputDir, "meta.json"), "{}");
-    vi.spyOn(lookups, "observeLookupSession").mockImplementation(() => {
+    vi.spyOn(observeLookups, "observeLookupSession").mockImplementation(() => {
       throw new Error("observer failed");
     });
 
@@ -151,7 +152,7 @@ describe("extractCorrections", () => {
       "2026-09/2026-09-30_000000Z_a.json": submission("a"),
       "2026-10/2026-10-01_000000Z_b.json": submission("b"),
     });
-    const observe = vi.spyOn(lookups, "observeLookupSession");
+    const observe = vi.spyOn(observeLookups, "observeLookupSession");
 
     const meta = await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
@@ -161,7 +162,7 @@ describe("extractCorrections", () => {
 
   it("should observe a session exported twice in one submission once", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_b.json": submission("b", `${TINY_EXPORT}\n${TINY_EXPORT}`) });
-    const observe = vi.spyOn(lookups, "observeLookupSession");
+    const observe = vi.spyOn(observeLookups, "observeLookupSession");
 
     await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
 
@@ -209,7 +210,7 @@ describe("extractCorrections (incremental)", () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-09/2026-09-30_000000Z_a.json": submission("a") });
     await extractCorrections(traceDataDir, outputDir, options);
     writeFileSync(join(traceDataDir, "submissions", "2026-09", "2026-09-30_000001Z_c.json"), submission("c", "{ not an export"));
-    const observe = vi.spyOn(lookups, "observeLookupSession");
+    const observe = vi.spyOn(observeLookups, "observeLookupSession");
 
     const meta = await extractCorrections(traceDataDir, outputDir, options);
 

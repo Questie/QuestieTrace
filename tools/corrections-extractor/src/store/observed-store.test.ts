@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import type { ObservedSubmission } from "../observe-submission";
 import { addStagedScalarGroup, addStagedSessions, createAccumulator, observeSession, type StagedSession } from "../extract";
 import { addLookupScalarGroup, addStagedLookupSessions, createLookupAccumulator, observeLookupSession } from "../extract/lookups";
 import type { Confidence } from "../extract/observation";
 import { objectivesRealTraceFixture } from "../extract/observers/quest/__fixtures__/objectives.realTrace.fixture";
 import { ObservedStore, type ReplayedSession } from "./observed-store";
-import { observerVersion } from "./observer-version";
+import { OBSERVER_SOURCES, observerVersion } from "./observer-version";
 import { rcloneSource, sampledSource, samplePercentFromEnv } from "./source";
 
 const tempDirs: string[] = [];
@@ -196,6 +196,25 @@ describe("ObservedStore", () => {
 });
 
 describe("observerVersion", () => {
+  it("should hash every source the observe path imports", () => {
+    const srcDir = join(__dirname, "..");
+    const covered = (file: string) => OBSERVER_SOURCES.some((source) => file === source || file.startsWith(`${source}/`));
+    const seen = new Set<string>();
+    const stack = ["observe-submission.ts", "observe-worker.ts"];
+    while (stack.length > 0) {
+      const file = stack.pop()!;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const [, specifier] of readFileSync(join(srcDir, file), "utf8").matchAll(/from\s+["'](\.[^"']+)["']/g)) {
+        const base = join(dirname(file), specifier);
+        const resolved = [`${base}.ts`, join(base, "index.ts")].find((candidate) => existsSync(join(srcDir, candidate)));
+        if (resolved) stack.push(resolved);
+      }
+    }
+
+    expect([...seen].filter((file) => !covered(file))).toEqual([]);
+  });
+
   it("should change when an observer source changes, but not for tests", () => {
     const root = tempDir();
     mkdirSync(join(root, "observers"));
