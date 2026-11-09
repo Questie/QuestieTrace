@@ -47,6 +47,16 @@ The Parquet files can be queried directly, e.g. with the DuckDB CLI:
 SELECT field, count(*) FROM 'trace-session-store/batches/*.observations.parquet' GROUP BY field;
 ```
 
+### Developing observers on a sample
+
+Changing observer code empties the store, so the next run observes every submission again. While working on an observer, use a fixed sample instead:
+
+```sh
+EXTRACT_SAMPLE=5 npm run extract   # 5 % of submissions, the same ones every run
+```
+
+The sample has its own store (`trace-session-store/sample-5/`) and output (`output/sample-5/`). See [the data flow](../../docs/data-flow.md) and [the ADRs](../../docs/adr/) for the overall picture.
+
 Exports are cumulative, so one session shows up in many submissions. Submissions are folded newest first and only the newest copy of each session is used. All stored observations are folded in on every run; raw observations of fields with a custom merge are written to `output/.observations/` (removed after the run) and read back one part at a time, so memory use stays about flat.
 
 The results are written to `output/`:
