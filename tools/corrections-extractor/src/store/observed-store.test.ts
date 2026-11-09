@@ -6,7 +6,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import type { ObservedSubmission } from "../observe-submission";
 import { addStagedScalarGroup, addStagedSessions, createAccumulator, observeSession, type StagedSession } from "../extract";
 import { addLookupScalarGroup, addStagedLookupSessions, createLookupAccumulator, observeLookupSession, type StagedLookupSession } from "../extract/lookups";
-import type { Confidence } from "../extract/observation";
+import type { Confidence, Observation } from "../extract/observation";
 import { objectivesRealTraceFixture } from "../extract/observers/quest/__fixtures__/objectives.realTrace.fixture";
 import { ObservedStore, type ReplayedSession } from "./observed-store";
 import { OBSERVER_SOURCES, observerVersion } from "./observer-version";
@@ -28,7 +28,8 @@ function observed(sessions: ObservedSubmission["sessions"]): ObservedSubmission 
   return { submissionId: "id", exportCount: 1, droppedExports: [], sessions };
 }
 
-const npcName = { entityId: 7, value: "Gruk", confidence: "high" as const, provenance: { session: "s", t: 1.5 } };
+// Stored observations come back with the session key as their session label (names are not stored).
+const npcName = { entityId: 7, value: "Gruk", confidence: "high" as const, provenance: { session: "k1", t: 1.5 } };
 
 async function replay(store: ObservedStore): Promise<ReplayedSession[]> {
   const sessions: ReplayedSession[] = [];
@@ -56,7 +57,7 @@ describe("ObservedStore", () => {
 
   it("should replay observations exactly as they were added, including extra fields like spawn tokens", async () => {
     const store = await ObservedStore.open(tempDir(), "v1");
-    const spawn = { entityId: 9, value: { x: 1, y: 2 }, confidence: "medium" as const, provenance: { session: "s", t: 3 }, token: "questnpc" };
+    const spawn = { entityId: 9, value: { x: 1, y: 2 }, confidence: "medium" as const, provenance: { session: "k1", t: 3 }, token: "questnpc" };
     const extract = {
       sessionKey: "k1",
       sessionTime: null,
@@ -80,7 +81,8 @@ describe("ObservedStore", () => {
       sessionKey: "k1",
       observations: observedLookup.observations.map(([field, list]) => [field, [...list, ...list.map((obs) => ({ ...obs, value: { locale: "deDE", value: obs.value.value } }))]]),
     } as StagedLookupSession;
-    const nonEmpty = <T,>(fields: [string, T[]][]) => fields.filter(([, list]) => list.length > 0);
+    const nonEmpty = <T extends Observation<unknown>>(fields: [string, T[]][]) =>
+      fields.filter(([, list]) => list.length > 0).map(([field, list]) => [field, list.map((obs) => ({ ...obs, provenance: { ...obs.provenance, session: "k1" } }))]);
     const withoutEnUS = lookup.observations.map(([field, list]) => [field, list.filter((obs) => obs.value.locale !== "enUS")] as [string, typeof list]);
     const store = await ObservedStore.open(tempDir(), "v1");
     await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1", extract, lookup }]) }]);
@@ -95,7 +97,7 @@ describe("ObservedStore", () => {
 
   it("should keep lookup values with special characters exactly", async () => {
     const values = ["Grüße „Zitat“ \\ \"quoted\"", "Ëmøjï 🐉 \u2028 /slash/", "Œuvre d'art", ["a", "b\nc"]];
-    const lookupObs = values.map((value, index) => ({ entityId: index, value: { locale: "deDE", value }, confidence: "high" as const, provenance: { session: "s", t: index } }));
+    const lookupObs = values.map((value, index) => ({ entityId: index, value: { locale: "deDE", value }, confidence: "high" as const, provenance: { session: "k1", t: index } }));
     const store = await ObservedStore.open(tempDir(), "v1");
     await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1", lookup: { sessionKey: "k1", sessionTime: null, observations: [["questName", lookupObs]] } }]) }]);
 
@@ -241,6 +243,19 @@ describe("ObservedStore", () => {
     expect(reopened.keys().size).toBe(0);
     expect(sessions).toEqual([]);
     expect(readdirSync(join(dir, "batches"))).toEqual([]);
+  });
+
+  it("should remove the query views when the store is emptied", async () => {
+    const dir = tempDir();
+    const store = await ObservedStore.open(dir, "v1");
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1" }]) }]);
+    await store.writeQueryViews();
+    store.close();
+
+    (await ObservedStore.open(dir, "v2")).close();
+
+    expect(existsSync(join(dir, "sessions.parquet"))).toBe(false);
+    expect(existsSync(join(dir, "views.sql"))).toBe(false);
   });
 });
 
