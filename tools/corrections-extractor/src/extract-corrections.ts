@@ -90,7 +90,10 @@ export async function extractCorrections(
 async function updateStore(store: ObservedStore, source: SubmissionSource, { log, workers, batchSize }: Required<ExtractOptions>): Promise<void> {
   // NaN would create no workers and never finish.
   if (!Number.isInteger(workers)) throw new Error(`workers must be a whole number (got ${workers})`);
+  if (!Number.isInteger(batchSize) || batchSize < 1) throw new Error(`batchSize must be a whole number of at least 1 (got ${batchSize})`);
   const keys = await source.list();
+  // An empty listing is far likelier a broken source than an emptied archive: never drop everything for it.
+  if (keys.length === 0 && store.keys().size > 0) throw new Error("The source lists no submissions; keeping the store and the previous output");
   const listed = new Set(keys);
   const gone = [...store.keys()].filter((key) => !listed.has(key));
   if (gone.length > 0) {
@@ -100,6 +103,9 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
     store.forget([...gone, ...redo]);
     log(`Dropped ${gone.length} submission(s) no longer in the source; observing ${redo.length} older one(s) again`);
   }
+  // Submissions that failed to load are tried again: the cause may have been the download.
+  const failed = store.entries().filter(([, entry]) => entry.error !== undefined).map(([key]) => key);
+  if (failed.length > 0) store.forget(failed);
   const stored = store.keys();
   // Newest first: the first copy of a session met is then its most complete one. Keys start with
   // the receive time, so new submissions are newer than stored ones; one that is not would only
@@ -108,8 +114,16 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
   log(`${stored.size} submission(s) already observed, ${added.length} new`);
 
   const usedKeys = new Set<string>();
-  const pool = Array.from({ length: Math.max(0, Math.min(workers, added.length)) }, () => new Worker(new URL("./observe-worker.ts", import.meta.url), { execArgv: ["--import", import.meta.resolve("tsx")] }));
+  const pool: Worker[] = [];
+  // A worker failing between batches has no batch to reject: the next batch reports it.
+  let poolFailure: Error | undefined;
   try {
+    for (let i = 0; i < Math.min(workers, added.length); i++) {
+      const worker = new Worker(new URL("./observe-worker.ts", import.meta.url), { execArgv: ["--import", import.meta.resolve("tsx")] });
+      pool.push(worker);
+      worker.once("error", (e: Error) => (poolFailure ??= e));
+      worker.once("exit", (code) => (poolFailure ??= new Error(`An observe worker exited early (code ${code})`)));
+    }
     await observeBatches();
   } finally {
     await Promise.all(pool.map((worker) => worker.terminate()));
@@ -117,9 +131,12 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
 
   async function observeBatches(): Promise<void> {
     for (let start = 0; start < added.length; start += batchSize) {
+      if (poolFailure) throw poolFailure;
       const batch = added.slice(start, start + batchSize);
       const dir = await source.fetch(batch);
       try {
+        // A worker that failed during the download would never answer.
+        if (poolFailure) throw poolFailure;
         const observed: StoredSubmission[] = [];
         await observeInOrder(batch.map((key) => join(dir, key)), MAX_IDS, pool, usedKeys, (_file, submission, index) => {
           observed.push({ key: batch[index], submission });
