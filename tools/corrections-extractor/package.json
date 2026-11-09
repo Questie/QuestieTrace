@@ -13,5 +13,8 @@
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vitest": "5.0.1"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "2.0.0-r.1"
   }
 }

@@ -2,14 +2,17 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { defaultTraceDataDir } from "./core/trace-data/submissions";
 import { extractCorrections, workersFromEnv, type ExtractMeta } from "./extract-corrections";
+import { sourceFromEnv } from "./store/source";
 
 const toolDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDir = resolve(toolDir, "output");
+/** TRACE_STORE_DIR, else trace-session-store next to the QuestieTrace checkout. */
+const storeDir = process.env.TRACE_STORE_DIR ? resolve(process.env.TRACE_STORE_DIR) : resolve(toolDir, "../../../trace-session-store");
 
 const startedAt = performance.now();
 let meta: ExtractMeta;
 try {
-  meta = await extractCorrections(defaultTraceDataDir(), outputDir, { workers: workersFromEnv() });
+  meta = await extractCorrections(sourceFromEnv(defaultTraceDataDir()), storeDir, outputDir, { workers: workersFromEnv() });
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);
