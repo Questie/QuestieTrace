@@ -110,6 +110,24 @@ describe("ObservedStore", () => {
     expect(holding).toEqual(["2026-09/copy.json"]);
   });
 
+  it("should replay in fold order and keep the newest copy when replaying a slice at a time", async () => {
+    const store = await ObservedStore.open(tempDir(), "v1");
+    const session = (key: string, name: string) => ({ key, extract: { sessionKey: key, sessionTime: null, scalars: [["npcName", [{ ...npcName, value: name }]]], observations: [] } }) as ObservedSubmission["sessions"][number];
+    await store.add([{ key: "2026-09/a.json", submission: observed([session("k1", "old"), session("k2", "a")]) }]);
+    await store.add([
+      { key: "2026-10/c.json", submission: observed([session("k1", "new")]) },
+      { key: "2026-10/b.json", submission: observed([session("k3", "b")]) },
+    ]);
+
+    const sessions: ReplayedSession[] = [];
+    const progress: number[] = [];
+    await store.replay((replayed) => sessions.push(replayed), (done) => progress.push(done), 1);
+    store.close();
+
+    expect(sessions.map((replayed) => replayed.extract?.scalars[0][1][0].value)).toEqual(["new", "b", "a"]);
+    expect(progress).toEqual([1, 2, 3]);
+  });
+
   it("should replay only the newest copy of a session", async () => {
     const store = await ObservedStore.open(tempDir(), "v1");
     const copy = (name: string) => observed([{ key: "k1", extract: { sessionKey: "k1", sessionTime: null, scalars: [["npcName", [{ ...npcName, value: name }]]], observations: [] } }]);

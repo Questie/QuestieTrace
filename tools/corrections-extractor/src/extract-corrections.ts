@@ -150,7 +150,7 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
       if (session.error !== undefined) throw new Error(`Observing a session of ${session.submissionKey} failed (${session.error})`);
       if (session.extract) addStagedSessions(acc, [session.extract]);
       if (session.lookup) addStagedLookupSessions(lookupAcc, [session.lookup]);
-    });
+    }, (done, total) => log(`[${done}/${total}] submissions folded`));
 
     const now = new Date();
     const bundle = finalize(acc, { sourceFileNames: loaded.map(([, entry]) => entry.submissionId), now });
