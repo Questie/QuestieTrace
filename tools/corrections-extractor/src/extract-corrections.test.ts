@@ -241,6 +241,36 @@ describe("extractCorrections (incremental)", () => {
     expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, duplicateSessionsSkipped: 0 });
   });
 
+  it("should try submissions that failed to load again on the next run", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a"), "2026-10/2026-10-02_000000Z_b.json": "{ not json" });
+    const first = await extractCorrections(traceDataDir, outputDir, options);
+    writeFileSync(join(traceDataDir, "submissions", "2026-10", "2026-10-02_000000Z_b.json"), submission("b"));
+
+    const second = await extractCorrections(traceDataDir, outputDir, options);
+
+    expect(first.skippedFiles).toHaveLength(1);
+    expect(second).toMatchObject({ submissionCount: 2, skippedFiles: [] });
+  });
+
+  it("should keep the store and the previous output when the source lists no submissions", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
+    await extractCorrections(traceDataDir, outputDir, options);
+    const meta = readFileSync(join(outputDir, "meta.json"), "utf8");
+    const empty = { list: async () => [], fetch: async () => "", release: () => undefined };
+
+    await expect(extract(empty, join(traceDataDir, "..", "store"), outputDir, options)).rejects.toThrow("lists no submissions");
+    expect(readFileSync(join(outputDir, "meta.json"), "utf8")).toBe(meta);
+    expect((await extractCorrections(traceDataDir, outputDir, options)).submissionCount).toBe(1);
+  });
+
+  it("should reject a batch size that is not a whole number of at least 1", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
+
+    for (const batchSize of [0, -1, 1.5, Number.NaN]) {
+      await expect(extractCorrections(traceDataDir, outputDir, { ...options, batchSize })).rejects.toThrow(/batchSize/);
+    }
+  });
+
   it("should give the same result in several runs as in one", async () => {
     const files: Record<string, string> = {
       "2026-09/2026-09-30_000000Z_a.json": submission("a"),
