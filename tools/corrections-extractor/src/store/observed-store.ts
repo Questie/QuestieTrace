@@ -58,6 +58,8 @@ export interface ReplayedSession {
 }
 
 const KINDS = 3;
+/** Submissions replayed per query. */
+const REPLAY_SLICE = 2000;
 const KIND_SCALAR = 0;
 const KIND_OBSERVATION = 1;
 const KIND_LOOKUP = 2;
@@ -100,7 +102,9 @@ export class ObservedStore {
       writeManifest(dir, manifest);
     }
     mkdirSync(join(dir, "batches"), { recursive: true });
-    const instance = await DuckDBInstance.create(":memory:", { temp_directory: join(dir, ".tmp") });
+    // Left behind by a run that was killed.
+    rmSync(join(dir, ".tmp"), { recursive: true, force: true });
+    const instance = await DuckDBInstance.create(":memory:", { temp_directory: join(dir, ".tmp"), memory_limit: "4GB", max_temp_directory_size: "20GB" });
     try {
       return new ObservedStore(dir, manifest, instance, await instance.connect());
     } catch (e) {
@@ -210,7 +214,7 @@ export class ObservedStore {
     const sessionsFile = this.batchFile(batch, "sessions");
     const observationsFile = this.batchFile(batch, "observations");
     await c.run(`COPY sessions TO ${sqlString(`${sessionsFile}.tmp`)} (FORMAT parquet, COMPRESSION zstd)`);
-    await c.run(`COPY (SELECT * FROM observations ORDER BY kind, field, entity) TO ${sqlString(`${observationsFile}.tmp`)} (FORMAT parquet, COMPRESSION zstd)`);
+    await c.run(`COPY (SELECT * FROM observations ORDER BY submission, idx, kind, pos, seq) TO ${sqlString(`${observationsFile}.tmp`)} (FORMAT parquet, COMPRESSION zstd)`);
     await c.run("DROP TABLE sessions");
     await c.run("DROP TABLE observations");
     renameSync(`${sessionsFile}.tmp`, sessionsFile);
@@ -235,7 +239,11 @@ export class ObservedStore {
    * Hands every used session to `onSession`, in fold order (see the top of this file).
    * Returns how many observed session copies were left out because a newer copy was used.
    */
-  async replay(onSession: (session: ReplayedSession) => void): Promise<{ duplicateCopies: number }> {
+  async replay(
+    onSession: (session: ReplayedSession) => void,
+    onProgress?: (submissions: number, total: number) => void,
+    slice = REPLAY_SLICE,
+  ): Promise<{ duplicateCopies: number }> {
     const entries = this.entries();
     if (entries.length === 0) return { duplicateCopies: 0 };
     const c = this.connection;
@@ -252,13 +260,6 @@ export class ObservedStore {
       SELECT (SELECT count(*) FROM ${this.sessionsOf("live")} s WHERE NOT s.duplicate) - (SELECT count(*) FROM winners) AS duplicates`);
     const duplicateCopies = Number(counts.getRowObjectsJS()[0].duplicates);
 
-    const result = await c.stream(`
-      SELECT w.submission, w.idx, w.session_key, w.contributor, w.session_time, w.has_extract, w.has_lookup, w.error,
-             o.kind, o.field, o.entity, o.confidence, o.session_name, o.t, o.value, o.extra
-      FROM winners w LEFT JOIN read_parquet(${this.files("observations")}) o
-        ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
-      ORDER BY w.rank, w.idx, o.kind, o.pos, o.seq`);
-
     let current: { submission: string; idx: number; session: ReplayedSession; fields: Map<string, Observation<unknown>[]>[] } | undefined;
     const flush = () => {
       if (!current) return;
@@ -272,40 +273,56 @@ export class ObservedStore {
       onSession(current.session);
     };
 
-    for await (const rows of result.yieldRowObjectJs()) {
-      for (const row of rows) {
-        const submission = row.submission as string;
-        const idx = row.idx as number;
-        if (!current || current.submission !== submission || current.idx !== idx) {
-          flush();
-          const identity = {
-            ...(row.session_key === null ? {} : { sessionKey: row.session_key as string }),
-            ...(row.contributor === null ? {} : { contributorId: row.contributor as string }),
-          };
-          const sessionTime = (row.session_time as number | null) ?? null;
-          const session: ReplayedSession = { submissionKey: submission };
-          if (row.error !== null) session.error = row.error as string;
-          if (row.has_extract) session.extract = { ...identity, sessionTime, scalars: [], observations: [] };
-          if (row.has_lookup) session.lookup = { ...identity, sessionTime, observations: [] };
-          current = { submission, idx, session, fields: Array.from({ length: KINDS }, () => new Map()) };
+    // A slice of submissions at a time: sorting every observation at once spills tens of GB.
+    // Observation files are sorted by submission, so each slice only reads its own row groups.
+    const sorted = entries.map(([key]) => key).sort().reverse();
+    for (let start = 0; start < sorted.length; start += slice) {
+      const newest = sorted[start];
+      const oldest = sorted[Math.min(start + slice, sorted.length) - 1];
+      const range = `BETWEEN ${sqlString(oldest)} AND ${sqlString(newest)}`;
+      const result = await c.stream(`
+        SELECT w.submission, w.idx, w.session_key, w.contributor, w.session_time, w.has_extract, w.has_lookup, w.error,
+               o.kind, o.field, o.entity, o.confidence, o.session_name, o.t, o.value, o.extra
+        FROM (SELECT * FROM winners WHERE submission ${range}) w
+        LEFT JOIN (SELECT * FROM read_parquet(${this.files("observations")}) WHERE submission ${range}) o
+          ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
+        ORDER BY w.rank, w.idx, o.kind, o.pos, o.seq`);
+      for await (const rows of result.yieldRowObjectJs()) {
+        for (const row of rows) {
+          const submission = row.submission as string;
+          const idx = row.idx as number;
+          if (!current || current.submission !== submission || current.idx !== idx) {
+            flush();
+            const identity = {
+              ...(row.session_key === null ? {} : { sessionKey: row.session_key as string }),
+              ...(row.contributor === null ? {} : { contributorId: row.contributor as string }),
+            };
+            const sessionTime = (row.session_time as number | null) ?? null;
+            const session: ReplayedSession = { submissionKey: submission };
+            if (row.error !== null) session.error = row.error as string;
+            if (row.has_extract) session.extract = { ...identity, sessionTime, scalars: [], observations: [] };
+            if (row.has_lookup) session.lookup = { ...identity, sessionTime, observations: [] };
+            current = { submission, idx, session, fields: Array.from({ length: KINDS }, () => new Map()) };
+          }
+          if (row.kind === null) continue;
+          const byField = current.fields[row.kind as number];
+          const field = row.field as string;
+          let list = byField.get(field);
+          if (!list) {
+            list = [];
+            byField.set(field, list);
+          }
+          const extra = row.extra === null ? {} : (JSON.parse(row.extra as string) as { o?: object; p?: object });
+          list.push({
+            ...extra.o,
+            entityId: row.entity as number,
+            value: JSON.parse(row.value as string),
+            confidence: row.confidence as Confidence,
+            provenance: { session: row.session_name as string, t: row.t as number, ...extra.p },
+          });
         }
-        if (row.kind === null) continue;
-        const byField = current.fields[row.kind as number];
-        const field = row.field as string;
-        let list = byField.get(field);
-        if (!list) {
-          list = [];
-          byField.set(field, list);
-        }
-        const extra = row.extra === null ? {} : (JSON.parse(row.extra as string) as { o?: object; p?: object });
-        list.push({
-          ...extra.o,
-          entityId: row.entity as number,
-          value: JSON.parse(row.value as string),
-          confidence: row.confidence as Confidence,
-          provenance: { session: row.session_name as string, t: row.t as number, ...extra.p },
-        });
       }
+      onProgress?.(Math.min(start + slice, sorted.length), sorted.length);
     }
     flush();
     return { duplicateCopies };
