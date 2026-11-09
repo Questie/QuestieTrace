@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "os";
 import { join } from "path";
 import { TINY_EXPORT } from "./core/trace-data/fixtures";
-import { extractCorrections, workersFromEnv } from "./extract-corrections";
+import { extractCorrections as extract, workersFromEnv, type ExtractOptions } from "./extract-corrections";
+import { localSource } from "./store/source";
 import * as lookups from "./extract/lookups";
 
 const tempDirs: string[] = [];
@@ -14,6 +15,11 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** Extracts from the checkout in `traceDataDir`, keeping the observations in a store next to it. */
+function extractCorrections(traceDataDir: string, outputDir: string, options: ExtractOptions) {
+  return extract(localSource(traceDataDir), join(traceDataDir, "..", "store"), outputDir, options);
+}
 
 /** A trace-data checkout holding `files` (path under submissions/ -> content), plus an output directory. */
 function setupDirs(files: Record<string, string>) {
@@ -193,6 +199,70 @@ describe("extractCorrections", () => {
     const { traceDataDir, outputDir } = setupDirs({});
 
     await expect(extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 })).rejects.toThrow("does not exist");
+  });
+});
+
+describe("extractCorrections (incremental)", () => {
+  const options = { log: () => undefined, workers: 0 };
+
+  it("should only observe submissions added since the previous run", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-09/2026-09-30_000000Z_a.json": submission("a") });
+    await extractCorrections(traceDataDir, outputDir, options);
+    writeFileSync(join(traceDataDir, "submissions", "2026-09", "2026-09-30_000001Z_c.json"), submission("c", "{ not an export"));
+    const observe = vi.spyOn(lookups, "observeLookupSession");
+
+    const meta = await extractCorrections(traceDataDir, outputDir, options);
+
+    expect(observe).not.toHaveBeenCalled();
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, skippedFiles: [{ name: "2026-09/2026-09-30_000001Z_c.json" }] });
+  });
+
+  it("should use the copy of a session in a newer submission over the stored one", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-09/2026-09-30_000000Z_a.json": submission("a") });
+    await extractCorrections(traceDataDir, outputDir, options);
+    writeFileSync(join(traceDataDir, "submissions", "2026-09", "2026-09-30_000001Z_b.json"), submission("b"));
+
+    const meta = await extractCorrections(traceDataDir, outputDir, options);
+
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 2, duplicateSessionsSkipped: 1 });
+  });
+
+  it("should drop submissions that are no longer in the source", async () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-09/2026-09-30_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-01_000000Z_b.json": submission("b"),
+    });
+    await extractCorrections(traceDataDir, outputDir, options);
+    rmSync(join(traceDataDir, "submissions", "2026-10"), { recursive: true });
+
+    const meta = await extractCorrections(traceDataDir, outputDir, options);
+
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, duplicateSessionsSkipped: 0 });
+  });
+
+  it("should give the same result in several runs as in one", async () => {
+    const files: Record<string, string> = {
+      "2026-09/2026-09-30_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-01_000000Z_b.json": submission("b", `${TINY_EXPORT}\n${TINY_EXPORT}`),
+      "2026-10/2026-10-02_000000Z_broken.json": "{ not json",
+    };
+    const once = setupDirs(files);
+    const stepwise = setupDirs({});
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(join(stepwise.traceDataDir, "submissions", path, ".."), { recursive: true });
+      writeFileSync(join(stepwise.traceDataDir, "submissions", path), content);
+      await extractCorrections(stepwise.traceDataDir, stepwise.outputDir, options);
+    }
+
+    const { generatedAt: _a, ...onceMeta } = await extractCorrections(once.traceDataDir, once.outputDir, { ...options, batchSize: 1 });
+    const { generatedAt: _b, ...stepwiseMeta } = await extractCorrections(stepwise.traceDataDir, stepwise.outputDir, options);
+
+    expect(stepwiseMeta).toEqual(onceMeta);
+    const modules = (outputDir: string) =>
+      ["foreverNpcTraces.lua", "foreverQuestTraces.lua", "foreverItemTraces.lua", "foreverObjectTraces.lua", "xpDB-traces.lua"].map((file) =>
+        readFileSync(join(outputDir, file), "utf8").replace(/-- Generated at: .*/, ""),
+      );
+    expect(modules(stepwise.outputDir)).toEqual(modules(once.outputDir));
   });
 });
 

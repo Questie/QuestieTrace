@@ -15,6 +15,8 @@ export interface ObserveRequest {
 export interface ObservedSession {
   /** Undefined when the session cannot be matched with its copies. */
   key: string | undefined;
+  /** A copy of a session already used (from a newer submission or earlier in this one); not observed. */
+  duplicate?: true;
   extract?: StagedSession;
   lookup?: StagedLookupSession;
   /** Name of the error an observer threw; the run aborts if this session is used. */
@@ -39,7 +41,7 @@ export function observeSubmission({ path, maxIds }: ObserveRequest, usedKeys: Re
   const seen = new Set<string>();
   const sessions = submission.traces.flatMap((trace) => trace.sessions).map((session): ObservedSession => {
     const key = sessionKey(session);
-    if (key !== undefined && (usedKeys.has(key) || seen.has(key))) return { key };
+    if (key !== undefined && (usedKeys.has(key) || seen.has(key))) return { key, duplicate: true };
     if (key !== undefined) seen.add(key);
     try {
       const extract = observeSession(session, maxIds);
