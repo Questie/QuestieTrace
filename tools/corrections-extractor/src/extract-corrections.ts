@@ -57,7 +57,7 @@ export function workersFromEnv(env: NodeJS.ProcessEnv = process.env): number | u
   if (value === undefined) return undefined;
   const workers = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(workers)) {
-    throw new Error(`EXTRACT_WORKERS must be a whole number of at least 0 (got "${value}")`);
+    throw new Error(`EXTRACT_WORKERS must be a whole number from 0 to Number.MAX_SAFE_INTEGER (got "${value}")`);
   }
   return workers;
 }
