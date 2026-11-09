@@ -8,7 +8,7 @@ import { observeLookupSession } from "../extract/lookups";
 import { objectivesRealTraceFixture } from "../extract/observers/quest/__fixtures__/objectives.realTrace.fixture";
 import { ObservedStore, type ReplayedSession } from "./observed-store";
 import { observerVersion } from "./observer-version";
-import { rcloneSource } from "./source";
+import { rcloneSource, sampledSource, samplePercentFromEnv } from "./source";
 
 const tempDirs: string[] = [];
 
@@ -152,6 +152,40 @@ describe("observerVersion", () => {
 
     writeFileSync(join(root, "observers", "name.ts"), "b");
     expect(observerVersion(root, ["observers"])).not.toBe(before);
+  });
+});
+
+describe("sampledSource", () => {
+  const keys = Array.from({ length: 1000 }, (_, i) => `2026-10/${i}.json`);
+  const source = { list: async () => keys, fetch: async () => "", release: () => undefined };
+
+  it("should keep about the given percentage of submissions, the same ones every time", async () => {
+    const sample = await sampledSource(source, 10).list();
+
+    expect(sample.length).toBeGreaterThan(70);
+    expect(sample.length).toBeLessThan(130);
+    expect(await sampledSource(source, 10).list()).toEqual(sample);
+  });
+
+  it("should only add submissions when the percentage rises", async () => {
+    const small = await sampledSource(source, 5).list();
+    const large = new Set(await sampledSource(source, 20).list());
+
+    expect(small.every((key) => large.has(key))).toBe(true);
+  });
+});
+
+describe("samplePercentFromEnv", () => {
+  it("should read EXTRACT_SAMPLE as a percentage", () => {
+    expect(samplePercentFromEnv({})).toBeUndefined();
+    expect(samplePercentFromEnv({ EXTRACT_SAMPLE: "5" })).toBe(5);
+    expect(samplePercentFromEnv({ EXTRACT_SAMPLE: "0.5" })).toBe(0.5);
+  });
+
+  it("should reject values that are not a percentage above 0 and at most 100", () => {
+    for (const value of ["0", "101", "-1", "abc", "5%"]) {
+      expect(() => samplePercentFromEnv({ EXTRACT_SAMPLE: value })).toThrow(/EXTRACT_SAMPLE/);
+    }
   });
 });
 
