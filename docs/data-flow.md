@@ -50,11 +50,26 @@ Each person running full runs on one machine should use their own `TRACE_STORE_D
 
 ## Querying observations
 
+Each run writes `sessions.parquet` and `views.sql` into the store. They hold only the sessions in use: the newest copy of each, from submissions still in the bucket.
+
 ```sh
-duckdb -c "SELECT field, count(*) FROM '../trace-session-store/batches/*.observations.parquet' GROUP BY field"
+cd ../trace-session-store   # from the QuestieTrace checkout; the store sits next to it
+duckdb -init views.sql
 ```
 
-Columns: `submission, batch, idx` (session), `kind` (0 scalar, 1 custom merge, 2 lookup), `field, entity, value` (JSON), `confidence, session_name, t, extra`. Session rows (`*.sessions.parquet`) hold `session_key, contributor, session_time`. Rows of submissions no longer in `manifest.json` are stale. Filter them out, or use the extractor's replay.
+```sql
+-- Which builds and client locales the data comes from
+SELECT build, client_locale, count(DISTINCT session_key) FROM observations GROUP BY ALL ORDER BY 3 DESC;
+-- Spawn points of one NPC, with the unit token they were seen through
+SELECT value->>'zoneID', value->>'x', value->>'y', extra->>'$.o.token' FROM observations WHERE field = 'npcSpawns' AND entity = 250873;
+```
+
+| View | Columns |
+|---|---|
+| `sessions` | `session_key, contributor, session_time, interface_version, build, locale, rank` (0 = newest submission), `submission, batch, idx` |
+| `observations` | `session_key, contributor, session_time, interface_version, build, client_locale` (the session's), `kind` (`scalar`, `custom` or `lookup`), `field, entity, locale` (the translation's locale, lookups only), `value` (JSON), `confidence, t` (seconds into the session), `extra` (JSON, e.g. a spawn's `token`), `submission, idx` |
+
+enUS lookup observations are not stored: lookups are translations, and enUS names are in the `scalar` rows. Sessions from other flavors than Forever have a session row but no observations.
 
 ## Decisions
 

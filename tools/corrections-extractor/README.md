@@ -1,6 +1,6 @@
 # corrections-extractor
 
-Extracts Questie DB corrections and translations from every submission in a [trace-data](https://github.com/Questie/trace-data) checkout and writes them as paste-ready `forever*Traces.lua` and lookup modules.
+Extracts Questie DB corrections and translations from every submission in the OVH archive bucket (or a local [trace-data](https://github.com/Questie/trace-data) checkout) and writes them as paste-ready `forever*Traces.lua` and lookup modules.
 
 The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported.
 
@@ -41,11 +41,7 @@ The observations are kept between runs in `TRACE_STORE_DIR`, by default `trace-s
 
 A run therefore only observes submissions added since the last one. Submissions no longer in the source (rejected ones are deleted from the bucket) are dropped, and older submissions that may hold copies of their sessions are observed again. When the observer code changes (a hash of the sources listed in `src/store/observer-version.ts`), the store is dropped and every submission is observed again. Delete the directory to force that.
 
-The Parquet files can be queried directly, e.g. with the DuckDB CLI:
-
-```sql
-SELECT field, count(*) FROM 'trace-session-store/batches/*.observations.parquet' GROUP BY field;
-```
+Each run also writes `sessions.parquet` (the sessions in use) and `views.sql` into the store, so it can be queried with the DuckDB CLI, see [the data flow](../../docs/data-flow.md#querying-observations).
 
 ### Developing observers on a sample
 
