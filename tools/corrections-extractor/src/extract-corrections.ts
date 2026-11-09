@@ -94,10 +94,9 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
   const listed = new Set(keys);
   const gone = [...store.keys()].filter((key) => !listed.has(key));
   if (gone.length > 0) {
-    // Older submissions may hold copies of the dropped ones' sessions that were not observed
+    // Other submissions may hold copies of the dropped ones' sessions that were not observed
     // (see ObservedSession.duplicate): observe them again.
-    const newestGone = gone.reduce((newest, key) => (key > newest ? key : newest));
-    const redo = store.entries().filter(([key, entry]) => entry.duplicates > 0 && key < newestGone && listed.has(key)).map(([key]) => key);
+    const redo = (await store.holdingCopiesOf(gone)).filter((key) => listed.has(key));
     store.forget([...gone, ...redo]);
     log(`Dropped ${gone.length} submission(s) no longer in the source; observing ${redo.length} older one(s) again`);
   }
@@ -107,23 +106,32 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
   log(`${stored.size} submission(s) already observed, ${added.length} new`);
 
   const usedKeys = new Set<string>();
-  for (let start = 0; start < added.length; start += batchSize) {
-    const batch = added.slice(start, start + batchSize);
-    const dir = await source.fetch(batch);
-    try {
-      const observed: StoredSubmission[] = [];
-      await observeInOrder(batch.map((key) => join(dir, key)), MAX_IDS, workers, usedKeys, (_file, submission, index) => {
-        observed.push({ key: batch[index], submission });
-        const keys = new Set<string>();
-        for (const session of submission.sessions) if (session.key !== undefined && !session.duplicate) keys.add(session.key);
-        for (const key of keys) usedKeys.add(key);
-        return keys;
-      });
-      await store.add(observed);
-    } finally {
-      source.release(dir);
+  const pool = Array.from({ length: Math.max(0, Math.min(workers, added.length)) }, () => new Worker(new URL("./observe-worker.ts", import.meta.url), { execArgv: ["--import", import.meta.resolve("tsx")] }));
+  try {
+    await observeBatches();
+  } finally {
+    await Promise.all(pool.map((worker) => worker.terminate()));
+  }
+
+  async function observeBatches(): Promise<void> {
+    for (let start = 0; start < added.length; start += batchSize) {
+      const batch = added.slice(start, start + batchSize);
+      const dir = await source.fetch(batch);
+      try {
+        const observed: StoredSubmission[] = [];
+        await observeInOrder(batch.map((key) => join(dir, key)), MAX_IDS, pool, usedKeys, (_file, submission, index) => {
+          observed.push({ key: batch[index], submission });
+          const keys = new Set<string>();
+          for (const session of submission.sessions) if (session.key !== undefined && !session.duplicate) keys.add(session.key);
+          for (const key of keys) usedKeys.add(key);
+          return keys;
+        });
+        await store.add(observed);
+      } finally {
+        source.release(dir);
+      }
+      log(`[${Math.min(start + batchSize, added.length)}/${added.length}] new submissions observed`);
     }
-    log(`[${Math.min(start + batchSize, added.length)}/${added.length}] new submissions observed`);
   }
 }
 
@@ -172,28 +180,29 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
 }
 
 /**
- * Observes every file, `workers` at a time, and hands the results to `fold` in the order of
- * `files`. At most a few results wait for an earlier one, so memory use stays bounded.
+ * Observes every file on the `pool` of workers (on the main thread when it is empty) and hands
+ * the results to `fold` in the order of `files`. At most a few results wait for an earlier one,
+ * so memory use stays bounded. The workers learn the session keys `fold` returns; `usedKeys`
+ * must already hold those of earlier calls.
  */
 async function observeInOrder(
   files: string[],
   maxIds: ObserveRequest["maxIds"],
-  workers: number,
+  pool: Worker[],
   usedKeys: ReadonlySet<string>,
   fold: (file: string, submission: ObservedSubmission, index: number) => Set<string> | void,
 ): Promise<void> {
-  if (workers <= 0) {
+  if (pool.length === 0) {
     files.forEach((file, index) => fold(file, observeSubmission({ path: file, maxIds }, usedKeys), index));
     return;
   }
 
-  const pool = Array.from({ length: Math.min(workers, files.length) }, () => new Worker(new URL("./observe-worker.ts", import.meta.url), { execArgv: ["--import", import.meta.resolve("tsx")] }));
-  // Sessions used from earlier batches; messages are handled in order, so before any file.
-  if (usedKeys.size > 0) for (const worker of pool) worker.postMessage({ usedKeys: [...usedKeys] });
   const results = new Map<number, ObservedSubmission>();
   let next = 0;
   let folded = 0;
   let stopped = false;
+  let onError: ((e: Error) => void) | undefined;
+  let onExit: ((code: number) => void) | undefined;
   try {
     await new Promise<void>((resolveAll, rejectAll) => {
       const dispatch = (worker: Worker) => {
@@ -222,22 +231,27 @@ async function observeInOrder(
         worker.postMessage({ path: files[index], maxIds } satisfies ObserveRequest);
         return true;
       };
+      onError = (e: Error) => {
+        stopped = true;
+        rejectAll(e);
+      };
+      // A worker that exits without an error would otherwise leave its file unfolded forever.
+      onExit = (code: number) => {
+        stopped = true;
+        rejectAll(new Error(`An observe worker exited early (code ${code})`));
+      };
       for (const worker of pool) {
-        worker.on("error", (e) => {
-          stopped = true;
-          rejectAll(e);
-        });
-        // A worker that exits without an error would otherwise leave its file unfolded forever.
-        worker.on("exit", (code) => {
-          stopped = true;
-          rejectAll(new Error(`An observe worker exited early (code ${code})`));
-        });
-        dispatch(worker);
+        worker.on("error", onError);
+        worker.on("exit", onExit);
       }
+      for (const worker of pool) dispatch(worker);
       if (files.length === 0) resolveAll();
     });
   } finally {
-    await Promise.all(pool.map((worker) => worker.terminate()));
+    for (const worker of pool) {
+      if (onError) worker.off("error", onError);
+      if (onExit) worker.off("exit", onExit);
+    }
   }
 }
 
