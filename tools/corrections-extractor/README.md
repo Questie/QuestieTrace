@@ -22,9 +22,32 @@ npm ci
 npm run extract
 ```
 
-Reads `TRACE_DATA_DIR`, or by default the `trace-data` checkout next to the QuestieTrace checkout (`../../../trace-data`). Every `submissions/<yyyy-mm>/*.json` file is decoded natively (print encoding, raw deflate, CBOR), observed in worker threads (one per CPU core but one) and then folded in and dropped one at a time, in order. Raw observations are written to `output/.observations/` (removed after the run) and read back one part at a time while the modules are built, so memory use stays about flat as submissions come in; disk use for those files grows with them. Only summaries of the scalar fields and the keys of the sessions already used stay in memory. Submissions that fail to load are reported and skipped; the rest still runs. Set `EXTRACT_WORKERS` to use fewer threads, e.g. `EXTRACT_WORKERS=4 npm run extract` (`0` observes on the main thread).
+Submissions come from one of two sources:
 
-Exports are cumulative, so one session shows up in many submissions. Submissions are read newest first and only the newest copy of each session is used.
+- `TRACE_REMOTE`, an rclone remote holding the archive bucket, e.g. `TRACE_REMOTE=ovhcloud-de:trace-intake-ovh npm run extract`. Only the submissions not observed yet are downloaded, 500 at a time, into a temporary directory that is removed after each batch.
+- Otherwise `TRACE_DATA_DIR`, or by default the `trace-data` checkout next to the QuestieTrace checkout (`../../../trace-data`).
+
+Every new `submissions/<yyyy-mm>/*.json` file is decoded natively (print encoding, raw deflate, CBOR) and observed in worker threads (one per CPU core but one). Set `EXTRACT_WORKERS` to use fewer threads, e.g. `EXTRACT_WORKERS=4 npm run extract` (`0` observes on the main thread). Submissions that fail to load are reported and skipped; the rest still runs.
+
+### Observation store
+
+The observations are kept between runs in `TRACE_STORE_DIR`, by default `trace-session-store` next to the QuestieTrace checkout (`../../../trace-session-store`):
+
+| File | Content |
+|---|---|
+| `manifest.json` | Observer version and, per observed submission, its batch, load errors and counts |
+| `batches/<n>.sessions.parquet` | One row per observed session copy (submission, session key, contributor, server time) |
+| `batches/<n>.observations.parquet` | One row per observation (field, entity, value as JSON, confidence, time) |
+
+A run therefore only observes submissions added since the last one. Submissions no longer in the source (rejected ones are deleted from the bucket) are dropped, and older submissions that may hold copies of their sessions are observed again. When the observer code changes (a hash of the sources listed in `src/store/observer-version.ts`), the store is dropped and every submission is observed again. Delete the directory to force that.
+
+The Parquet files can be queried directly, e.g. with the DuckDB CLI:
+
+```sql
+SELECT field, count(*) FROM 'trace-session-store/batches/*.observations.parquet' GROUP BY field;
+```
+
+Exports are cumulative, so one session shows up in many submissions. Submissions are folded newest first and only the newest copy of each session is used. All stored observations are folded in on every run; raw observations of fields with a custom merge are written to `output/.observations/` (removed after the run) and read back one part at a time, so memory use stays about flat.
 
 The results are written to `output/`:
 
@@ -46,9 +69,10 @@ The same run writes Questie l10n lookup modules for every non-enUS locale found 
 
 ## How it works
 
-1. `src/core/trace-data/` lists and decodes the submissions.
+1. `src/store/source.ts` lists the submissions and fetches new ones, `src/core/trace-data/` decodes them.
 2. `foldSessions` (`src/extract/index.ts`) runs every observer in `src/extract/observers/` over the submission's sessions and collects their observations. Fields with the default scalar merge only keep a per-value summary; fields with a custom merge (spawns, drops, ...) keep every observation.
-3. After the last submission, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
+3. The observations of new submissions are added to the store (`src/store/observed-store.ts`), then every stored session is replayed in fold order.
+4. After the last session, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
 
 ### Quest-giver correlation
 

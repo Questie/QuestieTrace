@@ -3,6 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, wri
 import { tmpdir } from "os";
 import { join } from "path";
 import type { ObservedSubmission } from "../observe-submission";
+import { observeSession, type StagedSession } from "../extract";
+import { observeLookupSession } from "../extract/lookups";
+import { objectivesRealTraceFixture } from "../extract/observers/quest/__fixtures__/objectives.realTrace.fixture";
 import { ObservedStore, type ReplayedSession } from "./observed-store";
 import { observerVersion } from "./observer-version";
 import { rcloneSource } from "./source";
@@ -47,6 +50,64 @@ describe("ObservedStore", () => {
     store.close();
 
     expect(session.extract).toEqual({ sessionKey: "k1", contributorId: "c1", sessionTime: 100, scalars: [["npcName", [npcName]]], observations: [] });
+  });
+
+  it("should replay observations exactly as they were added, including extra fields like spawn tokens", async () => {
+    const store = await ObservedStore.open(tempDir(), "v1");
+    const spawn = { entityId: 9, value: { x: 1, y: 2 }, confidence: "medium" as const, provenance: { session: "s", t: 3 }, token: "questnpc" };
+    const extract = {
+      sessionKey: "k1",
+      sessionTime: null,
+      scalars: [["questName", [npcName]], ["npcName", [npcName, { ...npcName, value: "Grak" }]]] as StagedSession["scalars"],
+      observations: [["npcSpawns", [spawn]]] as StagedSession["observations"],
+    };
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1", extract }]) }]);
+
+    const [session] = await replay(store);
+    store.close();
+
+    expect(session.extract).toEqual(extract);
+  });
+
+  it("should replay a real session's observations unchanged", async () => {
+    const extract = { ...observeSession(objectivesRealTraceFixture, { npc: 0, quest: 0, item: 0, object: 0 })!, sessionKey: "k1" };
+    const lookup = { ...observeLookupSession(objectivesRealTraceFixture)!, sessionKey: "k1" };
+    const nonEmpty = <T,>(fields: [string, T[]][]) => fields.filter(([, list]) => list.length > 0);
+    const store = await ObservedStore.open(tempDir(), "v1");
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1", extract, lookup }]) }]);
+
+    const [session] = await replay(store);
+    store.close();
+
+    expect(session.extract).toEqual({ ...extract, scalars: nonEmpty(extract.scalars), observations: nonEmpty(extract.observations) });
+    expect(session.lookup).toEqual({ ...lookup, observations: nonEmpty(lookup.observations) });
+  });
+
+  it("should replay every copy of sessions without a key", async () => {
+    const store = await ObservedStore.open(tempDir(), "v1");
+    const keyless = { key: undefined, extract: { sessionTime: null, scalars: [], observations: [] } };
+    await store.add([{ key: "2026-09/a.json", submission: observed([keyless]) }]);
+    await store.add([{ key: "2026-10/b.json", submission: observed([keyless, keyless]) }]);
+
+    const sessions = await replay(store);
+    store.close();
+
+    expect(sessions.map((session) => session.submissionKey)).toEqual(["2026-10/b.json", "2026-10/b.json", "2026-09/a.json"]);
+  });
+
+  it("should name the submissions holding unobserved copies of a removed submission's sessions", async () => {
+    const store = await ObservedStore.open(tempDir(), "v1");
+    const used = { key: "k1", extract: { sessionTime: null, scalars: [], observations: [] } };
+    await store.add([
+      { key: "2026-10/new.json", submission: observed([used]) },
+      { key: "2026-09/copy.json", submission: observed([{ key: "k1", duplicate: true }]) },
+      { key: "2026-09/other.json", submission: observed([{ key: "k2", duplicate: true }]) },
+    ]);
+
+    const holding = await store.holdingCopiesOf(["2026-10/new.json"]);
+    store.close();
+
+    expect(holding).toEqual(["2026-09/copy.json"]);
   });
 
   it("should replay only the newest copy of a session", async () => {

@@ -24,6 +24,7 @@ const OBSERVER_SOURCES = [
   "extract/observation.ts",
   "extract/probes.ts",
   "observe-submission.ts",
+  "observe-worker.ts",
 ];
 
 function isSource(path: string): boolean {
