@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from "path";
 import type { StagedSession } from "../extract";
 import type { StagedLookupSession } from "../extract/lookups";
+import type { ScalarGroup } from "../extract/aggregate";
 import type { Confidence, Observation } from "../extract/observation";
 import type { ObservedSubmission } from "../observe-submission";
 
@@ -57,6 +58,18 @@ export interface ReplayedSession {
   lookup?: StagedLookupSession;
 }
 
+const CONFIDENCES: Confidence[] = ["low", "medium", "high"];
+
+/** One value group of a scalar or lookup field, see ObservedStore.scalarGroups. */
+export interface SummarizedGroup {
+  lookup: boolean;
+  field: string;
+  /** The client locale of a lookup value; null for scalar fields. */
+  locale: string | null;
+  entityId: number;
+  group: Omit<ScalarGroup<unknown>, "lastSessionKey">;
+}
+
 const KINDS = 3;
 /** Submissions replayed per query. */
 const REPLAY_SLICE = 2000;
@@ -85,6 +98,9 @@ function extraOf(observation: Observation<unknown>): string | null {
 }
 
 export class ObservedStore {
+  /** Whether table `winners` matches the manifest; cleared when the manifest changes. */
+  private winnersReady = false;
+
   private constructor(
     private readonly dir: string,
     private readonly manifest: Manifest,
@@ -130,6 +146,7 @@ export class ObservedStore {
   /** Drops submissions from the store. */
   forget(keys: Iterable<string>): void {
     for (const key of keys) delete this.manifest.submissions[key];
+    this.winnersReady = false;
     writeManifest(this.dir, this.manifest);
   }
 
@@ -232,33 +249,28 @@ export class ObservedStore {
       };
     }
     this.manifest.nextBatch = batch + 1;
+    this.winnersReady = false;
     writeManifest(this.dir, this.manifest);
   }
 
   /**
-   * Hands every used session to `onSession`, in fold order (see the top of this file).
+   * Hands every used session to `onSession`, in fold order (see the top of this file). With
+   * `customOnly`, sessions carry only the observations of fields with a custom merge: the scalar
+   * and lookup fields come from scalarGroups instead.
    * Returns how many observed session copies were left out because a newer copy was used.
    */
   async replay(
     onSession: (session: ReplayedSession) => void,
-    onProgress?: (submissions: number, total: number) => void,
-    slice = REPLAY_SLICE,
+    { onProgress, slice = REPLAY_SLICE, customOnly = false }: { onProgress?: (submissions: number, total: number) => void; slice?: number; customOnly?: boolean } = {},
   ): Promise<{ duplicateCopies: number }> {
     const entries = this.entries();
     if (entries.length === 0) return { duplicateCopies: 0 };
     const c = this.connection;
-    await this.loadSubmissions("live", entries);
-
-    await c.run(`
-      CREATE OR REPLACE TEMP TABLE winners AS
-      SELECT * EXCLUDE (copy) FROM (
-        SELECT s.*, row_number() OVER (PARTITION BY s.session_key ORDER BY s.rank, s.idx) AS copy
-        FROM ${this.sessionsOf("live")} s
-        WHERE NOT s.duplicate
-      ) WHERE session_key IS NULL OR copy = 1`);
+    await this.prepareWinners();
     const counts = await c.runAndReadAll(`
       SELECT (SELECT count(*) FROM ${this.sessionsOf("live")} s WHERE NOT s.duplicate) - (SELECT count(*) FROM winners) AS duplicates`);
     const duplicateCopies = Number(counts.getRowObjectsJS()[0].duplicates);
+    const kindFilter = customOnly ? `AND kind = ${KIND_OBSERVATION}` : "";
 
     let current: { submission: string; idx: number; session: ReplayedSession; fields: Map<string, Observation<unknown>[]>[] } | undefined;
     const flush = () => {
@@ -284,7 +296,7 @@ export class ObservedStore {
         SELECT w.submission, w.idx, w.session_key, w.contributor, w.session_time, w.has_extract, w.has_lookup, w.error,
                o.kind, o.field, o.entity, o.confidence, o.session_name, o.t, o.value, o.extra
         FROM (SELECT * FROM winners WHERE submission ${range}) w
-        LEFT JOIN (SELECT * FROM read_parquet(${this.files("observations")}) WHERE submission ${range}) o
+        LEFT JOIN (SELECT * FROM read_parquet(${this.files("observations")}) WHERE submission ${range} ${kindFilter}) o
           ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
         ORDER BY w.rank, w.idx, o.kind, o.pos, o.seq`);
       for await (const rows of result.yieldRowObjectJs()) {
@@ -326,6 +338,74 @@ export class ObservedStore {
     }
     flush();
     return { duplicateCopies };
+  }
+
+  /**
+   * Per scalar or lookup field, entity, locale (lookups only) and value: the summary the scalar
+   * merge needs (see ScalarGroup), over the used session copies. Groups come in the order a full
+   * fold would first meet their locale, entity and value.
+   */
+  async scalarGroups(onGroup: (group: SummarizedGroup) => void): Promise<void> {
+    if (this.entries().length === 0) return;
+    await this.prepareWinners();
+    const result = await this.connection.stream(`
+      WITH rows AS (
+        SELECT o.kind, o.field, o.entity, o.confidence, o.t, w.session_time,
+               w.rank::BIGINT * 1000000 + w.idx AS session,
+               [w.rank, w.idx, o.seq] AS seen,
+               CASE WHEN o.kind = ${KIND_LOOKUP} THEN json_extract_string(o.value, '$.locale') END AS locale,
+               CASE WHEN o.kind = ${KIND_LOOKUP} THEN json_extract(o.value, '$.value')::VARCHAR ELSE o.value END AS value
+        FROM read_parquet(${this.files("observations")}) o
+        JOIN winners w ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
+        WHERE o.kind IN (${KIND_SCALAR}, ${KIND_LOOKUP})
+      ), groups AS (
+        SELECT kind, field, locale, entity, value,
+               max(CASE confidence WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) AS confidence,
+               count(*) AS count,
+               max(t) AS latest_t,
+               count(DISTINCT session) FILTER (WHERE session_time IS NOT NULL) AS timed_sessions,
+               max(session_time) AS newest_session_time,
+               min(seen) AS seen
+        FROM rows GROUP BY ALL
+      )
+      SELECT kind, field, locale, entity, value, confidence, count, latest_t, timed_sessions, newest_session_time
+      FROM groups
+      ORDER BY kind, field,
+               min(seen) OVER (PARTITION BY kind, field, locale),
+               min(seen) OVER (PARTITION BY kind, field, locale, entity),
+               seen`);
+    for await (const rows of result.yieldRowObjectJs()) {
+      for (const row of rows) {
+        onGroup({
+          lookup: row.kind === KIND_LOOKUP,
+          field: row.field as string,
+          locale: row.locale as string | null,
+          entityId: row.entity as number,
+          group: {
+            value: JSON.parse(row.value as string),
+            confidence: CONFIDENCES[(row.confidence as number) - 1],
+            count: Number(row.count),
+            latestT: row.latest_t as number,
+            timedSessionCount: Number(row.timed_sessions),
+            newestSessionTime: (row.newest_session_time as number | null) ?? null,
+          },
+        });
+      }
+    }
+  }
+
+  /** Table `winners`: the first copy met of each session (every copy of sessions without a key), with its rank. */
+  private async prepareWinners(): Promise<void> {
+    if (this.winnersReady) return;
+    await this.loadSubmissions("live", this.entries());
+    await this.connection.run(`
+      CREATE OR REPLACE TEMP TABLE winners AS
+      SELECT * EXCLUDE (copy) FROM (
+        SELECT s.*, row_number() OVER (PARTITION BY s.session_key ORDER BY s.rank, s.idx) AS copy
+        FROM ${this.sessionsOf("live")} s
+        WHERE NOT s.duplicate
+      ) WHERE session_key IS NULL OR copy = 1`);
+    this.winnersReady = true;
   }
 
   private batchFile(batch: number, kind: "sessions" | "observations"): string {

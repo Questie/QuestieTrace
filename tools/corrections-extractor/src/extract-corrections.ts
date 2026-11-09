@@ -17,8 +17,8 @@ import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join, relative, resolve } from "path";
 import { availableParallelism } from "os";
 import { Worker } from "worker_threads";
-import { addStagedSessions, createAccumulator, finalize, MAX_IDS } from "./extract";
-import { addStagedLookupSessions, createLookupAccumulator, finalizeLookups, type LookupBundle } from "./extract/lookups";
+import { addStagedScalarGroup, addStagedSessions, createAccumulator, finalize, MAX_IDS } from "./extract";
+import { addLookupScalarGroup, addStagedLookupSessions, createLookupAccumulator, finalizeLookups, type LookupBundle } from "./extract/lookups";
 import { observeSubmission, type ObservedSubmission, type ObserveRequest } from "./observe-submission";
 import { observerVersion } from "./store/observer-version";
 import { ObservedStore, type StoredSubmission } from "./store/observed-store";
@@ -145,12 +145,20 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
   const lookupAcc = createLookupAccumulator();
   try {
     log("Folding stored observations");
-    const { duplicateCopies } = await store.replay((session) => {
-      // Observer errors abort the run, keeping the previous output.
-      if (session.error !== undefined) throw new Error(`Observing a session of ${session.submissionKey} failed (${session.error})`);
-      if (session.extract) addStagedSessions(acc, [session.extract]);
-      if (session.lookup) addStagedLookupSessions(lookupAcc, [session.lookup]);
-    }, (done, total) => log(`[${done}/${total}] submissions folded`));
+    // Scalar and lookup fields only need per-value counts: DuckDB sums them up, the rest is replayed.
+    await store.scalarGroups(({ lookup, field, locale, entityId, group }) => {
+      if (lookup) addLookupScalarGroup(lookupAcc, field, locale as string, entityId, group);
+      else addStagedScalarGroup(acc, field, entityId, group);
+    });
+    const { duplicateCopies } = await store.replay(
+      (session) => {
+        // Observer errors abort the run, keeping the previous output.
+        if (session.error !== undefined) throw new Error(`Observing a session of ${session.submissionKey} failed (${session.error})`);
+        if (session.extract) addStagedSessions(acc, [session.extract]);
+        if (session.lookup) addStagedLookupSessions(lookupAcc, [session.lookup]);
+      },
+      { customOnly: true, onProgress: (done, total) => log(`[${done}/${total}] submissions folded`) },
+    );
 
     const now = new Date();
     const bundle = finalize(acc, { sourceFileNames: loaded.map(([, entry]) => entry.submissionId), now });

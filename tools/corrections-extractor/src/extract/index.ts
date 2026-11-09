@@ -12,7 +12,7 @@
 // are processed. See PlayerIdentity.lua for how interfaceVersion is captured:
 
 import type { SessionRecord } from "../core/types";
-import { aggregateNewestScalarSummary, highestConfidence, aggregateScalarSummary, addToScalarSummary, type Fact, type ScalarSummary } from "./aggregate";
+import { aggregateNewestScalarSummary, highestConfidence, aggregateScalarSummary, addScalarGroup, addToScalarSummary, type Fact, type ScalarGroup, type ScalarSummary } from "./aggregate";
 import type { QuestObjectivesValue } from "./observers/quest/objectives";
 import type { Observation } from "./observation";
 import { ObservationStore } from "./observation-store";
@@ -233,6 +233,13 @@ export function observeSession(session: SessionRecord, maxIds: Partial<typeof MA
       return [key, (OBSERVERS[key](session) as Observation<unknown>[]).filter((observation) => observation.entityId > maxId)];
     }),
   };
+}
+
+/** Adds a summarized value group of a scalar field (see addScalarGroup). */
+export function addStagedScalarGroup(acc: ExtractAccumulator, field: string, entityId: number, group: Omit<ScalarGroup<unknown>, "lastSessionKey">): void {
+  const summary = acc.scalars[field as ScalarObserverKey] as ScalarSummary<unknown> | undefined;
+  if (!summary) throw new Error(`Unknown scalar field ${field}`);
+  addScalarGroup(summary, entityId, group);
 }
 
 /** Adds sessions observed with the accumulator's maxIds, in order. */

@@ -4,7 +4,7 @@
 // (see index.ts). enUS is skipped: its names already go into forever*Traces.lua.
 
 import type { SessionRecord } from "../core/types";
-import { addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarSummary } from "./aggregate";
+import { addScalarGroup, addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarGroup, type ScalarSummary } from "./aggregate";
 import { isForeverSession, MAX_IDS } from "./index";
 import type { Localized, Observation } from "./observation";
 import { observeLocalizedName as observeItemName } from "./observers/item/name";
@@ -44,6 +44,19 @@ export function createLookupAccumulator(): LookupAccumulator {
     summaries[key] = new Map();
   }
   return { sessionCount: 0, summaries };
+}
+
+/** Adds a summarized value group of a lookup field under `locale` (see addScalarGroup). */
+export function addLookupScalarGroup(acc: LookupAccumulator, field: string, locale: string, entityId: number, group: Omit<ScalarGroup<unknown>, "lastSessionKey">): void {
+  const byLocale = acc.summaries[field as ObserverKey] as Map<string, ScalarSummary<unknown>> | undefined;
+  if (!byLocale) throw new Error(`Unknown lookup field ${field}`);
+  if (locale === SKIPPED_LOCALE) return;
+  let summary = byLocale.get(locale);
+  if (!summary) {
+    summary = new Map();
+    byLocale.set(locale, summary);
+  }
+  addScalarGroup(summary, entityId, group);
 }
 
 function addLocalized(byLocale: Map<string, ScalarSummary<unknown>>, observations: Observation<Localized<unknown>>[]): void {
