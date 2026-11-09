@@ -75,6 +75,8 @@ export interface SessionRecord {
   schemaVersion: number;
   /** 1 = observed raw API streams; absent = legacy/unknown recording contract. */
   recordingContractVersion?: number;
+  /** GetBuildInfo() packed (schema 15+): "1" version, "2" build number, "3" date, "4" interface version. */
+  buildInfo?: Record<string, unknown>;
   name?: string;
   startedAt: number;
   startedAtPrecise: number;

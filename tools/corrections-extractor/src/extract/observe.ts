@@ -3,6 +3,7 @@
 // Kept apart from the merge and emit code: the observer version (store/observer-version.ts)
 // hashes this file, so changing it re-observes every submission, while index.ts can change freely.
 
+import { getStream } from "../core/emulator";
 import type { SessionRecord } from "../core/types";
 import type { Observation } from "./observation";
 import { sessionServerTime } from "./probes";
@@ -64,6 +65,23 @@ function getInterfaceVersion(session: SessionRecord): number | undefined {
 function isForeverBuild(interfaceVersion: number | undefined): boolean {
   if (interfaceVersion === undefined) return false;
   return String(interfaceVersion).startsWith("16");
+}
+
+/** The client a session was recorded with; null where the session does not say. */
+export interface SessionClient {
+  interfaceVersion: number | null;
+  build: number | null;
+  locale: string | null;
+}
+
+export function sessionClient(session: SessionRecord): SessionClient {
+  const build = Number(session.buildInfo?.["2"]);
+  const locale = getStream(session, "GetLocale", "player")?.[0]?.v;
+  return {
+    interfaceVersion: getInterfaceVersion(session) ?? null,
+    build: Number.isInteger(build) && build > 0 ? build : null,
+    locale: typeof locale === "string" && locale.length > 0 ? locale : null,
+  };
 }
 
 /** Sessions without GetBuildInfo count as Forever (see foldSessions). */

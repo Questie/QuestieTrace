@@ -4,7 +4,7 @@
 
 import { sessionKey } from "./core/trace-data/session-key";
 import { readSubmission } from "./core/trace-data/submissions";
-import { observeSession, type MAX_IDS, type StagedSession } from "./extract/observe";
+import { observeSession, sessionClient, type MAX_IDS, type SessionClient, type StagedSession } from "./extract/observe";
 import { observeLookupSession, type StagedLookupSession } from "./extract/observe-lookups";
 
 export interface ObserveRequest {
@@ -17,6 +17,8 @@ export interface ObservedSession {
   key: string | undefined;
   /** A copy of a session already used (from a newer submission or earlier in this one); not observed. */
   duplicate?: true;
+  /** Set for every session that is not a duplicate. */
+  client?: SessionClient;
   extract?: StagedSession;
   lookup?: StagedLookupSession;
   /** Name of the error an observer threw; the run aborts if this session is used. */
@@ -43,14 +45,15 @@ export function observeSubmission({ path, maxIds }: ObserveRequest, usedKeys: Re
     const key = sessionKey(session);
     if (key !== undefined && (usedKeys.has(key) || seen.has(key))) return { key, duplicate: true };
     if (key !== undefined) seen.add(key);
+    const client = sessionClient(session);
     try {
       const extract = observeSession(session, maxIds);
       const lookup = observeLookupSession(session);
       const identity = { sessionKey: key, contributorId: submission.contributorId || undefined };
-      return { key, extract: extract && { ...extract, ...identity }, lookup: lookup && { ...lookup, ...identity } };
+      return { key, client, extract: extract && { ...extract, ...identity }, lookup: lookup && { ...lookup, ...identity } };
     } catch (e) {
       // Only the error's name: its message can quote trace data.
-      return { key, error: e instanceof Error ? e.name : typeof e };
+      return { key, client, error: e instanceof Error ? e.name : typeof e };
     }
   });
   return {

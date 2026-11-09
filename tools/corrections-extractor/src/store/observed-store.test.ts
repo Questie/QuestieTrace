@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
+import { DuckDBInstance } from "@duckdb/node-api";
 import type { ObservedSubmission } from "../observe-submission";
 import { addStagedScalarGroup, addStagedSessions, createAccumulator, observeSession, type StagedSession } from "../extract";
-import { addLookupScalarGroup, addStagedLookupSessions, createLookupAccumulator, observeLookupSession } from "../extract/lookups";
+import { addLookupScalarGroup, addStagedLookupSessions, createLookupAccumulator, observeLookupSession, type StagedLookupSession } from "../extract/lookups";
 import type { Confidence } from "../extract/observation";
 import { objectivesRealTraceFixture } from "../extract/observers/quest/__fixtures__/objectives.realTrace.fixture";
 import { ObservedStore, type ReplayedSession } from "./observed-store";
@@ -70,10 +71,17 @@ describe("ObservedStore", () => {
     expect(session.extract).toEqual(extract);
   });
 
-  it("should replay a real session's observations unchanged", async () => {
+  it("should replay a real session's observations unchanged, but for enUS lookups", async () => {
     const extract = { ...observeSession(objectivesRealTraceFixture, { npc: 0, quest: 0, item: 0, object: 0 })!, sessionKey: "k1" };
-    const lookup = { ...observeLookupSession(objectivesRealTraceFixture)!, sessionKey: "k1" };
+    const observedLookup = observeLookupSession(objectivesRealTraceFixture)!;
+    // The fixture is enUS: add a German copy of every lookup value, which is kept.
+    const lookup = {
+      ...observedLookup,
+      sessionKey: "k1",
+      observations: observedLookup.observations.map(([field, list]) => [field, [...list, ...list.map((obs) => ({ ...obs, value: { locale: "deDE", value: obs.value.value } }))]]),
+    } as StagedLookupSession;
     const nonEmpty = <T,>(fields: [string, T[]][]) => fields.filter(([, list]) => list.length > 0);
+    const withoutEnUS = lookup.observations.map(([field, list]) => [field, list.filter((obs) => obs.value.locale !== "enUS")] as [string, typeof list]);
     const store = await ObservedStore.open(tempDir(), "v1");
     await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1", extract, lookup }]) }]);
 
@@ -81,7 +89,48 @@ describe("ObservedStore", () => {
     store.close();
 
     expect(session.extract).toEqual({ ...extract, scalars: nonEmpty(extract.scalars), observations: nonEmpty(extract.observations) });
-    expect(session.lookup).toEqual({ ...lookup, observations: nonEmpty(lookup.observations) });
+    expect(withoutEnUS.flatMap(([, list]) => list).length).toBeGreaterThan(0);
+    expect(session.lookup).toEqual({ ...lookup, observations: nonEmpty(withoutEnUS) });
+  });
+
+  it("should keep lookup values with special characters exactly", async () => {
+    const values = ["Grüße „Zitat“ \\ \"quoted\"", "Ëmøjï 🐉 \u2028 /slash/", "Œuvre d'art", ["a", "b\nc"]];
+    const lookupObs = values.map((value, index) => ({ entityId: index, value: { locale: "deDE", value }, confidence: "high" as const, provenance: { session: "s", t: index } }));
+    const store = await ObservedStore.open(tempDir(), "v1");
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1", lookup: { sessionKey: "k1", sessionTime: null, observations: [["questName", lookupObs]] } }]) }]);
+
+    const [session] = await replay(store);
+    const groups: unknown[] = [];
+    await store.scalarGroups(({ group }) => groups.push(group.value));
+    store.close();
+
+    expect(session.lookup?.observations).toEqual([["questName", lookupObs]]);
+    expect(groups).toEqual(values);
+  });
+
+  it("should write the used sessions with their client and views to query them", async () => {
+    const dir = tempDir();
+    const store = await ObservedStore.open(dir, "v1");
+    const client = { interfaceVersion: 16001, build: 70862, locale: "deDE" };
+    const session = (key: string) => ({ key, client, extract: { sessionKey: key, sessionTime: null, scalars: [["npcName", [npcName]]], observations: [] } }) as ObservedSubmission["sessions"][number];
+    await store.add([{ key: "2026-09/a.json", submission: observed([session("k1")]) }]);
+    await store.add([{ key: "2026-10/b.json", submission: observed([session("k1"), session("k2")]) }]);
+
+    await store.writeQueryViews();
+    store.close();
+
+    const db = await DuckDBInstance.create(":memory:");
+    const connection = await db.connect();
+    const views = readFileSync(join(dir, "views.sql"), "utf8").replaceAll("'sessions.parquet'", `'${join(dir, "sessions.parquet")}'`).replaceAll("'batches/", `'${join(dir, "batches")}/`);
+    await connection.run(views);
+    const rows = (await connection.runAndReadAll("SELECT session_key, interface_version, build, client_locale, field, entity, value FROM observations ORDER BY session_key")).getRowObjectsJS();
+    connection.closeSync();
+    db.closeSync();
+
+    expect(rows).toEqual([
+      { session_key: "k1", interface_version: 16001, build: 70862, client_locale: "deDE", field: "npcName", entity: 7, value: '"Gruk"' },
+      { session_key: "k2", interface_version: 16001, build: 70862, client_locale: "deDE", field: "npcName", entity: 7, value: '"Gruk"' },
+    ]);
   });
 
   it("should summarize scalar and lookup values exactly like folding them one by one", async () => {
