@@ -3,8 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, wri
 import { tmpdir } from "os";
 import { join } from "path";
 import type { ObservedSubmission } from "../observe-submission";
-import { observeSession, type StagedSession } from "../extract";
-import { observeLookupSession } from "../extract/lookups";
+import { addStagedScalarGroup, addStagedSessions, createAccumulator, observeSession, type StagedSession } from "../extract";
+import { addLookupScalarGroup, addStagedLookupSessions, createLookupAccumulator, observeLookupSession } from "../extract/lookups";
+import type { Confidence } from "../extract/observation";
 import { objectivesRealTraceFixture } from "../extract/observers/quest/__fixtures__/objectives.realTrace.fixture";
 import { ObservedStore, type ReplayedSession } from "./observed-store";
 import { observerVersion } from "./observer-version";
@@ -83,6 +84,42 @@ describe("ObservedStore", () => {
     expect(session.lookup).toEqual({ ...lookup, observations: nonEmpty(lookup.observations) });
   });
 
+  it("should summarize scalar and lookup values exactly like folding them one by one", async () => {
+    const real = { ...observeSession(objectivesRealTraceFixture, { npc: 0, quest: 0, item: 0, object: 0 })!, sessionKey: "k1" };
+    const realLookup = { ...observeLookupSession(objectivesRealTraceFixture)!, sessionKey: "k1" };
+    const obs = (entityId: number, value: unknown, confidence: Confidence, t: number) => ({ entityId, value, confidence, provenance: { session: "s", t } });
+    const synthetic = (key: string, sessionTime: number | null, names: [number, string, Confidence, number][]) => ({
+      key,
+      extract: { sessionKey: key, sessionTime, scalars: [["npcName", names.map(([id, name, confidence, t]) => obs(id, name, confidence, t))]], observations: [] },
+      lookup: { sessionKey: key, sessionTime, observations: [["npcName", names.map(([id, name, confidence, t]) => obs(id, { locale: t % 2 ? "deDE" : "frFR", value: name }, confidence, t))]] },
+    }) as ObservedSubmission["sessions"][number];
+    const store = await ObservedStore.open(tempDir(), "v1");
+    await store.add([
+      { key: "2026-10/b.json", submission: observed([{ key: "k1", extract: real, lookup: realLookup }, synthetic("k2", 5, [[2, "B", "low", 1], [1, "A", "high", 2], [2, "A", "low", 3]])]) },
+      { key: "2026-09/a.json", submission: observed([synthetic("k3", null, [[1, "A", "high", 1], [2, "B", "low", 4], [1, "A", "high", 6]]), synthetic("k2", 9, [[1, "old", "high", 1]])]) },
+    ]);
+
+    const folded = createAccumulator();
+    const foldedLookups = createLookupAccumulator();
+    await store.replay((session) => {
+      if (session.extract) addStagedSessions(folded, [session.extract]);
+      if (session.lookup) addStagedLookupSessions(foldedLookups, [session.lookup]);
+    });
+    const summarized = createAccumulator();
+    const summarizedLookups = createLookupAccumulator();
+    await store.scalarGroups(({ lookup, field, locale, entityId, group }) => {
+      if (lookup) addLookupScalarGroup(summarizedLookups, field, locale!, entityId, group);
+      else addStagedScalarGroup(summarized, field, entityId, group);
+    });
+    store.close();
+
+    // Maps as nested entry lists, so their order is compared too; lastSessionKey only matters while folding.
+    const plain = (value: unknown): unknown =>
+      value instanceof Map ? [...value].map(([key, entry]) => [key, plain(entry)]) : value && typeof value === "object" && "lastSessionKey" in value ? { ...value, lastSessionKey: undefined } : value;
+    expect(plain(new Map(Object.entries(summarized.scalars)))).toEqual(plain(new Map(Object.entries(folded.scalars))));
+    expect(plain(new Map(Object.entries(summarizedLookups.summaries)))).toEqual(plain(new Map(Object.entries(foldedLookups.summaries))));
+  });
+
   it("should replay every copy of sessions without a key", async () => {
     const store = await ObservedStore.open(tempDir(), "v1");
     const keyless = { key: undefined, extract: { sessionTime: null, scalars: [], observations: [] } };
@@ -121,7 +158,7 @@ describe("ObservedStore", () => {
 
     const sessions: ReplayedSession[] = [];
     const progress: number[] = [];
-    await store.replay((replayed) => sessions.push(replayed), (done) => progress.push(done), 1);
+    await store.replay((replayed) => sessions.push(replayed), { onProgress: (done) => progress.push(done), slice: 1 });
     store.close();
 
     expect(sessions.map((replayed) => replayed.extract?.scalars[0][1][0].value)).toEqual(["new", "b", "a"]);

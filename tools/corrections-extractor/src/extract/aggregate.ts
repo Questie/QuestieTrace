@@ -29,7 +29,7 @@ export function highestConfidence(observations: Observation<unknown>[]): Confide
   return best;
 }
 
-interface ScalarGroup<T> {
+export interface ScalarGroup<T> {
   value: T;
   confidence: Confidence;
   count: number;
@@ -47,6 +47,19 @@ interface ScalarGroup<T> {
  * be dropped as soon as they are added.
  */
 export type ScalarSummary<T> = Map<number, Map<string, ScalarGroup<T>>>;
+
+/**
+ * Adds a value group summarized elsewhere (e.g. by SQL over stored observations). Groups must
+ * come in the order their values were first observed, as addToScalarSummary would add them.
+ */
+export function addScalarGroup<T>(summary: ScalarSummary<T>, entityId: number, group: Omit<ScalarGroup<T>, "lastSessionKey">): void {
+  let groups = summary.get(entityId);
+  if (!groups) {
+    groups = new Map();
+    summary.set(entityId, groups);
+  }
+  groups.set(JSON.stringify(group.value), { ...group, lastSessionKey: undefined });
+}
 
 export function addToScalarSummary<T>(summary: ScalarSummary<T>, observations: Observation<T>[]): void {
   for (const obs of observations) {
