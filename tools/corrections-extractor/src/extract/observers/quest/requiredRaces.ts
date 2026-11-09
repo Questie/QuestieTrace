@@ -68,10 +68,13 @@ export const observeQuestFactions: FieldObserver<Faction> = (session) => {
     }
   }
 
+  // A sighting before the first faction sample still belongs to the character's faction.
+  // Counting it can only cancel a restriction, never cause one.
+  const firstFaction = (getStream(session, "UnitFactionGroup", "player") ?? []).map((entry) => playerFactionAt(session, entry.t)).find((faction) => faction !== null) ?? null;
   const observations: Observation<Faction>[] = [];
   const seen = new Set<string>();
   for (const { questID, t } of sightings) {
-    const faction = playerFactionAt(session, t);
+    const faction = playerFactionAt(session, t) ?? firstFaction;
     if (!faction) continue;
     const key = `${questID}:${faction}`;
     if (seen.has(key)) continue;

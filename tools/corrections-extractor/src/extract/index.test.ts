@@ -231,6 +231,15 @@ describe("extractAll (quest/item/object entities)", () => {
       expect(extractAll([allianceAccept(), hordeSibling, ...hordeSightings], options).questFixes).not.toContain("requiredRaces");
     });
 
+    it("should not export requiredRaces when a Horde character only has the quest in its quest log", () => {
+      const hordeLogOnly = makeForeverSession({
+        UnitFactionGroup: factionGroup("Horde"),
+        QuestLog: [apiSample(0, 0, [96659])],
+      });
+
+      expect(extractAll([allianceAccept(), hordeLogOnly, ...hordeSightings], options).questFixes).not.toContain("requiredRaces");
+    });
+
     it("should not export requiredRaces when the quest is also started by an item", () => {
       const itemStart = { GetQuestID: [apiSample(2, 2, 96659)] };
       const itemDetail = makeSession(
