@@ -2,13 +2,18 @@
 //! `tools/corrections-extractor`; see DESIGN.md.
 
 pub mod aggregate;
+pub mod finalize;
+pub mod fold;
 pub mod guid;
 pub mod item_link;
 pub mod js;
+pub mod lua;
 pub mod observation;
+pub mod observe;
 pub mod observers;
 pub mod probes;
 pub mod resources;
+pub mod run;
 
 #[cfg(test)]
 pub(crate) mod test_support;

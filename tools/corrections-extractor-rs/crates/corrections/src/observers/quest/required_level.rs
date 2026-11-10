@@ -20,12 +20,12 @@ use trace_data::{KeyRef, Session, Value};
 /// Era, TBC, Wrath and Mists send (questLogIndex, questID), Forever sends (questID) alone.
 fn unpack_quest_id(args: Option<&Value>) -> Option<f64> {
     let args = args?.as_object()?;
-    let quest_id = match args.get(KeyRef::Str("n"))?.as_num()? {
-        n if n == 1.0 => args.get(KeyRef::Num(1.0)),
-        n if n == 2.0 => args.get(KeyRef::Num(2.0)),
-        _ => None,
-    };
-    quest_id?.as_num().filter(|&id| id != 0.0)
+    let count = args.get(KeyRef::Str("n"))?.as_num()?;
+    // The quest id is the last of one or two arguments.
+    if count != 1.0 && count != 2.0 {
+        return None;
+    }
+    args.get(KeyRef::Num(count))?.as_num().filter(|&id| id != 0.0)
 }
 
 fn player_level_at(session: &Session, t: f64) -> Option<f64> {

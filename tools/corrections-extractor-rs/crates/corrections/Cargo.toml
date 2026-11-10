@@ -5,6 +5,10 @@ edition.workspace = true
 publish.workspace = true
 description = "Extracts Questie DB corrections and translations from QuestieTrace submissions"
 
+[[bin]]
+name = "corrections-extractor-rs"
+path = "src/main.rs"
+
 [dependencies]
 trace-data.workspace = true
 indexmap.workspace = true
