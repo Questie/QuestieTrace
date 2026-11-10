@@ -85,4 +85,5 @@ quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submiss
 | P1 | `Object::get` fast path for name and index keys | 42.8 / 42.3 s (−3%) | 5.9–6.0 GB | yes | 2a0dc0b |
 | P1b | Hash index of names for objects with >16 names (the ~100 function streams) | 45.2 / 45.6 s vs 42.9 / 45.3 s: no gain | +0.3 GB | **no** | — |
 | — | Finding: 78% of `Object::get` time is one instruction, the first load of an object's keys: cache misses, not key handling. Observers walk every event ~8 times, chasing a pointer per event per pass | | | | |
-| P2 | Read every event's name, `t`, `tp` once into a contiguous array when a session is created | 39.2 / 39.3 s vs 42.4 / 42.3 s (−7%) | 5.8–6.1 GB | yes | (next) |
+| P2 | Read every event's name, `t`, `tp` once into a contiguous array when a session is created | 39.2 / 39.3 s vs 42.4 / 42.3 s (−7%) | 5.8–6.1 GB | yes | f4bb554 |
+| P4 | CBOR header arguments read as integers (doubles only for 8-byte values above 2^53) | 38.7 / 38.6 s vs 39.5 / 39.7 s (−2%) | 6.0 GB | yes | (next) |

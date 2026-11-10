@@ -94,27 +94,43 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    /// Big-endian unsigned integer, accumulated in doubles like the Lua and TS decoders, so
-    /// values above 2^53 round the same way.
-    fn uint(&mut self, byte_count: usize) -> Result<f64> {
-        Ok(self.take(byte_count)?.iter().fold(0.0, |value, &byte| value * 256.0 + byte as f64))
+    /// Big-endian unsigned integer of `N` bytes.
+    #[inline]
+    fn uint<const N: usize>(&mut self) -> Result<[u8; N]> {
+        Ok(self.take(N)?.try_into().expect("take(N) returns N bytes"))
     }
 
+    /// The argument of an item header. The Lua and TS decoders accumulate it byte by byte in
+    /// doubles; up to 2^53 that is exact, so only larger 8-byte values take that path to round
+    /// the same way.
+    #[inline]
     fn argument(&mut self, info: u8) -> Result<f64> {
         match info {
             0..=23 => Ok(info as f64),
-            24 => self.uint(1),
-            25 => self.uint(2),
-            26 => self.uint(4),
-            27 => self.uint(8),
+            24 => Ok(u8::from_be_bytes(self.uint()?) as f64),
+            25 => Ok(u16::from_be_bytes(self.uint()?) as f64),
+            26 => Ok(u32::from_be_bytes(self.uint()?) as f64),
+            27 => {
+                let bytes: [u8; 8] = self.uint()?;
+                let value = u64::from_be_bytes(bytes);
+                if value <= 1 << 53 {
+                    Ok(value as f64)
+                } else {
+                    Ok(bytes.iter().fold(0.0, |value, &byte| value * 256.0 + byte as f64))
+                }
+            }
             31 => err("indefinite-length CBOR items are not supported"),
             _ => err("invalid CBOR additional information"),
         }
     }
 
     /// Reads one scalar, or the header of an array or map.
+    #[inline]
     pub fn item(&mut self) -> Result<Item<'a>> {
-        let initial = *self.take(1)?.first().expect("take(1) returns one byte");
+        let Some(&initial) = self.bytes.get(self.pos) else {
+            return err("truncated CBOR data");
+        };
+        self.pos += 1;
         let major = initial >> 5;
         let info = initial & 31;
         match major {
@@ -139,18 +155,12 @@ impl<'a> Cursor<'a> {
             21 => Ok(Item::Bool(true)),
             22 | 23 => Ok(Item::Nil),
             24 => {
-                let value = self.uint(1)?;
+                let value = u8::from_be_bytes(self.uint()?);
                 Err(CborError(format!("unsupported CBOR simple value {value}")))
             }
-            25 => Ok(Item::Num(half_to_f64(self.uint(2)? as u16))),
-            26 => {
-                let bytes: [u8; 4] = self.take(4)?.try_into().expect("take(4) returns four bytes");
-                Ok(Item::Num(f32::from_be_bytes(bytes) as f64))
-            }
-            27 => {
-                let bytes: [u8; 8] = self.take(8)?.try_into().expect("take(8) returns eight bytes");
-                Ok(Item::Num(f64::from_be_bytes(bytes)))
-            }
+            25 => Ok(Item::Num(half_to_f64(u16::from_be_bytes(self.uint()?)))),
+            26 => Ok(Item::Num(f32::from_be_bytes(self.uint()?) as f64)),
+            27 => Ok(Item::Num(f64::from_be_bytes(self.uint()?))),
             31 => err("CBOR break values are not supported"),
             _ => Err(CborError(format!("unsupported CBOR simple value {info}"))),
         }
