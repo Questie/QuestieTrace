@@ -30,81 +30,7 @@ function makeUnitLevelEntry(t: number, level: number) {
 }
 
 describe("observeRequiredLevel", () => {
-  it("should derive requiredLevel as the lowest acceptance level for a quest", () => {
-    const session = makeSession({
-      QuestAcceptLevel: {
-        "96659": [
-          { t: 3, tp: 3, v: 60 },
-          { t: 7, tp: 7, v: 55 },
-        ],
-      },
-    });
-
-    expect(observeRequiredLevel(session)).toEqual([
-      {
-        entityId: 96659,
-        value: 55,
-        confidence: "high",
-        provenance: { session: "test-session", t: 3 },
-      },
-    ]);
-  });
-
-  it("should return no observations when no QuestAcceptLevel data exists and no events", () => {
-    const session = makeSession({
-      GetQuestID: [{ t: 3, tp: 3, v: 96659 }],
-    });
-
-    expect(observeRequiredLevel(session)).toEqual([]);
-  });
-
-  it("should compute the minimum across multiple quests in the same session", () => {
-    const session = makeSession({
-      QuestAcceptLevel: {
-        "96659": [{ t: 3, tp: 3, v: 60 }],
-        "12345": [{ t: 7, tp: 7, v: 45 }],
-      },
-    });
-
-    const result = observeRequiredLevel(session);
-    expect(result).toHaveLength(2);
-    // Order doesn't matter - check both quests are present
-    expect(result.find(r => r.entityId === 96659)).toEqual({
-      entityId: 96659,
-      value: 60,
-      confidence: "high",
-      provenance: { session: "test-session", t: 3 },
-    });
-    expect(result.find(r => r.entityId === 12345)).toEqual({
-      entityId: 12345,
-      value: 45,
-      confidence: "high",
-      provenance: { session: "test-session", t: 7 },
-    });
-  });
-
-  it("should only use QuestAcceptLevel stream, not questLevel", () => {
-    const session = makeSession({
-      QuestAcceptLevel: {
-        "96659": [{ t: 3, tp: 3, v: 55 }],
-      },
-      GetQuestLogTitle: {
-        "96659": [{ t: 3, tp: 3, v: { 1: "A Threat Within", 2: 60, 8: 96659, n: 8 } }],
-      },
-    });
-
-    // Should use the acceptance level (55), not the quest level (60)
-    expect(observeRequiredLevel(session)).toEqual([
-      {
-        entityId: 96659,
-        value: 55,
-        confidence: "high",
-        provenance: { session: "test-session", t: 3 },
-      },
-    ]);
-  });
-
-  it("should fall back to UnitLevel at QUEST_ACCEPTED event time when QuestAcceptLevel is not available", () => {
+  it("should take the lowest player level at QUEST_ACCEPTED for each quest", () => {
     const session = makeSession(
       {
         UnitLevel: {
@@ -138,6 +64,62 @@ describe("observeRequiredLevel", () => {
     ]);
   });
 
+  it("should read the quest ID, not the quest log index, from an Era/TBC QUEST_ACCEPTED", () => {
+    const session = makeSession(
+      { UnitLevel: { player: [makeUnitLevelEntry(0, 12)] } },
+      [{ t: 3, tp: 3, e: "QUEST_ACCEPTED", a: { 1: 3, 2: 96659, n: 2 } }]
+    );
+
+    expect(observeRequiredLevel(session)).toEqual([
+      {
+        entityId: 96659,
+        value: 12,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should ignore the QuestAcceptLevel stream of traces before schema 18", () => {
+    // A real Forever pattern: accepting quest 14 recorded quest 237, the quest at log index 14.
+    const session = makeSession(
+      {
+        QuestAcceptLevel: { "237": [{ t: 3, tp: 3, v: 21 }] },
+        UnitLevel: { player: [makeUnitLevelEntry(0, 21)] },
+      },
+      [makeQuestAcceptedEvent(3, 14)]
+    );
+
+    expect(observeRequiredLevel(session)).toEqual([
+      {
+        entityId: 14,
+        value: 21,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 3 },
+      },
+    ]);
+  });
+
+  it("should use the PLAYER_LEVEL_UP level while the UnitLevel stream still shows the old level", () => {
+    // Turning in a quest dings level 10; the follow-up is accepted before the stream catches up.
+    const session = makeSession(
+      { UnitLevel: { player: [makeUnitLevelEntry(0, 9), makeUnitLevelEntry(51, 10)] } },
+      [
+        { t: 50, tp: 50, e: "PLAYER_LEVEL_UP", a: { 1: 10, n: 1 } },
+        makeQuestAcceptedEvent(50.2, 5001),
+      ]
+    );
+
+    expect(observeRequiredLevel(session)).toEqual([
+      {
+        entityId: 5001,
+        value: 10,
+        confidence: "medium",
+        provenance: { session: "test-session", t: 50.2 },
+      },
+    ]);
+  });
+
   it("should ignore QUEST_ACCEPTED events without matching UnitLevel data", () => {
     const session = makeSession(
       {
@@ -149,35 +131,6 @@ describe("observeRequiredLevel", () => {
     );
 
     expect(observeRequiredLevel(session)).toEqual([]);
-  });
-
-  it("should prefer QuestAcceptLevel over fallback when both exist", () => {
-    const session = makeSession(
-      {
-        QuestAcceptLevel: {
-          "96659": [{ t: 3, tp: 3, v: 55 }], // direct observation: level 55
-        },
-        UnitLevel: {
-          player: [
-            makeUnitLevelEntry(0, 10),
-            makeUnitLevelEntry(5, 15),
-          ],
-        },
-      },
-      [
-        makeQuestAcceptedEvent(3, 96659), // would give level 10 via fallback
-      ]
-    );
-
-    // Should use QuestAcceptLevel (55), not fallback (10)
-    expect(observeRequiredLevel(session)).toEqual([
-      {
-        entityId: 96659,
-        value: 55,
-        confidence: "high",
-        provenance: { session: "test-session", t: 3 },
-      },
-    ]);
   });
 });
 
