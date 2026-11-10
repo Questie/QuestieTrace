@@ -29,8 +29,8 @@ fn main() {
         for export in trace_data::export::find_exports(export_string).unwrap_or_default() {
             if let trace_data::export::Export::Payload(p) = export {
                 if let Ok(compressed) = trace_data::export::decode_for_print(p) {
-                    if let Ok(cbor) = inflater.inflate(&compressed) {
-                        payloads.push(cbor);
+                    if let Ok(inflated) = inflater.inflate(&compressed) {
+                        payloads.push(inflated.bytes().to_vec());
                     }
                 }
             }
