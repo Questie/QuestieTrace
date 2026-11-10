@@ -143,9 +143,10 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
             .map(|(&id, groups)| {
                 let mut all: Vec<&ScalarGroup<T>> = groups.values().collect();
                 let mut candidates: Vec<&ScalarGroup<T>> = all.iter().copied().filter(|g| g.timed_session_count >= NEWEST_MIN_SESSIONS).collect();
+                // Candidates were seen in timed sessions, so they all have a newest session time.
                 candidates.sort_by(|a, b| {
                     let newest = |g: &ScalarGroup<T>| g.newest_session_time.unwrap_or(f64::NAN);
-                    js_compare(newest(b) - newest(a)).then_with(|| default_order(a, b))
+                    newest_first(newest(a), newest(b)).then_with(|| default_order(a, b))
                 });
                 let winner = match candidates.first() {
                     Some(winner) => *winner,
@@ -163,22 +164,18 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
 /// Sessions a value needs before it can win by being the newest.
 const NEWEST_MIN_SESSIONS: usize = 2;
 
-/// How JS sort reads a comparator result: negative, positive, or (0 and NaN) equal.
-fn js_compare(difference: f64) -> Ordering {
-    if difference < 0.0 {
-        Ordering::Less
-    } else if difference > 0.0 {
-        Ordering::Greater
-    } else {
-        Ordering::Equal
-    }
+/// Newest first, like the TS comparator `b - a`. A total order, as `sort_by` requires: NaN
+/// (never recorded in real traces) sorts as the oldest instead of comparing equal to all.
+fn newest_first(a: f64, b: f64) -> Ordering {
+    let key = |x: f64| if x.is_nan() { f64::NEG_INFINITY } else { x + 0.0 };
+    key(b).partial_cmp(&key(a)).expect("NaN was mapped away")
 }
 
 fn default_order<T>(a: &ScalarGroup<T>, b: &ScalarGroup<T>) -> Ordering {
     b.confidence
         .cmp(&a.confidence)
         .then_with(|| b.count.cmp(&a.count))
-        .then_with(|| js_compare(b.latest_t - a.latest_t))
+        .then_with(|| newest_first(a.latest_t, b.latest_t))
 }
 
 fn to_fact<T: Clone>(winner: &ScalarGroup<T>, groups: &[&ScalarGroup<T>]) -> Fact<T> {
