@@ -8,7 +8,7 @@ use crate::aggregate::Num;
 use crate::js;
 use crate::observation::{Confidence, Localized, Observation};
 use crate::probes::{locale_at, quest_info_title_at, quest_title_at};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use trace_data::stream::{entry_t, get_stream, param_keys};
 use trace_data::{KeyRef, Session};
 
@@ -16,7 +16,7 @@ const QUEST_INFO: &str = "C_QuestLog.GetInfo";
 
 pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>>> {
     let mut observations = Vec::new();
-    let mut quest_ids_with_dialog_title: HashSet<Num> = HashSet::new();
+    let mut quest_ids_with_dialog_title: FxHashSet<Num> = FxHashSet::default();
     let localized = |locale: &str, title: &str| Localized {
         locale: locale.to_owned(),
         value: title.to_owned(),

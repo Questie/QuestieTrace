@@ -17,9 +17,9 @@
 //! only ever probed by a binary search over time.
 
 use crate::cbor::{CborError, Cursor, Item, Result, MAX_NESTING_DEPTH};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::cell::OnceCell;
-use std::collections::HashMap;
 use std::fmt;
 
 pub enum Value<'a> {
@@ -703,7 +703,7 @@ impl<'a> Decoder<'a> {
     /// semantics over the kept keys, validating the items the first pass had not reached.
     fn map_shape_with_deletes(&mut self, length: f64, depth: u32) -> Result<Shape> {
         // Only which keys remain matters for the shape, not their order.
-        let mut keys: std::collections::HashSet<JsKey<'a>> = std::collections::HashSet::new();
+        let mut keys: FxHashSet<JsKey<'a>> = FxHashSet::default();
         let mut i = 0.0;
         while i < length {
             i += 1.0;
@@ -834,7 +834,7 @@ struct TableBuilder<'a> {
     /// Entries in insertion order; None where an entry was deleted.
     slots: Vec<Option<(JsKey<'a>, Value<'a>)>>,
     /// Live key -> slot, once the table has more than SCAN_LIMIT slots.
-    index: Option<HashMap<JsKey<'a>, usize>>,
+    index: Option<FxHashMap<JsKey<'a>, usize>>,
 }
 
 impl<'a> TableBuilder<'a> {
@@ -862,7 +862,7 @@ impl<'a> TableBuilder<'a> {
         if let Some(index) = &mut self.index {
             index.insert(key.clone(), self.slots.len());
         } else if self.slots.len() == SCAN_LIMIT {
-            let mut index: HashMap<JsKey<'a>, usize> = self
+            let mut index: FxHashMap<JsKey<'a>, usize> = self
                 .slots
                 .iter()
                 .enumerate()

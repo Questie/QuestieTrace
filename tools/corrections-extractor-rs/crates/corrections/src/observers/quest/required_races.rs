@@ -24,7 +24,7 @@ use crate::observation::{Confidence, Observation};
 use crate::observers::npc::friendly_to_faction::FactionReactionValue;
 use crate::probes::{player_faction_at, Faction};
 use indexmap::IndexSet;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use trace_data::stream::{entry_t, entry_v, get_stream};
 use trace_data::{KeyRef, Session, Value};
 
@@ -111,7 +111,7 @@ pub fn observe_quest_factions(session: &Session) -> Vec<Observation<Faction>> {
         .find_map(|entry| player_faction_at(session, entry_t(entry)));
     let mut observations = Vec::new();
     // `${questID}:${faction}`
-    let mut seen: HashSet<(Num, Faction)> = HashSet::new();
+    let mut seen: FxHashSet<(Num, Faction)> = FxHashSet::default();
     for (quest_id, t) in sightings {
         let Some(faction) = player_faction_at(session, t).or(first_faction) else {
             continue;
@@ -132,7 +132,7 @@ pub fn merge_quest_factions(observations: &[Observation<Faction>]) -> IndexSet<F
 /// TS `summarizeReactions`: per faction, how many sessions saw the NPC hostile and how many saw
 /// it friendly.
 pub fn summarize_reactions(observations: &[Observation<FactionReactionValue>]) -> ReactionSummary {
-    let mut sessions = HashSet::new();
+    let mut sessions = FxHashSet::default();
     for obs in observations {
         sessions.insert((obs.value.faction, obs.value.friendly, obs.session));
     }

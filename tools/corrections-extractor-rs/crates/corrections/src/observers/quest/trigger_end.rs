@@ -12,7 +12,7 @@ use crate::js;
 use crate::observation::{Confidence, Observation};
 use crate::probes::{locale_at, player_pos_at, player_zone_at, to_questie_map_position};
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use trace_data::stream::emulated_list;
 use trace_data::stream::{entry_t, entry_v, get_stream, param_keys};
 use trace_data::{KeyRef, Session, Value};
@@ -149,7 +149,7 @@ pub fn observe(session: &Session) -> Vec<Observation<QuestTriggerEndValue>> {
         }
         // Objective text -> finished state of its previous positioned sample. Repeated completed
         // samples are stale re-reads, not completions, so only the transition emits.
-        let mut previous_finished: HashMap<String, bool> = HashMap::new();
+        let mut previous_finished: FxHashMap<String, bool> = FxHashMap::default();
 
         for entry in get_stream(session, OBJECTIVES, &[KeyRef::Str(&quest_id_key)]).unwrap_or(&[]) {
             let t = entry_t(entry);

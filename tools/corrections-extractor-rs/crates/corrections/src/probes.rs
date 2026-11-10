@@ -3,7 +3,7 @@
 
 use crate::js;
 use crate::resources::area_id_for_ui_map_id;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use trace_data::stream::{get_stream, nearest_by_time, unpack, value_at, DEFAULT_CORRELATION_WINDOW_SECONDS};
 use trace_data::{KeyRef, Session, Value};
 
@@ -151,7 +151,7 @@ const COMPLETED_QUEST_STREAMS: [&str; 2] = ["C_QuestLog.GetAllCompletedQuestIDs"
 
 /// Quest ids, compared as JS numbers (+0 and -0 alike).
 #[derive(Default, Debug)]
-pub struct QuestSet(HashSet<u64>);
+pub struct QuestSet(FxHashSet<u64>);
 
 impl QuestSet {
     fn key(id: f64) -> u64 {

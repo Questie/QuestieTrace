@@ -17,7 +17,7 @@ use crate::observers::spawn::{SpawnObservation, SpawnToken};
 use crate::probes::{stream_value_at, to_questie_map_position, MapPosition};
 use crate::resources::area_id_for_ui_map_id;
 use indexmap::IndexMap;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use trace_data::stream::{entry_t, entry_v};
 use trace_data::{KeyRef, Session, Value};
 
@@ -37,14 +37,14 @@ pub fn observe(session: &Session) -> Vec<Observation<TurnInPoiValue>> {
     };
 
     // `${questID}:${zoneID}:${x},${y}`: numbers compare like their String() forms.
-    let mut seen: HashSet<(Num, Num, Num, Num)> = HashSet::new();
+    let mut seen: FxHashSet<(Num, Num, Num, Num)> = FxHashSet::default();
     for (map_key, map_stream) in by_map.entries() {
         let ui_map_id = js::number(&map_key.to_string());
         let Some(zone_id) = area_id_for_ui_map_id(Some(ui_map_id)) else { continue };
 
         // POI updates can lag behind IsComplete, so a POI equal to the last one seen while the
         // quest was incomplete is still the objective location.
-        let mut last_incomplete_pos: HashMap<Num, (Num, Num)> = HashMap::new();
+        let mut last_incomplete_pos: FxHashMap<Num, (Num, Num)> = FxHashMap::default();
 
         for entry in map_stream.as_array().unwrap_or(&[]) {
             let Some(pois) = entry_v(entry).and_then(Value::as_array) else { continue };
