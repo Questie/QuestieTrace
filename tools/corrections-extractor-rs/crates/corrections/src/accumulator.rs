@@ -9,7 +9,7 @@ use crate::observe::{StagedLookups, StagedSession};
 use crate::observers::item::{npc_drops::NpcDrop, object_drops::ObjectDrop};
 use crate::observers::npc::friendly_to_faction::FactionReactionValue;
 use crate::observers::quest::finished_by::FinishedByFinisher;
-use crate::observers::quest::objectives::ObjectiveMatch;
+use crate::observers::quest::objectives::ObjectiveSlot;
 use crate::observers::quest::objectives_text::QuestObjectivesTextValue;
 use crate::observers::quest::quest_xp::QuestXpValue;
 use crate::observers::quest::reputation_reward::ReputationTurnInValue;
@@ -35,7 +35,7 @@ pub struct Accumulator {
     pub object_name: ScalarSummary<String>,
 
     pub required_level: ObservationsByEntity<f64>,
-    pub objectives: ObservationsByEntity<Vec<ObjectiveMatch>>,
+    pub objectives: ObservationsByEntity<Vec<ObjectiveSlot>>,
     pub trigger_end: ObservationsByEntity<QuestTriggerEndValue>,
     pub started_by: ObservationsByEntity<StartedByStarter>,
     pub finished_by: ObservationsByEntity<FinishedByFinisher>,

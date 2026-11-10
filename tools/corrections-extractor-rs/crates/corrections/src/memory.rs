@@ -8,7 +8,7 @@ use crate::observation::Localized;
 use crate::observers::item::{npc_drops::NpcDrop, object_drops::ObjectDrop};
 use crate::observers::npc::friendly_to_faction::FactionReactionValue;
 use crate::observers::quest::finished_by::FinishedByFinisher;
-use crate::observers::quest::objectives::ObjectiveMatch;
+use crate::observers::quest::objectives::{ObjectiveMatch, ObjectiveSlot};
 use crate::observers::quest::quest_xp::QuestXpValue;
 use crate::observers::quest::reputation_reward::ReputationTurnInValue;
 use crate::observers::quest::started_by::StartedByStarter;
@@ -40,7 +40,8 @@ no_heap!(
     NpcDrop,
     ObjectDrop,
     StartedByStarter,
-    FinishedByFinisher
+    FinishedByFinisher,
+    ObjectiveSlot
 );
 
 impl HeapSize for String {
