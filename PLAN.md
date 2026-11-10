@@ -1,0 +1,83 @@
+# corrections-extractor-rs: optimization plan
+
+Overnight work on the Rust prototype in `tools/corrections-extractor-rs` (local only, never pushed).
+Goal: find out which optimizations pay off, by how much, and at what complexity; then measure the
+full archive with both tools.
+
+## Decisions (from David, 2026-11-10)
+
+- **Speed is the priority.** A memory saving is worth it when it costs at most ~1% speed per 10%
+  memory saved.
+- **One local commit per kept experiment**; find the best combination.
+- **Full-archive Rust runs** at milestones, so we know how the variants behave at real scale (the
+  5% sample does not show finalize and fold costs that grow with the archive).
+- **The full TypeScript run comes last**, once the Rust work is done.
+
+## Rules for every experiment
+
+- **Measure A/B, back to back:** the previous best binary against the candidate, alternating, two
+  runs each, on the 5% sample (6,760 submissions), on an idle machine. Record elapsed, user and
+  sys time and peak memory (`/usr/bin/time`). One run is noise; a change counts only when both
+  candidate runs beat both baseline runs or the difference clearly exceeds the spread.
+- **Parity gate:** `scripts/parity.sh 5` against the TypeScript reference output must stay
+  identical, and `cargo test` and `cargo clippy --all-targets` must stay clean.
+- **Keep or drop:** a change that helps is committed on its own (one commit per experiment);
+  one that does not is reverted and recorded below with its numbers, so nobody tries it again
+  blindly.
+- **Re-profile** (samply) after every few accepted changes, so the order follows the data.
+- **Complexity** is rated low / medium / high: how much code changes, and how far the code
+  drifts from the TypeScript structure (see the divergence discussion: decoder internals are
+  cheap to diverge, finalize and the fold are not).
+
+## Starting point (2026-11-10, idle machine)
+
+- 5% sample: 57.2 s elapsed (60.1 s before the purge delay), peak memory 6.1 GB.
+- Full archive: 18 min 43 s, peak 13.4 GB (before the purge delay; not measured since).
+- Profile of the 5% run (self time): `Object::get` 17.6%, decoded-tree allocation and freeing
+  ~18% (`drop_in_place` 6.9%, mimalloc pages ~8%, `TableBuilder::into_entries` 2.9%),
+  `Cursor::item` 8.6%, `Decoder::map` 6.8%, memcpy/memset ~10% (a third of it the inflate copy),
+  SipHash ~2%.
+
+## Experiments, in order
+
+CPU by profile weight first, then memory where it is cheap, then the structural ones. Full-archive
+Rust runs after the CPU batch, after the memory batch, and at the end.
+
+| # | Experiment | Why | Expected | Complexity |
+|---|---|---|---|---|
+| M0 | Report observations and approximate bytes per field after a run (`--stats`) | Know what the fold holds before shrinking it | — | low |
+| P1 | `Object::get` fast path for name keys (compare `&str` directly, no `JsKey` built) | 17.6% self time | −10% | low |
+| P2 | Stream entry access (`entry_t`/`entry_tp`/`entry_v`): cheaper lookups of `t`, `tp`, `v` | Most `Object::get` calls come from entries | −5% | low |
+| P3 | Build table entries in place (no `into_entries` copy, fewer allocations) | Allocation ~18% | −5% | low |
+| P4 | CBOR lengths of 1/2/4 bytes read as integers (doubles only for 8 bytes) | `Cursor::item` 8.6% | −2% | low |
+| P5 | FxHash instead of SipHash in observer maps and sets (unit state pairing, etc.) | SipHash ~2% | −2% | low |
+| P6 | Borrow `export_string` when it has no escapes; avoid copying the inflate buffer | memcpy ~10% | −2% | low |
+| R1 | Re-profile; re-rank what is left | | | |
+| F0 | Full archive, Rust, after the CPU batch | Milestone | | |
+| M1 | Threads: 16 (physical cores) vs 32 (logical) | ~110 MB of decoded data per worker | −1.5 GB, ±few % time | low |
+| M2 | Shrink quest objectives (half the fold: two strings per observed match) | ~5.6 GB of ~11 GB at full scale | −GBs | medium |
+| M3 | Summarize custom-merge fields whose merge can be folded exactly | Keep per-entity state instead of every observation | −GB | medium |
+| P8 | Parallel finalize, mild version: the big independent merges side by side, TS order kept otherwise | 76 s serial at full scale | −1 min full | medium |
+| P7 | Smaller `Value` (box rare variants, `&str` instead of `Cow` where possible) | Less memory traffic per decoded value | −?% | medium |
+| P9 | Tune: `AHEAD_PER_THREAD`, purge delay | Re-balance after the above | ±% | low |
+| P10 | Lazy events (only if the profile still shows eager event decoding high) | Expected 1–2% only | −1–2% | medium |
+| — | `-C target-cpu=native` | Already measured: −2%, within noise; makes the binary unportable | rejected | — |
+
+M0 result (5% sample): the fold holds ~616 MB, growing linearly with sessions (~11 GB at full
+scale). Objectives are 51% of it (314 MB), then npc spawns 10%, npc reactions 8%, finishers 5%,
+quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submissions in flight.
+
+## Final measurements
+
+| # | What |
+|---|---|
+| F1 | Full archive, Rust, final binary, under the memory watchdog: time and peak memory |
+| F2 | Full archive, TypeScript tool from scratch (empty store, scratch directories): time and peak memory |
+| F3 | Diff the two full-archive outputs (parity on the whole archive, not only samples) |
+
+## Results
+
+| # | Result | Time (5%) | Peak memory (5%) | Kept? | Commit |
+|---|---|---|---|---|---|
+| base | starting point | 57.2 s | 6.1 GB | — | ed77d0c |
+| M0 | `--stats` per-field memory report | no change (off by default) | — | yes | (next) |
