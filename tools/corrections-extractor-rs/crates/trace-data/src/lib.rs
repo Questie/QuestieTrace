@@ -3,9 +3,9 @@
 //!
 //! ```no_run
 //! # use trace_data::{source::list_submissions, submission::Submission};
-//! let mut decompressor = libdeflater::Decompressor::new();
+//! let mut inflater = trace_data::Inflater::new();
 //! for file in list_submissions("trace-data".as_ref())? {
-//!     let submission = Submission::read(&file.path, &mut decompressor);
+//!     let submission = Submission::read(&file.path, &mut inflater);
 //!     let decoded = submission.decode();
 //!     for trace in &decoded.traces {
 //!         for session in trace.sessions() {
@@ -24,6 +24,6 @@ pub mod stream;
 pub mod submission;
 pub mod value;
 
-pub use libdeflater::Decompressor;
+pub use export::Inflater;
 pub use session::{Event, Session, SessionKey};
 pub use value::{format_number, JsKey, KeyRef, Object, Value};

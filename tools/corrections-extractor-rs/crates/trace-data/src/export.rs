@@ -137,25 +137,47 @@ pub fn decode_for_print(text: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// Inflates raw deflate data.
-pub fn inflate(decompressor: &mut Decompressor, compressed: &[u8]) -> Result<Vec<u8>, String> {
-    let mut out = vec![0u8; (compressed.len() * 8).clamp(64 * 1024, MAX_CBOR_BYTES)];
-    loop {
-        match decompressor.deflate_decompress(compressed, &mut out) {
-            Ok(size) => {
-                out.truncate(size);
-                return Ok(out);
+/// Raw-deflate inflating with an output buffer kept between calls: each export is inflated once
+/// into memory that is already there (growing only past the largest export seen), then copied
+/// out at its exact size.
+pub struct Inflater {
+    decompressor: Decompressor,
+    scratch: Vec<u8>,
+}
+
+impl Default for Inflater {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Inflater {
+    pub fn new() -> Self {
+        Inflater {
+            decompressor: Decompressor::new(),
+            scratch: Vec::new(),
+        }
+    }
+
+    pub fn inflate(&mut self, compressed: &[u8]) -> Result<Vec<u8>, String> {
+        let wanted = (compressed.len() * 8).clamp(64 * 1024, MAX_CBOR_BYTES);
+        if self.scratch.len() < wanted {
+            self.scratch.resize(wanted, 0);
+        }
+        loop {
+            match self.decompressor.deflate_decompress(compressed, &mut self.scratch) {
+                Ok(size) => return Ok(self.scratch[..size].to_vec()),
+                Err(DecompressionError::InsufficientSpace) if self.scratch.len() < MAX_CBOR_BYTES => {
+                    let grown = (self.scratch.len() * 2).min(MAX_CBOR_BYTES);
+                    self.scratch.resize(grown, 0);
+                }
+                Err(DecompressionError::InsufficientSpace) => {
+                    return Err(format!(
+                        "payload could not be decompressed: Cannot create a Buffer larger than {MAX_CBOR_BYTES} bytes"
+                    ));
+                }
+                Err(DecompressionError::BadData) => return Err("payload could not be decompressed: invalid deflate data".into()),
             }
-            Err(DecompressionError::InsufficientSpace) if out.len() < MAX_CBOR_BYTES => {
-                let grown = (out.len() * 2).min(MAX_CBOR_BYTES);
-                out.resize(grown, 0);
-            }
-            Err(DecompressionError::InsufficientSpace) => {
-                return Err(format!(
-                    "payload could not be decompressed: Cannot create a Buffer larger than {MAX_CBOR_BYTES} bytes"
-                ));
-            }
-            Err(DecompressionError::BadData) => return Err("payload could not be decompressed: invalid deflate data".into()),
         }
     }
 }

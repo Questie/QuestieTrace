@@ -12,7 +12,8 @@ path = "src/main.rs"
 [dependencies]
 trace-data.workspace = true
 indexmap.workspace = true
-rayon.workspace = true
+mimalloc.workspace = true
+rustc-hash.workspace = true
 ryu-js.workspace = true
 serde.workspace = true
 serde_json.workspace = true

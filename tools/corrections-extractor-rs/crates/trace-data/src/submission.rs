@@ -7,10 +7,9 @@
 //! Reading happens in two steps, so decoded values can borrow the inflated bytes:
 //! [`Submission::read`] inflates every export, [`Submission::decode`] decodes them.
 
-use crate::export::{decode_for_print, find_exports, inflate, is_js_whitespace, Export};
+use crate::export::{decode_for_print, find_exports, is_js_whitespace, Export, Inflater};
 use crate::session::Session;
 use crate::value::{decode_trace, Value};
-use libdeflater::Decompressor;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::path::Path;
@@ -80,7 +79,7 @@ fn submission_id_from_path(path: &Path) -> String {
 
 impl Submission {
     /// Reads and inflates the file at `path`; never fails, errors are kept for [`Self::decode`].
-    pub fn read(path: &Path, decompressor: &mut Decompressor) -> Submission {
+    pub fn read(path: &Path, inflater: &mut Inflater) -> Submission {
         let mut submission = Submission {
             submission_id: submission_id_from_path(path),
             contributor_id: String::new(),
@@ -121,7 +120,7 @@ impl Submission {
                 submission.exports = exports
                     .iter()
                     .enumerate()
-                    .map(|(index, export)| inflate_export(index, export, decompressor))
+                    .map(|(index, export)| inflate_export(index, export, inflater))
                     .collect();
             }
         }
@@ -164,7 +163,7 @@ impl Submission {
     }
 }
 
-fn inflate_export(index: usize, export: &Export, decompressor: &mut Decompressor) -> Result<Vec<u8>, String> {
+fn inflate_export(index: usize, export: &Export, inflater: &mut Inflater) -> Result<Vec<u8>, String> {
     let number = index + 1;
     let payload = match export {
         Export::Unterminated => return Err(format!("export {number} has no matching end marker")),
@@ -174,7 +173,7 @@ fn inflate_export(index: usize, export: &Export, decompressor: &mut Decompressor
         Export::Payload(payload) => payload,
     };
     let compressed = decode_for_print(payload).map_err(|message| format!("export {number}: {message}"))?;
-    inflate(decompressor, &compressed).map_err(|message| format!("export {number}: {message}"))
+    inflater.inflate(&compressed).map_err(|message| format!("export {number}: {message}"))
 }
 
 /// decode.ts `decodePayload` after inflating: the payload must decode to a table.
