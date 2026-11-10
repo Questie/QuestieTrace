@@ -1,6 +1,5 @@
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { defaultTraceDataDir } from "./core/trace-data/submissions";
 import { extractCorrections, workersFromEnv, type ExtractMeta } from "./extract-corrections";
 import { sampledSource, samplePercentFromEnv, sourceFromEnv } from "./store/source";
 
@@ -14,7 +13,7 @@ let outputDir = resolve(toolDir, "output");
 try {
   // A sample gets its own store and output, so it never touches the full ones.
   const sample = samplePercentFromEnv();
-  let source = sourceFromEnv(defaultTraceDataDir());
+  let source = sourceFromEnv();
   let storeDir = fullStoreDir;
   if (sample !== undefined) {
     source = sampledSource(source, sample);

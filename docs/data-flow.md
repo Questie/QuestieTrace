@@ -28,8 +28,8 @@ flowchart LR
 
 ```sh
 cd tools/corrections-extractor
-TRACE_REMOTE=ovhcloud-de:trace-intake-ovh npm run extract   # from the bucket
-npm run extract                                       # from a local ../trace-data checkout
+npm run extract                                      # from the bucket (rclone remote ovhcloud-de)
+TRACE_DATA_DIR=../../../trace-data npm run extract   # from a local checkout
 ```
 
 Changing any observer code empties the store, and the next run observes everything again. Develop observers on a sample first (see [ADR 0004](adr/0004-develop-observers-on-a-sample.md)).

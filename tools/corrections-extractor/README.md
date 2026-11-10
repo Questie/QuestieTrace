@@ -24,8 +24,8 @@ npm run extract
 
 Submissions come from one of two sources:
 
-- `TRACE_REMOTE`, an rclone remote holding the archive bucket, e.g. `TRACE_REMOTE=ovhcloud-de:trace-intake-ovh npm run extract`. Only the submissions not observed yet are downloaded, 500 at a time, into a temporary directory that is removed after each batch.
-- Otherwise `TRACE_DATA_DIR`, or by default the `trace-data` checkout next to the QuestieTrace checkout (`../../../trace-data`).
+- By default the archive bucket, through [rclone](https://rclone.org) and the team's remote `ovhcloud-de:trace-intake-ovh`. Set `TRACE_REMOTE` to use another remote. Only the submissions not observed yet are downloaded, 500 at a time, into a temporary directory that is removed after each batch.
+- A local `trace-data` checkout when `TRACE_DATA_DIR` is set, e.g. `TRACE_DATA_DIR=../../../trace-data npm run extract`.
 
 Every new `submissions/<yyyy-mm>/*.json` file is decoded natively (print encoding, raw deflate, CBOR) and observed in worker threads (one per CPU core but one). Set `EXTRACT_WORKERS` to use fewer threads, e.g. `EXTRACT_WORKERS=4 npm run extract` (`0` observes on the main thread). Submissions that fail to load are reported and skipped; the rest still runs.
 
