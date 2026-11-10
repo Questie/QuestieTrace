@@ -7,6 +7,14 @@ use corrections::run::{run, Options};
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// `mi_option_purge_delay` in mimalloc v3's `mi_option_e` (include/mimalloc.h); libmimalloc-sys
+/// names no constant for it.
+const MI_OPTION_PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
+/// Every submission allocates and frees its decoded sessions: purging freed memory after
+/// mimalloc's default 1 s made the OS fault it back in constantly. Measured on a 5% sample:
+/// 10 s cuts the run by 10% for 18% more peak memory; never purging gains 2% more for 30%.
+const PURGE_DELAY_MS: std::os::raw::c_long = 10_000;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -73,6 +81,8 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> ExitCode {
+    // SAFETY: sets a process-wide allocator option before any other thread exists.
+    unsafe { libmimalloc_sys::mi_option_set(MI_OPTION_PURGE_DELAY, PURGE_DELAY_MS) };
     let args = match parse_args() {
         Ok(args) => args,
         Err(message) => {
