@@ -6,15 +6,15 @@
 //! newest, so the most complete) is used. Exports are cumulative: one session shows up in
 //! many submissions.
 
+use crate::accumulator::Accumulator;
 use crate::finalize::{finalize, Bundle};
-use crate::fold::Accumulator;
 use crate::lua::iso_timestamp;
-use crate::observe::{observe_session, StagedSession, MAX_IDS};
+use crate::observe::{observe_session, StagedSession};
+use crate::pipeline::process_in_order;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Condvar, Mutex, RwLock};
+use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use trace_data::source::{in_sample, list_submissions, SubmissionFile};
 use trace_data::submission::Submission;
@@ -63,8 +63,6 @@ pub struct PartialFile {
 /// One submission after observing, before folding.
 struct ObservedSubmission {
     key: String,
-    submission_id: String,
-    contributor_id: String,
     export_count: usize,
     dropped_exports: Vec<String>,
     error: Option<String>,
@@ -91,14 +89,12 @@ fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, used: &RwL
         for session in trace.sessions() {
             let key = session.key();
             let duplicate = key.is_some_and(|k| !seen.insert(k) || used.read().expect("no thread panics holding the lock").contains(&k));
-            let staged = if duplicate { None } else { observe_session(&session, &MAX_IDS) };
+            let staged = if duplicate { None } else { observe_session(&session) };
             sessions.push(ObservedSession { key, duplicate, staged });
         }
     }
     ObservedSubmission {
         key: file.key.clone(),
-        submission_id: submission.submission_id.clone(),
-        contributor_id: submission.contributor_id.clone(),
         export_count: decoded.traces.len(),
         dropped_exports: decoded.dropped_exports,
         error: decoded.error,
@@ -109,7 +105,7 @@ fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, used: &RwL
 /// What the fold tallies besides the accumulator.
 #[derive(Default)]
 struct Tally {
-    submission_ids: Vec<String>,
+    submission_count: usize,
     export_count: usize,
     skipped_files: Vec<SkippedFile>,
     partial_files: Vec<PartialFile>,
@@ -121,7 +117,7 @@ fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally
         tally.skipped_files.push(SkippedFile { name: submission.key, error });
         return;
     }
-    tally.submission_ids.push(submission.submission_id);
+    tally.submission_count += 1;
     tally.export_count += submission.export_count;
     if !submission.dropped_exports.is_empty() {
         tally.partial_files.push(PartialFile {
@@ -129,7 +125,6 @@ fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally
             dropped_exports: submission.dropped_exports,
         });
     }
-    let contributor = Some(submission.contributor_id.as_str()).filter(|c| !c.is_empty());
     for session in submission.sessions {
         // A copy marked while observing, or one whose key a submission folded meanwhile used:
         // the observing thread could not know yet.
@@ -142,70 +137,15 @@ fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally
             continue;
         }
         if let Some(staged) = session.staged {
-            acc.add(staged, contributor);
+            acc.add(staged);
         }
     }
 }
 
-/// Observes `files` on `threads` worker threads and hands the results to `fold` on this thread,
-/// in the order of `files`. Workers claim one submission at a time and stay at most
-/// `AHEAD_PER_THREAD * threads` submissions ahead of the fold, so a large submission never holds
-/// the others up and memory stays bounded.
-fn observe_in_order(
-    files: &[SubmissionFile],
-    threads: usize,
-    used: &RwLock<HashSet<SessionKey>>,
-    mut fold: impl FnMut(ObservedSubmission),
-    log: &dyn Fn(&str),
-) {
-    const AHEAD_PER_THREAD: usize = 4;
-    const PROGRESS_EVERY: usize = 2000;
-    let ahead = threads * AHEAD_PER_THREAD;
-    let next = AtomicUsize::new(0);
-    let folded = (Mutex::new(0usize), Condvar::new());
-    let (results, received) = mpsc::channel::<(usize, ObservedSubmission)>();
-    std::thread::scope(|scope| {
-        for _ in 0..threads {
-            let results = results.clone();
-            let (next, folded) = (&next, &folded);
-            scope.spawn(move || {
-                let mut inflater = Inflater::new();
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= files.len() {
-                        return;
-                    }
-                    let (count, advanced) = folded;
-                    let mut done = count.lock().expect("no thread panics holding the lock");
-                    while index >= *done + ahead {
-                        done = advanced.wait(done).expect("no thread panics holding the lock");
-                    }
-                    drop(done);
-                    let observed = observe_submission(&files[index], &mut inflater, used);
-                    if results.send((index, observed)).is_err() {
-                        return;
-                    }
-                }
-            });
-        }
-        drop(results);
-        let mut pending: HashMap<usize, ObservedSubmission> = HashMap::new();
-        let mut expected = 0;
-        for (index, observed) in received {
-            pending.insert(index, observed);
-            while let Some(observed) = pending.remove(&expected) {
-                fold(observed);
-                expected += 1;
-                *folded.0.lock().expect("no thread panics holding the lock") = expected;
-                folded.1.notify_all();
-                if expected % PROGRESS_EVERY == 0 || expected == files.len() {
-                    log(&format!("[{expected}/{}] submissions observed", files.len()));
-                }
-            }
-        }
-        assert_eq!(expected, files.len(), "a worker stopped before observing every submission");
-    });
-}
+/// Submissions each worker may observe past the fold: enough that a large submission rarely
+/// holds the others up, few enough that observed results do not pile up.
+const AHEAD_PER_THREAD: usize = 4;
+const PROGRESS_EVERY: usize = 2000;
 
 /// Runs the extraction and writes every output file; meta.json last, as the mark of a complete run.
 pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
@@ -224,31 +164,44 @@ pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
     let used = RwLock::new(HashSet::new());
     let started = std::time::Instant::now();
     let mut folding = std::time::Duration::ZERO;
-    observe_in_order(
+    let threads = options.threads.max(1);
+    let observed = process_in_order(
         &files,
-        options.threads.max(1),
-        &used,
-        |observed| {
+        threads,
+        threads * AHEAD_PER_THREAD,
+        Inflater::new,
+        |inflater, file| observe_submission(file, inflater, &used),
+        |index, observed| {
             let fold_started = std::time::Instant::now();
             fold(observed, &mut acc, &mut tally, &used);
             folding += fold_started.elapsed();
+            let done = index + 1;
+            if done % PROGRESS_EVERY == 0 || done == files.len() {
+                log(&format!("[{done}/{}] submissions observed", files.len()));
+            }
         },
-        log,
     );
+    // An observer error aborts the run, keeping the previous output (as the TS tool does).
+    if let Err(index) = observed {
+        return Err(format!(
+            "Observing {} failed (see the panic above); keeping the previous output",
+            files[index].key
+        ));
+    }
     log(&format!("Folding took {:.1}s of that", folding.as_secs_f64()));
     log(&format!("Observed and folded in {:.1}s", started.elapsed().as_secs_f64()));
-    if tally.submission_ids.is_empty() {
+    if tally.submission_count == 0 {
         return Err("No submission could be loaded; keeping the previous output".into());
     }
 
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default();
     let generated_at = iso_timestamp(millis);
     let finalize_started = std::time::Instant::now();
-    let bundle = finalize(&acc, tally.submission_ids.len(), &generated_at);
+    let bundle = finalize(&acc, tally.submission_count, &generated_at);
     log(&format!("Finalized in {:.1}s", finalize_started.elapsed().as_secs_f64()));
     let meta = Meta {
         session_count: acc.session_count(),
-        submission_count: tally.submission_ids.len(),
+        submission_count: tally.submission_count,
         export_count: tally.export_count,
         skipped_files: tally.skipped_files,
         partial_files: tally.partial_files,

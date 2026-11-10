@@ -1,5 +1,6 @@
 //! What the fold collects from observed sessions, in fold order: per-value summaries of the
 //! scalar and translation fields, and every observation of the fields with a custom merge.
+//! (Which session copies are folded at all is decided in run.rs.)
 
 use crate::aggregate::{Num, ObservationsByEntity, ScalarSummary, SessionScalars};
 use crate::observation::{Localized, Observation, SessionId, Sessions};
@@ -97,36 +98,65 @@ impl Accumulator {
         self.sessions.len()
     }
 
-    /// Adds one observed session; sessions must come in fold order.
-    pub fn add(&mut self, staged: StagedSession, contributor: Option<&str>) {
-        let s = self.sessions.add(contributor, staged.server_time);
+    /// Adds one observed session; sessions must come in fold order. Every staged field is named
+    /// here, so a field added to StagedSession and not collected is a compile error.
+    pub fn add(&mut self, staged: StagedSession) {
+        let StagedSession {
+            server_time,
+            zone_or_sort,
+            quest_name,
+            quest_level,
+            objectives_text,
+            objective_count,
+            npc_name,
+            item_name,
+            object_name,
+            required_level,
+            objectives,
+            trigger_end,
+            started_by,
+            finished_by,
+            reputation_reward,
+            quest_xp,
+            quest_factions,
+            turn_in_poi,
+            npc_spawns,
+            npc_level,
+            npc_friendly_to_faction,
+            npc_rank,
+            npc_drops,
+            object_drops,
+            object_spawns,
+            lookups,
+        } = staged;
+        let s = self.sessions.add(server_time);
         let sessions = &self.sessions;
-        self.zone_or_sort.add_session(staged.zone_or_sort, s, sessions);
-        self.quest_name.add_session(staged.quest_name, s, sessions);
-        self.quest_level.add_session(staged.quest_level, s, sessions);
-        self.objectives_text.add_session(staged.objectives_text, s, sessions);
-        self.objective_count.add_session(staged.objective_count, s, sessions);
-        self.npc_name.add_session(staged.npc_name, s, sessions);
-        self.item_name.add_session(staged.item_name, s, sessions);
-        self.object_name.add_session(staged.object_name, s, sessions);
+        self.zone_or_sort.add_session(zone_or_sort, s, sessions);
+        self.quest_name.add_session(quest_name, s, sessions);
+        self.quest_level.add_session(quest_level, s, sessions);
+        self.objectives_text.add_session(objectives_text, s, sessions);
+        self.objective_count.add_session(objective_count, s, sessions);
+        self.npc_name.add_session(npc_name, s, sessions);
+        self.item_name.add_session(item_name, s, sessions);
+        self.object_name.add_session(object_name, s, sessions);
 
-        self.required_level.add(assign(staged.required_level, s));
-        self.objectives.add(assign(staged.objectives, s));
-        self.trigger_end.add(assign(staged.trigger_end, s));
-        self.started_by.add(assign(staged.started_by, s));
-        self.finished_by.add(assign(staged.finished_by, s));
-        self.reputation_reward.add(assign(staged.reputation_reward, s));
-        self.quest_xp.add(assign(staged.quest_xp, s));
-        self.quest_factions.add(assign(staged.quest_factions, s));
-        self.turn_in_poi.extend(assign(staged.turn_in_poi, s));
-        self.npc_spawns.add(assign(staged.npc_spawns, s));
-        self.npc_level.add(assign(staged.npc_level, s));
-        self.npc_friendly_to_faction.add(assign(staged.npc_friendly_to_faction, s));
-        self.npc_rank.add(assign(staged.npc_rank, s));
-        self.npc_drops.add(assign(staged.npc_drops, s));
-        self.object_drops.add(assign(staged.object_drops, s));
-        self.object_spawns.add(assign(staged.object_spawns, s));
+        self.required_level.add(assign(required_level, s));
+        self.objectives.add(assign(objectives, s));
+        self.trigger_end.add(assign(trigger_end, s));
+        self.started_by.add(assign(started_by, s));
+        self.finished_by.add(assign(finished_by, s));
+        self.reputation_reward.add(assign(reputation_reward, s));
+        self.quest_xp.add(assign(quest_xp, s));
+        self.quest_factions.add(assign(quest_factions, s));
+        self.turn_in_poi.extend(assign(turn_in_poi, s));
+        self.npc_spawns.add(assign(npc_spawns, s));
+        self.npc_level.add(assign(npc_level, s));
+        self.npc_friendly_to_faction.add(assign(npc_friendly_to_faction, s));
+        self.npc_rank.add(assign(npc_rank, s));
+        self.npc_drops.add(assign(npc_drops, s));
+        self.object_drops.add(assign(object_drops, s));
+        self.object_spawns.add(assign(object_spawns, s));
 
-        self.lookups.add(staged.lookups, s, sessions);
+        self.lookups.add(lookups, s, sessions);
     }
 }

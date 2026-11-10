@@ -10,7 +10,7 @@
 //! coordinates are relative to the zone they are keyed by.
 
 use super::finished_by::FinishedByValue;
-use crate::aggregate::{Fact, Num};
+use crate::aggregate::Num;
 use crate::js;
 use crate::observation::{Confidence, Observation};
 use crate::observers::spawn::{SpawnObservation, SpawnToken};
@@ -99,11 +99,11 @@ pub struct TurnInPoiSpawns {
 
 /// Converts quest turn-in POIs into spawn observations of the quest's single finisher. Quests
 /// with no or several finishers are skipped: their POI cannot be attributed to one of them.
-pub fn turn_in_poi_spawns(pois: &[Observation<TurnInPoiValue>], finished_by: &IndexMap<i64, Fact<FinishedByValue>>) -> TurnInPoiSpawns {
+pub fn turn_in_poi_spawns(pois: &[Observation<TurnInPoiValue>], finished_by: &IndexMap<i64, FinishedByValue>) -> TurnInPoiSpawns {
     let mut spawns = TurnInPoiSpawns::default();
 
     for poi in pois {
-        let Some(finisher) = finished_by.get(&poi.entity_id).map(|fact| &fact.value) else {
+        let Some(finisher) = finished_by.get(&poi.entity_id) else {
             continue;
         };
         let (target, finisher_id) = match (finisher.creatures.as_slice(), finisher.objects.as_slice()) {
@@ -249,20 +249,12 @@ mod tests {
         )
     }
 
-    fn finished_by(quest_id: i64, creatures: &[i64], objects: &[i64]) -> IndexMap<i64, Fact<FinishedByValue>> {
+    fn finished_by(quest_id: i64, creatures: &[i64], objects: &[i64]) -> IndexMap<i64, FinishedByValue> {
         let value = FinishedByValue {
             creatures: creatures.to_vec(),
             objects: objects.to_vec(),
         };
-        IndexMap::from([(
-            quest_id,
-            Fact {
-                value,
-                confidence: Confidence::Medium,
-                observation_count: 1,
-                alternative_count: 0,
-            },
-        )])
+        IndexMap::from([(quest_id, value)])
     }
 
     fn spawn_of(entity_id: i64) -> Observation<SpawnObservation> {

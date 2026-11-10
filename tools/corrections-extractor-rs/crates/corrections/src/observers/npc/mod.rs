@@ -8,4 +8,3 @@ pub mod rank;
 pub mod spawns;
 pub mod spawns_merge;
 pub mod unit_state;
-pub mod zone_id;
