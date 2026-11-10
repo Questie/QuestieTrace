@@ -7,6 +7,7 @@ import { StreamViewer } from "./components/StreamViewer.js";
 import { EventLog } from "./components/EventLog.js";
 import { PositionPlot } from "./components/PositionPlot.js";
 import { ExtractView } from "./components/ExtractView.js";
+import { FilePicker } from "./components/FilePicker.js";
 import type { SessionRecord, SessionSummary } from "../core/types.js";
 import "./App.css";
 
@@ -68,9 +69,11 @@ export function App() {
     error: sessionError,
   } = useSession(selectedFile, selectedSessionIndex);
 
-  // Auto-select first file if only one
+  const fileNames = useMemo(() => files.map((f) => f.name), [files]);
+
+  // Auto-select the file if there is only one: opening one downloads it.
   useEffect(() => {
-    if (files.length > 0 && !selectedFile) {
+    if (files.length === 1 && !selectedFile) {
       setSelectedFile(files[0].name);
     }
   }, [files, selectedFile]);
@@ -90,7 +93,7 @@ export function App() {
   if (filesLoading) return <div className="loading">Loading trace files...</div>;
   if (filesError) return <div className="error-msg">Error: {filesError}</div>;
   if (files.length === 0)
-    return <div className="error-msg">No submissions found in trace-data/submissions/</div>;
+    return <div className="error-msg">No submissions found. Check the dev server's terminal for an rclone error.</div>;
 
   return (
     <>
@@ -98,22 +101,14 @@ export function App() {
       <div className="app-header">
         <h1>Trace Analyzer</h1>
 
-        {/* File selector */}
-        <select
-          className="file-select"
-          value={selectedFile ?? ""}
-          onChange={(e) => {
-            setSelectedFile(e.target.value || null);
+        <FilePicker
+          files={fileNames}
+          value={selectedFile}
+          onSelect={(file) => {
+            setSelectedFile(file);
             setSelectedSessionIndex(null);
           }}
-        >
-          {files.length > 1 && <option value="">Select file...</option>}
-          {files.map((f) => (
-            <option key={f.name} value={f.name}>
-              {f.name}
-            </option>
-          ))}
-        </select>
+        />
 
         {/* Session selector */}
         {sessions.length > 1 && (
@@ -132,6 +127,13 @@ export function App() {
         {sessions.length === 1 && (
           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#888" }}>
             {sessionLabel(sessions[0])}
+          </span>
+        )}
+
+        {(sessionsLoading || sessionLoading) && (
+          <span className="loading-indicator" role="status">
+            <span className="spinner" />
+            {sessionsLoading ? "Downloading submission..." : "Loading session..."}
           </span>
         )}
 
@@ -182,7 +184,7 @@ export function App() {
       {/* Content */}
       <div className="tab-content">
         {(sessionsLoading || sessionLoading) && (
-          <div className="loading">Loading...</div>
+          <div className="loading">{sessionsLoading ? "Downloading submission..." : "Loading session..."}</div>
         )}
         {(sessionsError || sessionError) && (
           <div className="error-msg">

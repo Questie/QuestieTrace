@@ -34,16 +34,22 @@ export function useSessionList(fileName: string | null) {
       setSessions([]);
       return;
     }
+    // Drop the previous file's sessions, and ignore its answer if it arrives late.
+    let current = true;
+    setSessions([]);
     setLoading(true);
     setError(null);
     fetch(`/api/file/${encodeURIComponent(fileName)}/sessions`)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) throw new Error(data.error);
-        setSessions(data);
+        if (current) setSessions(data);
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => current && setError(e.message))
+      .finally(() => current && setLoading(false));
+    return () => {
+      current = false;
+    };
   }, [fileName]);
 
   return { sessions, loading, error };
@@ -59,6 +65,9 @@ export function useSession(fileName: string | null, sessionIndex: number | null)
       setSession(null);
       return;
     }
+    // Drop the previous session, and ignore its answer if it arrives late.
+    let current = true;
+    setSession(null);
     setLoading(true);
     setError(null);
     fetch(
@@ -67,10 +76,13 @@ export function useSession(fileName: string | null, sessionIndex: number | null)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) throw new Error(data.error);
-        setSession(data);
+        if (current) setSession(data);
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => current && setError(e.message))
+      .finally(() => current && setLoading(false));
+    return () => {
+      current = false;
+    };
   }, [fileName, sessionIndex]);
 
   return { session, loading, error };
