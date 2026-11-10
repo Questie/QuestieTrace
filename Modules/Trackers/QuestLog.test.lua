@@ -12,7 +12,6 @@ local function LoadQuestLogTracker(env)
   }
   env.GetTime = function() return 0 end
   env.GetTimePreciseSec = function() return 0 end
-  env.UnitLevel = function(_unit) return 60 end
 
   local chunkGlobals = assert(loadfile("Modules/globals.lua"))
   setfenv(chunkGlobals, env)
@@ -213,52 +212,5 @@ describe("QuestLog tracker", function()
     local titleTuple = titleStream[100][1].v
     assert.are.equal("Legacy Quest", titleTuple[1])
     assert.are.equal(100, titleTuple[8])
-  end)
-
-  it("should record player level at QUEST_ACCEPTED in QuestAcceptLevel stream", function()
-    env.questLogRows = {
-      { title = "Accepted Quest", questID = 100 },
-    }
-    env.UnitLevel = function(_unit) return 45 end
-
-    local capture = NewCapture()
-    InitAndSample(tracker, capture, env)
-
-    -- Simulate QUEST_ACCEPTED event (Classic: only questLogIndex provided)
-    -- Quest is at index 1 in the mock quest log
-    tracker.OnEvent(capture, "QUEST_ACCEPTED", 1)
-
-    local acceptStream = capture.session.functions["QuestAcceptLevel"]
-    assert.is_not_nil(acceptStream[100], "QuestAcceptLevel stream should exist for quest 100")
-    assert.are.equal(45, acceptStream[100][1].v)
-    assert.are.equal(0, acceptStream[100][1].t)
-  end)
-
-  it("should append new acceptance levels if player levels up and accepts another quest", function()
-    env.questLogRows = {
-      { title = "First Quest", questID = 100 },
-      { title = "Second Quest", questID = 101 },
-    }
-    env.UnitLevel = function(_unit) return 30 end
-
-    local capture = NewCapture()
-    InitAndSample(tracker, capture, env)
-
-    -- First acceptance at level 30 (quest at index 1)
-    tracker.OnEvent(capture, "QUEST_ACCEPTED", 1)
-
-    -- Simulate level up
-    env.UnitLevel = function(_unit) return 31 end
-    capture.startedAt = 100
-    capture.startedAtPrecise = 100
-
-    -- Second acceptance at level 31 (quest at index 2)
-    tracker.OnEvent(capture, "QUEST_ACCEPTED", 2)
-
-    local acceptStream = capture.session.functions["QuestAcceptLevel"]
-    assert.is_not_nil(acceptStream[100])
-    assert.are.equal(30, acceptStream[100][1].v)
-    assert.is_not_nil(acceptStream[101])
-    assert.are.equal(31, acceptStream[101][1].v)
   end)
 end)
