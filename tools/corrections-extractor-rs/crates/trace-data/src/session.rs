@@ -4,10 +4,12 @@
 use crate::value::{KeyRef, Object, Value};
 
 /// One valid session of an export.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Session<'v, 'a> {
     record: &'v Object<'a>,
-    events: &'v [Value<'a>],
+    /// Every event's name and times, read once: observers walk all events many times, and
+    /// reading them from the decoded event objects missed the cache on every event, every pass.
+    events: Vec<Event<'v, 'a>>,
     functions: &'v Object<'a>,
 }
 
@@ -18,6 +20,7 @@ impl<'v, 'a> Session<'v, 'a> {
         let record = value.as_object()?;
         let events = record.get(KeyRef::Str("events"))?.as_array()?;
         let functions = record.get(KeyRef::Str("functions"))?.as_object()?;
+        let events = events.iter().map(Event::read).collect();
         Some(Session { record, events, functions })
     }
 
@@ -35,12 +38,12 @@ impl<'v, 'a> Session<'v, 'a> {
     }
 
     /// The recorded events, in order. Every event counts toward indices, read or not.
-    pub fn events(&self) -> impl ExactSizeIterator<Item = Event<'v, 'a>> + Clone {
-        self.events.iter().map(Event)
+    pub fn events(&self) -> impl ExactSizeIterator<Item = Event<'v, 'a>> + Clone + '_ {
+        self.events.iter().copied()
     }
 
     pub fn event(&self, index: usize) -> Option<Event<'v, 'a>> {
-        self.events.get(index).map(Event)
+        self.events.get(index).copied()
     }
 
     pub fn event_count(&self) -> usize {
@@ -77,32 +80,47 @@ impl<'v, 'a> Session<'v, 'a> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionKey(u64, u64);
 
-/// One recorded event: `{ t, tp, e, a }`.
+/// One recorded event: `{ t, tp, e, a }`, with its name and times already read.
 #[derive(Clone, Copy)]
-pub struct Event<'v, 'a>(&'v Value<'a>);
+pub struct Event<'v, 'a> {
+    value: &'v Value<'a>,
+    name: Option<&'v str>,
+    t: f64,
+    tp: f64,
+}
 
 impl<'v, 'a> Event<'v, 'a> {
+    fn read(value: &'v Value<'a>) -> Self {
+        let num = |key: &str| value.get(key).and_then(Value::as_num).unwrap_or(f64::NAN);
+        Event {
+            value,
+            name: value.get("e").and_then(Value::as_str),
+            t: num("t"),
+            tp: num("tp"),
+        }
+    }
+
     /// The event name (`e`).
     pub fn name(&self) -> Option<&'v str> {
-        self.0.get("e").and_then(Value::as_str)
+        self.name
     }
 
     pub fn is(&self, name: &str) -> bool {
-        self.name() == Some(name)
+        self.name == Some(name)
     }
 
     /// Session time (`t`); NaN when missing, so comparisons fail like JS `undefined` does.
     pub fn t(&self) -> f64 {
-        self.0.get("t").and_then(Value::as_num).unwrap_or(f64::NAN)
+        self.t
     }
 
     pub fn tp(&self) -> f64 {
-        self.0.get("tp").and_then(Value::as_num).unwrap_or(f64::NAN)
+        self.tp
     }
 
     /// The packed arguments (`a`): `{ [1] = ..., n = count }`, decoded on first read.
     pub fn args(&self) -> Option<&'v Value<'a>> {
-        self.0.get("a")
+        self.value.get("a")
     }
 
     /// `a.n`, the argument count.
@@ -116,6 +134,6 @@ impl<'v, 'a> Event<'v, 'a> {
     }
 
     pub fn value(&self) -> &'v Value<'a> {
-        self.0
+        self.value
     }
 }

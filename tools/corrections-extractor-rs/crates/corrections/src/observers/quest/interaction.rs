@@ -26,8 +26,8 @@ pub enum InteractionValue<'v, 'a> {
 
 /// Stream lookups bounded by one quest event (TS `InteractionLookup`).
 #[derive(Clone, Copy)]
-pub struct InteractionLookup<'v, 'a> {
-    session: Session<'v, 'a>,
+pub struct InteractionLookup<'s, 'v, 'a> {
+    session: &'s Session<'v, 'a>,
     /// The event's raw time.
     t: f64,
     /// Samples at `t` count up to this precise time: the next event's when it shares `t`.
@@ -36,7 +36,7 @@ pub struct InteractionLookup<'v, 'a> {
 
 /// TS `questEventLookup`: the lookup for the event at `index`, or None when the previous or
 /// next event has the same `t` and `tp` (its giver could not be told apart).
-pub fn quest_event_lookup<'v, 'a>(session: &Session<'v, 'a>, index: usize) -> Option<InteractionLookup<'v, 'a>> {
+pub fn quest_event_lookup<'s, 'v, 'a>(session: &'s Session<'v, 'a>, index: usize) -> Option<InteractionLookup<'s, 'v, 'a>> {
     let event = session.event(index)?;
     let previous = index.checked_sub(1).and_then(|i| session.event(i));
     let next = session.event(index + 1);
@@ -49,16 +49,16 @@ pub fn quest_event_lookup<'v, 'a>(session: &Session<'v, 'a>, index: usize) -> Op
         _ => f64::INFINITY,
     };
     Some(InteractionLookup {
-        session: *session,
+        session,
         t: event.t(),
         before_tp,
     })
 }
 
-impl<'v, 'a> InteractionLookup<'v, 'a> {
+impl<'v, 'a> InteractionLookup<'_, 'v, 'a> {
     /// `session.functions[name][params...]` as it stood during the interaction.
     pub fn get(&self, name: &str, params: &[KeyRef]) -> InteractionValue<'v, 'a> {
-        value_before_next_event(get_stream(&self.session, name, params).unwrap_or(&[]), self.t, self.before_tp)
+        value_before_next_event(get_stream(self.session, name, params).unwrap_or(&[]), self.t, self.before_tp)
     }
 }
 
