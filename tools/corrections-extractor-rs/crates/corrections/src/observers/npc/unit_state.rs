@@ -12,7 +12,7 @@
 use crate::aggregate::Num;
 use crate::guid::GuidKind;
 use crate::observers::guid_encounters::guid_encounters;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use trace_data::stream::{entry_t, entry_tp, entry_v, get_stream, last_at_or_before, value_at};
 use trace_data::{KeyRef, Session, Value};
 
@@ -41,11 +41,11 @@ pub fn unit_state_encounters<'v, 'a>(session: &Session<'v, 'a>, name: &str, lead
         let params: Vec<KeyRef> = leading_params.iter().map(|&param| KeyRef::Str(param)).chain([KeyRef::Str(token)]).collect();
         let stream = get_stream(session, name, &params).unwrap_or(&[]);
         // JS Map keyed by number: NaN matches NaN and -0 matches 0, as with Num.
-        let mut guid_tps: HashMap<Num, Vec<f64>> = HashMap::new();
+        let mut guid_tps: FxHashMap<Num, Vec<f64>> = FxHashMap::default();
         for entry in get_stream(session, "UnitGUID", &[KeyRef::Str(token)]).unwrap_or(&[]) {
             guid_tps.entry(Num(entry_t(entry))).or_default().push(entry_tp(entry));
         }
-        let sample_times: HashSet<Num> = sample_event_times.iter().copied().chain(stream.iter().map(entry_t)).map(Num).collect();
+        let sample_times: FxHashSet<Num> = sample_event_times.iter().copied().chain(stream.iter().map(entry_t)).map(Num).collect();
         for encounter in guid_encounters(session, GuidKind::Npc, &[token]) {
             if !sample_times.contains(&Num(encounter.t)) {
                 continue;

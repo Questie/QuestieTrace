@@ -10,7 +10,7 @@
 use crate::aggregate::Num;
 use crate::js;
 use crate::observation::{Confidence, Observation};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use trace_data::stream::emulated_list;
 use trace_data::stream::{entry_t, entry_v, get_stream, param_keys};
 use trace_data::{KeyRef, Session, Value};
@@ -41,9 +41,9 @@ fn append_stream_levels(
     observations: &mut Vec<Observation<Num>>,
     function_name: &str,
     read_entry: fn(Option<&Value>) -> Option<f64>,
-    skip_keys: &HashSet<String>,
-) -> HashSet<String> {
-    let mut observed_keys = HashSet::new();
+    skip_keys: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    let mut observed_keys = FxHashSet::default();
     let Some(root) = session.function(function_name).filter(|root| !root.is_array()) else {
         return observed_keys;
     };
@@ -78,7 +78,7 @@ fn append_stream_levels(
 pub fn observe(session: &Session) -> Vec<Observation<Num>> {
     let mut observations = Vec::new();
     // Prefer the modern API when both recorded the same quest.
-    let modern_keys = append_stream_levels(session, &mut observations, "C_QuestLog.GetInfo", read_get_info_level, &HashSet::new());
+    let modern_keys = append_stream_levels(session, &mut observations, "C_QuestLog.GetInfo", read_get_info_level, &FxHashSet::default());
     append_stream_levels(session, &mut observations, "GetQuestLogTitle", read_get_quest_log_title_level, &modern_keys);
     observations
 }
