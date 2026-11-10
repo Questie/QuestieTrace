@@ -10,10 +10,10 @@
 //! Questie stores the text split into lines with the blank lines between paragraphs kept (a
 //! two-paragraph summary is `{line1, "", line2}`).
 
-use super::objectives::emulated_list;
 use crate::js;
 use crate::observation::{Confidence, Localized, Observation};
 use crate::probes::locale_at;
+use trace_data::stream::emulated_list;
 use trace_data::stream::{entry_t, entry_v, get_stream, param_keys};
 use trace_data::{KeyRef, Session, Value};
 
@@ -42,7 +42,9 @@ fn read_objectives_text<'v>(value: Option<&'v Value>) -> Option<&'v str> {
 
 pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<QuestObjectivesTextValue>>> {
     let mut observations = Vec::new();
-    let Some(root) = session.function("GetQuestLogQuestText").filter(|root| !root.is_array()) else { return observations };
+    let Some(root) = session.function("GetQuestLogQuestText").filter(|root| !root.is_array()) else {
+        return observations;
+    };
 
     for quest_id_key in param_keys(root) {
         let quest_id = js::number(&quest_id_key);
@@ -58,7 +60,10 @@ pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<QuestOb
             if lines.is_empty() {
                 continue;
             }
-            let value = Localized { locale: locale.to_owned(), value: lines };
+            let value = Localized {
+                locale: locale.to_owned(),
+                value: lines,
+            };
             // Read straight out of the quest log API.
             observations.push(Observation::new(quest_id as i64, value, Confidence::High, t));
         }
@@ -67,7 +72,11 @@ pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<QuestOb
 }
 
 pub fn observe(session: &Session) -> Vec<Observation<QuestObjectivesTextValue>> {
-    observe_localized(session).into_iter().filter(|obs| obs.value.locale == "enUS").map(|obs| obs.map(|v| v.value)).collect()
+    observe_localized(session)
+        .into_iter()
+        .filter(|obs| obs.value.locale == "enUS")
+        .map(|obs| obs.map(|v| v.value))
+        .collect()
 }
 
 #[cfg(test)]
@@ -106,7 +115,13 @@ mod tests {
         }));
         assert_eq!(
             lines(&observations[0]),
-            ["Dispatch 12 Befouled Water Elementals at Mystral Lake.", "", "Scout the gazebo on Mystral Lake.", "", "Return to Mastok Wrilehiss at Splintertree Post."]
+            [
+                "Dispatch 12 Befouled Water Elementals at Mystral Lake.",
+                "",
+                "Scout the gazebo on Mystral Lake.",
+                "",
+                "Return to Mastok Wrilehiss at Splintertree Post."
+            ]
         );
     }
 

@@ -7,36 +7,21 @@
 //! counts. Every other type does, including ones the matcher cannot resolve (e.g. reputation):
 //! exporting the remaining ids would leave the quest incomplete.
 
-use super::objectives::emulated_list;
 use crate::aggregate::Num;
 use crate::js;
 use crate::observation::{Confidence, Observation};
+use trace_data::stream::emulated_list;
 use trace_data::stream::{entry_t, entry_v, get_stream, param_keys};
-use trace_data::{format_number, KeyRef, Session, Value};
+use trace_data::{KeyRef, Session};
 
 const OBJECTIVES: &str = "C_QuestLog.GetQuestObjectives";
 const NON_OBJECTIVE_TYPES: [&str; 2] = ["event", "log"];
 
-/// JS `String(value)`, with None as `undefined`.
-///
-/// Shared by the quest observers that compare or match stringified values. It belongs in
-/// `crate::js`; it lives here because that module is shared.
-pub(super) fn js_string(value: Option<&Value>) -> String {
-    let Some(value) = value else { return "undefined".to_owned() };
-    match value.resolved() {
-        Value::Bool(b) => b.to_string(),
-        Value::Num(n) => format_number(*n),
-        Value::Str(s) => s.to_string(),
-        // Array.prototype.join: decoded arrays hold no nil, so every item is stringified.
-        Value::Array(items) => items.iter().map(|item| js_string(Some(item))).collect::<Vec<_>>().join(","),
-        Value::Object(_) => "[object Object]".to_owned(),
-        Value::Lazy(_) => unreachable!("resolved() never returns a lazy value"),
-    }
-}
-
 pub fn observe(session: &Session) -> Vec<Observation<Num>> {
     let mut observations = Vec::new();
-    let Some(root) = session.function(OBJECTIVES).filter(|root| !root.is_array()) else { return observations };
+    let Some(root) = session.function(OBJECTIVES).filter(|root| !root.is_array()) else {
+        return observations;
+    };
 
     for quest_id_key in param_keys(root) {
         let quest_id = js::number(&quest_id_key);
@@ -44,12 +29,14 @@ pub fn observe(session: &Session) -> Vec<Observation<Num>> {
             continue;
         }
         for entry in get_stream(session, OBJECTIVES, &[KeyRef::Str(&quest_id_key)]).unwrap_or(&[]) {
-            let Some(objectives) = emulated_list(entry_v(entry)).filter(|list| !list.is_empty()) else { continue };
+            let Some(objectives) = emulated_list(entry_v(entry)).filter(|list| !list.is_empty()) else {
+                continue;
+            };
             let count = objectives
                 .iter()
                 .flatten()
                 // `typeof objective === "object"`: arrays count too.
-                .filter(|objective| objective.is_table() && !NON_OBJECTIVE_TYPES.contains(&js_string(objective.get("type")).as_str()))
+                .filter(|objective| objective.is_table() && !NON_OBJECTIVE_TYPES.contains(&js::string(objective.get("type")).as_str()))
                 .count();
             observations.push(Observation::new(quest_id as i64, Num(count as f64), Confidence::High, entry_t(entry)));
         }
@@ -64,7 +51,9 @@ mod tests {
     use serde_json::{json, Value as Json};
 
     fn observed(functions: Json) -> Vec<(i64, f64, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value.0, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value.0, o.confidence, o.t)).collect()
+        })
     }
 
     fn counts(functions: Json) -> Vec<f64> {
@@ -109,16 +98,5 @@ mod tests {
     fn ignores_empty_objective_lists() {
         let functions = json!({ "C_QuestLog.GetQuestObjectives": { "33": stream([(3.0, json!([]))]) } });
         assert_eq!(observed(functions), []);
-    }
-
-    #[test]
-    fn stringifies_types_like_js_string() {
-        let types = json!({ "t": [true, 1.5, "event", ["event"], [1, ["a", 2]], { "k": 1 }] });
-        let strings = crate::test_support::with_session(&session_json(types, vec![]), |s| {
-            let items = s.function("t").and_then(Value::as_array).expect("an array");
-            items.iter().map(|item| js_string(Some(item))).collect::<Vec<_>>()
-        });
-        assert_eq!(strings, ["true", "1.5", "event", "event", "1,a,2", "[object Object]"]);
-        assert_eq!(js_string(None), "undefined");
     }
 }

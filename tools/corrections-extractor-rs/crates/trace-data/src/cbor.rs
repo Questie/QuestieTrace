@@ -178,7 +178,10 @@ mod tests {
     #[test]
     fn unsupported_items_name_themselves_like_the_ts_decoder() {
         assert_eq!(Cursor::new(&[0xc0]).item(), Err(CborError("CBOR tags are not supported".into())));
-        assert_eq!(Cursor::new(&[0x9f]).item(), Err(CborError("indefinite-length CBOR items are not supported".into())));
+        assert_eq!(
+            Cursor::new(&[0x9f]).item(),
+            Err(CborError("indefinite-length CBOR items are not supported".into()))
+        );
         assert_eq!(Cursor::new(&[0xf8, 0x20]).item(), Err(CborError("unsupported CBOR simple value 32".into())));
         assert_eq!(Cursor::new(&[0xe0]).item(), Err(CborError("unsupported CBOR simple value 0".into())));
     }

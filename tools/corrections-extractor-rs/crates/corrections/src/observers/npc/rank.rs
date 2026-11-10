@@ -34,7 +34,9 @@ pub fn observe(session: &Session) -> Vec<Observation<i64>> {
     let mut observations = Vec::new();
     let mut seen: HashSet<(i64, i64)> = HashSet::new();
     for encounter in unit_state_encounters(session, "UnitClassification", &[]) {
-        let Some(rank) = encounter.value.as_str().and_then(rank_by_classification) else { continue };
+        let Some(rank) = encounter.value.as_str().and_then(rank_by_classification) else {
+            continue;
+        };
         if !seen.insert((encounter.npc_id, rank)) {
             continue;
         }
@@ -80,16 +82,29 @@ mod tests {
     }
 
     fn observed(functions: Json, events: Vec<Json>) -> Vec<(i64, i64, Confidence, f64)> {
-        with_session(&session_json(functions, events), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, events), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     fn vote(session: u32, rank: i64) -> Observation<i64> {
-        Observation { session: SessionId(session), ..Observation::new(1, rank, Confidence::High, 0.0) }
+        Observation {
+            session: SessionId(session),
+            ..Observation::new(1, rank, Confidence::High, 0.0)
+        }
     }
 
     #[test]
     fn maps_each_classification_to_its_rank() {
-        let cases = [("normal", 0), ("trivial", 0), ("minus", 0), ("elite", 1), ("rareelite", 2), ("worldboss", 3), ("rare", 4)];
+        let cases = [
+            ("normal", 0),
+            ("trivial", 0),
+            ("minus", 0),
+            ("elite", 1),
+            ("rareelite", 2),
+            ("worldboss", 3),
+            ("rare", 4),
+        ];
         for (classification, rank) in cases {
             let functions = json!({
                 "UnitGUID": { "target": [sample(5.0, creature_guid(200001).into())] },

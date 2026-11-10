@@ -61,7 +61,10 @@ impl FactionRecord {
             return;
         }
         let at = if Self::is_array_index(id) {
-            self.0.iter().position(|&(key, _)| !Self::is_array_index(key) || key > id).unwrap_or(self.0.len())
+            self.0
+                .iter()
+                .position(|&(key, _)| !Self::is_array_index(key) || key > id)
+                .unwrap_or(self.0.len())
         } else {
             self.0.len()
         };
@@ -158,7 +161,9 @@ struct StandingSample {
 
 /// The faction streams of each api with a numeric key, as (factionID, key, entries).
 fn faction_streams<'v, 'a>(session: &Session<'v, 'a>, api: FactionApi) -> Vec<(f64, &'v [Value<'a>])> {
-    let Some(root) = session.function(api.function_name()).filter(|root| !root.is_array()) else { return Vec::new() };
+    let Some(root) = session.function(api.function_name()).filter(|root| !root.is_array()) else {
+        return Vec::new();
+    };
     param_keys(root)
         .iter()
         .filter_map(|key| {
@@ -177,7 +182,10 @@ fn standing_streams(session: &Session) -> IndexMap<Num, Vec<Vec<StandingSample>>
                 continue;
             }
             // `!value || typeof value !== "object"`: only tables have a standing.
-            let samples = entries.iter().map(|entry| StandingSample { t: entry_t(entry), standing: entry_v(entry).filter(|v| v.is_table()).and_then(|v| api.standing(v)) });
+            let samples = entries.iter().map(|entry| StandingSample {
+                t: entry_t(entry),
+                standing: entry_v(entry).filter(|v| v.is_table()).and_then(|v| api.standing(v)),
+            });
             streams.entry(Num(faction_id)).or_default().push(samples.collect());
         }
     }
@@ -252,9 +260,15 @@ fn standing_at(stream: &[StandingSample], t: f64, strict: bool) -> Option<Option
 fn standing_gains(streams: &IndexMap<Num, Vec<Vec<StandingSample>>>, t: f64) -> Option<FactionRecord> {
     let mut gains = FactionRecord::default();
     for (faction_id, faction_streams) in streams {
-        let boundaries: Vec<_> = faction_streams.iter().map(|stream| (standing_at(stream, t - CHANGE_WINDOW, true), standing_at(stream, t + CHANGE_WINDOW, false))).collect();
+        let boundaries: Vec<_> = faction_streams
+            .iter()
+            .map(|stream| (standing_at(stream, t - CHANGE_WINDOW, true), standing_at(stream, t + CHANGE_WINDOW, false)))
+            .collect();
         // The first stream with a standing at both boundaries wins; otherwise the preferred one.
-        let (before, after) = boundaries.iter().find(|(before, after)| matches!((before, after), (Some(Some(_)), Some(Some(_))))).unwrap_or(&boundaries[0]);
+        let (before, after) = boundaries
+            .iter()
+            .find(|(before, after)| matches!((before, after), (Some(Some(_)), Some(Some(_)))))
+            .unwrap_or(&boundaries[0]);
         let Some(after) = after else { continue };
         let Some(before) = before else { return None };
         let (Some(before), Some(after)) = (before, after) else { continue };
@@ -281,7 +295,8 @@ fn split_spillover(all_gains: &FactionRecord) -> (FactionRecord, FactionRecord) 
     let mut gains = FactionRecord::default();
     let mut spillover = FactionRecord::default();
     for (faction_id, amount) in all_gains.iter() {
-        let is_source = |other: f64| js_sign(other) == js_sign(amount) && other.abs() > amount.abs() && (amount - other / SPILLOVER_RATIO).abs() <= SPILLOVER_TOLERANCE;
+        let is_source =
+            |other: f64| js_sign(other) == js_sign(amount) && other.abs() > amount.abs() && (amount - other / SPILLOVER_RATIO).abs() <= SPILLOVER_TOLERANCE;
         // The first of the largest, as a stable sort by |amount| descending would put first.
         let mut source: Option<(f64, f64)> = None;
         for (other_id, other) in all_gains.iter().filter(|&(_, other)| is_source(other)) {
@@ -304,7 +319,7 @@ fn turn_in_quest_id(args: Option<&Value>) -> Option<f64> {
 
 /// JS `String(value)` of a chat message argument.
 fn message_text(value: Option<&Value>) -> String {
-    super::objective_count::js_string(value)
+    crate::js::string(value)
 }
 
 pub fn observe(session: &Session) -> Vec<Observation<ReputationTurnInValue>> {
@@ -360,7 +375,11 @@ pub fn observe(session: &Session) -> Vec<Observation<ReputationTurnInValue>> {
         let Some(gains) = gains.filter(|gains| !gains.is_empty()) else { continue };
 
         let (gains, spillover) = split_spillover(&gains);
-        let value = ReputationTurnInValue { player_faction, gains, spillover };
+        let value = ReputationTurnInValue {
+            player_faction,
+            gains,
+            spillover,
+        };
         observations.push(Observation::new(quest_id as i64, value, Confidence::High, t));
     }
     observations
@@ -389,7 +408,12 @@ fn merge_for_player_faction(observations: &[&Observation<ReputationTurnInValue>]
     for obs in observations {
         for (faction_id, amount) in obs.value.gains.iter() {
             *turn_ins_by_faction.entry(Num(faction_id)).or_default() += 1;
-            sessions_by_faction.entry(Num(faction_id)).or_default().entry(Num(amount + 0.0)).or_default().insert(obs.session);
+            sessions_by_faction
+                .entry(Num(faction_id))
+                .or_default()
+                .entry(Num(amount + 0.0))
+                .or_default()
+                .insert(obs.session);
         }
     }
 
@@ -402,7 +426,9 @@ fn merge_for_player_faction(observations: &[&Observation<ReputationTurnInValue>]
         if all_sessions.len() < MIN_SESSIONS {
             continue;
         }
-        let Some((amount, sessions)) = first_largest(amounts, IndexSet::len) else { continue };
+        let Some((amount, sessions)) = first_largest(amounts, IndexSet::len) else {
+            continue;
+        };
         if sessions.len() < MIN_SESSIONS || (sessions.len() as f64) < all_sessions.len() as f64 * MIN_AMOUNT_SHARE {
             continue;
         }
@@ -430,7 +456,9 @@ fn merge_for_player_faction(observations: &[&Observation<ReputationTurnInValue>]
         if spillover_sessions.get(faction_id).map_or(0, HashSet::len) < MIN_SESSIONS {
             continue;
         }
-        let Some((source, &count)) = first_largest(sources, |&count| count) else { continue };
+        let Some((source, &count)) = first_largest(sources, |&count| count) else {
+            continue;
+        };
         let Some(source_amount) = decided.get(source) else { continue };
         if (count as f64) < turn_ins as f64 * MIN_AMOUNT_SHARE {
             continue;
@@ -449,7 +477,13 @@ fn merge_for_player_faction(observations: &[&Observation<ReputationTurnInValue>]
 /// `JSON.stringify(a) === JSON.stringify(b)` for merged rewards: undefined alike, numbers alike
 /// when they print alike (±0 as 0, NaN and ±Infinity as null).
 fn json_equal(a: &Option<QuestReputationRewardValue>, b: &Option<QuestReputationRewardValue>) -> bool {
-    let number_equal = |x: f64, y: f64| if x.is_finite() && y.is_finite() { x == y } else { !x.is_finite() && !y.is_finite() };
+    let number_equal = |x: f64, y: f64| {
+        if x.is_finite() && y.is_finite() {
+            x == y
+        } else {
+            !x.is_finite() && !y.is_finite()
+        }
+    };
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| number_equal(x.0, y.0) && number_equal(x.1, y.1)),
@@ -512,7 +546,12 @@ mod tests {
         for &(faction_id, samples) in standings {
             let entries = samples
                 .iter()
-                .map(|&(t, value)| api_sample(t, json!({ "name": faction_name(faction_id), "factionID": faction_id, "currentStanding": value })))
+                .map(|&(t, value)| {
+                    api_sample(
+                        t,
+                        json!({ "name": faction_name(faction_id), "factionID": faction_id, "currentStanding": value }),
+                    )
+                })
                 .collect();
             factions.insert(faction_id.to_string(), Json::Array(entries));
         }
@@ -549,12 +588,23 @@ mod tests {
     }
 
     fn turn_in_value<const G: usize, const S: usize>(gains: [(f64, f64); G], spillover: [(f64, f64); S]) -> ReputationTurnInValue {
-        ReputationTurnInValue { player_faction: Faction::Horde, gains: gains.into(), spillover: spillover.into() }
+        ReputationTurnInValue {
+            player_faction: Faction::Horde,
+            gains: gains.into(),
+            spillover: spillover.into(),
+        }
     }
 
     #[test]
     fn records_reputation_changes_around_a_quest_turn_in() {
-        let session = orc_session(vec![turn_in(10.0, 99001.0)], &[(68, &[(0.0, 3000.0), (9.9, 3100.0)]), (76, &[(0.0, 5000.0)]), (87, &[(0.0, 400.0), (10.1, 375.0)])]);
+        let session = orc_session(
+            vec![turn_in(10.0, 99001.0)],
+            &[
+                (68, &[(0.0, 3000.0), (9.9, 3100.0)]),
+                (76, &[(0.0, 5000.0)]),
+                (87, &[(0.0, 400.0), (10.1, 375.0)]),
+            ],
+        );
         let observed: Vec<_> = observed(&session).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect();
         assert_eq!(observed, [(99001, turn_in_value([(68.0, 100.0), (87.0, -25.0)], []), Confidence::High, 10.0)]);
     }
@@ -586,14 +636,20 @@ mod tests {
                 "C_Reputation.GetFactionDataByID": { "68": [api_sample(0.0, Json::Null)] },
                 "GetFactionInfoByID": { "68": [legacy_sample(0.0, "Unterstadt", 3000.0), legacy_sample(10.0, "Unterstadt", 3250.0)] },
             }),
-            vec![turn_in(10.0, 99001.0), message(10.0, "Euer Ruf bei der Fraktion Unterstadt hat sich um 250 verbessert.")],
+            vec![
+                turn_in(10.0, 99001.0),
+                message(10.0, "Euer Ruf bei der Fraktion Unterstadt hat sich um 250 verbessert."),
+            ],
         );
         assert_eq!(values(&session), [turn_in_value([(68.0, 250.0)], [])]);
     }
 
     #[test]
     fn splits_off_spillover_gains() {
-        let session = orc_session(vec![turn_in(10.0, 99001.0)], &[(68, &[(0.0, 3000.0), (10.0, 3100.0)]), (76, &[(0.0, 5000.0), (10.0, 5026.0)])]);
+        let session = orc_session(
+            vec![turn_in(10.0, 99001.0)],
+            &[(68, &[(0.0, 3000.0), (10.0, 3100.0)]), (76, &[(0.0, 5000.0), (10.0, 5026.0)])],
+        );
         assert_eq!(values(&session), [turn_in_value([(68.0, 100.0)], [(76.0, 68.0)])]);
     }
 
@@ -675,7 +731,10 @@ mod tests {
     #[test]
     fn skips_turn_ins_with_a_faction_first_seen_in_the_window_outside_en_us() {
         let session = session(
-            vec![turn_in(10.0, 99001.0), message(10.0, "Euer Ruf bei der Fraktion Argentumdämmerung hat sich um 150 verbessert.")],
+            vec![
+                turn_in(10.0, 99001.0),
+                message(10.0, "Euer Ruf bei der Fraktion Argentumdämmerung hat sich um 150 verbessert."),
+            ],
             &[(529, &[(10.0, 350.0)])],
             Some(orc()),
             "deDE",
@@ -685,7 +744,10 @@ mod tests {
 
     #[test]
     fn skips_turn_ins_with_a_chat_faction_name_missing_from_the_reputation_streams() {
-        let session = orc_session(vec![turn_in(10.0, 99001.0), message(10.0, "Reputation with Unknown Faction increased by 100.")], &[(529, &[(10.0, 350.0)])]);
+        let session = orc_session(
+            vec![turn_in(10.0, 99001.0), message(10.0, "Reputation with Unknown Faction increased by 100.")],
+            &[(529, &[(10.0, 350.0)])],
+        );
         assert_eq!(observed(&session), []);
     }
 
@@ -709,9 +771,15 @@ mod tests {
 
     #[test]
     fn parses_reputation_messages_like_the_ts_regex() {
-        assert_eq!(parse_reputation_message("Reputation with Argent Dawn increased by 150."), Some(("Argent Dawn", 150.0)));
+        assert_eq!(
+            parse_reputation_message("Reputation with Argent Dawn increased by 150."),
+            Some(("Argent Dawn", 150.0))
+        );
         // (.+) is greedy: the name runs to the last " increased by N."
-        assert_eq!(parse_reputation_message("Reputation with A decreased by 5. increased by 7."), Some(("A decreased by 5.", 7.0)));
+        assert_eq!(
+            parse_reputation_message("Reputation with A decreased by 5. increased by 7."),
+            Some(("A decreased by 5.", 7.0))
+        );
         // (.+) needs a character between "with " and " increased".
         assert_eq!(parse_reputation_message("Reputation with  increased by 7."), None);
         assert_eq!(parse_reputation_message("Reputation with X increased by 7"), None);
@@ -722,40 +790,73 @@ mod tests {
     #[test]
     fn split_spillover_keeps_gains_that_are_not_a_quarter_of_another() {
         let all = FactionRecord::from([(68.0, 100.0), (76.0, 50.0)]);
-        assert_eq!(split_spillover(&all), (FactionRecord::from([(68.0, 100.0), (76.0, 50.0)]), FactionRecord::default()));
+        assert_eq!(
+            split_spillover(&all),
+            (FactionRecord::from([(68.0, 100.0), (76.0, 50.0)]), FactionRecord::default())
+        );
     }
 
     #[test]
     fn split_spillover_splits_off_gains_rounded_either_way_from_a_quarter() {
         let all = FactionRecord::from([(69.0, 75.0), (47.0, 18.0), (54.0, 19.0)]);
-        assert_eq!(split_spillover(&all), (FactionRecord::from([(69.0, 75.0)]), FactionRecord::from([(47.0, 69.0), (54.0, 69.0)])));
+        assert_eq!(
+            split_spillover(&all),
+            (FactionRecord::from([(69.0, 75.0)]), FactionRecord::from([(47.0, 69.0), (54.0, 69.0)]))
+        );
     }
 
     #[test]
     fn split_spillover_picks_the_largest_matching_gain_as_the_source() {
         let all = FactionRecord::from([(68.0, 96.0), (69.0, 100.0), (47.0, 25.0)]);
-        assert_eq!(split_spillover(&all), (FactionRecord::from([(68.0, 96.0), (69.0, 100.0)]), FactionRecord::from([(47.0, 69.0)])));
+        assert_eq!(
+            split_spillover(&all),
+            (FactionRecord::from([(68.0, 96.0), (69.0, 100.0)]), FactionRecord::from([(47.0, 69.0)]))
+        );
     }
 
     #[test]
     fn split_spillover_does_not_treat_a_gain_in_the_other_direction_as_spillover() {
         let all = FactionRecord::from([(68.0, 100.0), (87.0, -25.0)]);
-        assert_eq!(split_spillover(&all), (FactionRecord::from([(68.0, 100.0), (87.0, -25.0)]), FactionRecord::default()));
+        assert_eq!(
+            split_spillover(&all),
+            (FactionRecord::from([(68.0, 100.0), (87.0, -25.0)]), FactionRecord::default())
+        );
         // Not in the TS test, where -25 is also too far from 100 / 4: only the direction rules
         // out -0.5 as spillover of 2 (it can only decide for fractional amounts).
         let all = FactionRecord::from([(68.0, 2.0), (87.0, -0.5)]);
-        assert_eq!(split_spillover(&all), (FactionRecord::from([(68.0, 2.0), (87.0, -0.5)]), FactionRecord::default()));
+        assert_eq!(
+            split_spillover(&all),
+            (FactionRecord::from([(68.0, 2.0), (87.0, -0.5)]), FactionRecord::default())
+        );
     }
 
     #[test]
     fn faction_records_iterate_in_js_property_order() {
         let record = FactionRecord::from([(87.0, 1.0), (-5.0, 2.0), (68.0, 3.0), (5e9, 4.0), (-0.0, 5.0)]);
-        assert_eq!(record.iter().collect::<Vec<_>>(), [(0.0, 5.0), (68.0, 3.0), (87.0, 1.0), (-5.0, 2.0), (5e9, 4.0)]);
+        assert_eq!(
+            record.iter().collect::<Vec<_>>(),
+            [(0.0, 5.0), (68.0, 3.0), (87.0, 1.0), (-5.0, 2.0), (5e9, 4.0)]
+        );
     }
 
-    fn vote<const G: usize, const S: usize>(session: u32, faction: Faction, gains: [(f64, f64); G], spillover: [(f64, f64); S]) -> Observation<ReputationTurnInValue> {
-        let value = ReputationTurnInValue { player_faction: faction, gains: gains.into(), spillover: spillover.into() };
-        Observation { entity_id: 1, value, confidence: Confidence::High, t: 0.0, session: SessionId(session) }
+    fn vote<const G: usize, const S: usize>(
+        session: u32,
+        faction: Faction,
+        gains: [(f64, f64); G],
+        spillover: [(f64, f64); S],
+    ) -> Observation<ReputationTurnInValue> {
+        let value = ReputationTurnInValue {
+            player_faction: faction,
+            gains: gains.into(),
+            spillover: spillover.into(),
+        };
+        Observation {
+            entity_id: 1,
+            value,
+            confidence: Confidence::High,
+            t: 0.0,
+            session: SessionId(session),
+        }
     }
 
     const H: Faction = Faction::Horde;
@@ -763,7 +864,10 @@ mod tests {
 
     #[test]
     fn merge_returns_the_reward_agreed_on_by_at_least_two_sessions() {
-        assert_eq!(merge(&[vote(1, H, [(68.0, 100.0)], []), vote(2, H, [(68.0, 100.0)], [])]), Some(vec![(68.0, 100.0)]));
+        assert_eq!(
+            merge(&[vote(1, H, [(68.0, 100.0)], []), vote(2, H, [(68.0, 100.0)], [])]),
+            Some(vec![(68.0, 100.0)])
+        );
     }
 
     #[test]
@@ -780,7 +884,10 @@ mod tests {
 
     #[test]
     fn merge_returns_nothing_when_amounts_disagree_too_often() {
-        assert_eq!(merge(&[vote(1, H, [(68.0, 100.0)], []), vote(2, H, [(68.0, 100.0)], []), vote(3, H, [(68.0, 50.0)], [])]), None);
+        assert_eq!(
+            merge(&[vote(1, H, [(68.0, 100.0)], []), vote(2, H, [(68.0, 100.0)], []), vote(3, H, [(68.0, 50.0)], [])]),
+            None
+        );
     }
 
     #[test]
@@ -797,13 +904,23 @@ mod tests {
 
     #[test]
     fn merge_returns_nothing_when_alliance_and_horde_rewards_differ() {
-        let observations = [vote(1, A, [(2778.0, 50.0)], []), vote(2, A, [(2778.0, 50.0)], []), vote(3, H, [(2779.0, 50.0)], []), vote(4, H, [(2779.0, 50.0)], [])];
+        let observations = [
+            vote(1, A, [(2778.0, 50.0)], []),
+            vote(2, A, [(2778.0, 50.0)], []),
+            vote(3, H, [(2779.0, 50.0)], []),
+            vote(4, H, [(2779.0, 50.0)], []),
+        ];
         assert_eq!(merge(&observations), None);
     }
 
     #[test]
     fn merge_returns_the_shared_reward_when_alliance_and_horde_agree() {
-        let observations = [vote(1, A, [(59.0, 75.0)], []), vote(2, A, [(59.0, 75.0)], []), vote(3, H, [(59.0, 75.0)], []), vote(4, H, [(59.0, 75.0)], [])];
+        let observations = [
+            vote(1, A, [(59.0, 75.0)], []),
+            vote(2, A, [(59.0, 75.0)], []),
+            vote(3, H, [(59.0, 75.0)], []),
+            vote(4, H, [(59.0, 75.0)], []),
+        ];
         assert_eq!(merge(&observations), Some(vec![(59.0, 75.0)]));
     }
 

@@ -45,7 +45,11 @@ pub fn observe(session: &Session) -> Vec<Observation<FactionReactionValue>> {
         if !seen.insert((encounter.npc_id, faction, friendly)) {
             continue;
         }
-        let value = FactionReactionValue { faction, friendly, session_time };
+        let value = FactionReactionValue {
+            faction,
+            friendly,
+            session_time,
+        };
         observations.push(Observation::new(encounter.npc_id, value, Confidence::High, encounter.t));
     }
     observations
@@ -59,7 +63,10 @@ fn decide_faction(observations: &[Observation<FactionReactionValue>], faction: F
     }
     let mut sessions: IndexMap<SessionId, SessionReactions> = IndexMap::new();
     for obs in observations.iter().filter(|obs| obs.value.faction == faction) {
-        let session = sessions.entry(obs.session).or_insert_with(|| SessionReactions { friendly: IndexSet::new(), time: obs.value.session_time });
+        let session = sessions.entry(obs.session).or_insert_with(|| SessionReactions {
+            friendly: IndexSet::new(),
+            time: obs.value.session_time,
+        });
         session.friendly.insert(obs.value.friendly);
     }
     if sessions.values().any(|session| session.friendly.len() > 1) {
@@ -76,7 +83,15 @@ fn decide_faction(observations: &[Observation<FactionReactionValue>], faction: F
         time: f64,
     }
     // Sessions disagree: only a single switch over server time can decide, so every session needs one.
-    let mut votes: Vec<Vote> = sessions.values().map(|session| Some(Vote { friendly: session.friendly[0], time: session.time? })).collect::<Option<_>>()?;
+    let mut votes: Vec<Vote> = sessions
+        .values()
+        .map(|session| {
+            Some(Vote {
+                friendly: session.friendly[0],
+                time: session.time?,
+            })
+        })
+        .collect::<Option<_>>()?;
     votes.sort_by(|a, b| by_server_time(a.time, b.time));
     let switches: Vec<usize> = (1..votes.len()).filter(|&i| votes[i].friendly != votes[i - 1].friendly).collect();
     if switches.len() != 1 || votes[switches[0]].time == votes[switches[0] - 1].time {
@@ -131,7 +146,11 @@ mod tests {
     }
 
     fn reaction(faction: Faction, friendly: bool, session_time: Option<f64>) -> FactionReactionValue {
-        FactionReactionValue { faction, friendly, session_time }
+        FactionReactionValue {
+            faction,
+            friendly,
+            session_time,
+        }
     }
 
     fn observed(session: &Json) -> Vec<(i64, FactionReactionValue, Confidence, f64)> {
@@ -144,7 +163,13 @@ mod tests {
     }
 
     fn vote_at(session: u32, faction: Faction, friendly: bool, session_time: Option<f64>) -> Observation<FactionReactionValue> {
-        Observation { entity_id: 1, value: reaction(faction, friendly, session_time), confidence: Confidence::High, t: 0.0, session: SessionId(session) }
+        Observation {
+            entity_id: 1,
+            value: reaction(faction, friendly, session_time),
+            confidence: Confidence::High,
+            t: 0.0,
+            session: SessionId(session),
+        }
     }
 
     #[test]
@@ -168,7 +193,10 @@ mod tests {
                 "UnitGUID": { "mouseover": samples(&[(3.0, creature_guid(200001)), (8.0, creature_guid(200002))]) },
                 "UnitReaction": { "player": { "mouseover": samples(&[(3.0, json!(2))]) } },
             }),
-            vec![event(3.0, "UPDATE_MOUSEOVER_UNIT", packed(&[])), event(8.0, "UPDATE_MOUSEOVER_UNIT", packed(&[]))],
+            vec![
+                event(3.0, "UPDATE_MOUSEOVER_UNIT", packed(&[])),
+                event(8.0, "UPDATE_MOUSEOVER_UNIT", packed(&[])),
+            ],
         );
         let found: Vec<(i64, FactionReactionValue)> = observed(&session).into_iter().map(|o| (o.0, o.1)).collect();
         assert_eq!(found, [(200001, reaction(Horde, false, None)), (200002, reaction(Horde, false, None))]);
@@ -278,17 +306,26 @@ mod tests {
 
     #[test]
     fn merge_gives_ah_when_both_factions_are_friendly_in_at_least_two_sessions_each() {
-        assert_eq!(merge(&[vote(1, Alliance, true), vote(2, Alliance, true), vote(3, Horde, true), vote(4, Horde, true)]), Some("AH"));
+        assert_eq!(
+            merge(&[vote(1, Alliance, true), vote(2, Alliance, true), vote(3, Horde, true), vote(4, Horde, true)]),
+            Some("AH")
+        );
     }
 
     #[test]
     fn merge_gives_only_the_friendly_faction_when_the_other_is_hostile() {
-        assert_eq!(merge(&[vote(1, Alliance, false), vote(2, Alliance, false), vote(3, Horde, true), vote(4, Horde, true)]), Some("H"));
+        assert_eq!(
+            merge(&[vote(1, Alliance, false), vote(2, Alliance, false), vote(3, Horde, true), vote(4, Horde, true)]),
+            Some("H")
+        );
     }
 
     #[test]
     fn merge_gives_nothing_when_the_npc_is_hostile_to_both_factions() {
-        assert_eq!(merge(&[vote(1, Alliance, false), vote(2, Alliance, false), vote(3, Horde, false), vote(4, Horde, false)]), None);
+        assert_eq!(
+            merge(&[vote(1, Alliance, false), vote(2, Alliance, false), vote(3, Horde, false), vote(4, Horde, false)]),
+            None
+        );
     }
 
     #[test]
@@ -298,24 +335,44 @@ mod tests {
 
     #[test]
     fn merge_gives_nothing_when_a_faction_was_observed_in_only_one_session() {
-        assert_eq!(merge(&[vote(1, Alliance, true), vote(1, Alliance, true), vote(3, Horde, true), vote(4, Horde, true)]), None);
+        assert_eq!(
+            merge(&[vote(1, Alliance, true), vote(1, Alliance, true), vote(3, Horde, true), vote(4, Horde, true)]),
+            None
+        );
     }
 
     #[test]
     fn merge_gives_nothing_when_sessions_disagree_for_a_faction() {
-        let votes = [vote(1, Alliance, true), vote(2, Alliance, true), vote(5, Alliance, false), vote(3, Horde, true), vote(4, Horde, true)];
+        let votes = [
+            vote(1, Alliance, true),
+            vote(2, Alliance, true),
+            vote(5, Alliance, false),
+            vote(3, Horde, true),
+            vote(4, Horde, true),
+        ];
         assert_eq!(merge(&votes), None);
     }
 
     #[test]
     fn merge_uses_the_newer_reaction_when_sessions_switch_once_over_time() {
-        let votes = [vote(1, Alliance, false), vote(2, Alliance, true), vote(3, Alliance, true), vote(4, Horde, true), vote(5, Horde, true)];
+        let votes = [
+            vote(1, Alliance, false),
+            vote(2, Alliance, true),
+            vote(3, Alliance, true),
+            vote(4, Horde, true),
+            vote(5, Horde, true),
+        ];
         assert_eq!(merge(&votes), Some("AH"));
     }
 
     #[test]
     fn merge_decides_without_server_times_when_all_sessions_agree() {
-        let votes = [vote_at(1, Alliance, true, None), vote_at(2, Alliance, true, None), vote_at(3, Horde, true, None), vote_at(4, Horde, true, None)];
+        let votes = [
+            vote_at(1, Alliance, true, None),
+            vote_at(2, Alliance, true, None),
+            vote_at(3, Horde, true, None),
+            vote_at(4, Horde, true, None),
+        ];
         assert_eq!(merge(&votes), Some("AH"));
     }
 
@@ -346,20 +403,38 @@ mod tests {
 
     #[test]
     fn merge_gives_nothing_when_the_newer_reaction_was_seen_in_only_one_session() {
-        let votes = [vote(1, Alliance, false), vote(2, Alliance, false), vote(3, Alliance, true), vote(4, Horde, true), vote(5, Horde, true)];
+        let votes = [
+            vote(1, Alliance, false),
+            vote(2, Alliance, false),
+            vote(3, Alliance, true),
+            vote(4, Horde, true),
+            vote(5, Horde, true),
+        ];
         assert_eq!(merge(&votes), None);
     }
 
     #[test]
     fn merge_gives_nothing_when_sessions_switch_more_than_once_over_time() {
-        let votes =
-            [vote(1, Alliance, true), vote(2, Alliance, false), vote(3, Alliance, true), vote(4, Alliance, true), vote(5, Horde, true), vote(6, Horde, true)];
+        let votes = [
+            vote(1, Alliance, true),
+            vote(2, Alliance, false),
+            vote(3, Alliance, true),
+            vote(4, Alliance, true),
+            vote(5, Horde, true),
+            vote(6, Horde, true),
+        ];
         assert_eq!(merge(&votes), None);
     }
 
     #[test]
     fn merge_gives_nothing_when_disagreeing_sessions_have_no_server_time() {
-        let votes = [vote_at(1, Alliance, false, None), vote(2, Alliance, true), vote(3, Alliance, true), vote(4, Horde, true), vote(5, Horde, true)];
+        let votes = [
+            vote_at(1, Alliance, false, None),
+            vote(2, Alliance, true),
+            vote(3, Alliance, true),
+            vote(4, Horde, true),
+            vote(5, Horde, true),
+        ];
         assert_eq!(merge(&votes), None);
     }
 

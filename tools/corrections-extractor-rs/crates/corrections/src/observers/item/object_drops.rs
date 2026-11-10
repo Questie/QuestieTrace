@@ -28,7 +28,9 @@ mod tests {
     use serde_json::json;
 
     fn observed(functions: serde_json::Value) -> Vec<(i64, i64, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value.object_id, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value.object_id, o.confidence, o.t)).collect()
+        })
     }
 
     #[test]
@@ -48,7 +50,10 @@ mod tests {
                 "1": "GameObject-0-5208-0-7-2843-0000399", "2": 1, "3": "GameObject-0-5208-0-7-2844-0000400", "4": 1, "n": 4,
             } }] },
         });
-        assert_eq!(observed(functions), [(12345, 2843, Confidence::High, 5.0), (12345, 2844, Confidence::High, 5.0)]);
+        assert_eq!(
+            observed(functions),
+            [(12345, 2843, Confidence::High, 5.0), (12345, 2844, Confidence::High, 5.0)]
+        );
     }
 
     #[test]

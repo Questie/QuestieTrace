@@ -16,7 +16,11 @@ pub struct NpcEncounter {
 pub fn npc_encounters(session: &Session) -> Vec<NpcEncounter> {
     guid_encounters(session, GuidKind::Npc, &TRACKED_UNIT_TOKENS)
         .into_iter()
-        .map(|e| NpcEncounter { npc_id: e.entity_id, token: e.token, t: e.t })
+        .map(|e| NpcEncounter {
+            npc_id: e.entity_id,
+            token: e.token,
+            t: e.t,
+        })
         .collect()
 }
 
@@ -27,7 +31,9 @@ mod tests {
     use serde_json::json;
 
     fn encounters(functions: serde_json::Value) -> Vec<(i64, &'static str, f64)> {
-        with_session(&session_json(functions, vec![]), |s| npc_encounters(s).into_iter().map(|e| (e.npc_id, e.token, e.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            npc_encounters(s).into_iter().map(|e| (e.npc_id, e.token, e.t)).collect()
+        })
     }
 
     #[test]

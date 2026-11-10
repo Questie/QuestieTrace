@@ -32,7 +32,9 @@ pub struct TurnInPoiValue {
 
 pub fn observe(session: &Session) -> Vec<Observation<TurnInPoiValue>> {
     let mut observations = Vec::new();
-    let Some(by_map) = session.function("C_QuestLog.GetQuestsOnMap").and_then(Value::as_object) else { return observations };
+    let Some(by_map) = session.function("C_QuestLog.GetQuestsOnMap").and_then(Value::as_object) else {
+        return observations;
+    };
 
     // `${questID}:${zoneID}:${x},${y}`: numbers compare like their String() forms.
     let mut seen: HashSet<(Num, Num, Num, Num)> = HashSet::new();
@@ -50,7 +52,9 @@ pub fn observe(session: &Session) -> Vec<Observation<TurnInPoiValue>> {
 
             for poi in pois {
                 let number = |key: &str| poi.get(key).and_then(Value::as_num);
-                let (Some(quest_id), Some(x), Some(y)) = (number("questID"), number("x"), number("y")) else { continue };
+                let (Some(quest_id), Some(x), Some(y)) = (number("questID"), number("x"), number("y")) else {
+                    continue;
+                };
                 if number("mapID") != Some(ui_map_id) || poi.get("isQuestStart").and_then(Value::as_bool) == Some(true) {
                     continue;
                 }
@@ -73,7 +77,12 @@ pub fn observe(session: &Session) -> Vec<Observation<TurnInPoiValue>> {
                     continue;
                 }
 
-                observations.push(Observation::new(quest_id as i64, TurnInPoiValue { zone_id, x: pos.x, y: pos.y }, Confidence::High, t));
+                observations.push(Observation::new(
+                    quest_id as i64,
+                    TurnInPoiValue { zone_id, x: pos.x, y: pos.y },
+                    Confidence::High,
+                    t,
+                ));
             }
         }
     }
@@ -94,7 +103,9 @@ pub fn turn_in_poi_spawns(pois: &[Observation<TurnInPoiValue>], finished_by: &In
     let mut spawns = TurnInPoiSpawns::default();
 
     for poi in pois {
-        let Some(finisher) = finished_by.get(&poi.entity_id).map(|fact| &fact.value) else { continue };
+        let Some(finisher) = finished_by.get(&poi.entity_id).map(|fact| &fact.value) else {
+            continue;
+        };
         let (target, finisher_id) = match (finisher.creatures.as_slice(), finisher.objects.as_slice()) {
             (&[npc_id], []) => (&mut spawns.npcs, npc_id),
             ([], &[object_id]) => (&mut spawns.objects, object_id),
@@ -103,7 +114,12 @@ pub fn turn_in_poi_spawns(pois: &[Observation<TurnInPoiValue>], finished_by: &In
         let TurnInPoiValue { zone_id, x, y } = poi.value;
         target.push(Observation {
             entity_id: finisher_id,
-            value: SpawnObservation { zone_id, x, y, token: SpawnToken::QuestPoi },
+            value: SpawnObservation {
+                zone_id,
+                x,
+                y,
+                token: SpawnToken::QuestPoi,
+            },
             confidence: poi.confidence,
             t: poi.t,
             session: poi.session,
@@ -135,7 +151,9 @@ mod tests {
     }
 
     fn observed(functions: Json) -> Vec<(i64, TurnInPoiValue, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     fn on_barrens(entries: impl IntoIterator<Item = (f64, Json)>) -> Json {
@@ -147,7 +165,16 @@ mod tests {
         let quests_on_map = on_barrens([(5.0, json!([poi(891, BARRENS_UI_MAP, 0.6228, 0.3903)]))]);
         assert_eq!(
             observed(functions(quests_on_map, &[(0.0, true)])),
-            [(891, TurnInPoiValue { zone_id: BARRENS_AREA, x: 62.28, y: 39.03 }, Confidence::High, 5.0)]
+            [(
+                891,
+                TurnInPoiValue {
+                    zone_id: BARRENS_AREA,
+                    x: 62.28,
+                    y: 39.03
+                },
+                Confidence::High,
+                5.0
+            )]
         );
     }
 
@@ -170,8 +197,18 @@ mod tests {
             (10.0, json!([poi(891, BARRENS_UI_MAP, 0.3, 0.3), poi(1, BARRENS_UI_MAP, 0.1, 0.1)])),
             (10.35, json!([poi(891, BARRENS_UI_MAP, 0.62, 0.39)])),
         ]);
-        let values: Vec<TurnInPoiValue> = observed(functions(quests_on_map, &[(0.0, false), (10.0, true)])).into_iter().map(|o| o.1).collect();
-        assert_eq!(values, [TurnInPoiValue { zone_id: BARRENS_AREA, x: 62.0, y: 39.0 }]);
+        let values: Vec<TurnInPoiValue> = observed(functions(quests_on_map, &[(0.0, false), (10.0, true)]))
+            .into_iter()
+            .map(|o| o.1)
+            .collect();
+        assert_eq!(
+            values,
+            [TurnInPoiValue {
+                zone_id: BARRENS_AREA,
+                x: 62.0,
+                y: 39.0
+            }]
+        );
     }
 
     #[test]
@@ -200,19 +237,44 @@ mod tests {
     // describe("turnInPoiSpawns")
 
     fn poi_obs() -> Observation<TurnInPoiValue> {
-        Observation::new(891, TurnInPoiValue { zone_id: BARRENS_AREA, x: 62.28, y: 39.03 }, Confidence::High, 5.0)
+        Observation::new(
+            891,
+            TurnInPoiValue {
+                zone_id: BARRENS_AREA,
+                x: 62.28,
+                y: 39.03,
+            },
+            Confidence::High,
+            5.0,
+        )
     }
 
     fn finished_by(quest_id: i64, creatures: &[i64], objects: &[i64]) -> IndexMap<i64, Fact<FinishedByValue>> {
-        let value = FinishedByValue { creatures: creatures.to_vec(), objects: objects.to_vec() };
-        IndexMap::from([(quest_id, Fact { value, confidence: Confidence::Medium, observation_count: 1, alternative_count: 0 })])
+        let value = FinishedByValue {
+            creatures: creatures.to_vec(),
+            objects: objects.to_vec(),
+        };
+        IndexMap::from([(
+            quest_id,
+            Fact {
+                value,
+                confidence: Confidence::Medium,
+                observation_count: 1,
+                alternative_count: 0,
+            },
+        )])
     }
 
     fn spawn_of(entity_id: i64) -> Observation<SpawnObservation> {
         let poi = poi_obs();
         Observation {
             entity_id,
-            value: SpawnObservation { zone_id: BARRENS_AREA, x: 62.28, y: 39.03, token: SpawnToken::QuestPoi },
+            value: SpawnObservation {
+                zone_id: BARRENS_AREA,
+                x: 62.28,
+                y: 39.03,
+                token: SpawnToken::QuestPoi,
+            },
             confidence: poi.confidence,
             t: poi.t,
             session: poi.session,
@@ -222,13 +284,25 @@ mod tests {
     #[test]
     fn attributes_the_poi_to_a_single_creature_finisher() {
         let spawns = turn_in_poi_spawns(&[poi_obs()], &finished_by(891, &[3453], &[]));
-        assert_eq!(spawns, TurnInPoiSpawns { npcs: vec![spawn_of(3453)], objects: vec![] });
+        assert_eq!(
+            spawns,
+            TurnInPoiSpawns {
+                npcs: vec![spawn_of(3453)],
+                objects: vec![]
+            }
+        );
     }
 
     #[test]
     fn attributes_the_poi_to_a_single_object_finisher() {
         let spawns = turn_in_poi_spawns(&[poi_obs()], &finished_by(891, &[], &[9000]));
-        assert_eq!(spawns, TurnInPoiSpawns { npcs: vec![], objects: vec![spawn_of(9000)] });
+        assert_eq!(
+            spawns,
+            TurnInPoiSpawns {
+                npcs: vec![],
+                objects: vec![spawn_of(9000)]
+            }
+        );
     }
 
     #[test]

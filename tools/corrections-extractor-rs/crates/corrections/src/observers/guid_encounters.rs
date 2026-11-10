@@ -31,7 +31,9 @@ pub(crate) fn entry_tp(entry: &Value) -> f64 {
 pub fn guid_encounters(session: &trace_data::Session, kind: GuidKind, tokens: &[&'static str]) -> Vec<GuidEncounter> {
     let mut out = Vec::new();
     for &token in tokens {
-        let Some(stream) = get_stream(session, "UnitGUID", &[KeyRef::Str(token)]) else { continue };
+        let Some(stream) = get_stream(session, "UnitGUID", &[KeyRef::Str(token)]) else {
+            continue;
+        };
         for entry in stream {
             let Some(guid) = entry_v(entry).and_then(Value::as_str) else { continue };
             let parsed = parse_guid(Some(guid));
@@ -39,7 +41,12 @@ pub fn guid_encounters(session: &trace_data::Session, kind: GuidKind, tokens: &[
                 continue;
             }
             if let Some(id) = parsed.id {
-                out.push(GuidEncounter { entity_id: id as i64, token, t: entry_t(entry), tp: entry_tp(entry) });
+                out.push(GuidEncounter {
+                    entity_id: id as i64,
+                    token,
+                    t: entry_t(entry),
+                    tp: entry_tp(entry),
+                });
             }
         }
     }
@@ -54,7 +61,10 @@ mod tests {
 
     fn encounters(functions: serde_json::Value, kind: GuidKind) -> Vec<(i64, &'static str, f64, f64)> {
         with_session(&session_json(functions, vec![]), |s| {
-            guid_encounters(s, kind, &TRACKED_UNIT_TOKENS).into_iter().map(|e| (e.entity_id, e.token, e.t, e.tp)).collect()
+            guid_encounters(s, kind, &TRACKED_UNIT_TOKENS)
+                .into_iter()
+                .map(|e| (e.entity_id, e.token, e.t, e.tp))
+                .collect()
         })
     }
 
@@ -65,7 +75,10 @@ mod tests {
             "npc": [{ "t": 5, "tp": 5, "v": "Creature-0-5208-0-7-197-000032" }],
             "questnpc": [{ "t": 10, "tp": 10, "v": "Creature-0-5208-0-7-197-000032" }],
         }});
-        assert_eq!(encounters(functions, GuidKind::Npc), [(823, "target", 0.0, 0.0), (197, "npc", 5.0, 5.0), (197, "questnpc", 10.0, 10.0)]);
+        assert_eq!(
+            encounters(functions, GuidKind::Npc),
+            [(823, "target", 0.0, 0.0), (197, "npc", 5.0, 5.0), (197, "questnpc", 10.0, 10.0)]
+        );
     }
 
     #[test]
