@@ -52,6 +52,12 @@ impl<'a> Cursor<'a> {
         self.pos
     }
 
+    /// Moves back to a position read before, to walk a container again.
+    pub fn set_pos(&mut self, pos: usize) {
+        debug_assert!(pos <= self.bytes.len());
+        self.pos = pos;
+    }
+
     /// How many items of a container with `length` items to allocate room for: every item takes
     /// at least one byte, so a hostile length cannot reserve more than the data left.
     pub fn capacity_for(&self, length: f64) -> usize {

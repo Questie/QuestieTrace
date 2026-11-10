@@ -86,7 +86,7 @@ fn main() {
         decode.as_secs_f64()
     );
     let mut rows: Vec<_> = OBSERVERS.iter().map(|(name, _)| (*name, first[name], again[name])).collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.1));
     println!("{:<26} {:>10} {:>10}", "observer", "first (s)", "again (s)");
     for (name, f, a) in rows {
         println!("{name:<26} {:>10.2} {:>10.2}", f.as_secs_f64(), a.as_secs_f64());
