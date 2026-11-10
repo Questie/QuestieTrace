@@ -322,6 +322,7 @@ dependencies = [
  "flate2",
  "libdeflater",
  "memchr",
+ "rustc-hash",
  "ryu-js",
  "serde",
  "serde_json",

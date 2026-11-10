@@ -12,8 +12,8 @@
 use crate::observation::{Confidence, Observation, SessionId};
 use crate::observers::npc::unit_state::unit_state_encounters;
 use indexmap::{IndexMap, IndexSet};
+use rustc_hash::FxHashSet;
 use std::cmp::Reverse;
-use std::collections::HashSet;
 use trace_data::Session;
 
 fn rank_by_classification(classification: &str) -> Option<i64> {
@@ -32,7 +32,7 @@ const MIN_SESSIONS: usize = 2;
 /// Each rank of each NPC once per session.
 pub fn observe(session: &Session) -> Vec<Observation<i64>> {
     let mut observations = Vec::new();
-    let mut seen: HashSet<(i64, i64)> = HashSet::new();
+    let mut seen: FxHashSet<(i64, i64)> = FxHashSet::default();
     for encounter in unit_state_encounters(session, "UnitClassification", &[]) {
         let Some(rank) = encounter.value.as_str().and_then(rank_by_classification) else {
             continue;

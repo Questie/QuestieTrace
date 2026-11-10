@@ -14,7 +14,7 @@ use crate::js;
 use crate::observation::{Confidence, Observation, SessionId};
 use crate::observers::npc::unit_state::unit_state_encounters;
 use indexmap::{IndexMap, IndexSet};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use trace_data::Session;
 
 /// Written out as the separate minLevel and maxLevel fields.
@@ -30,7 +30,7 @@ const MIN_SHARE: f64 = 0.1;
 /// Each level of each NPC once per session.
 pub fn observe(session: &Session) -> Vec<Observation<f64>> {
     let mut observations = Vec::new();
-    let mut seen: HashSet<(i64, Num)> = HashSet::new();
+    let mut seen: FxHashSet<(i64, Num)> = FxHashSet::default();
     for encounter in unit_state_encounters(session, "UnitLevel", &[]) {
         // `typeof level !== "number" || level < 1`: NaN is a number and not below 1.
         let Some(level) = encounter.value.as_num().filter(|&level| level >= 1.0 || level.is_nan()) else {
