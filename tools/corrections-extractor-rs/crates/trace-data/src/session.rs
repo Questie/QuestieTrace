@@ -91,6 +91,14 @@ pub struct Event<'v, 'a> {
 
 impl<'v, 'a> Event<'v, 'a> {
     fn read(value: &'v Value<'a>) -> Self {
+        if let Some(header) = value.event_header() {
+            return Event {
+                value,
+                name: header.name,
+                t: header.t,
+                tp: header.tp,
+            };
+        }
         let num = |key: &str| value.get(key).and_then(Value::as_num).unwrap_or(f64::NAN);
         Event {
             value,
@@ -135,5 +143,72 @@ impl<'v, 'a> Event<'v, 'a> {
 
     pub fn value(&self) -> &'v Value<'a> {
         self.value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::decode_trace;
+
+    fn text(s: &str) -> Vec<u8> {
+        let mut out = vec![0x60 | s.len() as u8];
+        out.extend(s.as_bytes());
+        out
+    }
+
+    /// `{"sessions": [{"events": [event], "functions": {"F": 1}}]}`
+    fn session_bytes(event: &[u8]) -> Vec<u8> {
+        let mut out = vec![0xa1];
+        out.extend(text("sessions"));
+        out.extend([0x81, 0xa2]);
+        out.extend(text("events"));
+        out.push(0x81);
+        out.extend(event);
+        out.extend(text("functions"));
+        out.push(0xa1);
+        out.extend(text("F"));
+        out.push(0x01);
+        out
+    }
+
+    #[test]
+    fn an_events_header_read_from_its_bytes_matches_the_decoded_event() {
+        let f64_bytes = |n: f64| -> Vec<u8> { std::iter::once(0xfb).chain(n.to_be_bytes()).collect() };
+        let mut plain = vec![0xa4];
+        plain.extend(text("t"));
+        plain.extend(f64_bytes(1.25));
+        plain.extend(text("tp"));
+        plain.extend(f64_bytes(1.5));
+        plain.extend(text("e"));
+        plain.extend(text("QUEST_ACCEPTED"));
+        plain.extend(text("a"));
+        plain.extend([0xa2, 0x01, 0x07, 0x61, b'n', 0x01]);
+        let events: Vec<(&str, Vec<u8>)> = vec![
+            ("plain", plain),
+            // "e" deleted by a nil and set again: decoding decides.
+            ("deleted then set", [vec![0xa2], text("e"), vec![0xf6], text("e"), text("X")].concat()),
+            ("a number name", [vec![0xa1], text("e"), vec![0x05]].concat()),
+            ("a string time", [vec![0xa2], text("t"), text("1"), text("e"), text("X")].concat()),
+            ("a table time", [vec![0xa2], text("t"), vec![0x81, 0x01], text("e"), text("X")].concat()),
+            ("a numeric key", [vec![0xa2, 0x01], text("x"), text("e"), text("X")].concat()),
+            ("invalid UTF-8 name", [vec![0xa1], text("e"), vec![0x62, 0xff, 0xfe]].concat()),
+            // Not a map at all (an integer-keyed array here would make the events table an
+            // object, so no session).
+            ("not a map", text("x")),
+        ];
+        for (case, event) in events {
+            let bytes = session_bytes(&event);
+            let root = decode_trace(&bytes).unwrap().unwrap();
+            let sessions = root.get("sessions").and_then(Value::as_array).unwrap();
+            let session = Session::new(&sessions[0]).unwrap_or_else(|| panic!("{case}: no session"));
+            let header = session.event(0).unwrap();
+            // Decoding the event afterwards is the reference.
+            let decoded = &session.events[0].value;
+            let num = |key: &str| decoded.get(key).and_then(Value::as_num).unwrap_or(f64::NAN);
+            assert_eq!(header.name(), decoded.get("e").and_then(Value::as_str), "{case}: name");
+            assert_eq!(header.t().to_bits(), num("t").to_bits(), "{case}: t");
+            assert_eq!(header.tp().to_bits(), num("tp").to_bits(), "{case}: tp");
+        }
     }
 }
