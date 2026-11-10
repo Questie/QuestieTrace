@@ -358,6 +358,13 @@ function Core.GetStatusData()
   }
 end
 
+--- Get the current data-collection consent state.
+---@return boolean? consent true when granted, false when declined, nil when undecided
+function Core.GetConsentState()
+  local settings = type(QuestieTrace) == "table" and QuestieTrace.settings
+  return settings and settings.dataCollectionConsent
+end
+
 --- Return the live or newest saved session for external diagnostics.
 ---
 --- This is intended for read-only bridge/testing inspection. The returned
