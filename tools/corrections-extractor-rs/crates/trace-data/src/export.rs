@@ -199,6 +199,9 @@ impl Inflated {
     }
 }
 
+/// Inflate buffers an [`Inflater`] keeps between submissions.
+const SPARE_BUFFERS: usize = 1;
+
 /// Raw-deflate inflating into recycled buffers: an export is inflated once, straight into a
 /// buffer an earlier export left behind (see [`Inflater::recycle`]), so neither copying nor
 /// clearing memory is needed in the common case.
@@ -216,9 +219,15 @@ impl Inflater {
         }
     }
 
-    /// Hands buffers back for later exports.
+    /// Hands buffers back for later exports. Most submissions hold one export, so one spare
+    /// (the largest) is kept: more would keep a thread holding one buffer per export of the
+    /// largest submission it ever saw.
     pub fn recycle(&mut self, inflated: impl IntoIterator<Item = Inflated>) {
         self.spare.extend(inflated.into_iter().map(|inflated| inflated.buffer));
+        if self.spare.len() > SPARE_BUFFERS {
+            self.spare.sort_by_key(|buffer| std::cmp::Reverse(buffer.len()));
+            self.spare.truncate(SPARE_BUFFERS);
+        }
     }
 
     pub fn inflate(&mut self, compressed: &[u8]) -> Result<Inflated, String> {

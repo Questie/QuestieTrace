@@ -54,7 +54,8 @@ Rust runs after the CPU batch, after the memory batch, and at the end.
 | P6 | Borrow `export_string` when it has no escapes; inflate into recycled buffers (no copy, no zero-fill) | 33.5 / 33.3 s vs 37.4 / 38.0 s (−11%) | 5.8 GB | yes | 590fa89 |
 | R1 | Re-profile: decoding is ~55% (value building 16.5%, CBOR headers 13.5%, validation ~9%, alloc/free ~14%); eager event decoding is ~40% of value building — events are built but, after P2, barely read | | | | |
 | F0 | **Full archive, CPU batch (P1–P6):** 11 min 49 s (was 18 min 43 s); fold thread busy 121 s, finalize 48 s; outputs identical to the first full run | — | **18.5 GB** (was 13.4 GB): recycled inflate buffers stay per thread, plus the purge delay | — | 590fa89 |
-| P10 | Lazy events: an event stays undecoded; `Session::new` reads `e`/`t`/`tp` straight from its bytes (falls back to decoding for anything odd) | 28.7 / 28.5 s vs 33.1 / 33.8 s (−14%) | 5.4 GB | yes | (next) |
+| P10 | Lazy events: an event stays undecoded; `Session::new` reads `e`/`t`/`tp` straight from its bytes (falls back to decoding for anything odd) | 28.7 / 28.5 s vs 33.1 / 33.8 s (−14%) | 5.4 GB | yes | 1c36e8d |
+| M-a | Keep one spare inflate buffer per thread (the largest), not one per export of the largest submission seen | 28.8 / 29.0 s vs 28.6 / 28.8 s (+0.7%, noise) | 4.8–4.9 GB vs 5.2 GB (−8%) | yes | (next) |
 | — | Noise check: the same binary on both sides gave 37.0–37.8 s, so differences under ~2% are within noise | | | | |
 | P6 | Borrow `export_string` when it has no escapes; avoid copying the inflate buffer | memcpy ~10% | −2% | low |
 | R1 | Re-profile; re-rank what is left | | | |
