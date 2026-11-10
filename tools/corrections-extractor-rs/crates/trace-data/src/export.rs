@@ -117,7 +117,8 @@ pub fn decode_for_print(text: &str) -> Result<Vec<u8>, String> {
     if let Some(out) = decode_clean_print(text.as_bytes()) {
         return Ok(out);
     }
-    let kept = text.chars().filter(|&c| !is_js_whitespace(c)).count();
+    // TS counts and quotes UTF-16 units: a character outside the BMP is two of them.
+    let kept: usize = text.chars().filter(|&c| !is_js_whitespace(c)).map(char::len_utf16).sum();
     if kept == 1 {
         return Err("payload is not valid print-encoded data".into());
     }
@@ -127,7 +128,11 @@ pub fn decode_for_print(text: &str) -> Result<Vec<u8>, String> {
     for c in text.chars().filter(|&c| !is_js_whitespace(c)) {
         let value = if (c as u32) < 256 { SIX_BIT[c as usize] } else { -1 };
         if value < 0 {
-            let quoted = serde_json::to_string(&c.to_string()).expect("a string always serializes");
+            // JSON.stringify of the UTF-16 unit: a high surrogate alone prints escaped.
+            let quoted = match c.encode_utf16(&mut [0; 2]) {
+                [high, _] => format!("\"\\u{high:04x}\""),
+                _ => serde_json::to_string(&c.to_string()).expect("a string always serializes"),
+            };
             return Err(format!("payload is not valid print-encoded data (character {quoted})"));
         }
         cache |= (value as u32) << bits;
@@ -278,6 +283,19 @@ mod tests {
             let spaced: String = text.chars().flat_map(|c| [c, ' ']).collect();
             assert_eq!(decode_for_print(&text).unwrap(), decode_for_print(&spaced).unwrap(), "length {length}");
         }
+    }
+
+    #[test]
+    fn characters_outside_the_bmp_count_and_quote_as_utf16_units_like_ts() {
+        // node: decodeForPrint("abc😀d") names "\ud83d"; a lone "😀" is two units, so not "one character".
+        assert_eq!(
+            decode_for_print("abc😀d").unwrap_err(),
+            "payload is not valid print-encoded data (character \"\\ud83d\")"
+        );
+        assert_eq!(
+            decode_for_print("😀").unwrap_err(),
+            "payload is not valid print-encoded data (character \"\\ud83d\")"
+        );
     }
 
     #[test]
