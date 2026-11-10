@@ -7,7 +7,7 @@ use crate::observation::{Localized, Observation};
 use crate::observers::item::{npc_drops::NpcDrop, object_drops::ObjectDrop};
 use crate::observers::npc::friendly_to_faction::FactionReactionValue;
 use crate::observers::quest::finished_by::FinishedByFinisher;
-use crate::observers::quest::objectives::ObjectiveMatch;
+use crate::observers::quest::objectives::ObjectiveSlot;
 use crate::observers::quest::objectives_text::QuestObjectivesTextValue;
 use crate::observers::quest::quest_xp::QuestXpValue;
 use crate::observers::quest::reputation_reward::ReputationTurnInValue;
@@ -70,7 +70,7 @@ pub struct StagedSession {
 
     // Fields with a custom merge.
     pub required_level: Vec<Observation<f64>>,
-    pub objectives: Vec<Observation<Vec<ObjectiveMatch>>>,
+    pub objectives: Vec<Observation<Vec<ObjectiveSlot>>>,
     pub trigger_end: Vec<Observation<QuestTriggerEndValue>>,
     pub started_by: Vec<Observation<StartedByStarter>>,
     pub finished_by: Vec<Observation<FinishedByFinisher>>,
@@ -131,7 +131,7 @@ pub fn observe_session(session: &Session) -> Option<StagedSession> {
         item_name: SessionScalars::new(item::name::observe(session)),
         object_name: SessionScalars::new(object::name::observe(session)),
         required_level: quest::required_level::observe(session),
-        objectives: quest::objectives::observe(session),
+        objectives: quest::objectives::per_session(quest::objectives::observe(session)),
         trigger_end: quest::trigger_end::observe(session),
         started_by: quest::started_by::observe(session),
         finished_by: quest::finished_by::observe(session),
