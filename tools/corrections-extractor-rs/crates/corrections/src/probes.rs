@@ -193,8 +193,10 @@ pub fn completed_quests_at(session: &Session, t: f64) -> Option<QuestSet> {
         completed.insert(id);
     }
     for change in stream.get("delta").and_then(Value::as_array).unwrap_or(&[]) {
+        // A change without a time (NaN) never applies, as `!(change.t <= t)` skips it in TS.
         let change_t = change.get("t").and_then(Value::as_num).unwrap_or(f64::NAN);
-        if !(change_t <= t) {
+        let applied_by_t = change_t <= t;
+        if !applied_by_t {
             continue;
         }
         for id in numbers(change.get("add")) {

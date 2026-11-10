@@ -195,7 +195,8 @@ pub fn quest_xp_difficulty(level: f64, shown_xp: f64) -> Option<usize> {
     let mut found = None;
     for (difficulty, &value) in values.iter().enumerate().skip(FIRST_DIFFICULTY) {
         // NaN fails `> 0`, so missing cells never match, as in TS.
-        if !(value > 0.0) || round_quest_xp(value) != shown_xp {
+        let has_xp = value > 0.0;
+        if !has_xp || round_quest_xp(value) != shown_xp {
             continue;
         }
         if found.is_some() {
