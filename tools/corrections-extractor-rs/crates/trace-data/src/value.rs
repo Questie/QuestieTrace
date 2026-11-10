@@ -15,22 +15,34 @@
 //! until first read. Validation reports every error a full decode would, so a lazy value
 //! always decodes later. A function stream, once read, keeps its entries lazy in turn: most are
 //! only ever probed by a binary search over time.
+//!
+//! Decoded values live in an [`Arena`] and borrow their strings from the decoded bytes, so a
+//! value owns nothing: a whole submission's values are freed at once when its arena is reset,
+//! never one by one.
 
 use crate::cbor::{CborError, Cursor, Item, Result, MAX_NESTING_DEPTH};
+use bumpalo::collections::Vec as ArenaVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::fmt;
 
+/// Where decoded values are allocated. Reset it (or drop it) once nothing borrows from it.
+pub type Arena = bumpalo::Bump;
+
+#[derive(Clone)]
 pub enum Value<'a> {
     Bool(bool),
     Num(f64),
-    Str(Cow<'a, str>),
-    Array(Vec<Value<'a>>),
+    Str(&'a str),
+    Array(&'a [Value<'a>]),
     Object(Object<'a>),
     /// Not decoded yet; every accessor decodes it first.
     Lazy(Lazy<'a>),
 }
+
+// The arena never runs destructors, so a value that owned heap memory would leak it.
+const _: () = assert!(!std::mem::needs_drop::<Value>());
 
 impl fmt::Debug for Value<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -38,7 +50,7 @@ impl fmt::Debug for Value<'_> {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Num(n) => f.write_str(&format_number(*n)),
             Value::Str(s) => write!(f, "{s:?}"),
-            Value::Array(items) => f.debug_list().entries(items).finish(),
+            Value::Array(items) => f.debug_list().entries(items.iter()).finish(),
             Value::Object(object) => f.debug_map().entries(object.entries().map(|(k, v)| (k.to_string(), v))).finish(),
             Value::Lazy(_) => unreachable!("resolved() never returns a lazy value"),
         }
@@ -112,10 +124,10 @@ impl<'a> Value<'a> {
         let key = key.into();
         match self.resolved() {
             Value::Object(object) => object.get(key),
-            Value::Array(items) => match key.js_key() {
+            Value::Array(items) => match key.property() {
                 // JS arrays are 0-based; Lua's 1..n land at 0..n-1.
-                JsKey::Index(i) => items.get(i as usize),
-                JsKey::Name(_) => None,
+                Property::Index(i) => items.get(i as usize),
+                Property::Name(_) => None,
             },
             _ => None,
         }
@@ -228,35 +240,51 @@ impl<'k> From<&'k str> for KeyRef<'k> {
 }
 
 impl<'k> KeyRef<'k> {
-    fn js_key(self) -> JsKey<'k> {
+    fn property(self) -> Property<'k> {
         match self {
-            KeyRef::Num(n) => JsKey::from_num(n),
-            KeyRef::Str(s) => JsKey::from_str(Cow::Borrowed(s)),
+            KeyRef::Num(n) => match index_of(n) {
+                Some(i) => Property::Index(i),
+                None => Property::Name(Cow::Owned(format_number(n))),
+            },
+            KeyRef::Str(s) => match canonical_index(s) {
+                Some(i) => Property::Index(i),
+                None => Property::Name(Cow::Borrowed(s)),
+            },
         }
     }
 }
 
+/// A looked-up key as JS sees it; the stored form is [`JsKey`].
+enum Property<'k> {
+    Index(u32),
+    Name(Cow<'k, str>),
+}
+
 /// A property key as JS sees it: an array index (canonical integer 0 ..= 2^32 - 2) or a name.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum JsKey<'a> {
     Index(u32),
-    Name(Cow<'a, str>),
+    Name(&'a str),
 }
 
 const MAX_ARRAY_INDEX: f64 = 4_294_967_294.0;
 
+/// The array index a number names, if any. -0 is the index 0: String(-0) === "0".
+fn index_of(n: f64) -> Option<u32> {
+    (n.fract() == 0.0 && (0.0..=MAX_ARRAY_INDEX).contains(&n)).then_some(n as u32)
+}
+
 impl<'a> JsKey<'a> {
-    fn from_num(n: f64) -> JsKey<'static> {
-        // -0 is the index 0: String(-0) === "0".
-        if n.fract() == 0.0 && (0.0..=MAX_ARRAY_INDEX).contains(&n) {
-            JsKey::Index(n as u32)
-        } else {
-            JsKey::Name(Cow::Owned(format_number(n)))
+    /// A number key; a name that is no index is written to the arena.
+    fn from_num(n: f64, arena: &'a Arena) -> JsKey<'a> {
+        match index_of(n) {
+            Some(i) => JsKey::Index(i),
+            None => JsKey::Name(arena.alloc_str(&format_number(n))),
         }
     }
 
-    fn from_str(s: Cow<'a, str>) -> JsKey<'a> {
-        match canonical_index(&s) {
+    fn from_str(s: &'a str) -> JsKey<'a> {
+        match canonical_index(s) {
             Some(i) => JsKey::Index(i),
             None => JsKey::Name(s),
         }
@@ -273,7 +301,7 @@ impl<'a> JsKey<'a> {
                 }
                 // Only canonical forms: String(Number(name)) must give the name back.
                 match name.parse::<f64>() {
-                    Ok(n) => n.fract() == 0.0 && n >= 1.0 && n.is_finite() && format_number(n) == **name,
+                    Ok(n) => n.fract() == 0.0 && n >= 1.0 && n.is_finite() && format_number(n) == *name,
                     Err(_) => false,
                 }
             }
@@ -306,9 +334,10 @@ pub fn format_number(n: f64) -> String {
 }
 
 /// A table that is not an array, in JS property order.
+#[derive(Clone, Copy)]
 pub struct Object<'a> {
     /// Array-index keys ascending, then the other keys in insertion order.
-    entries: Vec<(JsKey<'a>, Value<'a>)>,
+    entries: &'a [(JsKey<'a>, Value<'a>)],
     /// How many leading entries have an index key.
     index_count: usize,
 }
@@ -333,9 +362,9 @@ impl<'a> Object<'a> {
             // function name) is compared as it is, and an integral number is an index.
             KeyRef::Str(name) if !name.as_bytes().first().is_some_and(u8::is_ascii_digit) => self.get_name(name),
             KeyRef::Num(n) if n.fract() == 0.0 && (0.0..=MAX_ARRAY_INDEX).contains(&n) => self.get_index(n as u32),
-            _ => match key.js_key() {
-                JsKey::Index(i) => self.get_index(i),
-                JsKey::Name(name) => self.get_name(&name),
+            _ => match key.property() {
+                Property::Index(i) => self.get_index(i),
+                Property::Name(name) => self.get_name(&name),
             },
         }
     }
@@ -354,35 +383,46 @@ impl<'a> Object<'a> {
     fn get_name(&self, name: &str) -> Option<&Value<'a>> {
         self.entries[self.index_count..]
             .iter()
-            .find(|(key, _)| matches!(key, JsKey::Name(n) if n.as_ref() == name))
+            .find(|(key, _)| matches!(key, JsKey::Name(n) if *n == name))
             .map(|(_, v)| v)
     }
 
     /// Builds an object from entries in insertion order (unique keys).
-    fn from_insertion_order(mut entries: Vec<(JsKey<'a>, Value<'a>)>) -> Self {
-        // Most objects (every stream entry {t, tp, v}) have no index key: nothing to reorder.
-        if entries.iter().all(|(key, _)| matches!(key, JsKey::Name(_))) {
-            return Object { entries, index_count: 0 };
+    fn from_insertion_order(mut entries: ArenaVec<'a, (JsKey<'a>, Value<'a>)>) -> Self {
+        let index_count = sort_into_property_order(&mut entries);
+        Object {
+            entries: entries.into_bump_slice(),
+            index_count,
         }
-        // Stable: names keep their insertion order behind the sorted indices.
-        entries.sort_by(|(a, _), (b, _)| match (a, b) {
-            (JsKey::Index(a), JsKey::Index(b)) => a.cmp(b),
-            (JsKey::Index(_), JsKey::Name(_)) => std::cmp::Ordering::Less,
-            (JsKey::Name(_), JsKey::Index(_)) => std::cmp::Ordering::Greater,
-            (JsKey::Name(_), JsKey::Name(_)) => std::cmp::Ordering::Equal,
-        });
-        let index_count = entries.iter().take_while(|(key, _)| matches!(key, JsKey::Index(_))).count();
-        Object { entries, index_count }
     }
 }
 
+/// Puts entries in insertion order into JS property order; returns how many have an index key.
+fn sort_into_property_order(entries: &mut [(JsKey, Value)]) -> usize {
+    // Most objects (every stream entry {t, tp, v}) have no index key: nothing to reorder.
+    if entries.iter().all(|(key, _)| matches!(key, JsKey::Name(_))) {
+        return 0;
+    }
+    // Stable: names keep their insertion order behind the sorted indices.
+    entries.sort_by(|(a, _), (b, _)| match (a, b) {
+        (JsKey::Index(a), JsKey::Index(b)) => a.cmp(b),
+        (JsKey::Index(_), JsKey::Name(_)) => std::cmp::Ordering::Less,
+        (JsKey::Name(_), JsKey::Index(_)) => std::cmp::Ordering::Greater,
+        (JsKey::Name(_), JsKey::Name(_)) => std::cmp::Ordering::Equal,
+    });
+    entries.iter().take_while(|(key, _)| matches!(key, JsKey::Index(_))).count()
+}
+
 /// A validated, undecoded value.
+#[derive(Clone)]
 pub struct Lazy<'a> {
     raw: &'a [u8],
+    /// Where the value goes once decoded.
+    arena: &'a Arena,
     depth: u32,
     /// How to decode it when read: in full, or as a function stream with lazy entries.
     decode_as: Context,
-    decoded: OnceCell<Box<Value<'a>>>,
+    decoded: OnceCell<&'a Value<'a>>,
 }
 
 /// An event's name (`e`) and times (`t`, `tp`; NaN when not numbers).
@@ -439,17 +479,13 @@ impl<'a> Lazy<'a> {
         Some(header)
     }
 
-    fn get(&self) -> &Value<'a> {
+    fn get(&self) -> &'a Value<'a> {
         self.decoded.get_or_init(|| {
-            let mut decoder = Decoder {
-                cursor: Cursor::new(self.raw),
-                last_table_integer_keyed: false,
-                validated: true,
-            };
+            let mut decoder = Decoder::new(self.raw, self.arena, true);
             let value = decoder
                 .value(self.depth, self.decode_as)
                 .expect("a lazy value was validated when it was skipped");
-            Box::new(value.expect("a nil value is never kept lazy"))
+            self.arena.alloc(value.expect("a nil value is never kept lazy"))
         })
     }
 }
@@ -490,7 +526,7 @@ enum Context {
 
 impl Context {
     fn child(self, key: &JsKey) -> Context {
-        let name = |expected: &str| matches!(key, JsKey::Name(n) if n == expected);
+        let name = |expected: &str| matches!(key, JsKey::Name(n) if *n == expected);
         match self {
             Context::Root if name("sessions") => Context::Sessions,
             Context::Sessions => Context::Session,
@@ -507,12 +543,8 @@ impl Context {
 }
 
 /// Decodes a trace file payload: exactly one CBOR item, nothing after it. None for nil.
-pub fn decode_trace(bytes: &[u8]) -> Result<Option<Value<'_>>> {
-    let mut decoder = Decoder {
-        cursor: Cursor::new(bytes),
-        last_table_integer_keyed: false,
-        validated: false,
-    };
+pub fn decode_trace<'a>(bytes: &'a [u8], arena: &'a Arena) -> Result<Option<Value<'a>>> {
+    let mut decoder = Decoder::new(bytes, arena, false);
     let value = decoder.value(1, Context::Root)?;
     if !decoder.cursor.is_done() {
         return Err(CborError("trailing data after CBOR item".into()));
@@ -521,12 +553,8 @@ pub fn decode_trace(bytes: &[u8]) -> Result<Option<Value<'_>>> {
 }
 
 /// Decodes one complete CBOR item in full (no lazy values). None for nil.
-pub fn decode_value(bytes: &[u8]) -> Result<Option<Value<'_>>> {
-    let mut decoder = Decoder {
-        cursor: Cursor::new(bytes),
-        last_table_integer_keyed: false,
-        validated: false,
-    };
+pub fn decode_value<'a>(bytes: &'a [u8], arena: &'a Arena) -> Result<Option<Value<'a>>> {
+    let mut decoder = Decoder::new(bytes, arena, false);
     let value = decoder.value(1, Context::Plain)?;
     if !decoder.cursor.is_done() {
         return Err(CborError("trailing data after CBOR item".into()));
@@ -536,6 +564,7 @@ pub fn decode_value(bytes: &[u8]) -> Result<Option<Value<'_>>> {
 
 struct Decoder<'a> {
     cursor: Cursor<'a>,
+    arena: &'a Arena,
     /// Whether the table decoded last had only positive integer keys (and at least one).
     last_table_integer_keyed: bool,
     /// The bytes were validated before (a lazy value being decoded): nested lazy values need
@@ -547,11 +576,24 @@ fn depth_error() -> CborError {
     CborError(format!("CBOR deserialization exceeded maximum table depth of {MAX_NESTING_DEPTH}"))
 }
 
-fn text(bytes: &[u8]) -> Cow<'_, str> {
-    String::from_utf8_lossy(bytes)
-}
-
 impl<'a> Decoder<'a> {
+    fn new(bytes: &'a [u8], arena: &'a Arena, validated: bool) -> Self {
+        Decoder {
+            cursor: Cursor::new(bytes),
+            arena,
+            last_table_integer_keyed: false,
+            validated,
+        }
+    }
+
+    /// A CBOR string as text: borrowed when it is UTF-8, else repaired into the arena.
+    fn text(&self, bytes: &'a [u8]) -> &'a str {
+        match std::str::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(_) => self.arena.alloc_str(&String::from_utf8_lossy(bytes)),
+        }
+    }
+
     /// cbor.ts checks a table's depth before reading its length, so a table too deep reports
     /// that, even when its length is invalid too.
     fn check_container_depth(&self, depth: u32) -> Result<()> {
@@ -572,7 +614,7 @@ impl<'a> Decoder<'a> {
         self.check_container_depth(depth)?;
         Ok(match self.cursor.item()? {
             Item::Num(n) => Some(Value::Num(n)),
-            Item::Str(bytes) => Some(Value::Str(text(bytes))),
+            Item::Str(bytes) => Some(Value::Str(self.text(bytes))),
             Item::Bool(b) => Some(Value::Bool(b)),
             Item::Nil => None,
             Item::Array(length) => Some(self.array(length, depth, context)?),
@@ -584,10 +626,11 @@ impl<'a> Decoder<'a> {
         if depth > MAX_NESTING_DEPTH {
             return Err(depth_error());
         }
-        let mut items = Vec::with_capacity(self.cursor.capacity_for(length));
+        let arena = self.arena;
+        let mut items = ArenaVec::with_capacity_in(self.cursor.capacity_for(length), arena);
         let mut first_integer_keyed = false;
         // Set once an item is nil: the table has a hole and is no plain array any more.
-        let mut raw: Option<Vec<(JsKey<'a>, Value<'a>)>> = None;
+        let mut raw: Option<ArenaVec<'a, (JsKey<'a>, Value<'a>)>> = None;
         let mut index = 1.0;
         while index <= length {
             let key = JsKey::Index(index as u32);
@@ -599,7 +642,9 @@ impl<'a> Decoder<'a> {
             }
             match (item, &mut raw) {
                 (None, None) => {
-                    raw = Some(items.drain(..).enumerate().map(|(i, v)| (JsKey::Index(i as u32 + 1), v)).collect());
+                    let mut entries = ArenaVec::with_capacity_in(items.capacity(), arena);
+                    entries.extend(items.drain(..).enumerate().map(|(i, v)| (JsKey::Index(i as u32 + 1), v)));
+                    raw = Some(entries);
                 }
                 (None, Some(_)) => {}
                 (Some(item), Some(raw)) => raw.push((key, item)),
@@ -612,17 +657,18 @@ impl<'a> Decoder<'a> {
         }
         self.last_table_integer_keyed = !items.is_empty();
         if first_integer_keyed {
-            let entries = items.into_iter().enumerate().map(|(i, v)| (JsKey::Index(i as u32 + 1), v)).collect();
+            let mut entries = ArenaVec::with_capacity_in(items.len(), arena);
+            entries.extend(items.into_iter().enumerate().map(|(i, v)| (JsKey::Index(i as u32 + 1), v)));
             return Ok(Value::Object(Object::from_insertion_order(entries)));
         }
-        Ok(Value::Array(items))
+        Ok(Value::Array(items.into_bump_slice()))
     }
 
     fn map(&mut self, length: f64, depth: u32, context: Context) -> Result<Value<'a>> {
         if depth > MAX_NESTING_DEPTH {
             return Err(depth_error());
         }
-        let mut table = TableBuilder::with_capacity(self.cursor.capacity_for(length));
+        let mut table = TableBuilder::with_capacity_in(self.cursor.capacity_for(length), self.arena);
         let mut first_integer_keyed = false;
         let mut has_other_key = false;
         let mut has_deleted = false;
@@ -634,7 +680,7 @@ impl<'a> Decoder<'a> {
                 return Err(CborError("CBOR map keys that decode to nil are not supported".into()));
             };
             let key = match key {
-                Value::Num(n) => Some(JsKey::from_num(n).with_nan_check(n)),
+                Value::Num(n) => Some(JsKey::from_num(n, self.arena).with_nan_check(n)),
                 Value::Str(s) => Some(Ok(JsKey::from_str(s))),
                 _ => None,
             };
@@ -673,22 +719,26 @@ impl<'a> Decoder<'a> {
     }
 
     /// cbor.ts `finish`: a table with string keys becomes an array or an object.
-    fn finish(&mut self, raw: Vec<(JsKey<'a>, Value<'a>)>, first_integer_keyed: bool) -> Value<'a> {
+    fn finish(&mut self, mut raw: ArenaVec<'a, (JsKey<'a>, Value<'a>)>, first_integer_keyed: bool) -> Value<'a> {
         let integer_keyed = raw.iter().all(|(key, _)| key.is_positive_integer());
         self.last_table_integer_keyed = integer_keyed && !raw.is_empty();
         if raw.is_empty() {
-            return Value::Array(Vec::new());
+            return Value::Array(&[]);
         }
-        let object = Object::from_insertion_order(raw);
         if !integer_keyed || first_integer_keyed {
-            return Value::Object(object);
+            return Value::Object(Object::from_insertion_order(raw));
         }
-        let sequential =
-            object.index_count == object.entries.len() && object.entries.iter().enumerate().all(|(i, (key, _))| *key == JsKey::Index(i as u32 + 1));
+        let index_count = sort_into_property_order(&mut raw);
+        let sequential = raw.iter().enumerate().all(|(i, (key, _))| *key == JsKey::Index(i as u32 + 1));
         if !sequential {
-            return Value::Object(object);
+            return Value::Object(Object {
+                entries: raw.into_bump_slice(),
+                index_count,
+            });
         }
-        Value::Array(object.entries.into_iter().map(|(_, v)| v).collect())
+        let mut items = ArenaVec::with_capacity_in(raw.len(), self.arena);
+        items.extend(raw.into_iter().map(|(_, v)| v));
+        Value::Array(items.into_bump_slice())
     }
 
     /// Validates one value without decoding it; records its shape for the parent.
@@ -699,23 +749,22 @@ impl<'a> Decoder<'a> {
         } else {
             self.skip(depth, true)?
         };
-        let raw = self.cursor.slice_from(start);
-        Ok(match shape {
-            Shape::Nil => None,
-            Shape::Scalar => Some(Value::Lazy(Lazy {
-                raw,
+        let lazy = || {
+            Value::Lazy(Lazy {
+                raw: self.cursor.slice_from(start),
+                arena: self.arena,
                 depth,
                 decode_as,
                 decoded: OnceCell::new(),
-            })),
+            })
+        };
+        Ok(match shape {
+            Shape::Nil => None,
+            Shape::Scalar => Some(lazy()),
             Shape::Table { integer_keyed } => {
+                let value = lazy();
                 self.last_table_integer_keyed = integer_keyed;
-                Some(Value::Lazy(Lazy {
-                    raw,
-                    depth,
-                    decode_as,
-                    decoded: OnceCell::new(),
-                }))
+                Some(value)
             }
         })
     }
@@ -846,8 +895,8 @@ impl<'a> Decoder<'a> {
             let key = match key {
                 None => continue,
                 Some(SkippedKey::Num(n)) if n.is_nan() => return Err(CborError("table index is NaN".into())),
-                Some(SkippedKey::Num(n)) => JsKey::from_num(n),
-                Some(SkippedKey::Str(bytes)) => JsKey::from_str(text(bytes)),
+                Some(SkippedKey::Num(n)) => JsKey::from_num(n, self.arena),
+                Some(SkippedKey::Str(bytes)) => JsKey::from_str(self.text(bytes)),
             };
             if item == Shape::Nil {
                 keys.remove(&key);
@@ -918,7 +967,7 @@ impl SkippedKey<'_> {
             SkippedKey::Num(n) => n.is_finite() && n.fract() == 0.0 && *n >= 1.0,
             SkippedKey::Str(bytes) => match bytes.first() {
                 Some(b) if b.is_ascii_alphabetic() || *b == b'_' => false,
-                _ => JsKey::from_str(text(bytes)).is_positive_integer(),
+                _ => JsKey::from_str(&String::from_utf8_lossy(bytes)).is_positive_integer(),
             },
         }
     }
@@ -952,76 +1001,83 @@ impl Value<'_> {
     }
 }
 
-// A slot costs nothing over an entry (the key's niche holds None), which lets `into_entries`
-// reuse the slots' allocation.
-const _: () = assert!(std::mem::size_of::<Option<(JsKey, Value)>>() == std::mem::size_of::<(JsKey, Value)>());
-
 /// Tables up to this size find keys by scanning; larger ones keep a hash index.
 const SCAN_LIMIT: usize = 16;
 
 /// An insertion-ordered table with JS set/delete semantics: setting an existing key keeps its
 /// position, deleting removes it (a key set again afterwards goes last). Lua keys are unique;
 /// they only collide when a number and a string name the same JS property, or a nil value
-/// deletes a key. Deleting leaves a tombstone, so any mix of sets and deletes stays linear.
-#[derive(Default)]
+/// deletes a key. Deleting only marks the entry, so any mix of sets and deletes stays linear.
 struct TableBuilder<'a> {
-    /// Entries in insertion order; None where an entry was deleted.
-    slots: Vec<Option<(JsKey<'a>, Value<'a>)>>,
-    /// Live key -> slot, once the table has more than SCAN_LIMIT slots.
+    /// Entries in insertion order, deleted ones included.
+    entries: ArenaVec<'a, (JsKey<'a>, Value<'a>)>,
+    /// Which entries are deleted; empty until the first delete (rare: only a nil value deletes).
+    deleted: Vec<bool>,
+    /// Live key -> entry, once the table has more than SCAN_LIMIT entries.
     index: Option<FxHashMap<JsKey<'a>, usize>>,
 }
 
 impl<'a> TableBuilder<'a> {
-    fn with_capacity(capacity: usize) -> Self {
+    fn with_capacity_in(capacity: usize, arena: &'a Arena) -> Self {
         TableBuilder {
-            slots: Vec::with_capacity(capacity),
+            entries: ArenaVec::with_capacity_in(capacity, arena),
+            deleted: Vec::new(),
             index: None,
         }
+    }
+
+    fn is_deleted(&self, at: usize) -> bool {
+        self.deleted.get(at).copied().unwrap_or(false)
     }
 
     fn position(&self, key: &JsKey<'a>) -> Option<usize> {
         match &self.index {
             Some(index) => index.get(key).copied(),
-            None => self.slots.iter().position(|slot| slot.as_ref().is_some_and(|(k, _)| k == key)),
+            None => (0..self.entries.len()).find(|&at| self.entries[at].0 == *key && !self.is_deleted(at)),
         }
     }
 
     fn set(&mut self, key: JsKey<'a>, value: Value<'a>) {
         if let Some(at) = self.position(&key) {
-            if let Some(slot) = &mut self.slots[at] {
-                slot.1 = value;
-            }
+            self.entries[at].1 = value;
             return;
         }
         if let Some(index) = &mut self.index {
-            index.insert(key.clone(), self.slots.len());
-        } else if self.slots.len() == SCAN_LIMIT {
-            let mut index: FxHashMap<JsKey<'a>, usize> = self
-                .slots
-                .iter()
-                .enumerate()
-                .filter_map(|(i, slot)| slot.as_ref().map(|(k, _)| (k.clone(), i)))
+            index.insert(key, self.entries.len());
+        } else if self.entries.len() == SCAN_LIMIT {
+            let mut index: FxHashMap<JsKey<'a>, usize> = (0..self.entries.len())
+                .filter(|&at| !self.is_deleted(at))
+                .map(|at| (self.entries[at].0, at))
                 .collect();
-            index.insert(key.clone(), self.slots.len());
+            index.insert(key, self.entries.len());
             self.index = Some(index);
         }
-        self.slots.push(Some((key, value)));
+        self.entries.push((key, value));
+        if !self.deleted.is_empty() {
+            self.deleted.push(false);
+        }
     }
 
     fn remove(&mut self, key: &JsKey<'a>) {
         if let Some(at) = self.position(key) {
-            self.slots[at] = None;
+            if self.deleted.is_empty() {
+                self.deleted.resize(self.entries.len(), false);
+            }
+            self.deleted[at] = true;
             if let Some(index) = &mut self.index {
                 index.remove(key);
             }
         }
     }
 
-    /// The live entries, in insertion order. `filter_map` over the owned slots collects in place
-    /// (an entry and its slot have the same size, see below), so no second vector is allocated.
-    fn into_entries(self) -> Vec<(JsKey<'a>, Value<'a>)> {
-        #[allow(clippy::filter_map_identity, reason = "flatten() would not collect in place")]
-        self.slots.into_iter().filter_map(|slot| slot).collect()
+    /// The live entries, in insertion order.
+    fn into_entries(self) -> ArenaVec<'a, (JsKey<'a>, Value<'a>)> {
+        let mut entries = self.entries;
+        if !self.deleted.is_empty() {
+            let mut deleted = self.deleted.into_iter();
+            entries.retain(|_| !deleted.next().expect("one flag per entry"));
+        }
+        entries
     }
 }
 
@@ -1062,9 +1118,10 @@ mod tests {
 
     /// The item's JSON as decoded in full, as a function stream and as event arguments.
     fn decoded_three_ways(item: &[u8]) -> [String; 3] {
-        let full = to_json(&decode_value(item).expect("decodes").expect("not nil"));
+        let arena = Arena::new();
+        let full = to_json(&decode_value(item, &arena).expect("decodes").expect("not nil"));
         let bytes = in_a_session(item);
-        let root = decode_trace(&bytes).expect("decodes").expect("not nil");
+        let root = decode_trace(&bytes, &arena).expect("decodes").expect("not nil");
         let session = &root.get("sessions").and_then(Value::as_array).expect("sessions")[0];
         let stream = to_json(session.get("functions").and_then(|f| f.get("F")).expect("F"));
         let args = to_json(session.get("events").and_then(|e| e.get(0)).and_then(|e| e.get("a")).expect("a"));
@@ -1081,9 +1138,9 @@ mod tests {
 
     #[track_caller]
     fn fails_with(item: &[u8], message: &str) {
-        let full = decode_value(item).map(|_| ()).expect_err("the full decode fails").0;
+        let full = decode_value(item, &Arena::new()).map(|_| ()).expect_err("the full decode fails").0;
         assert!(full.contains(message), "{full}");
-        let lazy = decode_trace(&in_a_session(item))
+        let lazy = decode_trace(&in_a_session(item), &Arena::new())
             .map(|_| ())
             .expect_err("validation fails while decoding, not later")
             .0;
@@ -1096,14 +1153,14 @@ mod tests {
 
     #[test]
     fn integers_are_doubles_like_the_lua_reference() {
-        assert_eq!(decode_value(&[0x38, 0x63]).unwrap().unwrap().as_num(), Some(-100.0));
+        assert_eq!(decode_value(&[0x38, 0x63], &Arena::new()).unwrap().unwrap().as_num(), Some(-100.0));
         // 2^53 + 1 cannot be represented; Lua and the TS decoder both round to 2^53.
         decodes_to(&[0x81, 0x1b, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01], "[9007199254740992]");
     }
 
     #[test]
     fn half_single_and_double_floats() {
-        let num = |bytes: &[u8]| decode_value(bytes).unwrap().unwrap().as_num().unwrap();
+        let num = |bytes: &[u8]| decode_value(bytes, &Arena::new()).unwrap().unwrap().as_num().unwrap();
         assert_eq!(num(&[0xf9, 0xc4, 0x00]), -4.0);
         assert_eq!(num(&[0xf9, 0x00, 0x01]), 2f64.powi(-24));
         assert_eq!(num(&[0xf9, 0x7c, 0x00]), f64::INFINITY);
@@ -1165,7 +1222,8 @@ mod tests {
     fn numbers_and_strings_find_the_same_keys() {
         // {"b": 1, 10: 2, "007": 3, -1: 4}
         let item = [0xa4, 0x61, b'b', 0x01, 0x0a, 0x02, 0x63, b'0', b'0', b'7', 0x03, 0x20, 0x04];
-        let value = decode_value(&item).unwrap().unwrap();
+        let arena = Arena::new();
+        let value = decode_value(&item, &arena).unwrap().unwrap();
         let num = |key: KeyRef| value.get(key).and_then(Value::as_num);
         assert_eq!((num(KeyRef::Num(10.0)), num(KeyRef::Str("10"))), (Some(2.0), Some(2.0)));
         assert_eq!(
@@ -1198,7 +1256,7 @@ mod tests {
         fails_with(&[0x81, 0x19, 0x01], "truncated");
         fails_with(&[0xa1, 0xf6, 0x01], "nil");
         fails_with(&[0xa1, 0xfb, 0x7f, 0xf8, 0, 0, 0, 0, 0, 0, 0x01], "NaN");
-        assert!(decode_value(&[0x01, 0x02]).unwrap_err().0.contains("trailing"));
+        assert!(decode_value(&[0x01, 0x02], &Arena::new()).unwrap_err().0.contains("trailing"));
     }
 
     #[test]
@@ -1211,14 +1269,14 @@ mod tests {
     fn a_table_too_deep_reports_its_depth_even_when_its_length_is_invalid() {
         // 100 arrays, then an indefinite-length array at depth 101: TS checks depth first.
         let item: Vec<u8> = std::iter::repeat_n(0x81, 100).chain([0x9f, 0xff]).collect();
-        assert!(decode_value(&item).unwrap_err().0.contains("depth"));
+        assert!(decode_value(&item, &Arena::new()).unwrap_err().0.contains("depth"));
     }
 
     #[test]
     fn allows_100_nested_tables_and_rejects_101() {
         let nested = |depth: usize| -> Vec<u8> { std::iter::repeat_n(0x81, depth).chain([0x80]).collect() };
-        assert!(decode_value(&nested(99)).is_ok());
-        assert!(decode_value(&nested(100)).unwrap_err().0.contains("depth"));
+        assert!(decode_value(&nested(99), &Arena::new()).is_ok());
+        assert!(decode_value(&nested(100), &Arena::new()).unwrap_err().0.contains("depth"));
     }
 
     #[test]

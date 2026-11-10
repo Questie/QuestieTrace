@@ -18,7 +18,7 @@ use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use trace_data::source::{in_sample, list_submissions, SubmissionFile};
 use trace_data::submission::Submission;
-use trace_data::{Inflater, SessionKey};
+use trace_data::{Arena, Inflater, SessionKey};
 
 pub struct Options {
     pub trace_data: PathBuf,
@@ -81,9 +81,9 @@ struct ObservedSession {
 
 /// Decodes and observes one submission. Sessions in `used` were folded from newer
 /// submissions: their copies here are duplicates and not observed.
-fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, used: &RwLock<HashSet<SessionKey>>) -> ObservedSubmission {
+fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, arena: &mut Arena, used: &RwLock<HashSet<SessionKey>>) -> ObservedSubmission {
     let submission = Submission::read(&file.path, inflater);
-    let decoded = submission.decode();
+    let decoded = submission.decode(arena);
     // Only the first copy of a session in a submission is used.
     let mut seen = HashSet::new();
     let mut sessions = Vec::new();
@@ -102,10 +102,20 @@ fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, used: &RwL
         error: decoded.error,
         sessions,
     };
-    // The next submission inflates into this one's buffers.
+    // The next submission inflates into this one's buffers and decodes into this arena.
     submission.recycle(inflater);
+    arena.reset();
+    if arena.allocated_bytes() > ARENA_KEPT_BYTES {
+        *arena = Arena::new();
+    }
     observed
 }
+
+/// The most arena memory a worker keeps between submissions. A reset arena keeps its largest
+/// block, which only grows, so without a cap every worker would hold on to the largest
+/// submission it ever decoded (5% sample: +2 GB). Per submission the arena takes a median
+/// 10 MB, p90 37 MB; caps of 0, 16, 32 and 64 MB ran equally fast, 16 MB used the least memory.
+const ARENA_KEPT_BYTES: usize = 16 << 20;
 
 /// What the fold tallies besides the accumulator.
 #[derive(Default)]
@@ -174,8 +184,8 @@ pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
         &files,
         threads,
         threads * AHEAD_PER_THREAD,
-        Inflater::new,
-        |inflater, file| observe_submission(file, inflater, &used),
+        || (Inflater::new(), Arena::new()),
+        |(inflater, arena), file| observe_submission(file, inflater, arena, &used),
         |index, observed| {
             let fold_started = std::time::Instant::now();
             fold(observed, &mut acc, &mut tally, &used);
