@@ -9,6 +9,7 @@ publish = false
 [workspace.dependencies]
 trace-data = { path = "crates/trace-data" }
 indexmap = "2"
+flate2 = { version = "1", default-features = false, features = ["zlib"] }
 libdeflater = "1.26"
 memchr = "2"
 mimalloc = { version = "0.1", default-features = false }

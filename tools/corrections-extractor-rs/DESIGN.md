@@ -20,14 +20,18 @@ The port keeps the observable behaviour and changes how it is computed:
 
 | TypeScript | Rust |
 |---|---|
-| Decodes every session into JS objects | Decodes lazily: a function stream when first read, event arguments when first read |
-| Worker threads, results posted to the main thread | `rayon` over a window of submissions, folded in order on one thread |
+| Decodes every session into JS objects | Decodes lazily: a function stream when first read, and then only the stream entries read (a binary search over time probes a few); event arguments when first read |
+| Worker threads, results posted to the main thread | Worker threads claim submissions one at a time; one thread folds them in order, the workers at most a few submissions per thread ahead |
 | Incremental DuckDB/parquet store between runs | None: every run is a full scan of a local checkout |
 | Observations as JSON values with string keys | Typed observations per field |
+| Scalar observations summarized on the main thread | Pre-merged per session and value on the worker that observed them |
 | Raw custom-merge observations on disk | Kept in memory, compact and typed |
 
 Source: a local trace-data checkout only (`--trace-data` or `TRACE_DATA_DIR`). Runs against the
 OVH bucket sync it first.
+
+Decoding allocates many small values on every thread, so the binary uses mimalloc as its global
+allocator: with the system allocator, threads contended on it and used twice the memory.
 
 ## Layout
 
@@ -47,13 +51,13 @@ scripts/
 1. **List** `submissions/<yyyy-mm>/*.json` as keys `<yyyy-mm>/<file>.json`, apply the sample
    (`--sample` / `EXTRACT_SAMPLE`: first 4 bytes of SHA-256(key) as a fraction below the
    percentage) and sort newest first. The position in that order is the submission's rank.
-2. **Observe** a window of submissions in parallel. Each submission: read the envelope, decode
-   every export, and per session compute its key, client and, for Forever sessions, the staged
-   observations of every observer. Sessions whose key was already used by an earlier window
-   are skipped without observing.
-3. **Fold** the window in rank order on one thread. Of each session key only the first copy met
-   is used (newest submission, then export order); sessions without a key are always used.
-   Scalar fields go into per-value summaries; custom-merge fields keep every observation.
+2. **Observe** on worker threads, one submission at a time. Each submission: read the
+   envelope, decode every export, and per session compute its key and, for Forever sessions,
+   the staged observations of every observer (scalar ones already merged per value). Sessions
+   whose key a folded submission used are skipped without observing.
+3. **Fold** in rank order on one thread, as results arrive. Of each session key only the first
+   copy met is used (newest submission, then export order); sessions without a key are always
+   used. Scalar fields go into per-value summaries; custom-merge fields keep every observation.
 4. **Finalize** merges facts per field, builds records and writes the Lua modules, then
    `meta.json` last (it marks a complete run).
 

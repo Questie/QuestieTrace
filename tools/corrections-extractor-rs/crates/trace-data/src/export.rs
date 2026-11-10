@@ -3,7 +3,8 @@
 //!   "!QuestieTrace:N!" + EncodeForPrint(raw deflate(CBOR(payload))) + "!End:QuestieTrace:N!"
 //!
 //! Mirrors `core/trace-data/decode.ts`, including its error messages (they end up in
-//! meta.json), except where zlib words an inflate error differently from libdeflate.
+//! meta.json). Inflating uses libdeflate; only when it rejects a payload is zlib asked why, so
+//! the message is the one the TS tool (Node's zlib) reports.
 
 use libdeflater::{DecompressionError, Decompressor};
 
@@ -213,8 +214,34 @@ impl Inflater {
                         "payload could not be decompressed: Cannot create a Buffer larger than {MAX_CBOR_BYTES} bytes"
                     ));
                 }
-                Err(DecompressionError::BadData) => return Err("payload could not be decompressed: invalid deflate data".into()),
+                Err(DecompressionError::BadData) => return Err(format!("payload could not be decompressed: {}", zlib_error(compressed))),
             }
+        }
+    }
+}
+
+/// Why zlib, which the TS tool inflates with, rejects data libdeflate rejected: zlib's own
+/// message, or Node's "unexpected end of file" when the input ends inside the stream. Only the
+/// error path pays for inflating twice.
+fn zlib_error(compressed: &[u8]) -> String {
+    use flate2::{Decompress, FlushDecompress, Status};
+    let mut zlib = Decompress::new(false);
+    let mut out: Vec<u8> = Vec::with_capacity(compressed.len() * 8);
+    loop {
+        if out.len() == out.capacity() {
+            out.reserve(out.capacity().max(64 * 1024));
+        }
+        let (before_in, before_out) = (zlib.total_in(), zlib.total_out());
+        let rest = &compressed[before_in as usize..];
+        // No-flush calls: zlib-rs refuses a second Finish call after one ran out of output space.
+        match zlib.decompress_vec(rest, &mut out, FlushDecompress::None) {
+            Err(e) => return e.message().unwrap_or("invalid deflate data").to_owned(),
+            // zlib accepts what libdeflate rejected: keep libdeflate's verdict.
+            Ok(Status::StreamEnd) => return "invalid deflate data".into(),
+            Ok(_) if zlib.total_in() == before_in && zlib.total_out() == before_out && out.len() < out.capacity() => {
+                return "unexpected end of file".into();
+            }
+            Ok(_) => {}
         }
     }
 }
@@ -272,6 +299,27 @@ mod tests {
     fn the_end_marker_must_repeat_the_start_version() {
         assert_eq!(kinds("!QuestieTrace:12!ab!End:QuestieTrace:12!"), ["ab"]);
         assert_eq!(kinds("!QuestieTrace:1!ab!End:QuestieTrace:12!"), ["unterminated"]);
+    }
+
+    #[test]
+    fn corrupt_and_cut_off_deflate_data_get_zlibs_messages() {
+        let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
+        let data: Vec<u8> = (0..20_000u32).flat_map(|i| (i % 251).to_le_bytes()).collect();
+        let mut compressed = vec![0; compressor.deflate_compress_bound(data.len())];
+        let size = compressor.deflate_compress(&data, &mut compressed).unwrap();
+        compressed.truncate(size);
+        let mut inflater = Inflater::new();
+        assert_eq!(inflater.inflate(&compressed).unwrap(), data);
+        // Node: "unexpected end of file" for input that ends inside the stream.
+        assert_eq!(
+            inflater.inflate(&compressed[..size / 2]).unwrap_err(),
+            "payload could not be decompressed: unexpected end of file"
+        );
+        // A reserved block type (0b11) is invalid in every deflate decoder; zlib names it.
+        assert_eq!(
+            inflater.inflate(&[0x07, 0x00]).unwrap_err(),
+            "payload could not be decompressed: invalid block type"
+        );
     }
 
     #[test]
