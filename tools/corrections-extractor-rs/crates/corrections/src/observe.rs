@@ -17,7 +17,12 @@ pub struct MaxIds {
     pub object: i64,
 }
 
-pub const MAX_IDS: MaxIds = MaxIds { npc: 18199, quest: 9665, item: 25818, object: 300_142 };
+pub const MAX_IDS: MaxIds = MaxIds {
+    npc: 18199,
+    quest: 9665,
+    item: 25818,
+    object: 300_142,
+};
 
 /// GetBuildInfo's interface version, as PlayerIdentity.lua records it:
 /// `functions.GetBuildInfo.player[0].v`.
@@ -42,14 +47,22 @@ pub struct SessionClient {
 }
 
 pub fn session_client(session: &Session) -> SessionClient {
-    let build = session.field("buildInfo").and_then(|info| info.get("2")).map(number_like).filter(|b| crate::js::is_integer(*b) && *b > 0.0);
+    let build = session
+        .field("buildInfo")
+        .and_then(|info| info.get("2"))
+        .map(number_like)
+        .filter(|b| crate::js::is_integer(*b) && *b > 0.0);
     let locale = trace_data::stream::get_stream(session, "GetLocale", &[KeyRef::Str("player")])
         .and_then(|stream| stream.first())
         .and_then(|entry| entry.get("v"))
         .and_then(Value::as_str)
         .filter(|l| !l.is_empty())
         .map(str::to_owned);
-    SessionClient { interface_version: interface_version(session), build, locale }
+    SessionClient {
+        interface_version: interface_version(session),
+        build,
+        locale,
+    }
 }
 
 /// JS `Number(x)` for a decoded value.
@@ -75,5 +88,8 @@ pub fn observe_session(session: &Session, max_ids: &MaxIds) -> Option<StagedSess
         return None;
     }
     let _ = max_ids;
-    Some(StagedSession { server_time: session_server_time(session), required_level: quest::required_level::observe(session) })
+    Some(StagedSession {
+        server_time: session_server_time(session),
+        required_level: quest::required_level::observe(session),
+    })
 }

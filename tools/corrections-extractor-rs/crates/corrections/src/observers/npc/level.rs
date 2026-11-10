@@ -32,7 +32,9 @@ pub fn observe(session: &Session) -> Vec<Observation<f64>> {
     let mut seen: HashSet<(i64, Num)> = HashSet::new();
     for encounter in unit_state_encounters(session, "UnitLevel", &[]) {
         // `typeof level !== "number" || level < 1`: NaN is a number and not below 1.
-        let Some(level) = encounter.value.as_num().filter(|&level| level >= 1.0 || level.is_nan()) else { continue };
+        let Some(level) = encounter.value.as_num().filter(|&level| level >= 1.0 || level.is_nan()) else {
+            continue;
+        };
         if !seen.insert((encounter.npc_id, Num(level))) {
             continue;
         }
@@ -57,17 +59,24 @@ pub fn merge(observations: &[Observation<f64>]) -> Option<NpcLevelRange> {
     if levels.is_empty() {
         return None;
     }
-    Some(NpcLevelRange { min: js_min(&levels), max: js_max(&levels) })
+    Some(NpcLevelRange {
+        min: js_min(&levels),
+        max: js_max(&levels),
+    })
 }
 
 /// JS `Math.min(...values)`: NaN when any value is NaN.
 fn js_min(values: &[f64]) -> f64 {
-    values.iter().fold(f64::INFINITY, |min, &v| if min.is_nan() || v.is_nan() { f64::NAN } else { min.min(v) })
+    values
+        .iter()
+        .fold(f64::INFINITY, |min, &v| if min.is_nan() || v.is_nan() { f64::NAN } else { min.min(v) })
 }
 
 /// JS `Math.max(...values)`: NaN when any value is NaN.
 fn js_max(values: &[f64]) -> f64 {
-    values.iter().fold(f64::NEG_INFINITY, |max, &v| if max.is_nan() || v.is_nan() { f64::NAN } else { max.max(v) })
+    values
+        .iter()
+        .fold(f64::NEG_INFINITY, |max, &v| if max.is_nan() || v.is_nan() { f64::NAN } else { max.max(v) })
 }
 
 #[cfg(test)]
@@ -94,11 +103,16 @@ mod tests {
     }
 
     fn observed(functions: Json, events: Vec<Json>) -> Vec<(i64, f64, Confidence, f64)> {
-        with_session(&session_json(functions, events), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, events), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     fn sighting(session: u32, level: f64) -> Observation<f64> {
-        Observation { session: SessionId(session), ..Observation::new(1, level, Confidence::High, 0.0) }
+        Observation {
+            session: SessionId(session),
+            ..Observation::new(1, level, Confidence::High, 0.0)
+        }
     }
 
     #[test]
@@ -168,7 +182,10 @@ mod tests {
 
     #[test]
     fn merge_ignores_levels_seen_in_only_one_session() {
-        assert_eq!(merge(&[sighting(1, 12.0), sighting(2, 12.0), sighting(3, 20.0)]), Some(NpcLevelRange { min: 12.0, max: 12.0 }));
+        assert_eq!(
+            merge(&[sighting(1, 12.0), sighting(2, 12.0), sighting(3, 20.0)]),
+            Some(NpcLevelRange { min: 12.0, max: 12.0 })
+        );
     }
 
     #[test]

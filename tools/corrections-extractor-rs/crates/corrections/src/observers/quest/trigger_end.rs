@@ -7,13 +7,13 @@
 //! state long after the completion, so a location is recorded only on an objective's
 //! incomplete->complete transition, or on its first sample when it is first seen finished.
 
-use super::objectives::emulated_list;
 use crate::aggregate::Num;
 use crate::js;
 use crate::observation::{Confidence, Observation};
 use crate::probes::{locale_at, player_pos_at, player_zone_at, to_questie_map_position};
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use trace_data::stream::emulated_list;
 use trace_data::stream::{entry_t, entry_v, get_stream, param_keys};
 use trace_data::{KeyRef, Session, Value};
 
@@ -86,9 +86,15 @@ pub fn merge(observations: &[Observation<QuestTriggerEndValue>], preferred_zone:
         }
     }
     let Some(latest_text) = latest.map(|o| &o.value.text) else {
-        return QuestTriggerEndValue { text: String::new(), locations: Vec::new() };
+        return QuestTriggerEndValue {
+            text: String::new(),
+            locations: Vec::new(),
+        };
     };
-    let without_location = || QuestTriggerEndValue { text: latest_text.clone(), locations: Vec::new() };
+    let without_location = || QuestTriggerEndValue {
+        text: latest_text.clone(),
+        locations: Vec::new(),
+    };
 
     let mut zones: IndexMap<Num, ZoneTally> = IndexMap::new();
     for observation in observations.iter().filter(|o| o.value.text == *latest_text) {
@@ -97,11 +103,20 @@ pub fn merge(observations: &[Observation<QuestTriggerEndValue>], preferred_zone:
             if !zone_id.is_finite() {
                 continue;
             }
-            let tally = zones.entry(Num(*zone_id)).or_insert_with(|| ZoneTally { id: *zone_id + 0.0, count: 0, latest_t: 0.0, coords: IndexMap::new() });
+            let tally = zones.entry(Num(*zone_id)).or_insert_with(|| ZoneTally {
+                id: *zone_id + 0.0,
+                count: 0,
+                latest_t: 0.0,
+                coords: IndexMap::new(),
+            });
             tally.count += 1;
             tally.latest_t = js_max(tally.latest_t, observation.t);
             for &position in positions {
-                let coord = tally.coords.entry((Num(position.0), Num(position.1))).or_insert(CoordTally { position, count: 0, latest_t: 0.0 });
+                let coord = tally.coords.entry((Num(position.0), Num(position.1))).or_insert(CoordTally {
+                    position,
+                    count: 0,
+                    latest_t: 0.0,
+                });
                 coord.count += 1;
                 coord.latest_t = js_max(coord.latest_t, observation.t);
             }
@@ -124,12 +139,17 @@ pub fn merge(observations: &[Observation<QuestTriggerEndValue>], preferred_zone:
     }
     let Some(best_coord) = best_coord else { return without_location() };
 
-    QuestTriggerEndValue { text: latest_text.clone(), locations: vec![(best_zone.id, vec![best_coord.position])] }
+    QuestTriggerEndValue {
+        text: latest_text.clone(),
+        locations: vec![(best_zone.id, vec![best_coord.position])],
+    }
 }
 
 pub fn observe(session: &Session) -> Vec<Observation<QuestTriggerEndValue>> {
     let mut observations = Vec::new();
-    let Some(objectives_root) = session.function(OBJECTIVES).filter(|root| !root.is_array()) else { return observations };
+    let Some(objectives_root) = session.function(OBJECTIVES).filter(|root| !root.is_array()) else {
+        return observations;
+    };
 
     for quest_id_key in param_keys(objectives_root) {
         let quest_id = js::number(&quest_id_key);
@@ -145,7 +165,9 @@ pub fn observe(session: &Session) -> Vec<Observation<QuestTriggerEndValue>> {
             if locale_at(session, t).is_some_and(|locale| locale != "enUS") {
                 continue;
             }
-            let (Some(zone_id), Some(position)) = (player_zone_at(session, t), player_pos_at(session, t)) else { continue };
+            let (Some(zone_id), Some(position)) = (player_zone_at(session, t), player_pos_at(session, t)) else {
+                continue;
+            };
 
             let objectives = emulated_list(entry_v(entry)).unwrap_or_default();
             for objective in objectives.into_iter().flatten().filter(|o| o.as_object().is_some()) {
@@ -153,7 +175,9 @@ pub fn observe(session: &Session) -> Vec<Observation<QuestTriggerEndValue>> {
                     continue;
                 }
                 let Some(finished) = objective.get("finished") else { continue };
-                let Some(text) = objective.get("text").and_then(Value::as_str).map(js::trim).filter(|text| !text.is_empty()) else { continue };
+                let Some(text) = objective.get("text").and_then(Value::as_str).map(js::trim).filter(|text| !text.is_empty()) else {
+                    continue;
+                };
 
                 let finished = finished.as_bool() == Some(true);
                 let was_finished = previous_finished.insert(text.to_owned(), finished);
@@ -164,7 +188,10 @@ pub fn observe(session: &Session) -> Vec<Observation<QuestTriggerEndValue>> {
                 }
 
                 let questie = to_questie_map_position(position);
-                let value = QuestTriggerEndValue { text: text.to_owned(), locations: vec![(zone_id + 0.0, vec![(questie.x, questie.y)])] };
+                let value = QuestTriggerEndValue {
+                    text: text.to_owned(),
+                    locations: vec![(zone_id + 0.0, vec![(questie.x, questie.y)])],
+                };
                 observations.push(Observation::new(quest_id as i64, value, Confidence::High, t));
             }
         }
@@ -180,12 +207,17 @@ mod tests {
     use serde_json::{json, Value as Json};
 
     fn observed(functions: Json) -> Vec<(i64, QuestTriggerEndValue, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     /// `[text, {zone: [[x, y], ...], ...}]`, zones given in JS property order.
     fn value(text: &str, locations: &[(f64, &[(f64, f64)])]) -> QuestTriggerEndValue {
-        QuestTriggerEndValue { text: text.to_owned(), locations: locations.iter().map(|&(zone, coords)| (zone, coords.to_vec())).collect() }
+        QuestTriggerEndValue {
+            text: text.to_owned(),
+            locations: locations.iter().map(|&(zone, coords)| (zone, coords.to_vec())).collect(),
+        }
     }
 
     fn event_objective(text: &str, finished: bool) -> Json {
@@ -200,7 +232,10 @@ mod tests {
             "C_Map.GetBestMapForUnit": { "player": stream([(10.0, json!(1436))]) },
             "C_Map.GetPlayerMapPosition": { "player": stream([(10.0, json!({ "x": 0.5611, "y": 0.6164 }))]) },
         });
-        assert_eq!(observed(functions), [(33, value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), Confidence::High, 10.0)]);
+        assert_eq!(
+            observed(functions),
+            [(33, value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), Confidence::High, 10.0)]
+        );
     }
 
     #[test]
@@ -245,7 +280,10 @@ mod tests {
                 (20.0, json!({ "x": 0.8, "y": 0.8 })),
             ]) },
         });
-        assert_eq!(observed(functions), [(33, value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), Confidence::High, 10.0)]);
+        assert_eq!(
+            observed(functions),
+            [(33, value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), Confidence::High, 10.0)]
+        );
     }
 
     #[test]
@@ -258,7 +296,10 @@ mod tests {
             "C_Map.GetBestMapForUnit": { "player": stream([(0.0, json!(1436))]) },
             "C_Map.GetPlayerMapPosition": { "player": stream([(10.0, json!({ "x": 0.5611, "y": 0.6164 })), (15.0, json!({ "x": 0.9, "y": 0.9 }))]) },
         });
-        assert_eq!(observed(functions), [(33, value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), Confidence::High, 10.0)]);
+        assert_eq!(
+            observed(functions),
+            [(33, value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), Confidence::High, 10.0)]
+        );
     }
 
     #[test]
@@ -290,7 +331,13 @@ mod tests {
     }
 
     fn obs(value: QuestTriggerEndValue, t: f64) -> Observation<QuestTriggerEndValue> {
-        Observation { entity_id: 33, value, confidence: Confidence::High, t, session: SessionId(0) }
+        Observation {
+            entity_id: 33,
+            value,
+            confidence: Confidence::High,
+            t,
+            session: SessionId(0),
+        }
     }
 
     #[test]
@@ -309,7 +356,10 @@ mod tests {
     #[test]
     fn merge_prefers_the_quests_zone_or_sort_zone_when_any_sample_observed_it() {
         let merged = merge(
-            &[obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 10.0), obs(value("Light the campfire", &[(12.0, &[(47.46, 62.18)])]), 20.0)],
+            &[
+                obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 10.0),
+                obs(value("Light the campfire", &[(12.0, &[(47.46, 62.18)])]), 20.0),
+            ],
             // zoneOrSort resolved Elwynn Forest for this quest
             Some(12.0),
         );
@@ -345,9 +395,15 @@ mod tests {
         let earlier = obs(value("Light the campfire", &[(12.0, &[(30.0, 40.0)])]), 10.0);
         let later = obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 20.0);
         // Equal counts: the more recent sample (zone 40) wins.
-        assert_eq!(merge(&[earlier.clone(), later], None), value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]));
+        assert_eq!(
+            merge(&[earlier.clone(), later], None),
+            value("Light the campfire", &[(40.0, &[(56.11, 61.64)])])
+        );
         // As in the TS test (which only holds zone 12).
-        assert_eq!(merge(&[earlier.clone(), earlier.clone()], None), value("Light the campfire", &[(12.0, &[(30.0, 40.0)])]));
+        assert_eq!(
+            merge(&[earlier.clone(), earlier.clone()], None),
+            value("Light the campfire", &[(12.0, &[(30.0, 40.0)])])
+        );
         // Equal counts and recency: the lowest zone id wins, whichever zone is met first.
         let same_time = obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 10.0);
         assert_eq!(merge(&[same_time, earlier], None), value("Light the campfire", &[(12.0, &[(30.0, 40.0)])]));

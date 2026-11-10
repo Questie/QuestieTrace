@@ -13,10 +13,17 @@ pub struct Bundle {
 }
 
 pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str) -> Bundle {
-    let header = Header { source_file_count, session_count: acc.session_count(), generated_at };
+    let header = Header {
+        source_file_count,
+        session_count: acc.session_count(),
+        generated_at,
+    };
 
     let required_level = acc.required_level.merge(quest::required_level::merge);
-    let quests: Vec<(i64, Record)> = required_level.into_iter().map(|(id, fact)| (id, vec![("requiredLevel".to_owned(), Js::Num(fact.value))])).collect();
+    let quests: Vec<(i64, Record)> = required_level
+        .into_iter()
+        .map(|(id, fact)| (id, vec![("requiredLevel".to_owned(), Js::Num(fact.value))]))
+        .collect();
 
     Bundle {
         modules: vec![
@@ -26,6 +33,11 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
             ("foreverObjectTraces.lua", write_corrections("ForeverObjectTraces", "objectKeys", &[], &header)),
             ("xpDB-traces.lua", write_quest_xp(&[], &header)),
         ],
-        lookups: vec![("lookupNpcs", Vec::new()), ("lookupQuests", Vec::new()), ("lookupItems", Vec::new()), ("lookupObjects", Vec::new())],
+        lookups: vec![
+            ("lookupNpcs", Vec::new()),
+            ("lookupQuests", Vec::new()),
+            ("lookupItems", Vec::new()),
+            ("lookupObjects", Vec::new()),
+        ],
     }
 }

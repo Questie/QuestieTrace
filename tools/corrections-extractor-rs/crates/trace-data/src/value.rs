@@ -299,8 +299,13 @@ pub struct Lazy<'a> {
 impl<'a> Lazy<'a> {
     fn get(&self) -> &Value<'a> {
         self.decoded.get_or_init(|| {
-            let mut decoder = Decoder { cursor: Cursor::new(self.raw), last_table_integer_keyed: false };
-            let value = decoder.value(self.depth, Context::Plain).expect("a lazy value was validated when it was skipped");
+            let mut decoder = Decoder {
+                cursor: Cursor::new(self.raw),
+                last_table_integer_keyed: false,
+            };
+            let value = decoder
+                .value(self.depth, Context::Plain)
+                .expect("a lazy value was validated when it was skipped");
             Box::new(value.expect("a nil value is never kept lazy"))
         })
     }
@@ -340,7 +345,10 @@ impl Context {
 
 /// Decodes a trace file payload: exactly one CBOR item, nothing after it. None for nil.
 pub fn decode_trace(bytes: &[u8]) -> Result<Option<Value<'_>>> {
-    let mut decoder = Decoder { cursor: Cursor::new(bytes), last_table_integer_keyed: false };
+    let mut decoder = Decoder {
+        cursor: Cursor::new(bytes),
+        last_table_integer_keyed: false,
+    };
     let value = decoder.value(1, Context::Root)?;
     if !decoder.cursor.is_done() {
         return Err(CborError("trailing data after CBOR item".into()));
@@ -350,7 +358,10 @@ pub fn decode_trace(bytes: &[u8]) -> Result<Option<Value<'_>>> {
 
 /// Decodes one complete CBOR item in full (no lazy values). None for nil.
 pub fn decode_value(bytes: &[u8]) -> Result<Option<Value<'_>>> {
-    let mut decoder = Decoder { cursor: Cursor::new(bytes), last_table_integer_keyed: false };
+    let mut decoder = Decoder {
+        cursor: Cursor::new(bytes),
+        last_table_integer_keyed: false,
+    };
     let value = decoder.value(1, Context::Plain)?;
     if !decoder.cursor.is_done() {
         return Err(CborError("trailing data after CBOR item".into()));
@@ -489,8 +500,8 @@ impl<'a> Decoder<'a> {
         if !integer_keyed || first_integer_keyed {
             return Value::Object(object);
         }
-        let sequential = object.index_count == object.entries.len()
-            && object.entries.iter().enumerate().all(|(i, (key, _))| *key == JsKey::Index(i as u32 + 1));
+        let sequential =
+            object.index_count == object.entries.len() && object.entries.iter().enumerate().all(|(i, (key, _))| *key == JsKey::Index(i as u32 + 1));
         if !sequential {
             return Value::Object(object);
         }
@@ -504,10 +515,18 @@ impl<'a> Decoder<'a> {
         let raw = self.cursor.slice_from(start);
         Ok(match shape {
             Shape::Nil => None,
-            Shape::Scalar => Some(Value::Lazy(Lazy { raw, depth, decoded: OnceCell::new() })),
+            Shape::Scalar => Some(Value::Lazy(Lazy {
+                raw,
+                depth,
+                decoded: OnceCell::new(),
+            })),
             Shape::Table { integer_keyed } => {
                 self.last_table_integer_keyed = integer_keyed;
-                Some(Value::Lazy(Lazy { raw, depth, decoded: OnceCell::new() }))
+                Some(Value::Lazy(Lazy {
+                    raw,
+                    depth,
+                    decoded: OnceCell::new(),
+                }))
             }
         })
     }

@@ -13,7 +13,9 @@ use trace_data::{KeyRef, Session, Value};
 
 pub fn observe(session: &Session) -> Vec<Observation<Num>> {
     let mut observations = Vec::new();
-    let Some(root) = session.function("QuestLogZone").filter(|root| !root.is_array()) else { return observations };
+    let Some(root) = session.function("QuestLogZone").filter(|root| !root.is_array()) else {
+        return observations;
+    };
 
     for quest_id_key in param_keys(root) {
         let quest_id = js::number(&quest_id_key);
@@ -21,7 +23,9 @@ pub fn observe(session: &Session) -> Vec<Observation<Num>> {
             continue;
         }
         for entry in get_stream(session, "QuestLogZone", &[KeyRef::Str(&quest_id_key)]).unwrap_or(&[]) {
-            let Some(zone_or_sort) = entry_v(entry).and_then(Value::as_str).and_then(zone_or_sort_id_for_name) else { continue };
+            let Some(zone_or_sort) = entry_v(entry).and_then(Value::as_str).and_then(zone_or_sort_id_for_name) else {
+                continue;
+            };
             // The quest-log association is observed, but the id is resolved through the bundled
             // DB2 name lookup rather than returned by WoW.
             observations.push(Observation::new(quest_id as i64, Num(zone_or_sort), Confidence::Medium, entry_t(entry)));
@@ -37,7 +41,9 @@ mod tests {
     use serde_json::{json, Value as Json};
 
     fn observed(functions: Json) -> Vec<(i64, f64, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value.0, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value.0, o.confidence, o.t)).collect()
+        })
     }
 
     #[test]
@@ -54,7 +60,10 @@ mod tests {
                 "not-a-quest": stream([(4.0, json!("Westfall"))]),
             },
         });
-        assert_eq!(observed(functions), [(96659, 40.0, Confidence::Medium, 2.0), (96659, -1.0, Confidence::Medium, 7.0)]);
+        assert_eq!(
+            observed(functions),
+            [(96659, 40.0, Confidence::Medium, 2.0), (96659, -1.0, Confidence::Medium, 7.0)]
+        );
     }
 
     #[test]

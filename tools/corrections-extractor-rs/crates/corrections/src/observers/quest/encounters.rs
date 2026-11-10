@@ -18,7 +18,9 @@ pub struct QuestEncounter {
 /// Every sample in which GetQuestID() returned a nonzero number (an active quest frame). The
 /// same quest can appear many times; merging them is the field merges' job.
 pub fn quest_encounters(session: &Session) -> Vec<QuestEncounter> {
-    let Some(stream) = get_stream(session, "GetQuestID", &[]) else { return Vec::new() };
+    let Some(stream) = get_stream(session, "GetQuestID", &[]) else {
+        return Vec::new();
+    };
     stream
         .iter()
         .filter_map(|entry| {
@@ -35,7 +37,9 @@ mod tests {
     use serde_json::json;
 
     fn encounters(functions: serde_json::Value) -> Vec<(f64, f64)> {
-        with_session(&session_json(functions, vec![]), |s| quest_encounters(s).into_iter().map(|e| (e.quest_id, e.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            quest_encounters(s).into_iter().map(|e| (e.quest_id, e.t)).collect()
+        })
     }
 
     #[test]

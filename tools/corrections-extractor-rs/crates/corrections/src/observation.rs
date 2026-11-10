@@ -38,11 +38,23 @@ pub struct Observation<T> {
 
 impl<T> Observation<T> {
     pub fn new(entity_id: i64, value: T, confidence: Confidence, t: f64) -> Self {
-        Observation { entity_id, value, confidence, t, session: SessionId::UNSET }
+        Observation {
+            entity_id,
+            value,
+            confidence,
+            t,
+            session: SessionId::UNSET,
+        }
     }
 
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Observation<U> {
-        Observation { entity_id: self.entity_id, value: f(self.value), confidence: self.confidence, t: self.t, session: self.session }
+        Observation {
+            entity_id: self.entity_id,
+            value: f(self.value),
+            confidence: self.confidence,
+            t: self.t,
+            session: self.session,
+        }
     }
 }
 
@@ -66,7 +78,9 @@ struct SessionInfo {
 impl Sessions {
     /// Registers the next folded session.
     pub fn add(&mut self, contributor: Option<&str>, server_time: Option<f64>) -> SessionId {
-        let contributor = contributor.filter(|c| !c.is_empty()).map(|c| ContributorId(self.contributors.insert_full(c.to_owned()).0 as u32));
+        let contributor = contributor
+            .filter(|c| !c.is_empty())
+            .map(|c| ContributorId(self.contributors.insert_full(c.to_owned()).0 as u32));
         self.sessions.push(SessionInfo { contributor, server_time });
         SessionId(self.sessions.len() as u32 - 1)
     }

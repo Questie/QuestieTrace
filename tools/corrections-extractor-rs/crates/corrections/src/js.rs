@@ -22,7 +22,8 @@ pub fn round(x: f64) -> f64 {
 pub fn is_whitespace(c: char) -> bool {
     matches!(
         c,
-        '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+        '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
     )
 }
 
@@ -56,6 +57,21 @@ pub fn number(s: &str) -> f64 {
     s.parse().unwrap_or(f64::NAN)
 }
 
+/// JS `String(x)` for a decoded value; None is `undefined`.
+pub fn string(value: Option<&trace_data::Value>) -> String {
+    use trace_data::Value;
+    let Some(value) = value else { return "undefined".to_owned() };
+    match value.resolved() {
+        Value::Bool(b) => b.to_string(),
+        Value::Num(n) => format_number(*n),
+        Value::Str(s) => s.to_string(),
+        // Array.prototype.join: decoded arrays hold no nil, so every item is stringified.
+        Value::Array(items) => items.iter().map(|item| string(Some(item))).collect::<Vec<_>>().join(","),
+        Value::Object(_) => "[object Object]".to_owned(),
+        Value::Lazy(_) => unreachable!("resolved() never returns a lazy value"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +97,16 @@ mod tests {
     #[test]
     fn trim_removes_the_byte_order_mark_like_js() {
         assert_eq!(trim("\u{feff} Elwynn \n"), "Elwynn");
+    }
+
+    #[test]
+    fn stringifies_types_like_js_string() {
+        let types = serde_json::json!({ "t": [true, 1.5, "event", ["event"], [1, ["a", 2]], { "k": 1 }] });
+        let strings = crate::test_support::with_session(&crate::test_support::session_json(types, vec![]), |s| {
+            let items = s.function("t").and_then(trace_data::Value::as_array).expect("an array");
+            items.iter().map(|item| string(Some(item))).collect::<Vec<_>>()
+        });
+        assert_eq!(strings, ["true", "1.5", "event", "event", "1,a,2", "[object Object]"]);
+        assert_eq!(string(None), "undefined");
     }
 }

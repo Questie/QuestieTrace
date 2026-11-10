@@ -21,7 +21,7 @@ use crate::js;
 use crate::observation::{Confidence, Observation, SessionId};
 use crate::probes::{locale_at, stream_value_at, unit_name_at};
 use indexmap::{IndexMap, IndexSet};
-use trace_data::stream::{entry_t, entry_v, get_stream, param_keys, unpack, value_at, Stream};
+use trace_data::stream::{emulated_list, entry_t, entry_v, get_stream, param_keys, value_at, Stream};
 use trace_data::{KeyRef, Session, Value};
 
 const OBJECTIVES: &str = "C_QuestLog.GetQuestObjectives";
@@ -65,16 +65,6 @@ pub struct QuestObjectivesValue {
     pub creatures: Vec<f64>,
     pub objects: Vec<f64>,
     pub items: Vec<f64>,
-}
-
-/// emulator.ts `emulate` followed by `Array.isArray`: packed args `{1: a, 2: b, n: 2}` as their
-/// values 1..n (None for nil), a plain array as its items; anything else is no list.
-///
-/// Shared by the quest observers that read tuples and objective lists. It belongs next to
-/// `trace_data::stream::unpack`; it lives here because that module is shared.
-pub(super) fn emulated_list<'v, 'a>(value: Option<&'v Value<'a>>) -> Option<Vec<Option<&'v Value<'a>>>> {
-    let value = value?;
-    unpack(value).or_else(|| value.as_array().map(|items| items.iter().map(Some).collect()))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -164,7 +154,11 @@ fn strip_progress_suffix(s: &str) -> &str {
 fn strip_slain_suffix(s: &str) -> &str {
     const SLAIN: &str = "slain";
     // Non-unicode /i only folds ASCII letters into "slain".
-    let Some(before) = s.len().checked_sub(SLAIN.len()).filter(|&at| s.as_bytes()[at..].eq_ignore_ascii_case(SLAIN.as_bytes())).map(|at| &s[..at])
+    let Some(before) = s
+        .len()
+        .checked_sub(SLAIN.len())
+        .filter(|&at| s.as_bytes()[at..].eq_ignore_ascii_case(SLAIN.as_bytes()))
+        .map(|at| &s[..at])
     else {
         return s;
     };
@@ -197,7 +191,11 @@ fn strip_trailing_past_tense_word(s: &str) -> &str {
 /// monsters, so an item or object name ending in "slain" stays intact.
 fn objective_name(text: &str, kind: ObjectiveKind) -> Option<String> {
     let without_suffix = strip_progress_suffix(strip_progress_prefix(text));
-    let without_kill_suffix = if kind == ObjectiveKind::Monster { strip_slain_suffix(without_suffix) } else { without_suffix };
+    let without_kill_suffix = if kind == ObjectiveKind::Monster {
+        strip_slain_suffix(without_suffix)
+    } else {
+        without_suffix
+    };
     let trimmed = js::trim(without_kill_suffix);
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
@@ -219,11 +217,20 @@ fn quest_id_at(session: &Session, t: f64) -> Option<f64> {
 }
 
 fn item_evidence(name: &str, id: f64, preference: Preference, starts_quest_id: Option<f64>, required_for_quest_id: Option<f64>) -> Evidence {
-    Evidence { kind: EvidenceKind::Item, normalized_name: normalize_name(name), id, preference, starts_quest_id, required_for_quest_id }
+    Evidence {
+        kind: EvidenceKind::Item,
+        normalized_name: normalize_name(name),
+        id,
+        preference,
+        starts_quest_id,
+        required_for_quest_id,
+    }
 }
 
 fn collect_loot_evidence(session: &Session) -> Vec<Evidence> {
-    let Some(link_streams) = session.function("GetLootSlotLink") else { return Vec::new() };
+    let Some(link_streams) = session.function("GetLootSlotLink") else {
+        return Vec::new();
+    };
 
     // Older traces store both as one flat stream, newer ones as streams keyed by loot slot.
     // Keyed streams are paired by slot: filtering each root separately would shift info from
@@ -248,10 +255,16 @@ fn collect_loot_evidence(session: &Session) -> Vec<Evidence> {
     let mut evidence = Vec::new();
     for (links, infos) in groups {
         for link_entry in links {
-            let Some(parsed) = entry_v(link_entry).and_then(Value::as_str).and_then(|link| parse_item_link(Some(link))) else { continue };
+            let Some(parsed) = entry_v(link_entry).and_then(Value::as_str).and_then(|link| parse_item_link(Some(link))) else {
+                continue;
+            };
             // GetLootSlotInfo returns (icon, name, quantity, currencyID, quality, locked,
             // isQuestItem, questID, isActive); questID is the quest the item starts.
-            let info = if infos.is_empty() { None } else { emulated_list(value_at(infos, entry_t(link_entry))) };
+            let info = if infos.is_empty() {
+                None
+            } else {
+                emulated_list(value_at(infos, entry_t(link_entry)))
+            };
             let info_value = |index: usize| info.as_ref().and_then(|info| info.get(index).copied().flatten());
             let is_quest_item = info_value(6).and_then(Value::as_bool) == Some(true);
             let starts_quest_id = info_value(7).and_then(Value::as_num).filter(|&id| id != 0.0);
@@ -280,12 +293,16 @@ fn link_entries_by_index<'v, 'a>(session: &Session<'v, 'a>, function_name: &str,
 fn collect_link_evidence(session: &Session) -> Vec<Evidence> {
     let mut evidence = Vec::new();
     for entry in link_entries_by_index(session, "GetQuestItemLink", &["required"]) {
-        let Some(parsed) = entry_v(entry).and_then(Value::as_str).and_then(|link| parse_item_link(Some(link))) else { continue };
+        let Some(parsed) = entry_v(entry).and_then(Value::as_str).and_then(|link| parse_item_link(Some(link))) else {
+            continue;
+        };
         let required_for = quest_id_at(session, entry_t(entry));
         evidence.push(item_evidence(parsed.name, parsed.item_id, Preference::Never, None, required_for));
     }
     for entry in link_entries_by_index(session, "GetMerchantItemLink", &[]) {
-        let Some(parsed) = entry_v(entry).and_then(Value::as_str).and_then(|link| parse_item_link(Some(link))) else { continue };
+        let Some(parsed) = entry_v(entry).and_then(Value::as_str).and_then(|link| parse_item_link(Some(link))) else {
+            continue;
+        };
         evidence.push(item_evidence(parsed.name, parsed.item_id, Preference::Never, None, None));
     }
     evidence
@@ -294,7 +311,9 @@ fn collect_link_evidence(session: &Session) -> Vec<Evidence> {
 fn collect_unit_evidence(session: &Session) -> Vec<Evidence> {
     let mut evidence = Vec::new();
     for token in ["target", "npc", "questnpc"] {
-        let Some(guid_stream) = get_stream(session, "UnitGUID", &[KeyRef::Str(token)]) else { continue };
+        let Some(guid_stream) = get_stream(session, "UnitGUID", &[KeyRef::Str(token)]) else {
+            continue;
+        };
         for entry in guid_stream {
             let Some(guid) = entry_v(entry).and_then(Value::as_str) else { continue };
             let parsed = parse_guid(Some(guid));
@@ -307,7 +326,14 @@ fn collect_unit_evidence(session: &Session) -> Vec<Evidence> {
             let t = entry_t(entry);
             let Some(name) = unit_name_at(session, token, t) else { continue };
             let preference = quest_id_at(session, t).map_or(Preference::Never, Preference::ForQuest);
-            evidence.push(Evidence { kind, normalized_name: normalize_name(&name), id, preference, starts_quest_id: None, required_for_quest_id: None });
+            evidence.push(Evidence {
+                kind,
+                normalized_name: normalize_name(&name),
+                id,
+                preference,
+                starts_quest_id: None,
+                required_for_quest_id: None,
+            });
         }
     }
     evidence
@@ -347,7 +373,9 @@ fn candidate_for_objective(kind: ObjectiveKind, name: &str, evidence: &[Evidence
 
 pub fn observe(session: &Session) -> Vec<Observation<Vec<ObjectiveMatch>>> {
     let mut observations = Vec::new();
-    let Some(objectives_root) = session.function(OBJECTIVES).filter(|root| !root.is_array()) else { return observations };
+    let Some(objectives_root) = session.function(OBJECTIVES).filter(|root| !root.is_array()) else {
+        return observations;
+    };
     // TS collects the evidence before this check; it is pure, so collecting after is the same.
     let item_evidence: Vec<Evidence> = collect_loot_evidence(session).into_iter().chain(collect_link_evidence(session)).collect();
     let unit_evidence = collect_unit_evidence(session);
@@ -368,7 +396,9 @@ pub fn observe(session: &Session) -> Vec<Observation<Vec<ObjectiveMatch>>> {
             let objective_list = emulated_list(entry_v(entry)).unwrap_or_default();
             let mut matches = Vec::new();
             for (index, objective) in objective_list.into_iter().enumerate() {
-                let Some(objective) = objective.filter(|o| o.as_object().is_some()) else { continue };
+                let Some(objective) = objective.filter(|o| o.as_object().is_some()) else {
+                    continue;
+                };
                 let kind = ObjectiveKind::from_type(objective.get("type"));
                 let text = objective.get("text").and_then(Value::as_str).filter(|text| !text.is_empty());
                 let (Some(kind), Some(text)) = (kind, text) else { continue };
@@ -376,12 +406,26 @@ pub fn observe(session: &Session) -> Vec<Observation<Vec<ObjectiveMatch>>> {
 
                 let source = if kind == ObjectiveKind::Item { &item_evidence } else { &unit_evidence };
                 if let Some(id) = candidate_for_objective(kind, &name, source, quest_id) {
-                    matches.push(ObjectiveMatch { kind, name, text: text.to_owned(), id, index });
+                    matches.push(ObjectiveMatch {
+                        kind,
+                        name,
+                        text: text.to_owned(),
+                        id,
+                        index,
+                    });
                     continue;
                 }
-                let Some(short_name) = name_without_trailing_verb(&name, kind) else { continue };
+                let Some(short_name) = name_without_trailing_verb(&name, kind) else {
+                    continue;
+                };
                 if let Some(id) = candidate_for_objective(kind, &short_name, source, quest_id) {
-                    matches.push(ObjectiveMatch { kind, name: short_name, text: text.to_owned(), id, index });
+                    matches.push(ObjectiveMatch {
+                        kind,
+                        name: short_name,
+                        text: text.to_owned(),
+                        id,
+                        index,
+                    });
                 }
             }
 
@@ -411,7 +455,12 @@ pub fn merge(observations: &[Observation<Vec<ObjectiveMatch>>]) -> QuestObjectiv
                 ObjectiveKind::Object => &mut objects,
                 ObjectiveKind::Item => &mut items,
             };
-            slots.entry(objective.index).or_default().entry(Num(objective.id)).or_default().insert(observation.session);
+            slots
+                .entry(objective.index)
+                .or_default()
+                .entry(Num(objective.id))
+                .or_default()
+                .insert(observation.session);
         }
     }
 
@@ -428,7 +477,11 @@ pub fn merge(observations: &[Observation<Vec<ObjectiveMatch>>]) -> QuestObjectiv
         ids.into_iter().map(|id| id.0).collect()
     };
 
-    QuestObjectivesValue { creatures: ordered(monsters), objects: ordered(objects), items: ordered(items) }
+    QuestObjectivesValue {
+        creatures: ordered(monsters),
+        objects: ordered(objects),
+        items: ordered(items),
+    }
 }
 
 #[cfg(test)]
@@ -453,7 +506,13 @@ mod tests {
     }
 
     fn matched(kind: ObjectiveKind, name: &str, text: &str, id: f64, index: usize) -> ObjectiveMatch {
-        ObjectiveMatch { kind, name: name.to_owned(), text: text.to_owned(), id, index }
+        ObjectiveMatch {
+            kind,
+            name: name.to_owned(),
+            text: text.to_owned(),
+            id,
+            index,
+        }
     }
 
     fn objectives(list: Json) -> Json {
@@ -543,7 +602,10 @@ mod tests {
             "UnitGUID": { "target": stream([(250.0, json!("Creature-0-5208-0-7-299-000123"))]) },
             "UnitName": { "target": stream([(250.0, unit_name("Kobold Vermin"))]) },
         }));
-        assert_eq!(matches[0], matched(ObjectiveKind::Monster, "Kobold Vermin", "0/1 Kobold Vermin slain", 299.0, 0));
+        assert_eq!(
+            matches[0],
+            matched(ObjectiveKind::Monster, "Kobold Vermin", "0/1 Kobold Vermin slain", 299.0, 0)
+        );
     }
 
     #[test]
@@ -555,7 +617,10 @@ mod tests {
             "UnitGUID": { "target": stream([(3.0, json!("Creature-0-5208-0-7-299-000123"))]) },
             "UnitName": { "target": stream([(3.0, unit_name("Kobold Vermin"))]) },
         }));
-        assert_eq!(matches[0], matched(ObjectiveKind::Monster, "Kobold Vermin", "0/1 Kobold Vermin slain", 299.0, 0));
+        assert_eq!(
+            matches[0],
+            matched(ObjectiveKind::Monster, "Kobold Vermin", "0/1 Kobold Vermin slain", 299.0, 0)
+        );
     }
 
     #[test]
@@ -675,7 +740,10 @@ mod tests {
             "UnitGUID": { "target": stream([(3.0, json!("Creature-0-5208-0-7-251143-000123"))]) },
             "UnitName": { "target": stream([(3.0, unit_name("Roiling Winds"))]) },
         }));
-        assert_eq!(matches, [matched(ObjectiveKind::Monster, "Roiling Winds", "0/6 Roiling Winds destroyed", 251143.0, 0)]);
+        assert_eq!(
+            matches,
+            [matched(ObjectiveKind::Monster, "Roiling Winds", "0/6 Roiling Winds destroyed", 251143.0, 0)]
+        );
     }
 
     #[test]
@@ -701,7 +769,10 @@ mod tests {
             "UnitGUID": { "target": stream([(3.0, json!("GameObject-0-5208-0-7-2843-0000399"))]) },
             "UnitName": { "target": stream([(3.0, unit_name("Bones of the Slain"))]) },
         }));
-        assert_eq!(matches[0], matched(ObjectiveKind::Object, "Bones of the Slain", "0/1 Bones of the Slain", 2843.0, 0));
+        assert_eq!(
+            matches[0],
+            matched(ObjectiveKind::Object, "Bones of the Slain", "0/1 Bones of the Slain", 2843.0, 0)
+        );
     }
 
     #[test]
@@ -720,9 +791,7 @@ mod tests {
     /// session. Quest 92461 "Slay 8 Vuldren Juveniles in Thendal Grove.": the player targets a
     /// "Juvenile Vuldren" (creature 250873) well after the objective was first sampled at 0/8.
     fn objectives_real_trace_fixture() -> Json {
-        let objective = |text: &str, fulfilled: u32| {
-            json!([{ "type": "monster", "numRequired": 8, "finished": false, "text": text, "objectiveType": 0, "numFulfilled": fulfilled }])
-        };
+        let objective = |text: &str, fulfilled: u32| json!([{ "type": "monster", "numRequired": 8, "finished": false, "text": text, "objectiveType": 0, "numFulfilled": fulfilled }]);
         json!({
             "startedAt": 0,
             "startedAtPrecise": 0,
@@ -764,29 +833,52 @@ mod tests {
         assert_eq!(observations.len(), 2);
         for observation in observations {
             assert_eq!(observation.entity_id, SLAY_VULDREN_QUEST_ID);
-            let [only] = observation.value.as_slice() else { panic!("one match, got {:?}", observation.value) };
-            assert_eq!((only.kind, only.name.as_str(), only.id, only.index), (ObjectiveKind::Monster, "Juvenile Vuldren", JUVENILE_VULDREN_CREATURE_ID, 0));
+            let [only] = observation.value.as_slice() else {
+                panic!("one match, got {:?}", observation.value)
+            };
+            assert_eq!(
+                (only.kind, only.name.as_str(), only.id, only.index),
+                (ObjectiveKind::Monster, "Juvenile Vuldren", JUVENILE_VULDREN_CREATURE_ID, 0)
+            );
             assert!(only.text.contains("Juvenile Vuldren slain"), "text {:?}", only.text);
         }
     }
 
     #[test]
     fn objective_names_strip_progress_and_kill_suffixes_like_the_ts_regexes() {
-        assert_eq!(objective_name(" 3 / 8  Juvenile Vuldren   SLAIN", ObjectiveKind::Monster).as_deref(), Some("Juvenile Vuldren"));
-        assert_eq!(objective_name("Anaya's Pendant : 0 / 1 ", ObjectiveKind::Item).as_deref(), Some("Anaya's Pendant"));
+        assert_eq!(
+            objective_name(" 3 / 8  Juvenile Vuldren   SLAIN", ObjectiveKind::Monster).as_deref(),
+            Some("Juvenile Vuldren")
+        );
+        assert_eq!(
+            objective_name("Anaya's Pendant : 0 / 1 ", ObjectiveKind::Item).as_deref(),
+            Some("Anaya's Pendant")
+        );
         // Only a trailing counter after the last colon is progress.
-        assert_eq!(objective_name("Note: 0/1 left over", ObjectiveKind::Item).as_deref(), Some("Note: 0/1 left over"));
+        assert_eq!(
+            objective_name("Note: 0/1 left over", ObjectiveKind::Item).as_deref(),
+            Some("Note: 0/1 left over")
+        );
         // \s+ is required before "slain".
         assert_eq!(objective_name("0/1 Unslain", ObjectiveKind::Monster).as_deref(), Some("Unslain"));
         assert_eq!(objective_name("0/1 ", ObjectiveKind::Object), None);
-        assert_eq!(name_without_trailing_verb("Sickly Gazelle CURED", ObjectiveKind::Monster).as_deref(), Some("Sickly Gazelle"));
+        assert_eq!(
+            name_without_trailing_verb("Sickly Gazelle CURED", ObjectiveKind::Monster).as_deref(),
+            Some("Sickly Gazelle")
+        );
         // \S+ needs a character before "ed", and an item keeps its name.
         assert_eq!(name_without_trailing_verb("Roiling ed", ObjectiveKind::Monster), None);
         assert_eq!(name_without_trailing_verb("Cured Ham", ObjectiveKind::Item), None);
     }
 
     fn obs(value: Vec<ObjectiveMatch>, t: f64, session: u32) -> Observation<Vec<ObjectiveMatch>> {
-        Observation { entity_id: 33, value, confidence: Confidence::Low, t, session: SessionId(session) }
+        Observation {
+            entity_id: 33,
+            value,
+            confidence: Confidence::Low,
+            t,
+            session: SessionId(session),
+        }
     }
 
     fn item(id: f64, index: usize) -> ObjectiveMatch {
@@ -794,7 +886,11 @@ mod tests {
     }
 
     fn value(creatures: &[f64], objects: &[f64], items: &[f64]) -> QuestObjectivesValue {
-        QuestObjectivesValue { creatures: creatures.to_vec(), objects: objects.to_vec(), items: items.to_vec() }
+        QuestObjectivesValue {
+            creatures: creatures.to_vec(),
+            objects: objects.to_vec(),
+            items: items.to_vec(),
+        }
     }
 
     #[test]

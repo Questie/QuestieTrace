@@ -105,7 +105,8 @@ pub fn find_exports(export_string: &str) -> Result<Vec<Export<'_>>, String> {
 pub(crate) fn is_js_whitespace(c: char) -> bool {
     matches!(
         c,
-        '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+        '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
     )
 }
 
@@ -150,7 +151,9 @@ pub fn inflate(decompressor: &mut Decompressor, compressed: &[u8]) -> Result<Vec
                 out.resize(grown, 0);
             }
             Err(DecompressionError::InsufficientSpace) => {
-                return Err(format!("payload could not be decompressed: Cannot create a Buffer larger than {MAX_CBOR_BYTES} bytes"));
+                return Err(format!(
+                    "payload could not be decompressed: Cannot create a Buffer larger than {MAX_CBOR_BYTES} bytes"
+                ));
             }
             Err(DecompressionError::BadData) => return Err("payload could not be decompressed: invalid deflate data".into()),
         }
@@ -183,7 +186,10 @@ mod tests {
     #[test]
     fn print_decoding_rejects_a_single_character_and_foreign_characters() {
         assert_eq!(decode_for_print(" a ").unwrap_err(), "payload is not valid print-encoded data");
-        assert_eq!(decode_for_print("ab*c").unwrap_err(), "payload is not valid print-encoded data (character \"*\")");
+        assert_eq!(
+            decode_for_print("ab*c").unwrap_err(),
+            "payload is not valid print-encoded data (character \"*\")"
+        );
     }
 
     #[test]

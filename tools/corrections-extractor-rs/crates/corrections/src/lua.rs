@@ -97,7 +97,11 @@ fn positional_arrays(entries: &[(String, Js)]) -> Option<Vec<Vec<Js>>> {
         }
     };
     let has_items = entries.iter().any(|(k, _)| k == "items");
-    Some(if has_items { vec![array("creatures"), array("objects"), array("items")] } else { vec![array("creatures"), array("objects")] })
+    Some(if has_items {
+        vec![array("creatures"), array("objects"), array("items")]
+    } else {
+        vec![array("creatures"), array("objects")]
+    })
 }
 
 /// corrections-writer.ts `luaValue`.
@@ -300,7 +304,11 @@ pub fn write_lookup(table: LookupTable, locale: &str, entries: &[(i64, Js)]) -> 
 
 /// quest-xp-writer.ts `writeQuestXpLua`: `QuestXP.db[id] = {level, xp}` rows, sorted by id.
 pub fn write_quest_xp(rows: &[(i64, f64, f64)], header: &Header) -> String {
-    let mut lines: Vec<String> = vec!["---@type QuestXP".into(), "local QuestXP = QuestieLoader:ImportModule(\"QuestXP\")".into(), String::new()];
+    let mut lines: Vec<String> = vec![
+        "---@type QuestXP".into(),
+        "local QuestXP = QuestieLoader:ImportModule(\"QuestXP\")".into(),
+        String::new(),
+    ];
     lines.extend(header.lines());
     let mut sorted: Vec<&(i64, f64, f64)> = rows.iter().collect();
     sorted.sort_by_key(|(id, _, _)| *id);
@@ -337,7 +345,11 @@ pub fn iso_timestamp(unix_millis: i64) -> String {
 mod tests {
     use super::*;
 
-    const HEADER: Header = Header { source_file_count: 1, session_count: 1, generated_at: "2020-01-01T00:00:00.000Z" };
+    const HEADER: Header = Header {
+        source_file_count: 1,
+        session_count: 1,
+        generated_at: "2020-01-01T00:00:00.000Z",
+    };
 
     fn record(fields: Vec<(&str, Js)>) -> Record {
         fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()
@@ -389,7 +401,11 @@ mod tests {
 
     #[test]
     fn includes_the_header_with_file_and_session_counts_and_timestamp() {
-        let header = Header { source_file_count: 2, session_count: 5, generated_at: "2020-01-01T00:00:00.000Z" };
+        let header = Header {
+            source_file_count: 2,
+            session_count: 5,
+            generated_at: "2020-01-01T00:00:00.000Z",
+        };
         let lua = write_corrections("ForeverNpcTraces", "npcKeys", &[], &header);
         assert!(lua.contains("-- Source trace files: 2"));
         assert!(lua.contains("-- Sessions aggregated: 5"));
@@ -398,7 +414,15 @@ mod tests {
 
     #[test]
     fn escapes_strings_and_formats_nil_number_and_boolean_values() {
-        let lua = npc_lua(&[(1, record(vec![("name", Js::str("Say \"Hi\"")), ("minLevel", Js::Num(12.0)), ("flag", Js::Bool(true)), ("missing", Js::Null)]))]);
+        let lua = npc_lua(&[(
+            1,
+            record(vec![
+                ("name", Js::str("Say \"Hi\"")),
+                ("minLevel", Js::Num(12.0)),
+                ("flag", Js::Bool(true)),
+                ("missing", Js::Null),
+            ]),
+        )]);
         assert!(lua.contains("[npcKeys.name] = \"Say \\\"Hi\\\"\","));
         assert!(lua.contains("[npcKeys.minLevel] = 12,"));
         assert!(lua.contains("[npcKeys.flag] = true,"));
@@ -419,9 +443,15 @@ mod tests {
             1,
             record(vec![
                 ("breadcrumbs", ids(&[33.0, 45.0])),
-                ("startedBy", relation(vec![("creatures", ids(&[33.0])), ("objects", ids(&[])), ("items", ids(&[45.0]))])),
+                (
+                    "startedBy",
+                    relation(vec![("creatures", ids(&[33.0])), ("objects", ids(&[])), ("items", ids(&[45.0]))]),
+                ),
                 ("finishedBy", relation(vec![("creatures", ids(&[40.0])), ("objects", ids(&[12.0]))])),
-                ("startedByEmpty", relation(vec![("creatures", ids(&[])), ("objects", ids(&[])), ("items", ids(&[]))])),
+                (
+                    "startedByEmpty",
+                    relation(vec![("creatures", ids(&[])), ("objects", ids(&[])), ("items", ids(&[]))]),
+                ),
             ]),
         )]);
         assert!(lua.contains("[questKeys.breadcrumbs] = {33,45},"));
@@ -433,12 +463,24 @@ mod tests {
     #[test]
     fn renders_two_position_finisher_and_quest_end_tables() {
         let lua = quest_lua(&[
-            (1, record(vec![("finishedBy", relation(vec![("creatures", ids(&[10.0, 20.0])), ("objects", ids(&[30.0]))]))])),
-            (2, record(vec![("questEnds", relation(vec![("creatures", ids(&[40.0])), ("objects", ids(&[]))]))])),
+            (
+                1,
+                record(vec![(
+                    "finishedBy",
+                    relation(vec![("creatures", ids(&[10.0, 20.0])), ("objects", ids(&[30.0]))]),
+                )]),
+            ),
+            (
+                2,
+                record(vec![("questEnds", relation(vec![("creatures", ids(&[40.0])), ("objects", ids(&[]))]))]),
+            ),
         ]);
         assert!(lua.contains("[questKeys.finishedBy_add] = {{10,20},{30}},"));
         assert!(lua.contains("[questKeys.questEnds_add] = {{40}},"));
-        let npc = npc_lua(&[(2, record(vec![("questEnds", relation(vec![("creatures", ids(&[])), ("objects", ids(&[50.0]))]))]))]);
+        let npc = npc_lua(&[(
+            2,
+            record(vec![("questEnds", relation(vec![("creatures", ids(&[])), ("objects", ids(&[50.0]))]))]),
+        )]);
         assert!(npc.contains("[npcKeys.questEnds_add] = {nil,{50}},"));
     }
 
@@ -458,14 +500,26 @@ mod tests {
 
     #[test]
     fn renders_item_drops_with_the_add_suffix() {
-        let lua = write_corrections("ForeverItemTraces", "itemKeys", &[(123, record(vec![("npcDrops", ids(&[1001.0, 1002.0])), ("objectDrops", ids(&[2001.0]))]))], &HEADER);
+        let lua = write_corrections(
+            "ForeverItemTraces",
+            "itemKeys",
+            &[(123, record(vec![("npcDrops", ids(&[1001.0, 1002.0])), ("objectDrops", ids(&[2001.0]))]))],
+            &HEADER,
+        );
         assert!(lua.contains("[itemKeys.npcDrops_add] = {1001,1002},"));
         assert!(lua.contains("[itemKeys.objectDrops_add] = {2001},"));
     }
 
     #[test]
     fn holds_back_excluded_fields() {
-        let lua = quest_lua(&[(1, record(vec![("requiredLevel", Js::Num(5.0)), ("zoneOrSort", Js::Num(12.0)), ("questLevel", Js::Num(6.0))]))]);
+        let lua = quest_lua(&[(
+            1,
+            record(vec![
+                ("requiredLevel", Js::Num(5.0)),
+                ("zoneOrSort", Js::Num(12.0)),
+                ("questLevel", Js::Num(6.0)),
+            ]),
+        )]);
         assert!(!lua.contains("requiredLevel") && !lua.contains("zoneOrSort"));
         assert!(lua.contains("[questKeys.questLevel] = 6,"));
     }
@@ -482,7 +536,11 @@ mod tests {
 
     #[test]
     fn quest_xp_rows_are_sorted_by_id() {
-        let header = Header { source_file_count: 1, session_count: 3, generated_at: "2026-01-01T00:00:00.000Z" };
+        let header = Header {
+            source_file_count: 1,
+            session_count: 3,
+            generated_at: "2026-01-01T00:00:00.000Z",
+        };
         let lua = write_quest_xp(&[(312, 10.0, 900.0), (99, 5.0, 110.0)], &header);
         assert!(lua.contains("local QuestXP = QuestieLoader:ImportModule(\"QuestXP\")"));
         assert!(lua.contains("-- Sessions aggregated: 3"));
@@ -491,7 +549,14 @@ mod tests {
 
     #[test]
     fn quest_lookups_put_a_space_after_the_tuple_comma_only() {
-        let lua = write_lookup(LookupTable::Quest, "deDE", &[(9, Js::Array(vec![Js::str("Titel"), Js::Array(vec![Js::str("Ziel")])])), (2, Js::Array(vec![Js::str("Zwei"), Js::Null]))]);
+        let lua = write_lookup(
+            LookupTable::Quest,
+            "deDE",
+            &[
+                (9, Js::Array(vec![Js::str("Titel"), Js::Array(vec![Js::str("Ziel")])])),
+                (2, Js::Array(vec![Js::str("Zwei"), Js::Null])),
+            ],
+        );
         assert!(lua.starts_with("if GetLocale() ~= \"deDE\" then\n    return\nend\n"));
         assert!(lua.contains("l10n.questLookup[\"deDE\"] = loadstring([[return {\n[2] = {\"Zwei\", nil},\n[9] = {\"Titel\", {\"Ziel\"}},\n}]])\n"));
     }

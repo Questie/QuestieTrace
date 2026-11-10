@@ -52,12 +52,23 @@ pub fn observe(session: &Session) -> Vec<Observation<QuestXpValue>> {
 
     let mut observations = Vec::new();
     for entry in get_stream(session, "GetRewardXP", &[]).unwrap_or(&[]) {
-        let Some(xp) = entry_v(entry).and_then(Value::as_num).filter(|&xp| xp > 0.0) else { continue };
+        let Some(xp) = entry_v(entry).and_then(Value::as_num).filter(|&xp| xp > 0.0) else {
+            continue;
+        };
         let tp = entry_tp(entry);
         // TS skips `questId <= 0`, which lets NaN through.
-        let Some(quest_id) = value_at_tp(quest_ids, tp).and_then(Value::as_num).filter(|&id| id > 0.0 || id.is_nan()) else { continue };
-        let Some(player_level) = value_at_tp(levels, tp).and_then(Value::as_num) else { continue };
-        observations.push(Observation::new(quest_id as i64, QuestXpValue { xp, player_level }, Confidence::High, entry_t(entry)));
+        let Some(quest_id) = value_at_tp(quest_ids, tp).and_then(Value::as_num).filter(|&id| id > 0.0 || id.is_nan()) else {
+            continue;
+        };
+        let Some(player_level) = value_at_tp(levels, tp).and_then(Value::as_num) else {
+            continue;
+        };
+        observations.push(Observation::new(
+            quest_id as i64,
+            QuestXpValue { xp, player_level },
+            Confidence::High,
+            entry_t(entry),
+        ));
     }
     observations
 }
@@ -162,7 +173,10 @@ mod tests {
 
     #[test]
     fn merge_returns_the_difficulty_most_samples_agree_on() {
-        assert_eq!(merge(&[observation(900.0, 12.0), observation(230.0, 12.0), observation(900.0, 12.0)], Some(12.0)), Some(910.0));
+        assert_eq!(
+            merge(&[observation(900.0, 12.0), observation(230.0, 12.0), observation(900.0, 12.0)], Some(12.0)),
+            Some(910.0)
+        );
     }
 
     #[test]

@@ -38,18 +38,27 @@ pub(crate) struct LootSource {
 /// object_drops.rs, whose TS twin differs from npcDrops.ts only in the GUID kind.
 pub(crate) fn loot_sources(session: &Session, kind: GuidKind) -> Vec<LootSource> {
     let mut sources = Vec::new();
-    let (Some(link_stream), Some(_)) = (session.function("GetLootSlotLink"), session.function("GetLootSourceInfo")) else { return sources };
+    let (Some(link_stream), Some(_)) = (session.function("GetLootSlotLink"), session.function("GetLootSourceInfo")) else {
+        return sources;
+    };
     for slot in param_keys(link_stream) {
         let slot = [KeyRef::Str(&slot)];
-        let (Some(link_entries), Some(source_entries)) = (get_stream(session, "GetLootSlotLink", &slot), get_stream(session, "GetLootSourceInfo", &slot)) else {
+        let (Some(link_entries), Some(source_entries)) = (get_stream(session, "GetLootSlotLink", &slot), get_stream(session, "GetLootSourceInfo", &slot))
+        else {
             continue;
         };
         for link_entry in link_entries {
-            let Some(link) = parse_item_link(entry_v(link_entry).and_then(Value::as_str)) else { continue };
+            let Some(link) = parse_item_link(entry_v(link_entry).and_then(Value::as_str)) else {
+                continue;
+            };
             // `e.t === t`: an entry without `t` matches another without one, NaN matches nothing.
             let t = link_entry.get("t").and_then(Value::as_num);
-            let Some(source_at) = source_entries.iter().find(|entry| entry.get("t").and_then(Value::as_num) == t) else { continue };
-            let Some(source) = entry_v(source_at).filter(|v| v.is_table()) else { continue };
+            let Some(source_at) = source_entries.iter().find(|entry| entry.get("t").and_then(Value::as_num) == t) else {
+                continue;
+            };
+            let Some(source) = entry_v(source_at).filter(|v| v.is_table()) else {
+                continue;
+            };
             // Packed (guid1, quantity1, guid2, quantity2, ...).
             let count = source.get("n").and_then(Value::as_num).unwrap_or(0.0);
             let mut i = 1.0;
@@ -57,7 +66,11 @@ pub(crate) fn loot_sources(session: &Session, kind: GuidKind) -> Vec<LootSource>
                 if let Some(guid) = source.get(i).and_then(Value::as_str) {
                     let parsed = parse_guid(Some(guid));
                     if let (true, Some(id)) = (parsed.kind == kind, parsed.id) {
-                        sources.push(LootSource { item_id: link.item_id as i64, source_id: id as i64, t: entry_t(link_entry) });
+                        sources.push(LootSource {
+                            item_id: link.item_id as i64,
+                            source_id: id as i64,
+                            t: entry_t(link_entry),
+                        });
                     }
                 }
                 i += 2.0;
@@ -74,7 +87,9 @@ mod tests {
     use serde_json::json;
 
     fn observed(functions: serde_json::Value) -> Vec<(i64, i64, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value.npc_id, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value.npc_id, o.confidence, o.t)).collect()
+        })
     }
 
     #[test]
@@ -130,7 +145,14 @@ mod tests {
                 "2": [{ "t": 5, "tp": 5, "v": { "1": "Creature-0-5208-0-7-825-000033", "2": 1, "n": 2 } }],
             },
         });
-        assert_eq!(observed(functions), [(111, 823, Confidence::High, 5.0), (222, 824, Confidence::High, 10.0), (333, 825, Confidence::High, 5.0)]);
+        assert_eq!(
+            observed(functions),
+            [
+                (111, 823, Confidence::High, 5.0),
+                (222, 824, Confidence::High, 10.0),
+                (333, 825, Confidence::High, 5.0)
+            ]
+        );
     }
 
     #[test]

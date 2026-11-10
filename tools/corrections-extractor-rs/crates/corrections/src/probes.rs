@@ -15,7 +15,10 @@ pub struct MapPosition {
 
 /// C_Map's normalized 0-1 coordinates as Questie's 0-100 percentages, two decimals.
 pub fn to_questie_map_position(position: MapPosition) -> MapPosition {
-    MapPosition { x: js::round(position.x * 10_000.0) / 100.0, y: js::round(position.y * 10_000.0) / 100.0 }
+    MapPosition {
+        x: js::round(position.x * 10_000.0) / 100.0,
+        y: js::round(position.y * 10_000.0) / 100.0,
+    }
 }
 
 /// The value at or before `t` of `name` with `params`, as valueAt(getStream(...) ?? [], t).
@@ -29,7 +32,10 @@ fn as_non_empty_str<'v>(value: Option<&'v Value>) -> Option<&'v str> {
 
 fn as_map_position(value: Option<&Value>) -> Option<MapPosition> {
     let value = value.filter(|v| v.is_table())?;
-    Some(MapPosition { x: value.get("x")?.as_num()?, y: value.get("y")?.as_num()? })
+    Some(MapPosition {
+        x: value.get("x")?.as_num()?,
+        y: value.get("y")?.as_num()?,
+    })
 }
 
 const PLAYER: [KeyRef<'static>; 1] = [KeyRef::Str("player")];

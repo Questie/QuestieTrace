@@ -49,9 +49,13 @@ pub fn observe(session: &Session) -> Vec<Observation<f64>> {
         if !event.is("QUEST_ACCEPTED") {
             continue;
         }
-        let Some(quest_id) = unpack_quest_id(event.args()).filter(|&id| id > 0.0) else { continue };
+        let Some(quest_id) = unpack_quest_id(event.args()).filter(|&id| id > 0.0) else {
+            continue;
+        };
         let known_levels = [player_level_at(session, event.t()), level_up_level];
-        let Some(level) = known_levels.into_iter().flatten().reduce(f64::max) else { continue };
+        let Some(level) = known_levels.into_iter().flatten().reduce(f64::max) else {
+            continue;
+        };
         let entry = accepted.entry(quest_id as i64).or_insert((level, event.t()));
         if level < entry.0 {
             *entry = (level, event.t());
@@ -89,13 +93,19 @@ mod tests {
 
     #[test]
     fn takes_the_lowest_player_level_at_quest_accepted_for_each_quest() {
-        let session = session_json(levels(&[(0.0, 10.0), (5.0, 15.0), (10.0, 20.0)]), vec![accepted(3.0, 96659.0), accepted(7.0, 96659.0), accepted(12.0, 12345.0)]);
+        let session = session_json(
+            levels(&[(0.0, 10.0), (5.0, 15.0), (10.0, 20.0)]),
+            vec![accepted(3.0, 96659.0), accepted(7.0, 96659.0), accepted(12.0, 12345.0)],
+        );
         assert_eq!(observed(&session), [(96659, 10.0, 3.0), (12345, 20.0, 12.0)]);
     }
 
     #[test]
     fn reads_the_quest_id_not_the_quest_log_index_from_an_era_quest_accepted() {
-        let session = session_json(levels(&[(0.0, 12.0)]), vec![event(3.0, "QUEST_ACCEPTED", packed(&[3.0.into(), 96659.0.into()]))]);
+        let session = session_json(
+            levels(&[(0.0, 12.0)]),
+            vec![event(3.0, "QUEST_ACCEPTED", packed(&[3.0.into(), 96659.0.into()]))],
+        );
         assert_eq!(observed(&session), [(96659, 12.0, 3.0)]);
     }
 
@@ -111,7 +121,10 @@ mod tests {
     #[test]
     fn uses_the_player_level_up_level_while_the_unit_level_stream_lags() {
         // Turning in a quest dings level 10; the follow-up is accepted before the stream catches up.
-        let session = session_json(levels(&[(0.0, 9.0), (51.0, 10.0)]), vec![event(50.0, "PLAYER_LEVEL_UP", packed(&[10.0.into()])), accepted(50.2, 5001.0)]);
+        let session = session_json(
+            levels(&[(0.0, 9.0), (51.0, 10.0)]),
+            vec![event(50.0, "PLAYER_LEVEL_UP", packed(&[10.0.into()])), accepted(50.2, 5001.0)],
+        );
         assert_eq!(observed(&session), [(5001, 10.0, 50.2)]);
     }
 

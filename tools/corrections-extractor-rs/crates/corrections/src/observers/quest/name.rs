@@ -3,36 +3,28 @@
 //! [`observe`] keeps enUS names only; [`observe_localized`] keeps every locale (for the lookup
 //! export).
 
+use super::encounters::{quest_encounters, QuestEncounter};
 use crate::aggregate::Num;
 use crate::js;
 use crate::observation::{Confidence, Localized, Observation};
 use crate::probes::{locale_at, quest_info_title_at, quest_title_at};
 use std::collections::HashSet;
-use trace_data::stream::{entry_t, entry_v, get_stream, param_keys};
+use trace_data::stream::{entry_t, get_stream, param_keys};
 use trace_data::{KeyRef, Session};
 
 const QUEST_INFO: &str = "C_QuestLog.GetInfo";
 
-/// _encounters.ts `questEncounters`: (questID, t) of every nonzero `GetQuestID()` sample.
-///
-/// A private copy: `observers/quest/encounters.rs` (group A) ports the same helper.
-fn quest_encounters(session: &Session) -> Vec<(f64, f64)> {
-    let Some(stream) = get_stream(session, "GetQuestID", &[]) else { return Vec::new() };
-    stream
-        .iter()
-        // `typeof v === "number" && v !== 0`: NaN passes.
-        .filter_map(|entry| entry_v(entry)?.as_num().filter(|&id| id != 0.0).map(|id| (id, entry_t(entry))))
-        .collect()
-}
-
 pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>>> {
     let mut observations = Vec::new();
     let mut quest_ids_with_dialog_title: HashSet<Num> = HashSet::new();
-    let localized = |locale: &str, title: &str| Localized { locale: locale.to_owned(), value: title.to_owned() };
+    let localized = |locale: &str, title: &str| Localized {
+        locale: locale.to_owned(),
+        value: title.to_owned(),
+    };
 
     // Quest-dialog titles are the most direct source and keep precedence over the quest-log
     // API when both are available for the same quest.
-    for (quest_id, t) in quest_encounters(session) {
+    for QuestEncounter { quest_id, t } in quest_encounters(session) {
         let Some(locale) = locale_at(session, t) else { continue };
         if let Some(title) = quest_title_at(session, t) {
             quest_ids_with_dialog_title.insert(Num(quest_id));
@@ -42,7 +34,9 @@ pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>
 
     // C_QuestLog.GetInfo is keyed by questID and also recorded for quests in the log that never
     // open a quest dialog, so it is a source in its own right, not only a fallback.
-    let Some(info_root) = session.function(QUEST_INFO).filter(|root| !root.is_array()) else { return observations };
+    let Some(info_root) = session.function(QUEST_INFO).filter(|root| !root.is_array()) else {
+        return observations;
+    };
     for quest_id_key in param_keys(info_root) {
         let quest_id = js::number(&quest_id_key);
         if !quest_id.is_finite() || quest_ids_with_dialog_title.contains(&Num(quest_id)) {
@@ -61,7 +55,11 @@ pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>
 }
 
 pub fn observe(session: &Session) -> Vec<Observation<String>> {
-    observe_localized(session).into_iter().filter(|obs| obs.value.locale == "enUS").map(|obs| obs.map(|v| v.value)).collect()
+    observe_localized(session)
+        .into_iter()
+        .filter(|obs| obs.value.locale == "enUS")
+        .map(|obs| obs.map(|v| v.value))
+        .collect()
 }
 
 #[cfg(test)]
@@ -71,7 +69,9 @@ mod tests {
     use serde_json::json;
 
     fn observed(functions: serde_json::Value) -> Vec<(i64, String, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     fn high(quest_id: i64, title: &str, t: f64) -> (i64, String, Confidence, f64) {

@@ -8,7 +8,11 @@ use std::sync::LazyLock;
 
 macro_rules! resource {
     ($file:literal) => {
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../corrections-extractor/src/extract/resources/", $file))
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../corrections-extractor/src/extract/resources/",
+            $file
+        ))
     };
 }
 
@@ -76,7 +80,9 @@ fn ids_by_name(csv: &str, columns: &[&str], keep_lowest: bool) -> HashMap<String
             continue;
         }
         for &index in &name_indexes {
-            let Some(name) = row.get(index).filter(|name| !name.is_empty()) else { continue };
+            let Some(name) = row.get(index).filter(|name| !name.is_empty()) else {
+                continue;
+            };
             let entry = by_name.entry(normalize_name(name));
             match entry {
                 std::collections::hash_map::Entry::Vacant(slot) => {
@@ -115,7 +121,10 @@ pub fn area_id_for_ui_map_id(ui_map_id: Option<f64>) -> Option<f64> {
 static ZONE_OR_SORT_BY_NAME: LazyLock<HashMap<String, f64>> = LazyLock::new(|| {
     let mut lookup = HashMap::new();
     // Row by row, both name columns of a row before the next row, as addNames does.
-    for (csv, columns, sign) in [(AREA_TABLE, &["AreaName_lang", "ZoneName"][..], 1.0), (QUEST_SORT, &["SortName_lang"][..], -1.0)] {
+    for (csv, columns, sign) in [
+        (AREA_TABLE, &["AreaName_lang", "ZoneName"][..], 1.0),
+        (QUEST_SORT, &["SortName_lang"][..], -1.0),
+    ] {
         let rows = parse_csv(csv);
         let Some(header) = rows.first() else { continue };
         let Some(id_index) = column(header, "ID") else { continue };
@@ -126,7 +135,9 @@ static ZONE_OR_SORT_BY_NAME: LazyLock<HashMap<String, f64>> = LazyLock::new(|| {
                 continue;
             }
             for &index in &name_indexes {
-                let Some(name) = row.get(index).filter(|name| !name.is_empty()) else { continue };
+                let Some(name) = row.get(index).filter(|name| !name.is_empty()) else {
+                    continue;
+                };
                 lookup.entry(normalize_name(name)).or_insert(sign * id);
             }
         }

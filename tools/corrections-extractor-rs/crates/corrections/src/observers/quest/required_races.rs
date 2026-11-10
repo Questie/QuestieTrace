@@ -65,7 +65,11 @@ impl ReactionSummary {
 /// sends (questID) alone.
 fn accepted_quest_id(args: Option<&Value>) -> Option<f64> {
     let args = args.filter(|args| args.is_table())?;
-    let value = if args.get("n").and_then(Value::as_num) == Some(1.0) { args.get(1) } else { args.get(2) };
+    let value = if args.get("n").and_then(Value::as_num) == Some(1.0) {
+        args.get(1)
+    } else {
+        args.get(2)
+    };
     value?.as_num().filter(|&id| id > 0.0)
 }
 
@@ -83,7 +87,9 @@ pub fn observe_quest_factions(session: &Session) -> Vec<Observation<Faction>> {
         }
     }
     for entry in get_stream(session, "QuestLog", &[]).unwrap_or(&[]) {
-        let Some(quest_ids) = entry_v(entry).and_then(Value::as_array) else { continue };
+        let Some(quest_ids) = entry_v(entry).and_then(Value::as_array) else {
+            continue;
+        };
         for quest_id in quest_ids.iter().filter_map(Value::as_num).filter(|&id| id > 0.0) {
             sightings.push((quest_id, entry_t(entry)));
         }
@@ -99,13 +105,17 @@ pub fn observe_quest_factions(session: &Session) -> Vec<Observation<Faction>> {
 
     // A sighting before the first faction sample still belongs to the character's faction.
     // Counting it can only cancel a restriction, never cause one.
-    let first_faction =
-        get_stream(session, "UnitFactionGroup", &[KeyRef::Str("player")]).unwrap_or(&[]).iter().find_map(|entry| player_faction_at(session, entry_t(entry)));
+    let first_faction = get_stream(session, "UnitFactionGroup", &[KeyRef::Str("player")])
+        .unwrap_or(&[])
+        .iter()
+        .find_map(|entry| player_faction_at(session, entry_t(entry)));
     let mut observations = Vec::new();
     // `${questID}:${faction}`
     let mut seen: HashSet<(Num, Faction)> = HashSet::new();
     for (quest_id, t) in sightings {
-        let Some(faction) = player_faction_at(session, t).or(first_faction) else { continue };
+        let Some(faction) = player_faction_at(session, t).or(first_faction) else {
+            continue;
+        };
         if !seen.insert((Num(quest_id), faction)) {
             continue;
         }
@@ -127,8 +137,14 @@ pub fn summarize_reactions(observations: &[Observation<FactionReactionValue>]) -
         sessions.insert((obs.value.faction, obs.value.friendly, obs.session));
     }
     let count = |faction: Faction, friendly: bool| sessions.iter().filter(|&&(f, fr, _)| f == faction && fr == friendly).count();
-    let counts = |faction| FactionReactionCounts { hostile_sessions: count(faction, false), friendly_sessions: count(faction, true) };
-    ReactionSummary { alliance: counts(Faction::Alliance), horde: counts(Faction::Horde) }
+    let counts = |faction| FactionReactionCounts {
+        hostile_sessions: count(faction, false),
+        friendly_sessions: count(faction, true),
+    };
+    ReactionSummary {
+        alliance: counts(Faction::Alliance),
+        horde: counts(Faction::Horde),
+    }
 }
 
 fn excluded(faction: Faction, allowed: Faction, seen_factions: &IndexSet<Faction>, starters: &[ReactionSummary], sibling_factions: &IndexSet<Faction>) -> bool {
@@ -186,7 +202,11 @@ mod tests {
         (0..sessions)
             .map(|index| Observation {
                 entity_id: 500,
-                value: FactionReactionValue { faction, friendly, session_time: None },
+                value: FactionReactionValue {
+                    faction,
+                    friendly,
+                    session_time: None,
+                },
                 confidence: Confidence::High,
                 t: 0.0,
                 session: SessionId(first_session + index),
@@ -202,7 +222,10 @@ mod tests {
     /// other faction in one.
     fn faction_npc(hostile_faction: Faction, hostile_sessions: u32) -> ReactionSummary {
         let friendly_faction = if hostile_faction == Alliance { Horde } else { Alliance };
-        summarize(&[reactions(hostile_faction, false, hostile_sessions, 1), reactions(friendly_faction, true, 1, 1000)])
+        summarize(&[
+            reactions(hostile_faction, false, hostile_sessions, 1),
+            reactions(friendly_faction, true, 1, 1000),
+        ])
     }
 
     fn factions(factions: &[Faction]) -> IndexSet<Faction> {
@@ -210,14 +233,20 @@ mod tests {
     }
 
     fn counts(hostile_sessions: usize, friendly_sessions: usize) -> FactionReactionCounts {
-        FactionReactionCounts { hostile_sessions, friendly_sessions }
+        FactionReactionCounts {
+            hostile_sessions,
+            friendly_sessions,
+        }
     }
 
     // describe("observeQuestFactions")
 
     #[test]
     fn records_the_players_faction_for_an_accepted_quest() {
-        let session = session_json(json!({ "UnitFactionGroup": player_faction("Alliance", 0.0) }), vec![event(5.0, "QUEST_ACCEPTED", packed(&[json!(99001)]))]);
+        let session = session_json(
+            json!({ "UnitFactionGroup": player_faction("Alliance", 0.0) }),
+            vec![event(5.0, "QUEST_ACCEPTED", packed(&[json!(99001)]))],
+        );
         assert_eq!(observed(&session), [(99001, Alliance)]);
     }
 
@@ -246,7 +275,10 @@ mod tests {
 
     #[test]
     fn uses_the_first_known_faction_for_sightings_before_the_first_faction_sample() {
-        let session = session_json(json!({ "UnitFactionGroup": player_faction("Horde", 5.0), "QuestLog": stream([(0.0, json!([99001]))]) }), vec![]);
+        let session = session_json(
+            json!({ "UnitFactionGroup": player_faction("Horde", 5.0), "QuestLog": stream([(0.0, json!([99001]))]) }),
+            vec![],
+        );
         assert_eq!(observed(&session), [(99001, Horde)]);
     }
 
@@ -261,7 +293,10 @@ mod tests {
 
     #[test]
     fn ignores_unfactioned_players() {
-        let session = session_json(json!({ "UnitFactionGroup": player_faction("Neutral", 0.0) }), vec![event(5.0, "QUEST_ACCEPTED", packed(&[json!(99001)]))]);
+        let session = session_json(
+            json!({ "UnitFactionGroup": player_faction("Neutral", 0.0) }),
+            vec![event(5.0, "QUEST_ACCEPTED", packed(&[json!(99001)]))],
+        );
         assert_eq!(observed(&session), []);
     }
 
@@ -270,15 +305,27 @@ mod tests {
     #[test]
     fn counts_hostile_and_friendly_sessions_per_faction() {
         let summary = summarize(&[reactions(Horde, false, 3, 1), reactions(Horde, false, 1, 3), reactions(Alliance, true, 2, 1)]);
-        assert_eq!(summary, ReactionSummary { alliance: counts(0, 2), horde: counts(3, 0) });
+        assert_eq!(
+            summary,
+            ReactionSummary {
+                alliance: counts(0, 2),
+                horde: counts(3, 0)
+            }
+        );
     }
 
     // describe("mergeRequiredRaces")
 
     #[test]
     fn excludes_a_faction_when_the_quest_giver_is_hostile_to_it_in_3_sessions() {
-        assert_eq!(merge_required_races(&factions(&[Alliance]), &[faction_npc(Horde, 3)], &factions(&[])), Some(ALLIANCE_RACES));
-        assert_eq!(merge_required_races(&factions(&[Horde]), &[faction_npc(Alliance, 3)], &factions(&[])), Some(HORDE_RACES));
+        assert_eq!(
+            merge_required_races(&factions(&[Alliance]), &[faction_npc(Horde, 3)], &factions(&[])),
+            Some(ALLIANCE_RACES)
+        );
+        assert_eq!(
+            merge_required_races(&factions(&[Horde]), &[faction_npc(Alliance, 3)], &factions(&[])),
+            Some(HORDE_RACES)
+        );
     }
 
     #[test]
@@ -311,7 +358,11 @@ mod tests {
 
     #[test]
     fn does_not_exclude_a_faction_when_the_other_faction_also_saw_the_quest_giver_hostile() {
-        let summary = summarize(&[reactions(Horde, false, 3, 1), reactions(Alliance, true, 5, 100), reactions(Alliance, false, 1, 200)]);
+        let summary = summarize(&[
+            reactions(Horde, false, 3, 1),
+            reactions(Alliance, true, 5, 100),
+            reactions(Alliance, false, 1, 200),
+        ]);
         assert_eq!(merge_required_races(&factions(&[Alliance]), &[summary], &factions(&[])), None);
     }
 
@@ -323,7 +374,10 @@ mod tests {
 
     #[test]
     fn does_not_exclude_a_faction_when_any_of_its_sessions_saw_the_quest() {
-        assert_eq!(merge_required_races(&factions(&[Alliance, Horde]), &[faction_npc(Horde, 3)], &factions(&[])), None);
+        assert_eq!(
+            merge_required_races(&factions(&[Alliance, Horde]), &[faction_npc(Horde, 3)], &factions(&[])),
+            None
+        );
     }
 
     #[test]
@@ -339,19 +393,28 @@ mod tests {
 
     #[test]
     fn does_not_exclude_a_faction_that_saw_another_quest_of_the_same_quest_giver() {
-        assert_eq!(merge_required_races(&factions(&[Alliance]), &[faction_npc(Horde, 3)], &factions(&[Horde])), None);
+        assert_eq!(
+            merge_required_races(&factions(&[Alliance]), &[faction_npc(Horde, 3)], &factions(&[Horde])),
+            None
+        );
     }
 
     #[test]
     fn excludes_a_faction_when_only_the_remaining_faction_saw_other_quests_of_the_same_quest_giver() {
-        assert_eq!(merge_required_races(&factions(&[Alliance]), &[faction_npc(Horde, 3)], &factions(&[Alliance])), Some(ALLIANCE_RACES));
+        assert_eq!(
+            merge_required_races(&factions(&[Alliance]), &[faction_npc(Horde, 3)], &factions(&[Alliance])),
+            Some(ALLIANCE_RACES)
+        );
     }
 
     // describe("mergeQuestFactions")
 
     #[test]
     fn merge_quest_factions_collects_the_factions_of_all_observations() {
-        let observations = [Observation::new(1, Alliance, Confidence::High, 0.0), Observation::new(1, Horde, Confidence::High, 1.0)];
+        let observations = [
+            Observation::new(1, Alliance, Confidence::High, 0.0),
+            Observation::new(1, Horde, Confidence::High, 1.0),
+        ];
         assert_eq!(merge_quest_factions(&observations), factions(&[Alliance, Horde]));
     }
 }

@@ -32,8 +32,11 @@ pub struct UnitStateEncounter<'v, 'a> {
 /// ("UnitReaction", ["player"]).
 pub fn unit_state_encounters<'v, 'a>(session: &Session<'v, 'a>, name: &str, leading_params: &[&str]) -> Vec<UnitStateEncounter<'v, 'a>> {
     let mut out = Vec::new();
-    let sample_event_times: Vec<f64> =
-        session.events().filter(|event| event.name().is_some_and(|e| UNIT_STATE_SAMPLE_EVENTS.contains(&e))).map(|event| event.t()).collect();
+    let sample_event_times: Vec<f64> = session
+        .events()
+        .filter(|event| event.name().is_some_and(|e| UNIT_STATE_SAMPLE_EVENTS.contains(&e)))
+        .map(|event| event.t())
+        .collect();
     for token in UNIT_STATE_TOKENS {
         let params: Vec<KeyRef> = leading_params.iter().map(|&param| KeyRef::Str(param)).chain([KeyRef::Str(token)]).collect();
         let stream = get_stream(session, name, &params).unwrap_or(&[]);
@@ -49,16 +52,26 @@ pub fn unit_state_encounters<'v, 'a>(session: &Session<'v, 'a>, name: &str, lead
             }
             // A later GUID sample in the same frame starts another unit, so its value must not be used.
             // Relies on UnitInteraction.lua sampling the GUID before UnitState.lua samples the value (.toc order).
-            let next_tp = guid_tps.get(&Num(encounter.t)).and_then(|tps| tps.iter().copied().find(|&tp| tp > encounter.tp));
+            let next_tp = guid_tps
+                .get(&Num(encounter.t))
+                .and_then(|tps| tps.iter().copied().find(|&tp| tp > encounter.tp));
             let value = match next_tp {
                 None => value_at(stream, encounter.t),
                 Some(next_tp) => {
-                    let before_next: Vec<&Value> = stream.iter().filter(|entry| entry_t(entry) < encounter.t || entry_tp(entry) < next_tp).collect();
+                    let before_next: Vec<&Value> = stream
+                        .iter()
+                        .filter(|entry| entry_t(entry) < encounter.t || entry_tp(entry) < next_tp)
+                        .collect();
                     value_at_entries(&before_next, encounter.t)
                 }
             };
             let Some(value) = value else { continue };
-            out.push(UnitStateEncounter { npc_id: encounter.entity_id, token, t: encounter.t, value });
+            out.push(UnitStateEncounter {
+                npc_id: encounter.entity_id,
+                token,
+                t: encounter.t,
+                value,
+            });
         }
     }
     out

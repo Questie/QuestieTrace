@@ -25,7 +25,10 @@ pub fn list_submissions(trace_data_dir: &Path) -> std::io::Result<Vec<Submission
             let file = file?;
             let name = file.file_name().to_string_lossy().into_owned();
             if name.ends_with(".json") {
-                files.push(SubmissionFile { key: format!("{month_name}/{name}"), path: file.path() });
+                files.push(SubmissionFile {
+                    key: format!("{month_name}/{name}"),
+                    path: file.path(),
+                });
             }
         }
     }

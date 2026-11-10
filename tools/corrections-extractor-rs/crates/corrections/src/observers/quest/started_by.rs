@@ -53,7 +53,11 @@ pub fn merge(observations: &[Observation<StartedByStarter>]) -> StartedByValue {
             _ => false,
         };
     }
-    StartedByValue { creatures: creatures.into_iter().collect(), objects: objects.into_iter().collect(), items: items.into_iter().collect() }
+    StartedByValue {
+        creatures: creatures.into_iter().collect(),
+        objects: objects.into_iter().collect(),
+        items: items.into_iter().collect(),
+    }
 }
 
 /// GetQuestID() during the interaction; 0 and an ambiguous sample are no quest.
@@ -120,7 +124,11 @@ pub fn observe(session: &Session) -> Vec<Observation<StartedByStarter>> {
         } else {
             // QUEST_ACCEPTED: Era, TBC, Wrath and Mists send (questLogIndex, questID), Forever (questID).
             let args = event.args();
-            let quest_id = if args.and_then(|a| a.get("n")).and_then(Value::as_num) == Some(1.0) { event.arg(1) } else { event.arg(2) };
+            let quest_id = if args.and_then(|a| a.get("n")).and_then(Value::as_num) == Some(1.0) {
+                event.arg(1)
+            } else {
+                event.arg(2)
+            };
             quest_id.and_then(Value::as_num).filter(|&id| id != 0.0)
         };
         let Some(quest_id) = quest_id else { continue };
@@ -128,7 +136,12 @@ pub fn observe(session: &Session) -> Vec<Observation<StartedByStarter>> {
         push_giver(quest_id, event.t(), &lookup, &QUEST_DIALOG_TOKENS, &mut observations);
 
         if let Some(item_id) = starter_item_id.filter(|&id| id > 0.0) {
-            observations.push(Observation::new(quest_id as i64, StartedByStarter::Item(item_id as i64), Confidence::High, event.t()));
+            observations.push(Observation::new(
+                quest_id as i64,
+                StartedByStarter::Item(item_id as i64),
+                Confidence::High,
+                event.t(),
+            ));
         }
     }
 
@@ -179,7 +192,10 @@ mod tests {
 
     #[test]
     fn captures_an_item_starter_from_the_quest_detail_quest_start_item_id() {
-        let session = session_json(json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))] }), vec![trace_event("QUEST_DETAIL", 3.0, 3.0, &[json!(750)])]);
+        let session = session_json(
+            json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))] }),
+            vec![trace_event("QUEST_DETAIL", 3.0, 3.0, &[json!(750)])],
+        );
         assert_eq!(observed(&session), [(96659, Item(750), Confidence::High, 3.0)]);
     }
 
@@ -231,12 +247,18 @@ mod tests {
                 "GetQuestID": [sample(3.0, 3.0, json!(96659)), sample(10.0, 10.0, json!(12345))],
                 "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197)), sample(10.0, 10.0, json!("Creature-0-5208-0-7-200-000040"))] },
             }),
-            vec![trace_event("QUEST_DETAIL", 3.0, 3.0, &[json!(12345)]), trace_event("QUEST_DETAIL", 10.0, 10.0, &[json!(67890)])],
+            vec![
+                trace_event("QUEST_DETAIL", 3.0, 3.0, &[json!(12345)]),
+                trace_event("QUEST_DETAIL", 10.0, 10.0, &[json!(67890)]),
+            ],
         );
         let results = quests_and_values(&session);
         // Each quest event gives a creature and an item observation.
         assert_eq!(results.len(), 4);
-        let creatures: Vec<(i64, i64)> = results.iter().filter_map(|&(q, v)| if let Creature(id) = v { Some((q, id)) } else { None }).collect();
+        let creatures: Vec<(i64, i64)> = results
+            .iter()
+            .filter_map(|&(q, v)| if let Creature(id) = v { Some((q, id)) } else { None })
+            .collect();
         assert_eq!(creatures, [(96659, 197), (12345, 200)]);
         let items: Vec<i64> = results.iter().filter_map(|&(_, v)| if let Item(id) = v { Some(id) } else { None }).collect();
         assert_eq!(items, [12345, 67890]);
@@ -282,8 +304,10 @@ mod tests {
 
     #[test]
     fn observes_nothing_without_quest_start_events() {
-        let session =
-            session_json(json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))], "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }), vec![]);
+        let session = session_json(
+            json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))], "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }),
+            vec![],
+        );
         assert_eq!(observed(&session), []);
     }
 
@@ -360,15 +384,36 @@ mod tests {
 
     #[test]
     fn merge_keeps_each_creature_starter_once() {
-        let result =
-            merge(&[obs(Creature(197), Confidence::Medium, 3.0), obs(Creature(197), Confidence::Medium, 10.0), obs(Creature(200), Confidence::Medium, 15.0)]);
-        assert_eq!(result, StartedByValue { creatures: vec![197, 200], objects: vec![], items: vec![] });
+        let result = merge(&[
+            obs(Creature(197), Confidence::Medium, 3.0),
+            obs(Creature(197), Confidence::Medium, 10.0),
+            obs(Creature(200), Confidence::Medium, 15.0),
+        ]);
+        assert_eq!(
+            result,
+            StartedByValue {
+                creatures: vec![197, 200],
+                objects: vec![],
+                items: vec![]
+            }
+        );
     }
 
     #[test]
     fn merge_sorts_starters_by_kind() {
-        let result = merge(&[obs(Creature(197), Confidence::Medium, 3.0), obs(Object(2843), Confidence::Low, 5.0), obs(Item(750), Confidence::High, 7.0)]);
-        assert_eq!(result, StartedByValue { creatures: vec![197], objects: vec![2843], items: vec![750] });
+        let result = merge(&[
+            obs(Creature(197), Confidence::Medium, 3.0),
+            obs(Object(2843), Confidence::Low, 5.0),
+            obs(Item(750), Confidence::High, 7.0),
+        ]);
+        assert_eq!(
+            result,
+            StartedByValue {
+                creatures: vec![197],
+                objects: vec![2843],
+                items: vec![750]
+            }
+        );
     }
 
     // describe("observeStartedBy interaction correlation")
@@ -449,7 +494,10 @@ mod tests {
     fn uses_the_next_raw_event_as_the_boundary_even_when_it_is_not_a_quest_event() {
         let session = session_json(
             json!({ "UnitGUID": { "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.012, creature_guid(276172))] } }),
-            vec![trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)]), trace_event("MERCHANT_SHOW", 3.0, 3.011, &[])],
+            vec![
+                trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)]),
+                trace_event("MERCHANT_SHOW", 3.0, 3.011, &[]),
+            ],
         );
         assert_eq!(values(&session), [Creature(276171)]);
     }
@@ -471,7 +519,10 @@ mod tests {
     fn keeps_an_unchanged_object_giver_during_a_long_dialog() {
         let session = session_json(
             json!({ "UnitGUID": { "questnpc": [sample(1.0, 1.0, object_guid(410369))] } }),
-            vec![trace_event("QUEST_PROGRESS", 1.0, 1.0, &[]), trace_event("QUEST_ACCEPTED", 60.0, 60.0, &[json!(99196)])],
+            vec![
+                trace_event("QUEST_PROGRESS", 1.0, 1.0, &[]),
+                trace_event("QUEST_ACCEPTED", 60.0, 60.0, &[json!(99196)]),
+            ],
         );
         assert_eq!(values(&session), [Object(410369)]);
     }
@@ -480,7 +531,10 @@ mod tests {
     fn skips_events_with_indistinguishable_timestamps_instead_of_guessing_their_giver() {
         let session = session_json(
             json!({ "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(276171)), sample(3.0, 3.0, creature_guid(276172))] } }),
-            vec![trace_event("QUEST_ACCEPTED", 3.0, 3.0, &[json!(99196)]), trace_event("QUEST_ACCEPTED", 3.0, 3.0, &[json!(99197)])],
+            vec![
+                trace_event("QUEST_ACCEPTED", 3.0, 3.0, &[json!(99196)]),
+                trace_event("QUEST_ACCEPTED", 3.0, 3.0, &[json!(99197)]),
+            ],
         );
         assert_eq!(observed(&session), []);
     }
@@ -493,7 +547,10 @@ mod tests {
                     "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.002, tied_guid.clone())],
                     "npc": [sample(1.0, 1.0, creature_guid(276173))],
                 } }),
-                vec![trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)]), trace_event("MERCHANT_SHOW", 3.0, 3.002, &[])],
+                vec![
+                    trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)]),
+                    trace_event("MERCHANT_SHOW", 3.0, 3.002, &[]),
+                ],
             );
             assert_eq!(observed(&session), [], "tied guid {tied_guid:?}");
         }
@@ -554,7 +611,11 @@ mod tests {
                 "UnitGUID": { "npc": [sample(1.0, 1.002, creature_guid(276171)), sample(2.0, 2.002, None), sample(3.0, 3.002, creature_guid(276172))] },
                 "C_GossipInfo.GetAvailableQuests": [sample(1.0, 1.002, json!([{ "questID": 99196 }]))],
             }),
-            vec![trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]), trace_event("GOSSIP_CLOSED", 2.0, 2.001, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.001, &[])],
+            vec![
+                trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]),
+                trace_event("GOSSIP_CLOSED", 2.0, 2.001, &[]),
+                trace_event("GOSSIP_SHOW", 3.0, 3.001, &[]),
+            ],
         );
         assert_eq!(values(&session), [Creature(276171), Creature(276172)]);
     }
@@ -567,7 +628,11 @@ mod tests {
                     "UnitGUID": { "npc": [sample(1.0, 1.002, creature_guid(276171)), sample(3.0, 3.002, creature_guid(276172))] },
                     "C_GossipInfo.GetAvailableQuests": [sample(1.0, 1.002, json!([{ "questID": 99196 }])), sample(3.0, 3.002, clearing_list.clone())],
                 }),
-                vec![trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.001, &[]), trace_event("GOSSIP_SHOW", 4.0, 4.001, &[])],
+                vec![
+                    trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]),
+                    trace_event("GOSSIP_SHOW", 3.0, 3.001, &[]),
+                    trace_event("GOSSIP_SHOW", 4.0, 4.001, &[]),
+                ],
             );
             assert_eq!(values(&session), [Creature(276171)], "clearing list {clearing_list:?}");
         }

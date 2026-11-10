@@ -44,7 +44,9 @@ pub(crate) const CLUSTER_EPSILON: f64 = 1e-9;
 const EXCLUSIVE_TOKENS: [SpawnToken; 2] = [SpawnToken::QuestPoi, SpawnToken::QuestNpc];
 
 fn find_exclusive_token(observations: &[Observation<SpawnObservation>]) -> Option<SpawnToken> {
-    EXCLUSIVE_TOKENS.into_iter().find(|&token| observations.iter().any(|obs| obs.value.token == token))
+    EXCLUSIVE_TOKENS
+        .into_iter()
+        .find(|&token| observations.iter().any(|obs| obs.value.token == token))
 }
 
 /// Merges spawn observations into the Questie spawns table.
@@ -143,10 +145,19 @@ pub(crate) fn merge_spawns_with(
         .into_iter()
         .map(|(zone, coords)| {
             let zone_id = zone.0;
-            let threshold = if CAPITAL_CITY_ZONE_IDS.contains(&zone_id) { CAPITAL_CITY_CLUSTER_THRESHOLD } else { SPAWN_CLUSTER_THRESHOLD };
+            let threshold = if CAPITAL_CITY_ZONE_IDS.contains(&zone_id) {
+                CAPITAL_CITY_CLUSTER_THRESHOLD
+            } else {
+                SPAWN_CLUSTER_THRESHOLD
+            };
             let mut clusters = cluster_and_average_coordinates(&coords, threshold);
             if single_spawn_per_zone {
-                let weight = |members: &[[f64; 2]]| -> usize { members.iter().map(|&[x, y]| observation_counts.get(&coord_key(zone_id, x, y)).copied().unwrap_or(1)).sum() };
+                let weight = |members: &[[f64; 2]]| -> usize {
+                    members
+                        .iter()
+                        .map(|&[x, y]| observation_counts.get(&coord_key(zone_id, x, y)).copied().unwrap_or(1))
+                        .sum()
+                };
                 // `reduce`: the first cluster of the highest weight wins.
                 let mut best = 0;
                 for index in 1..clusters.len() {
@@ -220,7 +231,12 @@ fn cluster_and_average_coordinates(coords: &[[f64; 2]], threshold: f64) -> Vec<C
                 cluster.sum_x += x;
                 cluster.sum_y += y;
             }
-            _ => clusters.push(GrowingCluster { members: vec![[x, y]], count: 1, sum_x: x, sum_y: y }),
+            _ => clusters.push(GrowingCluster {
+                members: vec![[x, y]],
+                count: 1,
+                sum_x: x,
+                sum_y: y,
+            }),
         }
     }
 
@@ -229,7 +245,13 @@ fn cluster_and_average_coordinates(coords: &[[f64; 2]], threshold: f64) -> Vec<C
     // Each centroid rounded to 2 decimals.
     clusters
         .into_iter()
-        .map(|c| Cluster { coord: [js::round((c.sum_x / c.count as f64) * 100.0) / 100.0, js::round((c.sum_y / c.count as f64) * 100.0) / 100.0], members: c.members })
+        .map(|c| Cluster {
+            coord: [
+                js::round((c.sum_x / c.count as f64) * 100.0) / 100.0,
+                js::round((c.sum_y / c.count as f64) * 100.0) / 100.0,
+            ],
+            members: c.members,
+        })
         .collect()
 }
 
@@ -304,19 +326,31 @@ mod tests {
 
     /// The zone's spawn points; empty when the zone is missing.
     fn zone(spawns: &Spawns, zone_id: f64) -> Vec<[f64; 2]> {
-        spawns.iter().find(|(id, _)| *id == zone_id).map(|(_, points)| points.clone()).unwrap_or_default()
+        spawns
+            .iter()
+            .find(|(id, _)| *id == zone_id)
+            .map(|(_, points)| points.clone())
+            .unwrap_or_default()
     }
 
     #[test]
     fn builds_the_zone_to_coordinates_table() {
-        let observations = [obs(40.0, 30.01, 86.02, 10.0, Npc), obs(40.0, 30.01, 86.02, 20.0, Npc), obs(12.0, 47.46, 62.18, 30.0, Npc)];
+        let observations = [
+            obs(40.0, 30.01, 86.02, 10.0, Npc),
+            obs(40.0, 30.01, 86.02, 20.0, Npc),
+            obs(12.0, 47.46, 62.18, 30.0, Npc),
+        ];
         assert_eq!(merge_spawns(&observations, false), [(12.0, vec![[47.46, 62.18]]), (40.0, vec![[30.01, 86.02]])]);
     }
 
     #[test]
     fn clusters_and_averages_nearby_coordinates() {
         // The duplicate (30.01, 86.02) is deduplicated first; (86.02 + 86.03) / 2 rounds to 86.03.
-        let observations = [obs(40.0, 30.01, 86.02, 10.0, Npc), obs(40.0, 30.01, 86.02, 20.0, Npc), obs(40.0, 30.01, 86.03, 30.0, Npc)];
+        let observations = [
+            obs(40.0, 30.01, 86.02, 10.0, Npc),
+            obs(40.0, 30.01, 86.02, 20.0, Npc),
+            obs(40.0, 30.01, 86.03, 30.0, Npc),
+        ];
         assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[30.01, 86.03]])]);
     }
 
@@ -328,7 +362,11 @@ mod tests {
 
     #[test]
     fn questnpc_overrides_all_other_coordinates() {
-        let observations = [obs(40.0, 30.01, 86.02, 10.0, Target), obs(12.0, 47.46, 62.18, 20.0, Npc), obs(40.0, 50.0, 70.0, 30.0, QuestNpc)];
+        let observations = [
+            obs(40.0, 30.01, 86.02, 10.0, Target),
+            obs(12.0, 47.46, 62.18, 20.0, Npc),
+            obs(40.0, 50.0, 70.0, 30.0, QuestNpc),
+        ];
         assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[50.0, 70.0]])]);
     }
 
@@ -340,7 +378,10 @@ mod tests {
             obs(12.0, 47.46, 62.18, 30.0, QuestNpc),
             obs(40.0, 30.01, 86.02, 40.0, Target),
         ];
-        assert_eq!(merge_spawns(&observations, false), [(12.0, vec![[47.46, 62.18]]), (40.0, vec![[30.01, 86.02], [31.0, 87.0]])]);
+        assert_eq!(
+            merge_spawns(&observations, false),
+            [(12.0, vec![[47.46, 62.18]]), (40.0, vec![[30.01, 86.02], [31.0, 87.0]])]
+        );
     }
 
     #[test]
@@ -360,7 +401,11 @@ mod tests {
             (21.87, 45.3),
             (21.88, 45.31),
         ];
-        let observations: Vec<_> = points.iter().enumerate().map(|(i, &(x, y))| obs(40.0, x, y, i as f64 + 1.0, QuestNpc)).collect();
+        let observations: Vec<_> = points
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, y))| obs(40.0, x, y, i as f64 + 1.0, QuestNpc))
+            .collect();
         assert_eq!(zone(&merge_spawns(&observations, false), 40.0), [[21.85, 45.31]]);
     }
 
@@ -378,19 +423,32 @@ mod tests {
 
     #[test]
     fn collapses_observations_around_a_static_entity_into_one_spawn() {
-        let observations = [obs(267.0, 62.52, 19.74, 1.0, Target), obs(267.0, 62.57, 19.9, 2.0, Target), obs(267.0, 62.59, 19.75, 3.0, Target)];
+        let observations = [
+            obs(267.0, 62.52, 19.74, 1.0, Target),
+            obs(267.0, 62.57, 19.9, 2.0, Target),
+            obs(267.0, 62.59, 19.75, 3.0, Target),
+        ];
         assert_eq!(merge_spawns(&observations, false), [(267.0, vec![[62.56, 19.8]])]);
     }
 
     #[test]
     fn keeps_only_the_most_observed_cluster_per_zone_for_quest_entities() {
-        let observations = [obs(40.0, 10.0, 50.0, 1.0, Npc), obs(40.0, 30.0, 60.0, 2.0, Npc), obs(40.0, 30.2, 60.0, 3.0, Npc), obs(12.0, 47.46, 62.18, 4.0, Npc)];
+        let observations = [
+            obs(40.0, 10.0, 50.0, 1.0, Npc),
+            obs(40.0, 30.0, 60.0, 2.0, Npc),
+            obs(40.0, 30.2, 60.0, 3.0, Npc),
+            obs(12.0, 47.46, 62.18, 4.0, Npc),
+        ];
         assert_eq!(merge_spawns(&observations, true), [(12.0, vec![[47.46, 62.18]]), (40.0, vec![[30.1, 60.0]])]);
     }
 
     #[test]
     fn keeps_only_the_most_observed_questnpc_cluster_per_zone_for_quest_entities() {
-        let observations = [obs(40.0, 10.0, 50.0, 1.0, QuestNpc), obs(40.0, 10.2, 50.0, 2.0, QuestNpc), obs(40.0, 30.0, 60.0, 3.0, QuestNpc)];
+        let observations = [
+            obs(40.0, 10.0, 50.0, 1.0, QuestNpc),
+            obs(40.0, 10.2, 50.0, 2.0, QuestNpc),
+            obs(40.0, 30.0, 60.0, 3.0, QuestNpc),
+        ];
         assert_eq!(merge_spawns(&observations, true), [(40.0, vec![[10.1, 50.0]])]);
     }
 
@@ -414,7 +472,12 @@ mod tests {
 
     #[test]
     fn merges_clusters_whose_centroids_end_up_within_the_threshold() {
-        let observations = [obs(40.0, 10.0, 50.0, 1.0, Npc), obs(40.0, 10.3, 50.45, 2.0, Npc), obs(40.0, 10.31, 50.0, 3.0, Npc), obs(40.0, 10.32, 50.4, 4.0, Npc)];
+        let observations = [
+            obs(40.0, 10.0, 50.0, 1.0, Npc),
+            obs(40.0, 10.3, 50.45, 2.0, Npc),
+            obs(40.0, 10.31, 50.0, 3.0, Npc),
+            obs(40.0, 10.32, 50.4, 4.0, Npc),
+        ];
         assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[10.23, 50.21]])]);
     }
 
@@ -427,7 +490,11 @@ mod tests {
 
     #[test]
     fn does_not_chain_a_line_of_nearby_points_into_one_cluster() {
-        let observations: Vec<_> = [10.0, 10.4, 10.8, 11.2, 11.6].iter().enumerate().map(|(i, &x)| obs(40.0, x, 50.0, i as f64 + 1.0, Target)).collect();
+        let observations: Vec<_> = [10.0, 10.4, 10.8, 11.2, 11.6]
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| obs(40.0, x, 50.0, i as f64 + 1.0, Target))
+            .collect();
         assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[10.2, 50.0], [11.0, 50.0], [11.6, 50.0]])]);
     }
 
@@ -456,7 +523,11 @@ mod tests {
     #[test]
     fn zone_id_weights_questnpc_above_two_targets() {
         // Zone 40 weighs 3 (questnpc), zone 12 weighs 2 (two targets).
-        let observations = [obs(12.0, 47.46, 62.18, 1.0, Target), obs(12.0, 48.0, 63.0, 2.0, Target), obs(40.0, 30.01, 86.02, 3.0, QuestNpc)];
+        let observations = [
+            obs(12.0, 47.46, 62.18, 1.0, Target),
+            obs(12.0, 48.0, 63.0, 2.0, Target),
+            obs(40.0, 30.01, 86.02, 3.0, QuestNpc),
+        ];
         assert_eq!(merge_zone_id(&observations), 40.0);
     }
 
@@ -467,13 +538,25 @@ mod tests {
 
     #[test]
     fn handles_several_zones_with_several_coordinates_each() {
-        let observations = [obs(40.0, 30.01, 86.02, 1.0, Npc), obs(12.0, 47.46, 62.18, 2.0, Npc), obs(40.0, 31.0, 87.0, 3.0, Npc), obs(12.0, 48.0, 63.0, 4.0, Npc)];
-        assert_eq!(merge_spawns(&observations, false), [(12.0, vec![[47.46, 62.18], [48.0, 63.0]]), (40.0, vec![[30.01, 86.02], [31.0, 87.0]])]);
+        let observations = [
+            obs(40.0, 30.01, 86.02, 1.0, Npc),
+            obs(12.0, 47.46, 62.18, 2.0, Npc),
+            obs(40.0, 31.0, 87.0, 3.0, Npc),
+            obs(12.0, 48.0, 63.0, 4.0, Npc),
+        ];
+        assert_eq!(
+            merge_spawns(&observations, false),
+            [(12.0, vec![[47.46, 62.18], [48.0, 63.0]]), (40.0, vec![[30.01, 86.02], [31.0, 87.0]])]
+        );
     }
 
     #[test]
     fn questpoi_overrides_questnpc_and_all_other_coordinates() {
-        let observations = [obs(40.0, 30.01, 86.02, 10.0, Target), obs(12.0, 47.46, 62.18, 20.0, QuestNpc), obs(40.0, 50.0, 70.0, 30.0, QuestPoi)];
+        let observations = [
+            obs(40.0, 30.01, 86.02, 10.0, Target),
+            obs(12.0, 47.46, 62.18, 20.0, QuestNpc),
+            obs(40.0, 50.0, 70.0, 30.0, QuestPoi),
+        ];
         assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[50.0, 70.0]])]);
     }
 
@@ -502,7 +585,11 @@ mod tests {
 
     #[test]
     fn zone_id_only_counts_questpoi_zones_when_questpoi_exists() {
-        let observations = [obs(12.0, 1.0, 1.0, 10.0, QuestNpc), obs(12.0, 2.0, 2.0, 20.0, QuestNpc), obs(40.0, 50.0, 70.0, 30.0, QuestPoi)];
+        let observations = [
+            obs(12.0, 1.0, 1.0, 10.0, QuestNpc),
+            obs(12.0, 2.0, 2.0, 20.0, QuestNpc),
+            obs(40.0, 50.0, 70.0, 30.0, QuestPoi),
+        ];
         assert_eq!(merge_zone_id(&observations), 40.0);
     }
 
@@ -520,7 +607,12 @@ mod tests {
 
     #[test]
     fn zones_come_out_in_js_property_order() {
-        let observations = [obs(1519.0, 1.0, 1.0, 1.0, Npc), obs(-1.0, 2.0, 2.0, 2.0, Npc), obs(12.0, 3.0, 3.0, 3.0, Npc), obs(0.5, 4.0, 4.0, 4.0, Npc)];
+        let observations = [
+            obs(1519.0, 1.0, 1.0, 1.0, Npc),
+            obs(-1.0, 2.0, 2.0, 2.0, Npc),
+            obs(12.0, 3.0, 3.0, 3.0, Npc),
+            obs(0.5, 4.0, 4.0, 4.0, Npc),
+        ];
         let zones: Vec<f64> = merge_spawns(&observations, false).into_iter().map(|(zone, _)| zone).collect();
         assert_eq!(zones, [12.0, 1519.0, -1.0, 0.5]);
     }

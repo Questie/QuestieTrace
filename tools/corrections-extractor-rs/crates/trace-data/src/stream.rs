@@ -97,3 +97,10 @@ pub fn unpack<'v, 'a>(value: &'v Value<'a>) -> Option<Vec<Option<&'v Value<'a>>>
     }
     Some(values)
 }
+
+/// emulator.ts `emulate` followed by `Array.isArray`: the values of packed args, or the items of
+/// an array (decoded arrays hold no nil, so their items are all Some). None for any other value.
+pub fn emulated_list<'v, 'a>(value: Option<&'v Value<'a>>) -> Option<Vec<Option<&'v Value<'a>>>> {
+    let value = value?;
+    unpack(value).or_else(|| value.as_array().map(|items| items.iter().map(Some).collect()))
+}

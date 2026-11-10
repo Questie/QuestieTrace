@@ -19,7 +19,12 @@ pub fn observe(session: &Session) -> Vec<Observation<SpawnObservation>> {
         let Some(pos) = player_pos_at(session, encounter.t) else { continue };
         let questie_pos = to_questie_map_position(pos);
         let token = SpawnToken::from_unit_token(encounter.token).expect("every tracked unit token is a spawn token");
-        let value = SpawnObservation { zone_id, x: questie_pos.x, y: questie_pos.y, token };
+        let value = SpawnObservation {
+            zone_id,
+            x: questie_pos.x,
+            y: questie_pos.y,
+            token,
+        };
         observations.push(Observation::new(encounter.npc_id, value, Confidence::High, encounter.t));
     }
     observations
@@ -32,7 +37,9 @@ mod tests {
     use serde_json::json;
 
     fn observed(functions: serde_json::Value) -> Vec<(i64, SpawnObservation, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     fn spawn(zone_id: f64, x: f64, y: f64, token: SpawnToken) -> SpawnObservation {
@@ -107,6 +114,9 @@ mod tests {
             "C_Map.GetBestMapForUnit": { "player": [{ "t": 5, "tp": 5, "v": 1429 }] },
             "C_Map.GetPlayerMapPosition": { "player": [{ "t": 5, "tp": 5, "v": { "x": 0.4746, "y": 0.6218 } }] },
         });
-        assert_eq!(observed(functions), [(197, spawn(12.0, 47.46, 62.18, SpawnToken::QuestNpc), Confidence::High, 5.0)]);
+        assert_eq!(
+            observed(functions),
+            [(197, spawn(12.0, 47.46, 62.18, SpawnToken::QuestNpc), Confidence::High, 5.0)]
+        );
     }
 }
