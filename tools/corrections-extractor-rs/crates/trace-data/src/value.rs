@@ -457,6 +457,15 @@ fn text(bytes: &[u8]) -> Cow<'_, str> {
 }
 
 impl<'a> Decoder<'a> {
+    /// cbor.ts checks a table's depth before reading its length, so a table too deep reports
+    /// that, even when its length is invalid too.
+    fn check_container_depth(&self, depth: u32) -> Result<()> {
+        match self.cursor.peek_major() {
+            Some(4 | 5) if depth > MAX_NESTING_DEPTH => Err(depth_error()),
+            _ => Ok(()),
+        }
+    }
+
     /// One value; None stands for nil.
     fn value(&mut self, depth: u32, context: Context) -> Result<Option<Value<'a>>> {
         match context {
@@ -464,6 +473,7 @@ impl<'a> Decoder<'a> {
             Context::LazyStream => return self.lazy(depth, Context::Stream),
             _ => {}
         }
+        self.check_container_depth(depth)?;
         Ok(match self.cursor.item()? {
             Item::Num(n) => Some(Value::Num(n)),
             Item::Str(bytes) => Some(Value::Str(text(bytes))),
@@ -561,9 +571,9 @@ impl<'a> Decoder<'a> {
         // Fast path for the common case: a key that is no positive integer makes it an object.
         if has_other_key && !has_deleted {
             self.last_table_integer_keyed = false;
-            return Ok(Value::Object(Object::from_insertion_order(table.entries)));
+            return Ok(Value::Object(Object::from_insertion_order(table.into_entries())));
         }
-        Ok(self.finish(table.entries, first_integer_keyed))
+        Ok(self.finish(table.into_entries(), first_integer_keyed))
     }
 
     /// cbor.ts `finish`: a table with string keys becomes an array or an object.
@@ -613,6 +623,7 @@ impl<'a> Decoder<'a> {
     /// Walks one value, reporting every error `value` would. With `want_shape`, also works out
     /// whether a table would have only positive integer keys; nested values only validate.
     fn skip(&mut self, depth: u32, want_shape: bool) -> Result<Shape> {
+        self.check_container_depth(depth)?;
         let header = self.cursor.item()?;
         match header {
             Item::Num(_) | Item::Str(_) | Item::Bool(_) => return Ok(Shape::Scalar),
@@ -676,8 +687,8 @@ impl<'a> Decoder<'a> {
     /// The shape of a map that deletes keys: replays it from its first key with JS set/delete
     /// semantics over the kept keys, validating the items the first pass had not reached.
     fn map_shape_with_deletes(&mut self, length: f64, depth: u32) -> Result<Shape> {
-        let mut keys: Vec<JsKey<'a>> = Vec::new();
-        let mut has_other_key = false;
+        // Only which keys remain matters for the shape, not their order.
+        let mut keys: std::collections::HashSet<JsKey<'a>> = std::collections::HashSet::new();
         let mut i = 0.0;
         while i < length {
             i += 1.0;
@@ -690,14 +701,9 @@ impl<'a> Decoder<'a> {
                 Some(SkippedKey::Str(bytes)) => JsKey::from_str(text(bytes)),
             };
             if item == Shape::Nil {
-                keys.retain(|k| *k != key);
+                keys.remove(&key);
             } else {
-                if !has_other_key && !key.is_positive_integer() {
-                    has_other_key = true;
-                }
-                if !keys.contains(&key) {
-                    keys.push(key);
-                }
+                keys.insert(key);
             }
         }
         // A deleted key always takes the full rule (cbor.ts skips its fast path then).
@@ -736,6 +742,7 @@ impl<'a> Decoder<'a> {
 
     /// Reads a map key; None for keys the decoder drops (booleans and tables).
     fn skip_key(&mut self, depth: u32) -> Result<Option<SkippedKey<'a>>> {
+        self.check_container_depth(depth)?;
         match self.cursor.item()? {
             Item::Nil => Err(CborError("CBOR map keys that decode to nil are not supported".into())),
             Item::Num(n) => Ok(Some(SkippedKey::Num(n))),
@@ -800,18 +807,21 @@ impl Value<'_> {
 const SCAN_LIMIT: usize = 16;
 
 /// An insertion-ordered table with JS set/delete semantics: setting an existing key keeps its
-/// position, deleting removes it. (Lua keys are unique; they only collide when a number and a
-/// string name the same JS property, or a nil value deletes a key.)
+/// position, deleting removes it (a key set again afterwards goes last). Lua keys are unique;
+/// they only collide when a number and a string name the same JS property, or a nil value
+/// deletes a key. Deleting leaves a tombstone, so any mix of sets and deletes stays linear.
 #[derive(Default)]
 struct TableBuilder<'a> {
-    entries: Vec<(JsKey<'a>, Value<'a>)>,
+    /// Entries in insertion order; None where an entry was deleted.
+    slots: Vec<Option<(JsKey<'a>, Value<'a>)>>,
+    /// Live key -> slot, once the table has more than SCAN_LIMIT slots.
     index: Option<HashMap<JsKey<'a>, usize>>,
 }
 
 impl<'a> TableBuilder<'a> {
     fn with_capacity(capacity: usize) -> Self {
         TableBuilder {
-            entries: Vec::with_capacity(capacity),
+            slots: Vec::with_capacity(capacity),
             index: None,
         }
     }
@@ -819,32 +829,44 @@ impl<'a> TableBuilder<'a> {
     fn position(&self, key: &JsKey<'a>) -> Option<usize> {
         match &self.index {
             Some(index) => index.get(key).copied(),
-            None => self.entries.iter().position(|(k, _)| k == key),
+            None => self.slots.iter().position(|slot| slot.as_ref().is_some_and(|(k, _)| k == key)),
         }
     }
 
     fn set(&mut self, key: JsKey<'a>, value: Value<'a>) {
         if let Some(at) = self.position(&key) {
-            self.entries[at].1 = value;
+            if let Some(slot) = &mut self.slots[at] {
+                slot.1 = value;
+            }
             return;
         }
         if let Some(index) = &mut self.index {
-            index.insert(key.clone(), self.entries.len());
-        } else if self.entries.len() == SCAN_LIMIT {
-            let mut index: HashMap<JsKey<'a>, usize> = self.entries.iter().enumerate().map(|(i, (k, _))| (k.clone(), i)).collect();
-            index.insert(key.clone(), self.entries.len());
+            index.insert(key.clone(), self.slots.len());
+        } else if self.slots.len() == SCAN_LIMIT {
+            let mut index: HashMap<JsKey<'a>, usize> = self
+                .slots
+                .iter()
+                .enumerate()
+                .filter_map(|(i, slot)| slot.as_ref().map(|(k, _)| (k.clone(), i)))
+                .collect();
+            index.insert(key.clone(), self.slots.len());
             self.index = Some(index);
         }
-        self.entries.push((key, value));
+        self.slots.push(Some((key, value)));
     }
 
     fn remove(&mut self, key: &JsKey<'a>) {
         if let Some(at) = self.position(key) {
-            self.entries.remove(at);
-            if self.index.is_some() {
-                self.index = Some(self.entries.iter().enumerate().map(|(i, (k, _))| (k.clone(), i)).collect());
+            self.slots[at] = None;
+            if let Some(index) = &mut self.index {
+                index.remove(key);
             }
         }
+    }
+
+    /// The live entries, in insertion order.
+    fn into_entries(self) -> Vec<(JsKey<'a>, Value<'a>)> {
+        self.slots.into_iter().flatten().collect()
     }
 }
 
@@ -1016,9 +1038,36 @@ mod tests {
     }
 
     #[test]
+    fn a_table_too_deep_reports_its_depth_even_when_its_length_is_invalid() {
+        // 100 arrays, then an indefinite-length array at depth 101: TS checks depth first.
+        let item: Vec<u8> = std::iter::repeat_n(0x81, 100).chain([0x9f, 0xff]).collect();
+        assert!(decode_value(&item).unwrap_err().0.contains("depth"));
+    }
+
+    #[test]
     fn allows_100_nested_tables_and_rejects_101() {
         let nested = |depth: usize| -> Vec<u8> { std::iter::repeat_n(0x81, depth).chain([0x80]).collect() };
         assert!(decode_value(&nested(99)).is_ok());
         assert!(decode_value(&nested(100)).unwrap_err().0.contains("depth"));
+    }
+
+    #[test]
+    fn many_deleted_keys_decode_in_linear_time() {
+        // {k0: 1, ..., kN: 1, k0: nil, ..., kN: nil}: quadratic before deletes left tombstones.
+        let keys = 40_000u32;
+        let key = |i: u32| -> Vec<u8> { std::iter::once(0x78).chain(std::iter::once(8)).chain(format!("k{i:07}").into_bytes()).collect() };
+        let mut item = vec![0xba];
+        item.extend((keys * 2).to_be_bytes());
+        for i in 0..keys {
+            item.extend(key(i));
+            item.push(0x01);
+        }
+        for i in 0..keys {
+            item.extend(key(i));
+            item.push(0xf6);
+        }
+        let started = std::time::Instant::now();
+        decodes_to(&item, "[]");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
     }
 }

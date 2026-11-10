@@ -69,6 +69,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// The major type of the next item, without reading it.
+    pub fn peek_major(&self) -> Option<u8> {
+        self.bytes.get(self.pos).map(|initial| initial >> 5)
+    }
+
     pub fn is_done(&self) -> bool {
         self.pos >= self.bytes.len()
     }

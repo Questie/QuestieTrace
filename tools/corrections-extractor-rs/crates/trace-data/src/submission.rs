@@ -10,8 +10,8 @@
 use crate::export::{decode_for_print, find_exports, is_js_whitespace, Export, Inflater};
 use crate::session::Session;
 use crate::value::{decode_trace, Value};
-use serde::Deserialize;
 use serde_json::value::RawValue;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// A submission with its exports inflated.
@@ -54,14 +54,12 @@ impl<'a> Trace<'a> {
     }
 }
 
-#[derive(Deserialize)]
-struct Envelope<'a> {
-    #[serde(borrow)]
-    id: Option<&'a RawValue>,
-    #[serde(borrow)]
-    export_string: Option<&'a RawValue>,
-}
+/// The top-level fields of a submission file, as raw JSON: only `id` and `export_string` are
+/// ever parsed. A key that appears twice keeps its last value, as with `JSON.parse`.
+type Envelope<'a> = HashMap<String, &'a RawValue>;
 
+/// A JSON string field's value. A lone UTF-16 surrogate (which JS strings allow, Rust strings
+/// do not) makes it unreadable: "no export_string" where the TS tool would decode on.
 fn json_string(raw: Option<&RawValue>) -> Option<String> {
     raw.and_then(|raw| serde_json::from_str::<String>(raw.get()).ok())
 }
@@ -93,10 +91,12 @@ impl Submission {
             error: None,
             exports: Vec::new(),
         };
-        let envelope = match serde_json::from_slice::<Envelope>(bytes) {
+        // Read as UTF-8 like Node does: invalid bytes become U+FFFD instead of failing the file.
+        let text = String::from_utf8_lossy(bytes);
+        let envelope = match serde_json::from_str::<Envelope>(&text) {
             Ok(envelope) => envelope,
             // An array is a JS object too: it parses, but has no export_string.
-            Err(_) if serde_json::from_slice::<Vec<&RawValue>>(bytes).is_ok() => {
+            Err(_) if serde_json::from_str::<Vec<&RawValue>>(&text).is_ok() => {
                 submission.error = Some("no export_string".into());
                 return submission;
             }
@@ -106,10 +106,10 @@ impl Submission {
                 return submission;
             }
         };
-        if let Some(id) = json_string(envelope.id).filter(|id| !id.is_empty()) {
+        if let Some(id) = json_string(envelope.get("id").copied()).filter(|id| !id.is_empty()) {
             submission.submission_id = id;
         }
-        let Some(export_string) = json_string(envelope.export_string) else {
+        let Some(export_string) = json_string(envelope.get("export_string").copied()) else {
             submission.error = Some("no export_string".into());
             return submission;
         };
@@ -296,6 +296,19 @@ mod tests {
             "export 1: payload is not valid print-encoded data (character \"$\")"
         );
         assert_eq!(error(&tiny_export()[..200]), "export 1 has no matching end marker");
+    }
+
+    #[test]
+    fn a_repeated_key_keeps_its_last_value_and_invalid_utf8_is_replaced_like_node_does() {
+        let tiny = tiny_export();
+        let repeated = format!(r#"{{"export_string": "not an export", "export_string": "{tiny}"}}"#);
+        let read = |bytes: &[u8]| Submission::from_json(bytes, "fallback".into(), &mut Inflater::new());
+        assert_eq!(read(repeated.as_bytes()).decode().traces.len(), 1);
+        // An invalid byte in a free-text field must not make the file unreadable.
+        let mut invalid = br#"{"nickname": "x"#.to_vec();
+        invalid.push(0xff);
+        invalid.extend(format!(r#"", "export_string": "{tiny}"}}"#).into_bytes());
+        assert_eq!(read(&invalid).decode().traces.len(), 1);
     }
 
     #[test]
