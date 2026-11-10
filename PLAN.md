@@ -51,6 +51,8 @@ Rust runs after the CPU batch, after the memory batch, and at the end.
 | P3 | Build table entries in place (no `into_entries` copy, fewer allocations) | Allocation ~18% | −5% | low |
 | P4 | CBOR lengths of 1/2/4 bytes read as integers (doubles only for 8 bytes) | `Cursor::item` 8.6% | −2% | low |
 | P5 | FxHash instead of SipHash in observer maps and sets (unit state pairing, etc.) | SipHash ~2% | −2% | low |
+| P6 | Borrow `export_string` when it has no escapes; inflate into recycled buffers (no copy, no zero-fill) | 33.5 / 33.3 s vs 37.4 / 38.0 s (−11%) | 5.8 GB | yes | (next) |
+| — | Noise check: the same binary on both sides gave 37.0–37.8 s, so differences under ~2% are within noise | | | | |
 | P6 | Borrow `export_string` when it has no escapes; avoid copying the inflate buffer | memcpy ~10% | −2% | low |
 | R1 | Re-profile; re-rank what is left | | | |
 | F0 | Full archive, Rust, after the CPU batch | Milestone | | |
@@ -88,4 +90,4 @@ quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submiss
 | P2 | Read every event's name, `t`, `tp` once into a contiguous array when a session is created | 39.2 / 39.3 s vs 42.4 / 42.3 s (−7%) | 5.8–6.1 GB | yes | f4bb554 |
 | P4 | CBOR header arguments read as integers (doubles only for 8-byte values above 2^53) | 38.7 / 38.6 s vs 39.5 / 39.7 s (−2%) | 6.0 GB | yes | acda299 |
 | P3 | Finish decoded tables in place (`filter_map` collects into the slots' own allocation) | 37.9 / 37.9 s vs 39.4 / 39.1 s (−3%) | 6.0 GB | yes | 206e1b3 |
-| P5 | FxHash instead of SipHash in observer maps/sets and the decoder's table index | 37.6 / 37.4 s vs 38.0 / 37.8 s (−1%) | 5.6–5.8 GB | yes | (next) |
+| P5 | FxHash instead of SipHash in observer maps/sets and the decoder's table index | 37.6 / 37.4 s vs 38.0 / 37.8 s (−1%) | 5.6–5.8 GB | yes | 525fc94 |

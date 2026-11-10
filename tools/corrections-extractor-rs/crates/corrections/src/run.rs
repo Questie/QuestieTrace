@@ -95,13 +95,16 @@ fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, used: &RwL
             sessions.push(ObservedSession { key, duplicate, staged });
         }
     }
-    ObservedSubmission {
+    let observed = ObservedSubmission {
         key: file.key.clone(),
         export_count: decoded.traces.len(),
         dropped_exports: decoded.dropped_exports,
         error: decoded.error,
         sessions,
-    }
+    };
+    // The next submission inflates into this one's buffers.
+    submission.recycle(inflater);
+    observed
 }
 
 /// What the fold tallies besides the accumulator.

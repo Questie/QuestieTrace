@@ -179,7 +179,7 @@ fn encoded_exports_read_back_through_the_real_decoder() {
     let cbor = trace_data::Inflater::new()
         .inflate(&trace_data::export::decode_for_print(payload).unwrap())
         .unwrap();
-    let root = decode_trace(&cbor).unwrap().unwrap();
+    let root = decode_trace(cbor.bytes()).unwrap().unwrap();
     assert_eq!(
         trace_data::value::to_json(&root),
         r#"{"sessions":[{"startedAt":0,"startedAtPrecise":0,"events":[{"t":2,"tp":2,"e":"E","a":{"1":5,"n":1}}],"functions":{"F":[{"t":1,"tp":1,"v":"x"}]}}]}"#
