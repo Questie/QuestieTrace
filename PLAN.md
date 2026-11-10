@@ -59,7 +59,10 @@ Rust runs after the CPU batch, after the memory batch, and at the end.
 | M1 | Threads 24 / 16 instead of 32 (same binary, `--threads`) | 24: 30.5 / 31.1 s (+4.5%); 16: 34.4 s (+16%) vs 29.1 / 30.4 s | 24: 3.9 GB (−21%); 16: 2.7 GB (−45%) | **no**: ~2% and ~3.6% speed per 10% memory, over the 1% rule; `--threads` stays available | — |
 | M2 | Objectives folded as per-session slots (kind, position, id): the merge never reads the matched name and text, and counts sessions per slot | 28.9 / 28.7 s vs 28.9 / 28.5 s (noise) | fold 616 → 319 MB (−48%); at full scale ~−5 GB | yes | 7dd06f3 |
 | R2 | Re-profile: CBOR walking dominates (`Cursor::item` 18.4%: half the validation walk, the rest resolving streams and event headers); alloc/free ~12%; finalize is 77% npc spawn merges | | | | |
-| P8 | Parallel finalize, mild: the per-entity spawn merges (npc and object) run on all cores, entities handed out one at a time, entity order kept; nothing else in finalize changes | finalize 0.9 → 0.3 s on 5% (full scale: see F1) | — | yes | (next) |
+| P8 | Parallel finalize, mild: the per-entity spawn merges (npc and object) run on all cores, entities handed out one at a time, entity order kept; nothing else in finalize changes | finalize 0.9 → 0.3 s on 5% (full scale: see F1) | — | yes | 64346ce |
+| P11 | `npc_drops`: look loot sources up by time in a map instead of scanning the source stream per link | 27.8 / 27.5 s vs 27.2 / 27.5 s: no gain | — | **no** | — |
+| — | Rejected on inspection: parse JSON before the lossy UTF-8 pass (that pass is already the only validation; nothing to save) | | | — | — |
+| P12a | Trusted walking of already validated bytes (event headers; shapes of lazy entries while a lazy value decodes): an item counter, no error checks, no recursion | 26.5 / 26.8 s vs 28.5 / 27.8 s (−5%) | 4.5–4.6 GB | yes | (next) |
 | — | Noise check: the same binary on both sides gave 37.0–37.8 s, so differences under ~2% are within noise | | | | |
 | P6 | Borrow `export_string` when it has no escapes; avoid copying the inflate buffer | memcpy ~10% | −2% | low |
 | R1 | Re-profile; re-rank what is left | | | |
