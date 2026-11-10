@@ -66,24 +66,49 @@ fn only_defined<T>(values: IndexMap<i64, Option<T>>) -> IndexMap<i64, T> {
 }
 
 /// A merge over each entity's observations of `field` followed by those of `extra` (TS
-/// `store.groups([key, extraKey])`): spawns and their quest turn-in spawns.
-fn merge_with_extra<R>(
+/// `store.groups([key, extraKey])`): spawns and their quest turn-in spawns. Entities merge
+/// independently, so they are spread over threads; the result keeps the entity order.
+fn merge_with_extra<R: Send>(
     field: &ObservationsByEntity<SpawnObservation>,
     extra: &IndexMap<i64, Vec<Observation<SpawnObservation>>>,
-    mut merge: impl FnMut(i64, &[Observation<SpawnObservation>]) -> R,
+    merge: impl Fn(i64, &[Observation<SpawnObservation>]) -> R + Sync,
 ) -> IndexMap<i64, R> {
-    let mut merged = IndexMap::new();
-    for (id, observed) in field.iter() {
-        let mut combined = observed.to_vec();
-        combined.extend(extra.get(&id).into_iter().flatten().cloned());
-        merged.insert(id, merge(id, &combined));
-    }
-    for (&id, turn_in) in extra {
-        if field.get(id).is_none() {
-            merged.insert(id, merge(id, turn_in));
+    let ids: Vec<i64> = field
+        .iter()
+        .map(|(id, _)| id)
+        .chain(extra.keys().copied().filter(|&id| field.get(id).is_none()))
+        .collect();
+    let merge_one = |id: i64| -> R {
+        match (field.get(id), extra.get(&id)) {
+            (Some(observed), turn_in) => {
+                let mut combined = observed.to_vec();
+                combined.extend(turn_in.into_iter().flatten().cloned());
+                merge(id, &combined)
+            }
+            (None, Some(turn_in)) => merge(id, turn_in),
+            (None, None) => unreachable!("every id comes from one of the two"),
         }
-    }
-    merged
+    };
+    // Workers take entities one at a time: a few entities hold most observations.
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut merged: Vec<(usize, R)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let at = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(&id) = ids.get(at) else { return done };
+                        done.push((at, merge_one(id)));
+                    }
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|worker| worker.join().expect("a merge panicked")).collect()
+    });
+    merged.sort_unstable_by_key(|(at, _)| *at);
+    ids.into_iter().zip(merged.into_iter().map(|(_, result)| result)).collect()
 }
 
 fn by_entity<T>(observations: Vec<Observation<T>>) -> IndexMap<i64, Vec<Observation<T>>> {
