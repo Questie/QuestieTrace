@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { TINY_EXPORT } from "../../../corrections-extractor/src/core/trace-data/fixtures";
@@ -60,6 +60,17 @@ function setupHandler(root = "/__questie_trace_missing__/a/b", traceDataDir = "/
   const configureServer = traceApiPlugin().configureServer as (server: unknown) => void;
   configureServer(server);
   return use.mock.calls[0]?.[0] as Middleware;
+}
+
+/** Sends GET `url` to `handler` and waits for the response. */
+function requester(handler: Middleware) {
+  return async (url: string) => {
+    const response = makeResponse();
+    handler({ url }, response, vi.fn());
+    // Generous: the bucket test starts real processes.
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce(), { timeout: 5000 });
+    return { status: response.statusCode, body: JSON.parse(response.end.mock.calls[0]?.[0]) };
+  };
 }
 
 function makeResponse(): Response {
@@ -140,37 +151,55 @@ describe("traceApiPlugin middleware", () => {
     expect(response.end.mock.calls[0]?.[0]).toContain('Unknown extract entity \\"toString\\"');
   });
 
-  it("should preserve normal API request handling", () => {
+  it("should preserve normal API request handling", async () => {
     const handler = setupHandler();
     const response = makeResponse();
     const next = vi.fn();
 
     handler({ url: "/api/files" }, response, next);
 
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
     expect(response.setHeader).toHaveBeenCalledWith("Content-Type", "application/json");
     expect(response.end).toHaveBeenCalledWith("[]");
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("should list trace-data submissions and serve the sessions of every export in one", () => {
+  it("should list trace-data submissions and serve the sessions of every export in one", async () => {
     const traceDataDir = createTraceData({
       "2026-10/2026-10-01_000000Z_a.json": JSON.stringify({ id: "a", export_string: `${TINY_EXPORT}\n${TINY_EXPORT}` }),
       "2026-10/2026-10-02_000000Z_broken.json": JSON.stringify({ id: "broken", export_string: "not an export" }),
     });
-    const handler = setupHandler(undefined, traceDataDir);
-    const request = (url: string) => {
-      const response = makeResponse();
-      handler({ url }, response, vi.fn());
-      return { status: response.statusCode, body: JSON.parse(response.end.mock.calls[0]?.[0]) };
-    };
+    const request = requester(setupHandler(undefined, traceDataDir));
 
-    expect(request("/api/files/").status).toBe(404);
-    expect(request("/api/file/2026-10-01_000000Z_a.json/sessions").body).toHaveLength(2);
-    expect(request("/api/file/2026-10-01_000000Z_a.json/session/1").body.startedAt).toBe(100.5);
-    expect(request("/api/file/2026-10-02_000000Z_broken.json/sessions").status).toBe(500);
-    expect(request("/api/files").body).toEqual([
+    expect((await request("/api/files/")).status).toBe(404);
+    expect((await request("/api/file/2026-10-01_000000Z_a.json/sessions")).body).toHaveLength(2);
+    expect((await request("/api/file/2026-10-01_000000Z_a.json/session/1")).body.startedAt).toBe(100.5);
+    expect((await request("/api/file/2026-10-02_000000Z_broken.json/sessions")).status).toBe(500);
+    expect((await request("/api/files")).body).toEqual([
       { name: "2026-10-01_000000Z_a.json", sessionCount: 2, error: null },
       { name: "2026-10-02_000000Z_broken.json", sessionCount: null, error: expect.stringMatching(/markers/) },
     ]);
+  });
+
+  it("should list and fetch submissions from the bucket when TRACE_DATA_DIR is not set", async () => {
+    const bucketDir = createTraceData({ "2026-10/2026-10-01_000000Z_a.json": JSON.stringify({ id: "a", export_string: TINY_EXPORT }) });
+    const binDir = mkdtempSync(join(tmpdir(), "fake-rclone-"));
+    tempDirs.push(binDir);
+    // Stands in for rclone: serves bucketDir for lsf and copy (see store/source.ts for the arguments).
+    writeFileSync(
+      join(binDir, "rclone"),
+      `#!/bin/sh
+case "$1" in
+  lsf) cd "${bucketDir}/submissions" && find . -type f | sed 's|^./||' ;;
+  copy) while read -r key; do mkdir -p "$(dirname "$9/$key")"; cp "${bucketDir}/submissions/$key" "$9/$key"; done < "$3" ;;
+esac
+`,
+    );
+    chmodSync(join(binDir, "rclone"), 0o755);
+    vi.stubEnv("PATH", `${binDir}:${process.env.PATH}`);
+    const request = requester(setupHandler(undefined, ""));
+
+    expect((await request("/api/files")).body).toEqual([{ name: "2026-10-01_000000Z_a.json", sessionCount: null, error: null }]);
+    expect((await request("/api/file/2026-10-01_000000Z_a.json/sessions")).body).toHaveLength(1);
   });
 });

@@ -12,4 +12,4 @@ The OVH bucket `trace-intake-ovh` is the only copy of raw submissions, and the e
 - Local disk use is the observation store (a few GB) plus outputs.
 - A full re-run downloads everything again: free, but slower than reading a local copy.
 - Submissions deleted from the bucket (rejections) are dropped from the store. Older submissions holding unobserved copies of their sessions are observed again.
-- The trace-analyzer still reads a local checkout. Keep the mirror until it can fetch from the bucket.
+- The trace-analyzer reads the bucket too, downloading a submission when it is opened. A local mirror is no longer needed.

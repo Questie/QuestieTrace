@@ -1,6 +1,6 @@
 # Trace Analyzer
 
-A React + TypeScript + Vite web application for analyzing QuestieTrace submissions from a [trace-data](https://github.com/Questie/trace-data) checkout.
+A React + TypeScript + Vite web application for analyzing QuestieTrace submissions from the OVH archive bucket (or a local [trace-data](https://github.com/Questie/trace-data) checkout).
 
 ## Overview
 
@@ -26,17 +26,9 @@ npm ci
 
 ## Trace Data
 
-The analyzer reads `TRACE_DATA_DIR`, or by default the `trace-data` checkout next to the QuestieTrace checkout:
+Like the [corrections-extractor](../corrections-extractor/README.md), the analyzer reads the archive bucket through [rclone](https://rclone.org), which must be installed (the team's remote `ovhcloud-de:trace-intake-ovh`, or `TRACE_REMOTE`). It lists the submissions at start and downloads a submission when you open it; opened submissions stay in memory until you click "Reload".
 
-```
-trace-data/
-└── submissions/
-    └── 2026-10/
-        └── 2026-10-01_000000Z_<id>.json
-QuestieTrace/
-└── tools/
-    └── trace-analyzer/     ← this project
-```
+Set `TRACE_DATA_DIR` to read a local `trace-data` checkout instead (`<dir>/submissions/<yyyy-mm>/<stamp>_<id>.json`).
 
 Submissions are decoded natively by the dev server middleware (with the decoder of [`tools/corrections-extractor`](../corrections-extractor/README.md)) when they are opened. A submission holding several exports lists the sessions of all of them.
 
@@ -76,7 +68,7 @@ trace-analyzer/
 ## How It Works
 
 1. **Vite Dev Server** starts with `traceApiPlugin` middleware
-2. Middleware lists the submissions in the trace-data checkout
+2. Middleware lists the submissions in the bucket (or the `TRACE_DATA_DIR` checkout) and downloads one when it is opened
 3. Frontend fetches file list via `/api/files`
 4. User selects a file → fetches sessions via `/api/file/:filename/sessions`
 5. User selects a session → fetches full session via `/api/file/:filename/session/:name`
@@ -95,7 +87,7 @@ Key structures:
 ## Troubleshooting
 
 **No submissions found**
-- Ensure a trace-data checkout exists next to `QuestieTrace/`, or set `TRACE_DATA_DIR`
+- Check the terminal for an rclone error: is the remote `ovhcloud-de` configured (`rclone lsd ovhcloud-de:`)? Set `TRACE_REMOTE` for another remote, or `TRACE_DATA_DIR` for a local checkout
 - Click "Reload" in the UI or call `GET /api/reload`
 
 **Failed to load submission**
