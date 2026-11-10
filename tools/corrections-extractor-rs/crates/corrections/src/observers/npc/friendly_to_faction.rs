@@ -14,15 +14,13 @@
 //! Any other disagreement (several switches, a switch between sessions with the same server time,
 //! a session that saw both, a session without a server time) leaves the faction undecided.
 
-use crate::aggregate::Num;
-use crate::guid::{parse_guid, GuidKind};
+use super::unit_state::unit_state_encounters;
 use crate::observation::{Confidence, Observation, SessionId};
 use crate::probes::{player_faction_at, session_server_time, Faction};
 use indexmap::{IndexMap, IndexSet};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use trace_data::stream::{entry_t, entry_v, get_stream, value_at};
-use trace_data::{KeyRef, Session, Value};
+use std::collections::HashSet;
+use trace_data::Session;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct FactionReactionValue {
@@ -38,17 +36,17 @@ const FRIENDLY_REACTION_MIN: f64 = 4.0;
 pub fn observe(session: &Session) -> Vec<Observation<FactionReactionValue>> {
     let mut observations = Vec::new();
     // `${npcID}:${faction}:${friendly}`
-    let mut seen: HashSet<(Num, Faction, bool)> = HashSet::new();
+    let mut seen: HashSet<(i64, Faction, bool)> = HashSet::new();
     let session_time = session_server_time(session);
-    for encounter in reaction_encounters(session) {
+    for encounter in unit_state_encounters(session, "UnitReaction", &["player"]) {
         let Some(faction) = player_faction_at(session, encounter.t) else { continue };
         let Some(reaction) = encounter.value.as_num() else { continue };
         let friendly = reaction >= FRIENDLY_REACTION_MIN;
-        if !seen.insert((Num(encounter.npc_id), faction, friendly)) {
+        if !seen.insert((encounter.npc_id, faction, friendly)) {
             continue;
         }
         let value = FactionReactionValue { faction, friendly, session_time };
-        observations.push(Observation::new(encounter.npc_id as i64, value, Confidence::High, encounter.t));
+        observations.push(Observation::new(encounter.npc_id, value, Confidence::High, encounter.t));
     }
     observations
 }
@@ -106,85 +104,6 @@ pub fn merge(observations: &[Observation<FactionReactionValue>]) -> Option<&'sta
         (false, true) => Some("H"),
         (false, false) => None,
     }
-}
-
-// --- UnitReaction paired with NPC GUIDs ---
-//
-// A private port of `_unitState.ts` `unitStateEncounters(session, "UnitReaction", "player")`
-// and the npc part of `_guidEncounters.ts`, which are not ported yet (group C). Replace it with
-// `npc::unit_state` once that lands.
-//
-// Both the UnitGUID and the UnitState streams are only written on change, so a value is only
-// trusted at a GUID sample recorded at the same time as the value, or when PLAYER_TARGET_CHANGED
-// or UPDATE_MOUSEOVER_UNIT fired at that time (UnitState samples every token on both, so the
-// last value is still current).
-
-const UNIT_STATE_TOKENS: [&str; 2] = ["target", "mouseover"];
-const UNIT_STATE_SAMPLE_EVENTS: [&str; 2] = ["PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT"];
-
-struct ReactionEncounter<'v, 'a> {
-    npc_id: f64,
-    t: f64,
-    value: &'v Value<'a>,
-}
-
-fn entry_tp(entry: &Value) -> f64 {
-    entry.get("tp").and_then(Value::as_num).unwrap_or(f64::NAN)
-}
-
-/// emulator.ts `valueAt` over a filtered stream.
-fn value_at_entries<'v, 'a>(entries: &[&'v Value<'a>], target: f64) -> Option<&'v Value<'a>> {
-    let (mut lo, mut hi) = (0isize, entries.len() as isize - 1);
-    let mut result = None;
-    while lo <= hi {
-        let mid = ((lo + hi) as usize) >> 1;
-        if entry_t(entries[mid]) <= target {
-            result = Some(mid);
-            lo = mid as isize + 1;
-        } else {
-            hi = mid as isize - 1;
-        }
-    }
-    entry_v(entries[result?])
-}
-
-fn reaction_encounters<'v, 'a>(session: &Session<'v, 'a>) -> Vec<ReactionEncounter<'v, 'a>> {
-    let mut out = Vec::new();
-    let sample_event_times: Vec<f64> =
-        session.events().filter(|event| event.name().is_some_and(|name| UNIT_STATE_SAMPLE_EVENTS.contains(&name))).map(|event| event.t()).collect();
-    for token in UNIT_STATE_TOKENS {
-        let stream = get_stream(session, "UnitReaction", &[KeyRef::Str("player"), KeyRef::Str(token)]).unwrap_or(&[]);
-        let guid_stream = get_stream(session, "UnitGUID", &[KeyRef::Str(token)]).unwrap_or(&[]);
-        let mut guid_tps: HashMap<Num, Vec<f64>> = HashMap::new();
-        for entry in guid_stream {
-            guid_tps.entry(Num(entry_t(entry))).or_default().push(entry_tp(entry));
-        }
-        let sample_times: HashSet<Num> = sample_event_times.iter().copied().chain(stream.iter().map(entry_t)).map(Num).collect();
-
-        for entry in guid_stream {
-            let Some(guid) = entry_v(entry).and_then(Value::as_str) else { continue };
-            let parsed = parse_guid(Some(guid));
-            let (GuidKind::Npc, Some(npc_id)) = (parsed.kind, parsed.id) else { continue };
-            let (t, tp) = (entry_t(entry), entry_tp(entry));
-            if !sample_times.contains(&Num(t)) {
-                continue;
-            }
-            // A later GUID sample in the same frame starts another unit, so its value must not be
-            // used. Relies on UnitInteraction.lua sampling the GUID before UnitState.lua samples
-            // the value (.toc order).
-            let next_tp = guid_tps.get(&Num(t)).and_then(|tps| tps.iter().copied().find(|&other| other > tp));
-            let value = match next_tp {
-                None => value_at(stream, t),
-                Some(next_tp) => {
-                    let before_next: Vec<&Value> = stream.iter().filter(|e| entry_t(e) < t || entry_tp(e) < next_tp).collect();
-                    value_at_entries(&before_next, t)
-                }
-            };
-            let Some(value) = value else { continue };
-            out.push(ReactionEncounter { npc_id, t, value });
-        }
-    }
-    out
 }
 
 #[cfg(test)]
