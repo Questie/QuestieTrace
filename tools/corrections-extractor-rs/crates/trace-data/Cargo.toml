@@ -6,6 +6,7 @@ publish.workspace = true
 description = "Reads QuestieTrace submissions: export decoding, CBOR and a lazy session view"
 
 [dependencies]
+flate2.workspace = true
 libdeflater.workspace = true
 memchr.workspace = true
 ryu-js.workspace = true
