@@ -8,6 +8,7 @@ pub mod guid;
 pub mod item_link;
 pub mod js;
 pub mod lua;
+pub mod memory;
 pub mod observation;
 pub mod observe;
 pub mod observers;

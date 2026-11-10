@@ -46,6 +46,12 @@ pub type QuestReputationRewardValue = Vec<(f64, f64)>;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FactionRecord(Vec<(f64, f64)>);
 
+impl crate::memory::HeapSize for FactionRecord {
+    fn heap_size(&self) -> usize {
+        self.0.capacity() * std::mem::size_of::<(f64, f64)>()
+    }
+}
+
 impl FactionRecord {
     /// Whether `String(id)` is an array index, which JS orders before other keys.
     fn is_array_index(id: f64) -> bool {

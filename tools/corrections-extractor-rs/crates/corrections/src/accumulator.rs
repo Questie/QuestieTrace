@@ -3,6 +3,7 @@
 //! (Which session copies are folded at all is decided in run.rs.)
 
 use crate::aggregate::{Num, ObservationsByEntity, ScalarSummary, SessionScalars};
+use crate::memory::FieldMemory;
 use crate::observation::{Localized, Observation, SessionId, Sessions};
 use crate::observe::{StagedLookups, StagedSession};
 use crate::observers::item::{npc_drops::NpcDrop, object_drops::ObjectDrop};
@@ -159,4 +160,56 @@ impl Accumulator {
 
         self.lookups.add(lookups, s, sessions);
     }
+}
+
+impl Accumulator {
+    /// Approximate memory per field, largest first (`--stats`).
+    pub fn memory_report(&self) -> Vec<FieldMemory> {
+        let mut report = Vec::new();
+        let mut add = |field: &'static str, (rows, bytes): (usize, usize)| report.push(FieldMemory { field, rows, bytes });
+        add("zoneOrSort (scalar)", self.zone_or_sort.memory());
+        add("questName (scalar)", self.quest_name.memory());
+        add("questLevel (scalar)", self.quest_level.memory());
+        add("objectivesText (scalar)", self.objectives_text.memory());
+        add("objectiveCount (scalar)", self.objective_count.memory());
+        add("npcName (scalar)", self.npc_name.memory());
+        add("itemName (scalar)", self.item_name.memory());
+        add("objectName (scalar)", self.object_name.memory());
+        add("requiredLevel", self.required_level.memory());
+        add("objectives", self.objectives.memory());
+        add("triggerEnd", self.trigger_end.memory());
+        add("startedBy", self.started_by.memory());
+        add("finishedBy", self.finished_by.memory());
+        add("reputationReward", self.reputation_reward.memory());
+        add("questXp", self.quest_xp.memory());
+        add("questFactions", self.quest_factions.memory());
+        let poi = self.turn_in_poi.capacity() * std::mem::size_of::<Observation<TurnInPoiValue>>();
+        add("turnInPoi", (self.turn_in_poi.len(), poi));
+        add("npcSpawns", self.npc_spawns.memory());
+        add("npcLevel", self.npc_level.memory());
+        add("npcFriendlyToFaction", self.npc_friendly_to_faction.memory());
+        add("npcRank", self.npc_rank.memory());
+        add("npcDrops", self.npc_drops.memory());
+        add("objectDrops", self.object_drops.memory());
+        add("objectSpawns", self.object_spawns.memory());
+        let lookups = [
+            ("lookup npcName", sum_locales(&self.lookups.npc_name)),
+            ("lookup questName", sum_locales(&self.lookups.quest_name)),
+            ("lookup objectivesText", sum_locales(&self.lookups.objectives_text)),
+            ("lookup itemName", sum_locales(&self.lookups.item_name)),
+            ("lookup objectName", sum_locales(&self.lookups.object_name)),
+        ];
+        for (field, memory) in lookups {
+            add(field, memory);
+        }
+        report.sort_by_key(|line| std::cmp::Reverse(line.bytes));
+        report
+    }
+}
+
+fn sum_locales<T: Eq + Hash + crate::memory::HeapSize>(by_locale: &IndexMap<String, ScalarSummary<T>>) -> (usize, usize) {
+    by_locale
+        .values()
+        .map(ScalarSummary::memory)
+        .fold((0, 0), |(r, b), (rows, bytes)| (r + rows, b + bytes))
 }
