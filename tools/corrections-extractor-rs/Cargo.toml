@@ -11,7 +11,8 @@ trace-data = { path = "crates/trace-data" }
 indexmap = "2"
 libdeflater = "1.26"
 memchr = "2"
-rayon = "1"
+mimalloc = { version = "0.1", default-features = false }
+rustc-hash = "2"
 ryu-js = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }

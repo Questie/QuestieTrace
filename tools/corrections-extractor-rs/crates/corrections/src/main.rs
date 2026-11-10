@@ -2,6 +2,11 @@
 //! trace-data checkout. See README.md.
 
 use corrections::run::{run, Options};
+
+/// Decoding allocates many small values on every thread; the system allocator contends on them.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -75,17 +80,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Some(threads) = args.threads {
-        if let Err(e) = rayon::ThreadPoolBuilder::new().num_threads(threads).build_global() {
-            eprintln!("Could not start {threads} threads: {e}");
-            return ExitCode::FAILURE;
-        }
-    }
+    let threads = args.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from));
     let started = Instant::now();
     let options = Options {
         trace_data: args.trace_data,
         output: args.output.clone(),
         sample_percent: args.sample_percent,
+        threads,
     };
     match run(&options, &|line| eprintln!("{line}")) {
         Ok(meta) => {

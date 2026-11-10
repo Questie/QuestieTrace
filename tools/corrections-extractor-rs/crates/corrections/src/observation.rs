@@ -105,7 +105,7 @@ impl Sessions {
 }
 
 /// A value observed under a client locale (`GetLocale()`), for translations.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Localized<T> {
     pub locale: String,
     pub value: T,

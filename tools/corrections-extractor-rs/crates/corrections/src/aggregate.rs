@@ -4,9 +4,12 @@
 //! to the most recently observed one, then to the value seen first. Fields whose merge is not
 //! "pick one winner" keep every observation and merge them themselves.
 
-use crate::observation::{Confidence, Observation, SessionId, Sessions};
+use crate::observation::{Confidence, Localized, Observation, SessionId, Sessions};
 use indexmap::IndexMap;
+use rustc_hash::FxBuildHasher;
 use std::cmp::Ordering;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 /// One merged value per entity.
@@ -65,53 +68,157 @@ pub struct ScalarGroup<T> {
     pub newest_session_time: Option<f64>,
 }
 
+/// One session's observations of a scalar field, merged per entity and value in the order they
+/// were first observed. The observing thread builds it, so the fold adds one group per value
+/// instead of every observation (a session repeats the same quest level hundreds of times).
+pub struct SessionScalars<T> {
+    groups: Vec<SessionGroup<T>>,
+}
+
+struct SessionGroup<T> {
+    entity_id: i64,
+    value: T,
+    confidence: Confidence,
+    count: usize,
+    /// The first observation's t, which starts a new group's latest_t.
+    first_t: f64,
+    /// The largest t that is not NaN; NaN when every t is.
+    max_t: f64,
+}
+
+impl<T> Default for SessionScalars<T> {
+    fn default() -> Self {
+        SessionScalars { groups: Vec::new() }
+    }
+}
+
+impl<T: Clone + Eq + Hash> SessionScalars<T> {
+    pub fn new(observations: Vec<Observation<T>>) -> Self {
+        let mut positions: HashMap<(i64, T), usize, FxBuildHasher> = HashMap::default();
+        let mut groups: Vec<SessionGroup<T>> = Vec::new();
+        for obs in observations {
+            match positions.entry((obs.entity_id, obs.value)) {
+                Entry::Occupied(at) => {
+                    let group = &mut groups[*at.get()];
+                    group.count += 1;
+                    group.confidence = group.confidence.max(obs.confidence);
+                    if obs.t > group.max_t || (group.max_t.is_nan() && !obs.t.is_nan()) {
+                        group.max_t = obs.t;
+                    }
+                }
+                Entry::Vacant(slot) => {
+                    let (entity_id, value) = slot.key().clone();
+                    slot.insert(groups.len());
+                    groups.push(SessionGroup {
+                        entity_id,
+                        value,
+                        confidence: obs.confidence,
+                        count: 1,
+                        first_t: obs.t,
+                        max_t: obs.t,
+                    });
+                }
+            }
+        }
+        SessionScalars { groups }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+}
+
+impl<T: Clone + Eq + Hash> SessionScalars<Localized<T>> {
+    /// Splits translations by locale, keeping the first-observed order within each.
+    pub fn by_locale(self) -> impl Iterator<Item = (String, SessionScalars<T>)> {
+        let mut by_locale: IndexMap<String, SessionScalars<T>> = IndexMap::new();
+        for group in self.groups {
+            let Localized { locale, value } = group.value;
+            let part = SessionGroup {
+                entity_id: group.entity_id,
+                value,
+                confidence: group.confidence,
+                count: group.count,
+                first_t: group.first_t,
+                max_t: group.max_t,
+            };
+            by_locale.entry(locale).or_default().groups.push(part);
+        }
+        by_locale.into_iter()
+    }
+}
+
 /// Per entity, the distinct values observed, in the order they were first observed.
 pub struct ScalarSummary<T: Eq + Hash> {
-    entities: IndexMap<i64, IndexMap<T, ScalarGroup<T>>>,
+    entities: IndexMap<i64, IndexMap<T, ScalarGroup<T>, FxBuildHasher>, FxBuildHasher>,
 }
 
 impl<T: Eq + Hash> Default for ScalarSummary<T> {
     fn default() -> Self {
-        ScalarSummary { entities: IndexMap::new() }
+        ScalarSummary { entities: IndexMap::default() }
     }
 }
 
 impl<T: Clone + Eq + Hash> ScalarSummary<T> {
     /// aggregate.ts `addToScalarSummary`. Observations of one session must be added together.
     pub fn add(&mut self, observations: impl IntoIterator<Item = Observation<T>>, sessions: &Sessions) {
+        let mut run: Vec<Observation<T>> = Vec::new();
         for obs in observations {
-            let session_time = sessions.server_time(obs.session);
-            let groups = self.entities.entry(obs.entity_id).or_default();
-            match groups.get_mut(&obs.value) {
-                None => {
-                    groups.insert(
-                        obs.value.clone(),
-                        ScalarGroup {
-                            value: obs.value,
-                            confidence: obs.confidence,
-                            count: 1,
-                            latest_t: obs.t,
-                            timed_session_count: usize::from(session_time.is_some()),
-                            last_session: obs.session,
-                            newest_session_time: session_time,
-                        },
-                    );
+            if run.last().is_some_and(|last| last.session != obs.session) {
+                let session = run[0].session;
+                self.add_session(SessionScalars::new(std::mem::take(&mut run)), session, sessions);
+            }
+            run.push(obs);
+        }
+        if let Some(first) = run.first() {
+            let session = first.session;
+            self.add_session(SessionScalars::new(run), session, sessions);
+        }
+    }
+
+    /// Adds one session's observations, already merged per entity and value.
+    pub fn add_session(&mut self, scalars: SessionScalars<T>, session: SessionId, sessions: &Sessions) {
+        let session_time = sessions.server_time(session);
+        for group in scalars.groups {
+            self.add_group(group, session, session_time);
+        }
+    }
+
+    /// Merges a session's group into the entity's group of the same value, exactly as adding its
+    /// observations one by one would.
+    fn add_group(&mut self, part: SessionGroup<T>, session: SessionId, session_time: Option<f64>) {
+        let groups = self.entities.entry(part.entity_id).or_default();
+        match groups.get_mut(&part.value) {
+            None => {
+                // The first observation sets latest_t; later ones raise it (a NaN first t sticks).
+                let latest_t = if part.max_t > part.first_t { part.max_t } else { part.first_t };
+                groups.insert(
+                    part.value.clone(),
+                    ScalarGroup {
+                        value: part.value,
+                        confidence: part.confidence,
+                        count: part.count,
+                        latest_t,
+                        timed_session_count: usize::from(session_time.is_some()),
+                        last_session: session,
+                        newest_session_time: session_time,
+                    },
+                );
+            }
+            Some(group) => {
+                group.count += part.count;
+                group.confidence = group.confidence.max(part.confidence);
+                if part.max_t > group.latest_t {
+                    group.latest_t = part.max_t;
                 }
-                Some(group) => {
-                    group.count += 1;
-                    group.confidence = group.confidence.max(obs.confidence);
-                    if obs.t > group.latest_t {
-                        group.latest_t = obs.t;
-                    }
-                    // Observations of one session are added together, so a new id means a new session.
-                    if session_time.is_some() && obs.session != group.last_session {
-                        group.timed_session_count += 1;
-                    }
-                    group.last_session = obs.session;
-                    if let Some(time) = session_time {
-                        if group.newest_session_time.is_none_or(|newest| time > newest) {
-                            group.newest_session_time = Some(time);
-                        }
+                // A new session id means a new session: one session's groups come together.
+                if session_time.is_some() && session != group.last_session {
+                    group.timed_session_count += 1;
+                }
+                group.last_session = session;
+                if let Some(time) = session_time {
+                    if group.newest_session_time.is_none_or(|newest| time > newest) {
+                        group.newest_session_time = Some(time);
                     }
                 }
             }
@@ -189,12 +296,12 @@ fn to_fact<T: Clone>(winner: &ScalarGroup<T>, groups: &[&ScalarGroup<T>]) -> Fac
 
 /// Custom-merge fields: every observation, grouped by entity in the order they were added.
 pub struct ObservationsByEntity<T> {
-    entities: IndexMap<i64, Vec<Observation<T>>>,
+    entities: IndexMap<i64, Vec<Observation<T>>, FxBuildHasher>,
 }
 
 impl<T> Default for ObservationsByEntity<T> {
     fn default() -> Self {
-        ObservationsByEntity { entities: IndexMap::new() }
+        ObservationsByEntity { entities: IndexMap::default() }
     }
 }
 

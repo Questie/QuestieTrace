@@ -1,8 +1,8 @@
 //! A full extraction run over a local trace-data checkout. Ports the parts of
 //! `extract-corrections.ts` that remain without the incremental store.
 //!
-//! Submissions are read newest first. A window of them is decoded and observed in parallel,
-//! then folded in order on this thread, so of each session only the first copy met (the
+//! Submissions are read newest first, decoded and observed on worker threads, and folded in
+//! order on this thread, so of each session only the first copy met (the
 //! newest, so the most complete) is used. Exports are cumulative: one session shows up in
 //! many submissions.
 
@@ -10,20 +10,23 @@ use crate::finalize::{finalize, Bundle};
 use crate::fold::Accumulator;
 use crate::lua::iso_timestamp;
 use crate::observe::{observe_session, StagedSession, MAX_IDS};
-use rayon::prelude::*;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Condvar, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use trace_data::source::{in_sample, list_submissions, SubmissionFile};
 use trace_data::submission::Submission;
-use trace_data::{Decompressor, SessionKey};
+use trace_data::{Inflater, SessionKey};
 
 pub struct Options {
     pub trace_data: PathBuf,
     pub output: PathBuf,
     /// Only this percentage of submissions, the same ones every run.
     pub sample_percent: Option<f64>,
+    /// Worker threads decoding and observing submissions.
+    pub threads: usize,
 }
 
 /// meta.json: what a run read. Field names and order are those of the TS tool.
@@ -78,8 +81,8 @@ struct ObservedSession {
 
 /// Decodes and observes one submission. Sessions in `used` were folded from newer
 /// submissions: their copies here are duplicates and not observed.
-fn observe_submission(file: &SubmissionFile, decompressor: &mut Decompressor, used: &HashSet<SessionKey>) -> ObservedSubmission {
-    let submission = Submission::read(&file.path, decompressor);
+fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, used: &RwLock<HashSet<SessionKey>>) -> ObservedSubmission {
+    let submission = Submission::read(&file.path, inflater);
     let decoded = submission.decode();
     // Only the first copy of a session in a submission is used.
     let mut seen = HashSet::new();
@@ -87,7 +90,7 @@ fn observe_submission(file: &SubmissionFile, decompressor: &mut Decompressor, us
     for trace in &decoded.traces {
         for session in trace.sessions() {
             let key = session.key();
-            let duplicate = key.is_some_and(|k| used.contains(&k) || !seen.insert(k));
+            let duplicate = key.is_some_and(|k| !seen.insert(k) || used.read().expect("no thread panics holding the lock").contains(&k));
             let staged = if duplicate { None } else { observe_session(&session, &MAX_IDS) };
             sessions.push(ObservedSession { key, duplicate, staged });
         }
@@ -106,7 +109,6 @@ fn observe_submission(file: &SubmissionFile, decompressor: &mut Decompressor, us
 /// What the fold tallies besides the accumulator.
 #[derive(Default)]
 struct Tally {
-    used_keys: HashSet<SessionKey>,
     submission_ids: Vec<String>,
     export_count: usize,
     skipped_files: Vec<SkippedFile>,
@@ -114,7 +116,7 @@ struct Tally {
     duplicates: usize,
 }
 
-fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally) {
+fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally, used: &RwLock<HashSet<SessionKey>>) {
     if let Some(error) = submission.error {
         tally.skipped_files.push(SkippedFile { name: submission.key, error });
         return;
@@ -129,9 +131,13 @@ fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally
     }
     let contributor = Some(submission.contributor_id.as_str()).filter(|c| !c.is_empty());
     for session in submission.sessions {
-        // A copy marked while observing, or one whose key an earlier submission of the same
-        // window used: the observing thread could not know.
-        if session.duplicate || session.key.is_some_and(|key| !tally.used_keys.insert(key)) {
+        // A copy marked while observing, or one whose key a submission folded meanwhile used:
+        // the observing thread could not know yet.
+        if session.duplicate
+            || session
+                .key
+                .is_some_and(|key| !used.write().expect("no thread panics holding the lock").insert(key))
+        {
             tally.duplicates += 1;
             continue;
         }
@@ -141,9 +147,64 @@ fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally
     }
 }
 
-/// Submissions observed in parallel before folding them in order.
-fn window_size() -> usize {
-    rayon::current_num_threads() * 8
+/// Observes `files` on `threads` worker threads and hands the results to `fold` on this thread,
+/// in the order of `files`. Workers claim one submission at a time and stay at most
+/// `AHEAD_PER_THREAD * threads` submissions ahead of the fold, so a large submission never holds
+/// the others up and memory stays bounded.
+fn observe_in_order(
+    files: &[SubmissionFile],
+    threads: usize,
+    used: &RwLock<HashSet<SessionKey>>,
+    mut fold: impl FnMut(ObservedSubmission),
+    log: &dyn Fn(&str),
+) {
+    const AHEAD_PER_THREAD: usize = 4;
+    const PROGRESS_EVERY: usize = 2000;
+    let ahead = threads * AHEAD_PER_THREAD;
+    let next = AtomicUsize::new(0);
+    let folded = (Mutex::new(0usize), Condvar::new());
+    let (results, received) = mpsc::channel::<(usize, ObservedSubmission)>();
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            let results = results.clone();
+            let (next, folded) = (&next, &folded);
+            scope.spawn(move || {
+                let mut inflater = Inflater::new();
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    if index >= files.len() {
+                        return;
+                    }
+                    let (count, advanced) = folded;
+                    let mut done = count.lock().expect("no thread panics holding the lock");
+                    while index >= *done + ahead {
+                        done = advanced.wait(done).expect("no thread panics holding the lock");
+                    }
+                    drop(done);
+                    let observed = observe_submission(&files[index], &mut inflater, used);
+                    if results.send((index, observed)).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(results);
+        let mut pending: HashMap<usize, ObservedSubmission> = HashMap::new();
+        let mut expected = 0;
+        for (index, observed) in received {
+            pending.insert(index, observed);
+            while let Some(observed) = pending.remove(&expected) {
+                fold(observed);
+                expected += 1;
+                *folded.0.lock().expect("no thread panics holding the lock") = expected;
+                folded.1.notify_all();
+                if expected % PROGRESS_EVERY == 0 || expected == files.len() {
+                    log(&format!("[{expected}/{}] submissions observed", files.len()));
+                }
+            }
+        }
+        assert_eq!(expected, files.len(), "a worker stopped before observing every submission");
+    });
 }
 
 /// Runs the extraction and writes every output file; meta.json last, as the mark of a complete run.
@@ -160,28 +221,31 @@ pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
 
     let mut acc = Accumulator::default();
     let mut tally = Tally::default();
-    let window = window_size();
-    for (index, chunk) in files.chunks(window).enumerate() {
-        let used = &tally.used_keys;
-        let observed: Vec<ObservedSubmission> = chunk
-            .par_iter()
-            .map_init(Decompressor::new, |d, file| observe_submission(file, d, used))
-            .collect();
-        for submission in observed {
-            fold(submission, &mut acc, &mut tally);
-        }
-        let done = ((index + 1) * window).min(files.len());
-        if done % (window * 16) < window || done == files.len() {
-            log(&format!("[{done}/{}] submissions observed", files.len()));
-        }
-    }
+    let used = RwLock::new(HashSet::new());
+    let started = std::time::Instant::now();
+    let mut folding = std::time::Duration::ZERO;
+    observe_in_order(
+        &files,
+        options.threads.max(1),
+        &used,
+        |observed| {
+            let fold_started = std::time::Instant::now();
+            fold(observed, &mut acc, &mut tally, &used);
+            folding += fold_started.elapsed();
+        },
+        log,
+    );
+    log(&format!("Folding took {:.1}s of that", folding.as_secs_f64()));
+    log(&format!("Observed and folded in {:.1}s", started.elapsed().as_secs_f64()));
     if tally.submission_ids.is_empty() {
         return Err("No submission could be loaded; keeping the previous output".into());
     }
 
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default();
     let generated_at = iso_timestamp(millis);
+    let finalize_started = std::time::Instant::now();
     let bundle = finalize(&acc, tally.submission_ids.len(), &generated_at);
+    log(&format!("Finalized in {:.1}s", finalize_started.elapsed().as_secs_f64()));
     let meta = Meta {
         session_count: acc.session_count(),
         submission_count: tally.submission_ids.len(),
