@@ -420,7 +420,7 @@ impl<'a> Lazy<'a> {
                 // Other keys are ignored, but their names must be UTF-8 to compare equal later.
                 other => {
                     std::str::from_utf8(other).ok()?;
-                    skip_value(&mut cursor)?;
+                    cursor.skip_trusted(1);
                     continue;
                 }
             };
@@ -432,7 +432,7 @@ impl<'a> Lazy<'a> {
                 (0, Item::Str(name)) => header.name = Some(std::str::from_utf8(name).ok()?),
                 (1, Item::Num(t)) => header.t = t,
                 (2, Item::Num(tp)) => header.tp = tp,
-                (_, item @ (Item::Array(_) | Item::Map(_))) => skip_rest(&mut cursor, item)?,
+                (_, item @ (Item::Array(_) | Item::Map(_))) => skip_children(&mut cursor, item),
                 _ => {}
             }
         }
@@ -444,6 +444,7 @@ impl<'a> Lazy<'a> {
             let mut decoder = Decoder {
                 cursor: Cursor::new(self.raw),
                 last_table_integer_keyed: false,
+                validated: true,
             };
             let value = decoder
                 .value(self.depth, self.decode_as)
@@ -453,25 +454,13 @@ impl<'a> Lazy<'a> {
     }
 }
 
-/// Skips one already validated value.
-fn skip_value(cursor: &mut Cursor) -> Option<()> {
-    let item = cursor.item().ok()?;
-    skip_rest(cursor, item)
-}
-
-/// Skips the items of an already validated container whose header was read.
-fn skip_rest(cursor: &mut Cursor, header: Item) -> Option<()> {
-    let count = match header {
-        Item::Array(n) => n,
-        Item::Map(n) => n * 2.0,
-        _ => return Some(()),
-    };
-    let mut i = 0.0;
-    while i < count {
-        i += 1.0;
-        skip_value(cursor)?;
+/// Skips the children of an already validated container whose header was read.
+fn skip_children(cursor: &mut Cursor, header: Item) {
+    match header {
+        Item::Array(n) => cursor.skip_trusted(n as u64),
+        Item::Map(n) => cursor.skip_trusted(n as u64 * 2),
+        _ => {}
     }
-    Some(())
 }
 
 /// Where a value sits in a trace file, deciding which values stay lazy.
@@ -522,6 +511,7 @@ pub fn decode_trace(bytes: &[u8]) -> Result<Option<Value<'_>>> {
     let mut decoder = Decoder {
         cursor: Cursor::new(bytes),
         last_table_integer_keyed: false,
+        validated: false,
     };
     let value = decoder.value(1, Context::Root)?;
     if !decoder.cursor.is_done() {
@@ -535,6 +525,7 @@ pub fn decode_value(bytes: &[u8]) -> Result<Option<Value<'_>>> {
     let mut decoder = Decoder {
         cursor: Cursor::new(bytes),
         last_table_integer_keyed: false,
+        validated: false,
     };
     let value = decoder.value(1, Context::Plain)?;
     if !decoder.cursor.is_done() {
@@ -547,6 +538,9 @@ struct Decoder<'a> {
     cursor: Cursor<'a>,
     /// Whether the table decoded last had only positive integer keys (and at least one).
     last_table_integer_keyed: bool,
+    /// The bytes were validated before (a lazy value being decoded): nested lazy values need
+    /// their shape, not another validation.
+    validated: bool,
 }
 
 fn depth_error() -> CborError {
@@ -700,7 +694,11 @@ impl<'a> Decoder<'a> {
     /// Validates one value without decoding it; records its shape for the parent.
     fn lazy(&mut self, depth: u32, decode_as: Context) -> Result<Option<Value<'a>>> {
         let start = self.cursor.pos();
-        let shape = self.skip(depth, true)?;
+        let shape = if self.validated {
+            self.validated_shape(depth)?
+        } else {
+            self.skip(depth, true)?
+        };
         let raw = self.cursor.slice_from(start);
         Ok(match shape {
             Shape::Nil => None,
@@ -720,6 +718,55 @@ impl<'a> Decoder<'a> {
                 }))
             }
         })
+    }
+
+    /// The shape `skip` would report, for bytes validated before: walked without error checks
+    /// (a map that deletes keys still takes the exact replay).
+    fn validated_shape(&mut self, depth: u32) -> Result<Shape> {
+        match self.cursor.item()? {
+            Item::Num(_) | Item::Str(_) | Item::Bool(_) => Ok(Shape::Scalar),
+            Item::Nil => Ok(Shape::Nil),
+            Item::Array(length) => {
+                let mut present = false;
+                let mut i = 0.0;
+                while i < length {
+                    i += 1.0;
+                    // 0xf6 and 0xf7 are null and undefined: nil.
+                    present |= !matches!(self.cursor.peek_byte(), Some(0xf6 | 0xf7));
+                    self.cursor.skip_trusted(1);
+                }
+                Ok(Shape::Table { integer_keyed: present })
+            }
+            Item::Map(length) => {
+                let first_key = self.cursor.pos();
+                let mut has_other_key = false;
+                let mut has_kept_key = false;
+                let mut i = 0.0;
+                while i < length {
+                    i += 1.0;
+                    let key = match self.cursor.item()? {
+                        Item::Num(n) => Some(SkippedKey::Num(n)),
+                        Item::Str(bytes) => Some(SkippedKey::Str(bytes)),
+                        container @ (Item::Array(_) | Item::Map(_)) => {
+                            skip_children(&mut self.cursor, container);
+                            None
+                        }
+                        _ => None,
+                    };
+                    if matches!(self.cursor.peek_byte(), Some(0xf6 | 0xf7)) {
+                        self.cursor.set_pos(first_key);
+                        return self.map_shape_with_deletes(length, depth);
+                    }
+                    self.cursor.skip_trusted(1);
+                    let Some(key) = key else { continue };
+                    has_kept_key = true;
+                    has_other_key |= !key.is_positive_integer();
+                }
+                Ok(Shape::Table {
+                    integer_keyed: has_kept_key && !has_other_key,
+                })
+            }
+        }
     }
 
     /// Walks one value, reporting every error `value` would. With `want_shape`, also works out
