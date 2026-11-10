@@ -60,4 +60,14 @@ describe("FilePicker", () => {
     expect(screen.queryByRole("option")).toBeNull();
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("should tell assistive technology its name, its list and the highlighted file", () => {
+    const { input } = open();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+
+    expect(screen.getByRole("combobox", { name: "Search submissions" })).toBe(input);
+    expect(input.getAttribute("aria-controls")).toBe(screen.getByRole("listbox").id);
+    expect(document.getElementById(input.getAttribute("aria-activedescendant")!)).toHaveTextContent("2026-11-07_120000Z_b.json");
+  });
 });

@@ -32,6 +32,7 @@ export function useSessionList(fileName: string | null) {
   useEffect(() => {
     if (!fileName) {
       setSessions([]);
+      setLoading(false);
       return;
     }
     // Drop the previous file's sessions, and ignore its answer if it arrives late.
@@ -63,6 +64,7 @@ export function useSession(fileName: string | null, sessionIndex: number | null)
   useEffect(() => {
     if (!fileName || sessionIndex === null) {
       setSession(null);
+      setLoading(false);
       return;
     }
     // Drop the previous session, and ignore its answer if it arrives late.

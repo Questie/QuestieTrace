@@ -62,12 +62,13 @@ export function traceApiPlugin(): Plugin {
         source.release(dir);
       }
     } catch (e) {
+      if (startedIn !== generation) return reloadedAgain(fileName);
       const error = e instanceof Error ? e.message : String(e);
-      if (startedIn === generation) loadErrors.set(fileName, error);
+      loadErrors.set(fileName, error);
       console.error(`[trace-api] Failed to fetch ${fileName}: ${error}`);
       return null;
     }
-    if (startedIn !== generation) return null;
+    if (startedIn !== generation) return reloadedAgain(fileName);
     if (submission.error) {
       loadErrors.set(fileName, submission.error);
       console.error(`[trace-api] Failed to load ${fileName}: ${submission.error}`);
@@ -84,6 +85,12 @@ export function traceApiPlugin(): Plugin {
       `[trace-api] Loaded ${data.sessions.length} session(s) from ${fileName}`
     );
     return data;
+  }
+
+  /** A load overtaken by a reload: load the file again from the new listing, if it still has it. */
+  async function reloadedAgain(fileName: string): Promise<TraceFile | null> {
+    await listing;
+    return traceFileKeys.has(fileName) ? getOrLoad(fileName) : null;
   }
 
   async function refreshFileList(): Promise<void> {
