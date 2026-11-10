@@ -818,6 +818,10 @@ impl Value<'_> {
     }
 }
 
+// A slot costs nothing over an entry (the key's niche holds None), which lets `into_entries`
+// reuse the slots' allocation.
+const _: () = assert!(std::mem::size_of::<Option<(JsKey, Value)>>() == std::mem::size_of::<(JsKey, Value)>());
+
 /// Tables up to this size find keys by scanning; larger ones keep a hash index.
 const SCAN_LIMIT: usize = 16;
 
@@ -879,9 +883,11 @@ impl<'a> TableBuilder<'a> {
         }
     }
 
-    /// The live entries, in insertion order.
+    /// The live entries, in insertion order. `filter_map` over the owned slots collects in place
+    /// (an entry and its slot have the same size, see below), so no second vector is allocated.
     fn into_entries(self) -> Vec<(JsKey<'a>, Value<'a>)> {
-        self.slots.into_iter().flatten().collect()
+        #[allow(clippy::filter_map_identity, reason = "flatten() would not collect in place")]
+        self.slots.into_iter().filter_map(|slot| slot).collect()
     }
 }
 
