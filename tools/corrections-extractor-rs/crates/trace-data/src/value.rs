@@ -54,6 +54,14 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// An event's name and times, read without decoding the event when it has not been yet.
+    pub fn event_header(&self) -> Option<EventHeader<'a>> {
+        match self {
+            Value::Lazy(lazy) => lazy.event_header(),
+            _ => None,
+        }
+    }
+
     /// JS `Array.isArray`.
     pub fn is_array(&self) -> bool {
         matches!(self.resolved(), Value::Array(_))
@@ -377,7 +385,60 @@ pub struct Lazy<'a> {
     decoded: OnceCell<Box<Value<'a>>>,
 }
 
+/// An event's name (`e`) and times (`t`, `tp`; NaN when not numbers).
+pub struct EventHeader<'a> {
+    pub name: Option<&'a str>,
+    pub t: f64,
+    pub tp: f64,
+}
+
 impl<'a> Lazy<'a> {
+    /// Reads an undecoded event's header straight from its bytes. None whenever decoding could
+    /// tell a different story (not a map, a repeated, deleted or non-string key, invalid UTF-8),
+    /// so the caller decodes it instead.
+    fn event_header(&self) -> Option<EventHeader<'a>> {
+        if self.decoded.get().is_some() || self.decode_as != Context::Event {
+            return None;
+        }
+        let mut cursor = Cursor::new(self.raw);
+        let Ok(Item::Map(length)) = cursor.item() else { return None };
+        let mut header = EventHeader {
+            name: None,
+            t: f64::NAN,
+            tp: f64::NAN,
+        };
+        let mut seen = [false; 4];
+        let mut i = 0.0;
+        while i < length {
+            i += 1.0;
+            let Ok(Item::Str(key)) = cursor.item() else { return None };
+            let slot = match key {
+                b"e" => 0,
+                b"t" => 1,
+                b"tp" => 2,
+                b"a" => 3,
+                // Other keys are ignored, but their names must be UTF-8 to compare equal later.
+                other => {
+                    std::str::from_utf8(other).ok()?;
+                    skip_value(&mut cursor)?;
+                    continue;
+                }
+            };
+            if std::mem::replace(&mut seen[slot], true) {
+                return None;
+            }
+            match (slot, cursor.item().ok()?) {
+                (_, Item::Nil) => return None,
+                (0, Item::Str(name)) => header.name = Some(std::str::from_utf8(name).ok()?),
+                (1, Item::Num(t)) => header.t = t,
+                (2, Item::Num(tp)) => header.tp = tp,
+                (_, item @ (Item::Array(_) | Item::Map(_))) => skip_rest(&mut cursor, item)?,
+                _ => {}
+            }
+        }
+        Some(header)
+    }
+
     fn get(&self) -> &Value<'a> {
         self.decoded.get_or_init(|| {
             let mut decoder = Decoder {
@@ -392,6 +453,27 @@ impl<'a> Lazy<'a> {
     }
 }
 
+/// Skips one already validated value.
+fn skip_value(cursor: &mut Cursor) -> Option<()> {
+    let item = cursor.item().ok()?;
+    skip_rest(cursor, item)
+}
+
+/// Skips the items of an already validated container whose header was read.
+fn skip_rest(cursor: &mut Cursor, header: Item) -> Option<()> {
+    let count = match header {
+        Item::Array(n) => n,
+        Item::Map(n) => n * 2.0,
+        _ => return Some(()),
+    };
+    let mut i = 0.0;
+    while i < count {
+        i += 1.0;
+        skip_value(cursor)?;
+    }
+    Some(())
+}
+
 /// Where a value sits in a trace file, deciding which values stay lazy.
 #[derive(Clone, Copy, PartialEq)]
 enum Context {
@@ -400,6 +482,10 @@ enum Context {
     Session,
     Functions,
     Events,
+    /// An event: validated now, decoded as [`Context::Event`] on first read. Observers read
+    /// every event's name and times (straight from the bytes, see [`Value::event_header`]) but
+    /// the rest of an event only when it matters.
+    LazyEvent,
     Event,
     /// Decoded in full.
     Plain,
@@ -424,7 +510,7 @@ impl Context {
             Context::Session if name("events") => Context::Events,
             Context::Functions => Context::LazyStream,
             Context::Stream => Context::Stream,
-            Context::Events => Context::Event,
+            Context::Events => Context::LazyEvent,
             Context::Event if name("a") => Context::Lazy,
             _ => Context::Plain,
         }
@@ -486,6 +572,7 @@ impl<'a> Decoder<'a> {
         match context {
             Context::Lazy => return self.lazy(depth, Context::Plain),
             Context::LazyStream => return self.lazy(depth, Context::Stream),
+            Context::LazyEvent => return self.lazy(depth, Context::Event),
             _ => {}
         }
         self.check_container_depth(depth)?;
