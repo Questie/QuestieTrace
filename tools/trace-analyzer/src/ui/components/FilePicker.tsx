@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 /** Matches rendered at once: a native <select> with every submission (100k+) freezes the page. */
 const MAX_SHOWN = 100;
@@ -15,6 +15,7 @@ export function FilePicker({ files, value, onSelect }: FilePickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  const listId = useId();
 
   const newestFirst = useMemo(() => [...files].reverse(), [files]);
   const matches = useMemo(() => {
@@ -33,7 +34,11 @@ export function FilePicker({ files, value, onSelect }: FilePickerProps) {
     <div className="file-picker">
       <input
         role="combobox"
+        aria-label="Search submissions"
         aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-autocomplete="list"
+        aria-activedescendant={open && shown[highlighted] ? `${listId}-${highlighted}` : undefined}
         placeholder={value ?? `Search ${files.length.toLocaleString()} submissions (date, id)...`}
         value={query}
         onFocus={() => setOpen(true)}
@@ -53,10 +58,11 @@ export function FilePicker({ files, value, onSelect }: FilePickerProps) {
         }}
       />
       {open && (
-        <ul className="file-picker-list" role="listbox">
+        <ul id={listId} className="file-picker-list" role="listbox">
           {shown.map((file, index) => (
             <li
               key={file}
+              id={`${listId}-${index}`}
               role="option"
               aria-selected={index === highlighted}
               className={index === highlighted ? "highlighted" : ""}
