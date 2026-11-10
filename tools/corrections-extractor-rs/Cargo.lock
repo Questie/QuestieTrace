@@ -32,6 +32,7 @@ name = "corrections"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "libdeflater",
  "mimalloc",
  "rustc-hash",
  "ryu-js",

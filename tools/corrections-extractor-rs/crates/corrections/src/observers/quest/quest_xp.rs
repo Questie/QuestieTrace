@@ -11,7 +11,7 @@
 use crate::observation::{Confidence, Observation};
 use crate::resources::{quest_xp_difficulty, quest_xp_for};
 use indexmap::IndexMap;
-use trace_data::stream::{entry_t, entry_v, get_stream, Stream};
+use trace_data::stream::{entry_t, entry_tp, entry_v, get_stream, last_at_or_before, Stream};
 use trace_data::{KeyRef, Session, Value};
 
 /// One GetRewardXP sample. JS shape `{xp, playerLevel}`.
@@ -25,25 +25,9 @@ pub struct QuestXpValue {
 /// A quest more than this many levels below the player is scaled down.
 const XP_FULL_RANGE: f64 = 5.0;
 
-/// An entry's precise time `tp`; NaN when missing, so comparisons fail like JS `undefined`.
-fn entry_tp(entry: &Value) -> f64 {
-    entry.get("tp").and_then(Value::as_num).unwrap_or(f64::NAN)
-}
-
 /// `v` of the latest entry recorded at or before `tp`, which orders samples taken at one `t`.
 fn value_at_tp<'v, 'a>(stream: Stream<'v, 'a>, tp: f64) -> Option<&'v Value<'a>> {
-    let (mut lo, mut hi) = (0isize, stream.len() as isize - 1);
-    let mut result = None;
-    while lo <= hi {
-        let mid = ((lo + hi) as usize) >> 1;
-        if entry_tp(&stream[mid]) <= tp {
-            result = Some(mid);
-            lo = mid as isize + 1;
-        } else {
-            hi = mid as isize - 1;
-        }
-    }
-    entry_v(&stream[result?])
+    entry_v(&stream[last_at_or_before(stream.len(), |i| entry_tp(&stream[i]) <= tp)?])
 }
 
 pub fn observe(session: &Session) -> Vec<Observation<QuestXpValue>> {

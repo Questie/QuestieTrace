@@ -72,6 +72,65 @@ pub fn string(value: Option<&trace_data::Value>) -> String {
     }
 }
 
+/// JS `Math.min(...values)`: NaN when any value is NaN, Infinity for none.
+pub fn min(values: &[f64]) -> f64 {
+    values
+        .iter()
+        .fold(f64::INFINITY, |min, &v| if min.is_nan() || v.is_nan() { f64::NAN } else { min.min(v) })
+}
+
+/// JS `Math.max(...values)`: NaN when any value is NaN, -Infinity for none.
+pub fn max(values: &[f64]) -> f64 {
+    values
+        .iter()
+        .fold(f64::NEG_INFINITY, |max, &v| if max.is_nan() || v.is_nan() { f64::NAN } else { max.max(v) })
+}
+
+/// JS `Math.sign`: ±0 and NaN keep themselves.
+pub fn sign(x: f64) -> f64 {
+    if x == 0.0 || x.is_nan() {
+        x
+    } else {
+        x.signum()
+    }
+}
+
+/// JS `Math.hypot(a, b)` as V8 computes it (normalized Kahan sum); it differs from
+/// `f64::hypot` in the last bit for about a third of inputs.
+pub fn hypot(a: f64, b: f64) -> f64 {
+    if a.is_infinite() || b.is_infinite() {
+        return f64::INFINITY;
+    }
+    if a.is_nan() || b.is_nan() {
+        return f64::NAN;
+    }
+    let (a, b) = (a.abs(), b.abs());
+    let max = a.max(b);
+    if max == 0.0 {
+        return 0.0;
+    }
+    let (mut sum, mut compensation) = (0.0f64, 0.0f64);
+    for value in [a, b] {
+        let n = value / max;
+        let summand = n * n - compensation;
+        let preliminary = sum + summand;
+        compensation = (preliminary - sum) - summand;
+        sum = preliminary;
+    }
+    sum.sqrt() * max
+}
+
+/// JS `x.toFixed(4)` for finite numbers below 1e21 (coordinates): Rust rounds an exact tie to
+/// even, JS away from zero; with 4 decimals the ties are the odd multiples of 1/32. JS prints
+/// -0 as "0.0000".
+pub fn to_fixed_4(x: f64) -> String {
+    let x = x + 0.0;
+    let thirty_seconds = x.abs() * 32.0;
+    let tie = thirty_seconds.fract() == 0.0 && thirty_seconds % 2.0 == 1.0;
+    let away_from_zero = if x > 0.0 { x.next_up() } else { x.next_down() };
+    format!("{:.4}", if tie { away_from_zero } else { x })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,5 +167,30 @@ mod tests {
         });
         assert_eq!(strings, ["true", "1.5", "event", "event", "1,a,2", "[object Object]"]);
         assert_eq!(string(None), "undefined");
+    }
+
+    #[test]
+    fn to_fixed_4_rounds_ties_away_from_zero_like_js() {
+        // Expected values printed by node: (x).toFixed(4).
+        assert_eq!(to_fixed_4(30.03125), "30.0313");
+        assert_eq!(to_fixed_4(-0.03125), "-0.0313");
+        assert_eq!(to_fixed_4(0.09375), "0.0938");
+        assert_eq!(to_fixed_4(62.5625), "62.5625");
+        assert_eq!(to_fixed_4(-0.0), "0.0000");
+    }
+
+    #[test]
+    fn hypot_matches_v8_where_libm_differs() {
+        // node: Math.hypot(-40.17, 61.260000000000005) === 73.25582911959975; f64::hypot gives ...77.
+        assert_eq!(hypot(-40.17, 61.260000000000005), 73.25582911959975);
+    }
+
+    #[test]
+    fn min_max_and_sign_keep_nan_like_js() {
+        assert_eq!((min(&[3.0, 1.0, 2.0]), max(&[3.0, 1.0, 2.0])), (1.0, 3.0));
+        assert!(min(&[1.0, f64::NAN]).is_nan() && max(&[f64::NAN, 1.0]).is_nan());
+        assert_eq!((min(&[]), max(&[])), (f64::INFINITY, f64::NEG_INFINITY));
+        assert!(sign(-0.0).is_sign_negative() && sign(-0.0) == 0.0);
+        assert_eq!((sign(-7.5), sign(2.0)), (-1.0, 1.0));
     }
 }

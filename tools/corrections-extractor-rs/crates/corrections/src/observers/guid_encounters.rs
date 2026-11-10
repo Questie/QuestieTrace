@@ -5,7 +5,7 @@
 //! UnitGUID streams (WoW lets "target" resolve to a GameObject, e.g. a lootable chest).
 
 use crate::guid::{parse_guid, GuidKind};
-use trace_data::stream::{entry_t, entry_v, get_stream};
+use trace_data::stream::{entry_t, entry_tp, entry_v, get_stream};
 use trace_data::{KeyRef, Value};
 
 /// Unit tokens the addon records UnitGUID/UnitName/UnitLevel for.
@@ -19,11 +19,6 @@ pub struct GuidEncounter {
     pub t: f64,
     /// Precise time of the sample, which tells apart samples that share `t`.
     pub tp: f64,
-}
-
-/// An entry's precise time `tp`; NaN when missing, so comparisons fail like JS `undefined` does.
-pub(crate) fn entry_tp(entry: &Value) -> f64 {
-    entry.get("tp").and_then(Value::as_num).unwrap_or(f64::NAN)
 }
 
 /// One encounter per UnitGUID sample of `kind` on `tokens`, token by token. An entity can

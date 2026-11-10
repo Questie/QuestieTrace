@@ -254,3 +254,162 @@ fn write_outputs(dir: &Path, bundle: &Bundle, meta: &Meta) -> std::io::Result<()
     json.truncate(json.trim_end().len());
     std::fs::write(meta_path, json)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{export_string, stream, TempDir};
+    use serde_json::{json, Value as Json};
+
+    /// A session that names `quest_id` (above Classic's 9665, so it is exported) `title`.
+    fn titled_session(started_at: f64, quest_id: i64, title: &str) -> Json {
+        json!({
+            "startedAt": started_at,
+            "startedAtPrecise": started_at + 0.5,
+            "events": [],
+            "functions": {
+                "GetLocale": { "player": stream([(0.0, json!("enUS"))]) },
+                "GetQuestID": stream([(3.0, json!(quest_id))]),
+                "GetTitleText": stream([(3.0, json!(title))]),
+            },
+        })
+    }
+
+    struct Checkout {
+        dir: TempDir,
+    }
+
+    impl Checkout {
+        fn new() -> Checkout {
+            Checkout {
+                dir: TempDir::new("trace-data"),
+            }
+        }
+
+        /// Writes `submissions/<key>` holding `export_string`.
+        fn submission(&self, key: &str, export_string: &str) -> &Self {
+            let path = self.dir.0.join("submissions").join(key);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, json!({ "id": key, "export_string": export_string, "nickname": "never read" }).to_string()).unwrap();
+            self
+        }
+
+        fn run(&self, output: &Path, threads: usize) -> Result<Meta, String> {
+            let options = Options {
+                trace_data: self.dir.0.clone(),
+                output: output.to_owned(),
+                sample_percent: None,
+                threads,
+            };
+            run(&options, &|_| {})
+        }
+    }
+
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    }
+
+    #[test]
+    fn folds_the_newest_copy_of_each_session_and_counts_what_it_read() {
+        let checkout = Checkout::new();
+        let broken = "!QuestieTrace:1!abc$def!End:QuestieTrace:1!";
+        let old = export_string(&[titled_session(100.0, 96659, "Old Title")]);
+        let new = export_string(&[titled_session(100.0, 96659, "New Title")]);
+        checkout
+            .submission("2026-09/2026-09-01_000000Z_old.json", &old)
+            // The newest submission holds the session twice: two exports.
+            .submission("2026-10/2026-10-01_000000Z_new.json", &format!("{new}\n{new}"))
+            .submission("2026-10/2026-10-02_000000Z_broken.json", broken)
+            .submission(
+                "2026-10/2026-10-03_000000Z_partial.json",
+                &format!("{}{}", &old[..40], export_string(&[titled_session(200.0, 96660, "Other")])),
+            );
+        let output = TempDir::new("output");
+
+        let meta = checkout.run(&output.0, 2).unwrap();
+
+        assert_eq!((meta.session_count, meta.submission_count, meta.export_count), (2, 3, 4));
+        // Of three copies of the session one is used: both of the newest submission's count.
+        assert_eq!(meta.duplicate_sessions_skipped, 2);
+        assert_eq!(meta.skipped_files.len(), 1);
+        assert_eq!(meta.skipped_files[0].name, "2026-10/2026-10-02_000000Z_broken.json");
+        assert_eq!(
+            meta.skipped_files[0].error,
+            "export 1: payload is not valid print-encoded data (character \"$\")"
+        );
+        assert_eq!(meta.partial_files.len(), 1);
+        assert_eq!(meta.partial_files[0].dropped_exports, ["export 1 has no matching end marker"]);
+
+        let quests = read(&output.0.join("foreverQuestTraces.lua"));
+        // Session 100 was folded from the newest submission only.
+        assert!(
+            quests.contains("        [96659] = {\n            [questKeys.name] = \"New Title\","),
+            "{quests}"
+        );
+        assert!(!quests.contains("Old Title"));
+        assert!(quests.contains("        [96660] = {\n            [questKeys.name] = \"Other\","));
+        assert!(quests.contains("-- Source trace files: 3\n-- Sessions aggregated: 2"));
+        let mut on_disk = serde_json::to_string_pretty(&meta).unwrap();
+        on_disk.truncate(on_disk.trim_end().len());
+        assert_eq!(read(&output.0.join("meta.json")), on_disk);
+    }
+
+    #[test]
+    fn the_output_does_not_depend_on_the_number_of_threads() {
+        let checkout = Checkout::new();
+        // Many submissions, each with a copy of a shared session, so copies race between workers.
+        for i in 0..60 {
+            let sessions = [
+                titled_session(1000.0, 96659, &format!("Shared {i}")),
+                titled_session(i as f64, 97000 + i, &format!("Own {i}")),
+            ];
+            checkout.submission(&format!("2026-10/2026-10-01_{i:06}Z_s.json"), &export_string(&sessions));
+        }
+        let (one, many) = (TempDir::new("one"), TempDir::new("many"));
+        let meta_one = checkout.run(&one.0, 1).unwrap();
+        let meta_many = checkout.run(&many.0, 8).unwrap();
+        assert_eq!((meta_one.session_count, meta_one.duplicate_sessions_skipped), (61, 59));
+        assert_eq!((meta_many.session_count, meta_many.duplicate_sessions_skipped), (61, 59));
+        let without_time = |text: String| text.lines().filter(|l| !l.starts_with("-- Generated at: ")).collect::<Vec<_>>().join("\n");
+        let quests_one = without_time(read(&one.0.join("foreverQuestTraces.lua")));
+        assert_eq!(quests_one, without_time(read(&many.0.join("foreverQuestTraces.lua"))));
+        // The newest submission's copy of the shared session names its quest; every other copy is skipped.
+        assert!(
+            quests_one.contains("[96659] = {\n            [questKeys.name] = \"Shared 59\","),
+            "{quests_one}"
+        );
+        assert!(quests_one.contains("[97000] = {\n            [questKeys.name] = \"Own 0\","));
+    }
+
+    #[test]
+    fn a_run_that_loads_no_submission_keeps_the_previous_output() {
+        let checkout = Checkout::new();
+        checkout.submission("2026-10/2026-10-01_000000Z_broken.json", "!QuestieTrace:1!abc$def!End:QuestieTrace:1!");
+        let output = TempDir::new("output");
+        std::fs::write(output.0.join("meta.json"), "previous").unwrap();
+        std::fs::create_dir_all(output.0.join("lookupItems")).unwrap();
+        std::fs::write(output.0.join("lookupItems/deDE.lua"), "previous").unwrap();
+
+        let error = checkout.run(&output.0, 2).unwrap_err();
+
+        assert_eq!(error, "No submission could be loaded; keeping the previous output");
+        assert_eq!(read(&output.0.join("meta.json")), "previous");
+        assert_eq!(read(&output.0.join("lookupItems/deDE.lua")), "previous");
+    }
+
+    #[test]
+    fn replaces_the_lookup_directories_and_leaves_no_staging_behind() {
+        let checkout = Checkout::new();
+        checkout.submission("2026-10/2026-10-01_000000Z_a.json", &export_string(&[titled_session(1.0, 96659, "Title")]));
+        let output = TempDir::new("output");
+        std::fs::create_dir_all(output.0.join("lookupItems")).unwrap();
+        std::fs::write(output.0.join("lookupItems/frFR.lua"), "a locale the new run has no data for").unwrap();
+
+        checkout.run(&output.0, 2).unwrap();
+
+        assert!(!output.0.join("lookupItems/frFR.lua").exists());
+        assert!(output.0.join("lookupItems").is_dir());
+        assert!(!output.0.join(".lookups-staging").exists());
+        assert!(output.0.join("meta.json").exists());
+    }
+}
