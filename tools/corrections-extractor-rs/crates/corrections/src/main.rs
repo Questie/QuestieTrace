@@ -26,13 +26,15 @@ Usage: corrections-extractor-rs [--trace-data DIR] [--output DIR] [--sample PERC
   --output DIR       where the modules go (default: output, or output/sample-<PERCENT>)
   --sample PERCENT   only this percentage of submissions, the same ones every run
                      (default: $EXTRACT_SAMPLE)
-  --threads N        decoding threads (default: one per core)";
+  --threads N        decoding threads (default: one per core)
+  --stats            log approximately how much memory the fold holds per field";
 
 struct Args {
     trace_data: PathBuf,
     output: PathBuf,
     sample_percent: Option<f64>,
     threads: Option<usize>,
+    stats: bool,
 }
 
 fn parse_sample(value: &str) -> Result<f64, String> {
@@ -51,6 +53,7 @@ fn parse_args() -> Result<Args, String> {
         _ => None,
     };
     let mut threads = None;
+    let mut stats = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value"));
@@ -62,6 +65,7 @@ fn parse_args() -> Result<Args, String> {
                 let raw = value()?;
                 threads = Some(raw.parse().map_err(|_| format!("--threads must be a whole number (got \"{raw}\")"))?);
             }
+            "--stats" => stats = true,
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("Unknown argument {other}\n\n{USAGE}")),
         }
@@ -77,6 +81,7 @@ fn parse_args() -> Result<Args, String> {
         output,
         sample_percent,
         threads,
+        stats,
     })
 }
 
@@ -97,6 +102,7 @@ fn main() -> ExitCode {
         output: args.output.clone(),
         sample_percent: args.sample_percent,
         threads,
+        stats: args.stats,
     };
     match run(&options, &|line| eprintln!("{line}")) {
         Ok(meta) => {

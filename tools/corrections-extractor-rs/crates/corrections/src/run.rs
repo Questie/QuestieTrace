@@ -27,6 +27,8 @@ pub struct Options {
     pub sample_percent: Option<f64>,
     /// Worker threads decoding and observing submissions.
     pub threads: usize,
+    /// Log approximately how much memory the fold holds per field.
+    pub stats: bool,
 }
 
 /// meta.json: what a run read. Field names and order are those of the TS tool.
@@ -193,6 +195,14 @@ pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
     if tally.submission_count == 0 {
         return Err("No submission could be loaded; keeping the previous output".into());
     }
+    if options.stats {
+        let report = acc.memory_report();
+        let total: usize = report.iter().map(|line| line.bytes).sum();
+        log(&format!("Fold holds about {} MB:", total / 1_000_000));
+        for line in report.iter().filter(|line| line.bytes > 0) {
+            log(&format!("  {:>8} MB {:>12} rows  {}", line.bytes / 1_000_000, line.rows, line.field));
+        }
+    }
 
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default();
     let generated_at = iso_timestamp(millis);
@@ -300,6 +310,7 @@ mod tests {
                 output: output.to_owned(),
                 sample_percent: None,
                 threads,
+                stats: false,
             };
             run(&options, &|_| {})
         }

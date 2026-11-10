@@ -250,6 +250,22 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
     }
 }
 
+impl<T: Eq + Hash + crate::memory::HeapSize> ScalarSummary<T> {
+    /// (value groups, approximate bytes) held.
+    pub fn memory(&self) -> (usize, usize) {
+        let mut rows = 0;
+        let mut bytes = 0;
+        for groups in self.entities.values() {
+            rows += groups.len();
+            bytes += crate::memory::MAP_ENTRY_OVERHEAD + std::mem::size_of::<(i64, IndexMap<T, ScalarGroup<T>>)>();
+            for (key, group) in groups {
+                bytes += crate::memory::MAP_ENTRY_OVERHEAD + std::mem::size_of::<(T, ScalarGroup<T>)>() + key.heap_size() + group.value.heap_size();
+            }
+        }
+        (rows, bytes)
+    }
+}
+
 /// Sessions a value needs before it can win by being the newest.
 const NEWEST_MIN_SESSIONS: usize = 2;
 
@@ -275,6 +291,24 @@ pub struct ObservationsByEntity<T> {
 impl<T> Default for ObservationsByEntity<T> {
     fn default() -> Self {
         ObservationsByEntity { entities: IndexMap::default() }
+    }
+}
+
+impl<T: crate::memory::HeapSize> ObservationsByEntity<T> {
+    /// (observations, approximate bytes) held.
+    pub fn memory(&self) -> (usize, usize) {
+        let rows = self.entities.values().map(Vec::len).sum();
+        let bytes = self
+            .entities
+            .values()
+            .map(|list| {
+                crate::memory::MAP_ENTRY_OVERHEAD
+                    + std::mem::size_of::<(i64, Vec<Observation<T>>)>()
+                    + list.capacity() * std::mem::size_of::<Observation<T>>()
+                    + list.iter().map(|obs| obs.value.heap_size()).sum::<usize>()
+            })
+            .sum();
+        (rows, bytes)
     }
 }
 
