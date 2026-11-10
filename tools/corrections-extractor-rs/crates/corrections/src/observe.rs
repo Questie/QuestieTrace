@@ -18,7 +18,7 @@ use crate::observers::spawn::SpawnObservation;
 use crate::observers::{item, npc, object, quest};
 use crate::probes::{session_server_time, Faction};
 use std::hash::Hash;
-use trace_data::{KeyRef, Session, Value};
+use trace_data::Session;
 
 /// The highest ids Classic knows per entity. Only ids above them are exported, so npc, item
 /// and object observations at or below them are dropped right away.
@@ -49,43 +49,6 @@ fn interface_version(session: &Session) -> Option<f64> {
 /// GetBuildInfo are included: they may be early Forever traces.
 pub fn is_forever_session(session: &Session) -> bool {
     interface_version(session).is_none_or(|version| format_number(version).starts_with("16"))
-}
-
-/// The client a session was recorded with.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SessionClient {
-    pub interface_version: Option<f64>,
-    pub build: Option<f64>,
-    pub locale: Option<String>,
-}
-
-pub fn session_client(session: &Session) -> SessionClient {
-    let build = session
-        .field("buildInfo")
-        .and_then(|info| info.get("2"))
-        .map(number_like)
-        .filter(|b| crate::js::is_integer(*b) && *b > 0.0);
-    let locale = trace_data::stream::get_stream(session, "GetLocale", &[KeyRef::Str("player")])
-        .and_then(|stream| stream.first())
-        .and_then(|entry| entry.get("v"))
-        .and_then(Value::as_str)
-        .filter(|l| !l.is_empty())
-        .map(str::to_owned);
-    SessionClient {
-        interface_version: interface_version(session),
-        build,
-        locale,
-    }
-}
-
-/// JS `Number(x)` for a decoded value.
-fn number_like(value: &Value) -> f64 {
-    match value.resolved() {
-        Value::Num(n) => *n,
-        Value::Str(s) => crate::js::number(s),
-        Value::Bool(b) => f64::from(u8::from(*b)),
-        _ => f64::NAN,
-    }
 }
 
 /// One session's observations, ready for the fold. Scalar fields are merged by the default
@@ -152,7 +115,8 @@ fn translations<T: Clone + Eq + Hash>(observations: Vec<Observation<Localized<T>
 /// Runs every observer over one session; None for sessions that are not observed (not Forever).
 /// npcFriendlyToFaction is kept for every NPC: Classic NPCs start Forever quests, and their
 /// reactions decide those quests' requiredRaces.
-pub fn observe_session(session: &Session, max_ids: &MaxIds) -> Option<StagedSession> {
+pub fn observe_session(session: &Session) -> Option<StagedSession> {
+    let max_ids = MAX_IDS;
     if !is_forever_session(session) {
         return None;
     }
