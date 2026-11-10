@@ -13,15 +13,22 @@ use trace_data::{KeyRef, Session, Value};
 
 pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>>> {
     let mut observations = Vec::new();
-    let Some(link_stream) = session.function("GetLootSlotLink") else { return observations };
+    let Some(link_stream) = session.function("GetLootSlotLink") else {
+        return observations;
+    };
     for slot in param_keys(link_stream) {
-        let Some(entries) = get_stream(session, "GetLootSlotLink", &[KeyRef::Str(&slot)]) else { continue };
+        let Some(entries) = get_stream(session, "GetLootSlotLink", &[KeyRef::Str(&slot)]) else {
+            continue;
+        };
         for entry in entries {
             let Some(link) = entry_v(entry).and_then(Value::as_str) else { continue };
             let t = entry_t(entry);
             let Some(locale) = locale_at(session, t) else { continue };
             let Some(parsed) = parse_item_link(Some(link)) else { continue };
-            let value = Localized { locale: locale.to_owned(), value: parsed.name.to_owned() };
+            let value = Localized {
+                locale: locale.to_owned(),
+                value: parsed.name.to_owned(),
+            };
             observations.push(Observation::new(parsed.item_id as i64, value, Confidence::High, t));
         }
     }
@@ -29,7 +36,11 @@ pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>
 }
 
 pub fn observe(session: &Session) -> Vec<Observation<String>> {
-    observe_localized(session).into_iter().filter(|obs| obs.value.locale == "enUS").map(|obs| obs.map(|name| name.value)).collect()
+    observe_localized(session)
+        .into_iter()
+        .filter(|obs| obs.value.locale == "enUS")
+        .map(|obs| obs.map(|name| name.value))
+        .collect()
 }
 
 #[cfg(test)]
@@ -39,7 +50,9 @@ mod tests {
     use serde_json::json;
 
     fn observed(functions: serde_json::Value) -> Vec<(i64, String, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     #[test]
@@ -62,7 +75,10 @@ mod tests {
         });
         assert_eq!(
             observed(functions),
-            [(750, "Tough Wolf Meat".to_owned(), Confidence::High, 0.0), (2604, "Kobold Mining Bag".to_owned(), Confidence::High, 0.0)]
+            [
+                (750, "Tough Wolf Meat".to_owned(), Confidence::High, 0.0),
+                (2604, "Kobold Mining Bag".to_owned(), Confidence::High, 0.0)
+            ]
         );
     }
 

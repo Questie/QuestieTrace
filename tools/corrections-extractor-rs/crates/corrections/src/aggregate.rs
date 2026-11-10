@@ -223,7 +223,12 @@ impl<T> ObservationsByEntity<T> {
         self.entities
             .iter()
             .map(|(&id, list)| {
-                let fact = Fact { value: merge(list), confidence: highest_confidence(list), observation_count: list.len(), alternative_count: 0 };
+                let fact = Fact {
+                    value: merge(list),
+                    confidence: highest_confidence(list),
+                    observation_count: list.len(),
+                    alternative_count: 0,
+                };
                 (id, fact)
             })
             .collect()
@@ -235,7 +240,13 @@ mod tests {
     use super::*;
 
     fn obs(entity: i64, value: &str, confidence: Confidence, t: f64, session: SessionId) -> Observation<String> {
-        Observation { entity_id: entity, value: value.to_owned(), confidence, t, session }
+        Observation {
+            entity_id: entity,
+            value: value.to_owned(),
+            confidence,
+            t,
+            session,
+        }
     }
 
     #[test]
@@ -244,7 +255,11 @@ mod tests {
         let s = sessions.add(None, None);
         let mut summary = ScalarSummary::default();
         summary.add(
-            [obs(1, "low", Confidence::Low, 1.0, s), obs(1, "low", Confidence::Low, 2.0, s), obs(1, "high", Confidence::High, 3.0, s)],
+            [
+                obs(1, "low", Confidence::Low, 1.0, s),
+                obs(1, "low", Confidence::Low, 2.0, s),
+                obs(1, "high", Confidence::High, 3.0, s),
+            ],
             &sessions,
         );
         let fact = &summary.aggregate()[&1];
@@ -256,7 +271,10 @@ mod tests {
         let mut sessions = Sessions::default();
         let s = sessions.add(None, None);
         let mut summary = ScalarSummary::default();
-        summary.add([obs(1, "first", Confidence::Medium, 5.0, s), obs(1, "second", Confidence::Medium, 5.0, s)], &sessions);
+        summary.add(
+            [obs(1, "first", Confidence::Medium, 5.0, s), obs(1, "second", Confidence::Medium, 5.0, s)],
+            &sessions,
+        );
         assert_eq!(summary.aggregate()[&1].value, "first");
     }
 

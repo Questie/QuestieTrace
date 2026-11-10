@@ -30,7 +30,13 @@ pub fn stream(entries: impl IntoIterator<Item = (f64, Json)>) -> Json {
     Json::Array(
         entries
             .into_iter()
-            .map(|(t, v)| if v.is_null() { json!({ "t": t, "tp": t }) } else { json!({ "t": t, "tp": t, "v": v }) })
+            .map(|(t, v)| {
+                if v.is_null() {
+                    json!({ "t": t, "tp": t })
+                } else {
+                    json!({ "t": t, "tp": t, "v": v })
+                }
+            })
             .collect(),
     )
 }

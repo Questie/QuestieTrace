@@ -45,7 +45,10 @@ pub fn merge(observations: &[Observation<FinishedByFinisher>]) -> FinishedByValu
             _ => false,
         };
     }
-    FinishedByValue { creatures: creatures.into_iter().collect(), objects: objects.into_iter().collect() }
+    FinishedByValue {
+        creatures: creatures.into_iter().collect(),
+        objects: objects.into_iter().collect(),
+    }
 }
 
 /// GetQuestID() during the interaction; 0 and an ambiguous sample are no quest.
@@ -190,7 +193,13 @@ mod tests {
             vec![trace_event("QUEST_COMPLETE", 3.0, 3.0, &[])],
         );
         let results = with_session(&session, observe);
-        assert_eq!(merge(&results), FinishedByValue { creatures: vec![197], objects: vec![] });
+        assert_eq!(
+            merge(&results),
+            FinishedByValue {
+                creatures: vec![197],
+                objects: vec![]
+            }
+        );
     }
 
     #[test]
@@ -216,15 +225,19 @@ mod tests {
 
     #[test]
     fn observes_nothing_without_quest_completion_events() {
-        let session =
-            session_json(json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))], "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }), vec![]);
+        let session = session_json(
+            json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))], "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }),
+            vec![],
+        );
         assert_eq!(observed(&session), []);
     }
 
     #[test]
     fn observes_nothing_when_get_quest_id_is_not_active_at_the_event() {
-        let session =
-            session_json(json!({ "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }), vec![trace_event("QUEST_COMPLETE", 3.0, 3.0, &[])]);
+        let session = session_json(
+            json!({ "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }),
+            vec![trace_event("QUEST_COMPLETE", 3.0, 3.0, &[])],
+        );
         assert_eq!(observed(&session), []);
     }
 
@@ -263,7 +276,10 @@ mod tests {
     fn observes_both_quest_complete_and_quest_turned_in_for_the_same_quest() {
         let session = session_json(
             json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))], "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }),
-            vec![trace_event("QUEST_COMPLETE", 3.0, 3.0, &[]), trace_event("QUEST_TURNED_IN", 4.0, 4.0, &[json!(96659)])],
+            vec![
+                trace_event("QUEST_COMPLETE", 3.0, 3.0, &[]),
+                trace_event("QUEST_TURNED_IN", 4.0, 4.0, &[json!(96659)]),
+            ],
         );
         let results = with_session(&session, observe);
         // One from each event; the merge keeps the creature once.
@@ -319,15 +335,30 @@ mod tests {
 
     #[test]
     fn merge_keeps_each_creature_finisher_once() {
-        let result =
-            merge(&[obs(Creature(197), Confidence::Medium, 3.0), obs(Creature(197), Confidence::Medium, 10.0), obs(Creature(200), Confidence::Medium, 15.0)]);
-        assert_eq!(result, FinishedByValue { creatures: vec![197, 200], objects: vec![] });
+        let result = merge(&[
+            obs(Creature(197), Confidence::Medium, 3.0),
+            obs(Creature(197), Confidence::Medium, 10.0),
+            obs(Creature(200), Confidence::Medium, 15.0),
+        ]);
+        assert_eq!(
+            result,
+            FinishedByValue {
+                creatures: vec![197, 200],
+                objects: vec![]
+            }
+        );
     }
 
     #[test]
     fn merge_sorts_finishers_by_kind() {
         let result = merge(&[obs(Creature(197), Confidence::Medium, 3.0), obs(Object(2843), Confidence::Low, 5.0)]);
-        assert_eq!(result, FinishedByValue { creatures: vec![197], objects: vec![2843] });
+        assert_eq!(
+            result,
+            FinishedByValue {
+                creatures: vec![197],
+                objects: vec![2843]
+            }
+        );
     }
 
     #[test]
@@ -380,7 +411,10 @@ mod tests {
     fn uses_the_next_raw_event_as_the_boundary_even_when_it_is_not_a_quest_event() {
         let session = session_json(
             json!({ "UnitGUID": { "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.012, creature_guid(276172))] } }),
-            vec![trace_event("QUEST_TURNED_IN", 3.0, 3.001, &[json!(99196)]), trace_event("MERCHANT_SHOW", 3.0, 3.011, &[])],
+            vec![
+                trace_event("QUEST_TURNED_IN", 3.0, 3.001, &[json!(99196)]),
+                trace_event("MERCHANT_SHOW", 3.0, 3.011, &[]),
+            ],
         );
         assert_eq!(values(&session), [Creature(276171)]);
     }
@@ -402,7 +436,10 @@ mod tests {
     fn keeps_an_unchanged_object_giver_during_a_long_dialog() {
         let session = session_json(
             json!({ "UnitGUID": { "npc": [sample(1.0, 1.0, object_guid(410369))] } }),
-            vec![trace_event("QUEST_PROGRESS", 1.0, 1.0, &[]), trace_event("QUEST_TURNED_IN", 60.0, 60.0, &[json!(99196)])],
+            vec![
+                trace_event("QUEST_PROGRESS", 1.0, 1.0, &[]),
+                trace_event("QUEST_TURNED_IN", 60.0, 60.0, &[json!(99196)]),
+            ],
         );
         assert_eq!(values(&session), [Object(410369)]);
     }
@@ -411,7 +448,10 @@ mod tests {
     fn skips_events_with_indistinguishable_timestamps_instead_of_guessing_their_giver() {
         let session = session_json(
             json!({ "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(276171)), sample(3.0, 3.0, creature_guid(276172))] } }),
-            vec![trace_event("QUEST_TURNED_IN", 3.0, 3.0, &[json!(99196)]), trace_event("QUEST_TURNED_IN", 3.0, 3.0, &[json!(99197)])],
+            vec![
+                trace_event("QUEST_TURNED_IN", 3.0, 3.0, &[json!(99196)]),
+                trace_event("QUEST_TURNED_IN", 3.0, 3.0, &[json!(99197)]),
+            ],
         );
         assert_eq!(observed(&session), []);
     }
@@ -424,7 +464,10 @@ mod tests {
                     "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.002, tied_guid.clone())],
                     "npc": [sample(1.0, 1.0, creature_guid(276173))],
                 } }),
-                vec![trace_event("QUEST_TURNED_IN", 3.0, 3.001, &[json!(99196)]), trace_event("MERCHANT_SHOW", 3.0, 3.002, &[])],
+                vec![
+                    trace_event("QUEST_TURNED_IN", 3.0, 3.001, &[json!(99196)]),
+                    trace_event("MERCHANT_SHOW", 3.0, 3.002, &[]),
+                ],
             );
             assert_eq!(observed(&session), [], "tied guid {tied_guid:?}");
         }
@@ -485,7 +528,11 @@ mod tests {
                 "UnitGUID": { "npc": [sample(1.0, 1.002, creature_guid(276171)), sample(2.0, 2.002, None), sample(3.0, 3.002, creature_guid(276172))] },
                 "C_GossipInfo.GetActiveQuests": [sample(1.0, 1.002, json!([{ "questID": 99196 }]))],
             }),
-            vec![trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]), trace_event("GOSSIP_CLOSED", 2.0, 2.001, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.001, &[])],
+            vec![
+                trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]),
+                trace_event("GOSSIP_CLOSED", 2.0, 2.001, &[]),
+                trace_event("GOSSIP_SHOW", 3.0, 3.001, &[]),
+            ],
         );
         assert_eq!(values(&session), [Creature(276171), Creature(276172)]);
     }
@@ -498,7 +545,11 @@ mod tests {
                     "UnitGUID": { "npc": [sample(1.0, 1.002, creature_guid(276171)), sample(3.0, 3.002, creature_guid(276172))] },
                     "C_GossipInfo.GetActiveQuests": [sample(1.0, 1.002, json!([{ "questID": 99196 }])), sample(3.0, 3.002, clearing_list.clone())],
                 }),
-                vec![trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.001, &[]), trace_event("GOSSIP_SHOW", 4.0, 4.001, &[])],
+                vec![
+                    trace_event("GOSSIP_SHOW", 1.0, 1.001, &[]),
+                    trace_event("GOSSIP_SHOW", 3.0, 3.001, &[]),
+                    trace_event("GOSSIP_SHOW", 4.0, 4.001, &[]),
+                ],
             );
             assert_eq!(values(&session), [Creature(276171)], "clearing list {clearing_list:?}");
         }

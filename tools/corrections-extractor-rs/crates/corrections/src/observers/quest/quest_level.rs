@@ -7,11 +7,11 @@
 //! These are quest-log streams: quests can be in the log without GetQuestID() ever being
 //! sampled, so the streams are observed directly.
 
-use super::objectives::emulated_list;
 use crate::aggregate::Num;
 use crate::js;
 use crate::observation::{Confidence, Observation};
 use std::collections::HashSet;
+use trace_data::stream::emulated_list;
 use trace_data::stream::{entry_t, entry_v, get_stream, param_keys};
 use trace_data::{KeyRef, Session, Value};
 
@@ -44,7 +44,9 @@ fn append_stream_levels(
     skip_keys: &HashSet<String>,
 ) -> HashSet<String> {
     let mut observed_keys = HashSet::new();
-    let Some(root) = session.function(function_name).filter(|root| !root.is_array()) else { return observed_keys };
+    let Some(root) = session.function(function_name).filter(|root| !root.is_array()) else {
+        return observed_keys;
+    };
 
     let mut pending = Vec::new();
     for quest_id_key in param_keys(root) {
@@ -88,7 +90,9 @@ mod tests {
     use serde_json::{json, Value as Json};
 
     fn observed(functions: Json) -> Vec<(i64, f64, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value.0, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value.0, o.confidence, o.t)).collect()
+        })
     }
 
     #[test]
@@ -169,6 +173,9 @@ mod tests {
                 "12345": stream([(7.0, json!({ "1": "Arya's Request", "2": 45, "8": 12345, "n": 8 }))]),
             },
         });
-        assert_eq!(observed(functions), [(96659, 60.0, Confidence::High, 3.0), (12345, 45.0, Confidence::High, 7.0)]);
+        assert_eq!(
+            observed(functions),
+            [(96659, 60.0, Confidence::High, 3.0), (12345, 45.0, Confidence::High, 7.0)]
+        );
     }
 }

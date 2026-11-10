@@ -122,7 +122,10 @@ fn fold(submission: ObservedSubmission, acc: &mut Accumulator, tally: &mut Tally
     tally.submission_ids.push(submission.submission_id);
     tally.export_count += submission.export_count;
     if !submission.dropped_exports.is_empty() {
-        tally.partial_files.push(PartialFile { name: submission.key, dropped_exports: submission.dropped_exports });
+        tally.partial_files.push(PartialFile {
+            name: submission.key,
+            dropped_exports: submission.dropped_exports,
+        });
     }
     let contributor = Some(submission.contributor_id.as_str()).filter(|c| !c.is_empty());
     for session in submission.sessions {
@@ -145,8 +148,8 @@ fn window_size() -> usize {
 
 /// Runs the extraction and writes every output file; meta.json last, as the mark of a complete run.
 pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
-    let mut files = list_submissions(&options.trace_data)
-        .map_err(|e| format!("{} has no readable submissions directory: {e}", options.trace_data.display()))?;
+    let mut files =
+        list_submissions(&options.trace_data).map_err(|e| format!("{} has no readable submissions directory: {e}", options.trace_data.display()))?;
     if let Some(percent) = options.sample_percent {
         files.retain(|file| in_sample(&file.key, percent));
     }
@@ -160,7 +163,10 @@ pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
     let window = window_size();
     for (index, chunk) in files.chunks(window).enumerate() {
         let used = &tally.used_keys;
-        let observed: Vec<ObservedSubmission> = chunk.par_iter().map_init(Decompressor::new, |d, file| observe_submission(file, d, used)).collect();
+        let observed: Vec<ObservedSubmission> = chunk
+            .par_iter()
+            .map_init(Decompressor::new, |d, file| observe_submission(file, d, used))
+            .collect();
         for submission in observed {
             fold(submission, &mut acc, &mut tally);
         }

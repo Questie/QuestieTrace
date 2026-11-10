@@ -25,7 +25,11 @@ pub struct ParsedGuid<'g> {
 }
 
 pub fn parse_guid(guid: Option<&str>) -> ParsedGuid<'_> {
-    let unknown = ParsedGuid { kind: GuidKind::Unknown, id: None, spawn_uid: None };
+    let unknown = ParsedGuid {
+        kind: GuidKind::Unknown,
+        id: None,
+        spawn_uid: None,
+    };
     let Some(guid) = guid.filter(|g| !g.is_empty()) else { return unknown };
     let parts: Vec<&str> = guid.split('-').collect();
     let kind = match parts[0] {
@@ -37,9 +41,17 @@ pub fn parse_guid(guid: Option<&str>) -> ParsedGuid<'_> {
     };
     if matches!(kind, GuidKind::Npc | GuidKind::Object) && parts.len() >= 3 {
         let id = js::number(parts[parts.len() - 2]);
-        return ParsedGuid { kind, id: id.is_finite().then_some(id), spawn_uid: Some(parts[parts.len() - 1]) };
+        return ParsedGuid {
+            kind,
+            id: id.is_finite().then_some(id),
+            spawn_uid: Some(parts[parts.len() - 1]),
+        };
     }
-    ParsedGuid { kind, id: None, spawn_uid: None }
+    ParsedGuid {
+        kind,
+        id: None,
+        spawn_uid: None,
+    }
 }
 
 #[cfg(test)]

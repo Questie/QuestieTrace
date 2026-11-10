@@ -14,7 +14,10 @@ pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>
     for encounter in object_encounters(session) {
         let Some(locale) = locale_at(session, encounter.t) else { continue };
         if let Some(name) = unit_name_at(session, encounter.token, encounter.t) {
-            let value = Localized { locale: locale.to_owned(), value: name };
+            let value = Localized {
+                locale: locale.to_owned(),
+                value: name,
+            };
             observations.push(Observation::new(encounter.object_id, value, Confidence::High, encounter.t));
         }
     }
@@ -22,7 +25,11 @@ pub fn observe_localized(session: &Session) -> Vec<Observation<Localized<String>
 }
 
 pub fn observe(session: &Session) -> Vec<Observation<String>> {
-    observe_localized(session).into_iter().filter(|obs| obs.value.locale == "enUS").map(|obs| obs.map(|name| name.value)).collect()
+    observe_localized(session)
+        .into_iter()
+        .filter(|obs| obs.value.locale == "enUS")
+        .map(|obs| obs.map(|name| name.value))
+        .collect()
 }
 
 #[cfg(test)]
@@ -32,7 +39,9 @@ mod tests {
     use serde_json::json;
 
     fn observed(functions: serde_json::Value) -> Vec<(i64, String, Confidence, f64)> {
-        with_session(&session_json(functions, vec![]), |s| observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect())
+        with_session(&session_json(functions, vec![]), |s| {
+            observe(s).into_iter().map(|o| (o.entity_id, o.value, o.confidence, o.t)).collect()
+        })
     }
 
     #[test]

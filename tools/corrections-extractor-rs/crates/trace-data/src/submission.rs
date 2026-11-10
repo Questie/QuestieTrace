@@ -132,7 +132,11 @@ impl Submission {
     /// export's reason, as decode.ts does.
     pub fn decode(&self) -> Decoded<'_> {
         if let Some(error) = &self.error {
-            return Decoded { traces: Vec::new(), dropped_exports: Vec::new(), error: Some(error.clone()) };
+            return Decoded {
+                traces: Vec::new(),
+                dropped_exports: Vec::new(),
+                error: Some(error.clone()),
+            };
         }
         let mut traces = Vec::new();
         let mut dropped_exports = Vec::new();
@@ -146,9 +150,17 @@ impl Submission {
             }
         }
         if traces.is_empty() {
-            return Decoded { traces, dropped_exports: Vec::new(), error: Some(dropped_exports.join("; ")) };
+            return Decoded {
+                traces,
+                dropped_exports: Vec::new(),
+                error: Some(dropped_exports.join("; ")),
+            };
         }
-        Decoded { traces, dropped_exports, error: None }
+        Decoded {
+            traces,
+            dropped_exports,
+            error: None,
+        }
     }
 }
 

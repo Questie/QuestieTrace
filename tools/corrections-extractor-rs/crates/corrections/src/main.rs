@@ -59,7 +59,12 @@ fn parse_args() -> Result<Args, String> {
         Some(percent) => PathBuf::from("output").join(format!("sample-{percent}")),
         None => PathBuf::from("output"),
     });
-    Ok(Args { trace_data, output, sample_percent, threads })
+    Ok(Args {
+        trace_data,
+        output,
+        sample_percent,
+        threads,
+    })
 }
 
 fn main() -> ExitCode {
@@ -77,11 +82,19 @@ fn main() -> ExitCode {
         }
     }
     let started = Instant::now();
-    let options = Options { trace_data: args.trace_data, output: args.output.clone(), sample_percent: args.sample_percent };
+    let options = Options {
+        trace_data: args.trace_data,
+        output: args.output.clone(),
+        sample_percent: args.sample_percent,
+    };
     match run(&options, &|line| eprintln!("{line}")) {
         Ok(meta) => {
             let seconds = started.elapsed().as_secs();
-            let took = if seconds < 60 { format!("{seconds}s") } else { format!("{}m {}s", seconds / 60, seconds % 60) };
+            let took = if seconds < 60 {
+                format!("{seconds}s")
+            } else {
+                format!("{}m {}s", seconds / 60, seconds % 60)
+            };
             println!(
                 "Extracted {} session(s) from {} submission(s) into {} in {took}",
                 meta.session_count,
@@ -92,7 +105,10 @@ fn main() -> ExitCode {
                 eprintln!("Skipped {}: {}", skipped.name, skipped.error);
             }
             if meta.duplicate_sessions_skipped > 0 {
-                println!("Ignored {} older copies of sessions that later submissions exported again (the newest copy is used)", meta.duplicate_sessions_skipped);
+                println!(
+                    "Ignored {} older copies of sessions that later submissions exported again (the newest copy is used)",
+                    meta.duplicate_sessions_skipped
+                );
             }
             ExitCode::SUCCESS
         }

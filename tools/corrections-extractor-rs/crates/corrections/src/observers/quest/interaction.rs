@@ -48,7 +48,11 @@ pub fn quest_event_lookup<'v, 'a>(session: &Session<'v, 'a>, index: usize) -> Op
         Some(next) if next.t() == event.t() => next.tp(),
         _ => f64::INFINITY,
     };
-    Some(InteractionLookup { session: *session, t: event.t(), before_tp })
+    Some(InteractionLookup {
+        session: *session,
+        t: event.t(),
+        before_tp,
+    })
 }
 
 impl<'v, 'a> InteractionLookup<'v, 'a> {
@@ -76,7 +80,9 @@ fn value_before_next_event<'v, 'a>(stream: &'v [Value<'a>], t: f64, tp: f64) -> 
             hi = mid as isize - 1;
         }
     }
-    let Some(selected) = result.map(|i| &stream[i]) else { return InteractionValue::Known(None) };
+    let Some(selected) = result.map(|i| &stream[i]) else {
+        return InteractionValue::Known(None);
+    };
     if entry_t(selected) == t && entry_tp(selected) == tp {
         // Excluding the tied probe and returning the one before it could resurrect stale state.
         return InteractionValue::Ambiguous;
@@ -152,20 +158,28 @@ mod tests {
 
     #[test]
     fn has_no_lookup_when_the_previous_event_has_an_indistinguishable_timestamp() {
-        let session = session_json(json!({}), vec![trace_event("GOSSIP_SHOW", 3.0, 3.0, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.0, &[])]);
+        let session = session_json(
+            json!({}),
+            vec![trace_event("GOSSIP_SHOW", 3.0, 3.0, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.0, &[])],
+        );
         assert_eq!(look_up(&session, 1, "GetQuestID", &[]), Seen::NoLookup);
     }
 
     #[test]
     fn has_no_lookup_when_the_next_event_has_an_indistinguishable_timestamp() {
-        let session = session_json(json!({}), vec![trace_event("GOSSIP_SHOW", 3.0, 3.0, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.0, &[])]);
+        let session = session_json(
+            json!({}),
+            vec![trace_event("GOSSIP_SHOW", 3.0, 3.0, &[]), trace_event("GOSSIP_SHOW", 3.0, 3.0, &[])],
+        );
         assert_eq!(look_up(&session, 0, "GetQuestID", &[]), Seen::NoLookup);
     }
 
     #[test]
     fn reads_a_parameterized_stream() {
-        let session =
-            session_json(json!({ "UnitGUID": { "npc": [sample(3.0, 3.002, creature_guid(276171))] } }), vec![trace_event("GOSSIP_SHOW", 3.0, 3.001, &[])]);
+        let session = session_json(
+            json!({ "UnitGUID": { "npc": [sample(3.0, 3.002, creature_guid(276171))] } }),
+            vec![trace_event("GOSSIP_SHOW", 3.0, 3.001, &[])],
+        );
         assert_eq!(look_up(&session, 0, "UnitGUID", &["npc"]), guid_str(creature_guid(276171)));
     }
 
