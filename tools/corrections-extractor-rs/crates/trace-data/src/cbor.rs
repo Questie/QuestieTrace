@@ -69,6 +69,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// The next byte, without reading it.
+    pub fn peek_byte(&self) -> Option<u8> {
+        self.bytes.get(self.pos).copied()
+    }
+
     /// The major type of the next item, without reading it.
     pub fn peek_major(&self) -> Option<u8> {
         self.bytes.get(self.pos).map(|initial| initial >> 5)
@@ -121,6 +126,43 @@ impl<'a> Cursor<'a> {
             }
             31 => err("indefinite-length CBOR items are not supported"),
             _ => err("invalid CBOR additional information"),
+        }
+    }
+
+    /// Skips the next `count` values of data that was validated before: no error checks and no
+    /// recursion, just a count of the items still to skip. On data that is not valid after all
+    /// it stops at the end of the buffer instead of failing.
+    pub fn skip_trusted(&mut self, count: u64) {
+        let mut remaining = count;
+        while remaining > 0 {
+            let Some(&initial) = self.bytes.get(self.pos) else {
+                self.pos = self.bytes.len();
+                return;
+            };
+            self.pos += 1;
+            remaining -= 1;
+            let width = match initial & 31 {
+                24 => 1,
+                25 => 2,
+                26 => 4,
+                27 => 8,
+                _ => 0,
+            };
+            let argument = match self.bytes.get(self.pos..self.pos + width) {
+                Some(bytes) => bytes.iter().fold(0u64, |value, &byte| (value << 8) | byte as u64),
+                None => {
+                    self.pos = self.bytes.len();
+                    return;
+                }
+            };
+            let argument = if width == 0 { (initial & 31) as u64 } else { argument };
+            self.pos += width;
+            match initial >> 5 {
+                2 | 3 => self.pos = self.pos.saturating_add(argument as usize).min(self.bytes.len()),
+                4 => remaining = remaining.saturating_add(argument),
+                5 => remaining = remaining.saturating_add(argument.saturating_mul(2)),
+                _ => {}
+            }
         }
     }
 
