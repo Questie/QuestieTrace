@@ -56,7 +56,8 @@ pub fn with_session<R>(session: &Json, f: impl FnOnce(&Session) -> R) -> R {
         session["functions"] = json!({ "_test": [] });
     }
     let bytes = encode(&json!({ "sessions": [session] }));
-    let root = decode_trace(&bytes).expect("test session decodes").expect("not nil");
+    let arena = trace_data::Arena::new();
+    let root = decode_trace(&bytes, &arena).expect("test session decodes").expect("not nil");
     let sessions = root.get("sessions").and_then(trace_data::Value::as_array).expect("sessions array");
     let session = Session::new(&sessions[0]).expect("a valid session");
     f(&session)
@@ -179,7 +180,8 @@ fn encoded_exports_read_back_through_the_real_decoder() {
     let cbor = trace_data::Inflater::new()
         .inflate(&trace_data::export::decode_for_print(payload).unwrap())
         .unwrap();
-    let root = decode_trace(cbor.bytes()).unwrap().unwrap();
+    let arena = trace_data::Arena::new();
+    let root = decode_trace(cbor.bytes(), &arena).unwrap().unwrap();
     assert_eq!(
         trace_data::value::to_json(&root),
         r#"{"sessions":[{"startedAt":0,"startedAtPrecise":0,"events":[{"t":2,"tp":2,"e":"E","a":{"1":5,"n":1}}],"functions":{"F":[{"t":1,"tp":1,"v":"x"}]}}]}"#

@@ -5,7 +5,7 @@
 //! cargo run --release -p trace-data --example decode_bench -- <submission.json>...
 
 use std::time::{Duration, Instant};
-use trace_data::value::{decode_trace, decode_value, Value};
+use trace_data::value::{decode_trace, decode_value, Arena, Value};
 use trace_data::Inflater;
 
 fn touch(value: &Value) -> usize {
@@ -18,6 +18,7 @@ fn touch(value: &Value) -> usize {
 
 fn main() {
     let mut inflater = Inflater::new();
+    let mut arena = Arena::new();
     let (mut inflate, mut lazy, mut resolve, mut eager) = (Duration::ZERO, Duration::ZERO, Duration::ZERO, Duration::ZERO);
     let (mut bytes, mut nodes) = (0usize, 0usize);
     for path in std::env::args().skip(1) {
@@ -37,16 +38,17 @@ fn main() {
         }
         inflate += started.elapsed();
         for cbor in &payloads {
+            arena.reset();
             bytes += cbor.len();
             let started = Instant::now();
-            let Ok(Some(root)) = decode_trace(cbor) else { continue };
+            let Ok(Some(root)) = decode_trace(cbor, &arena) else { continue };
             lazy += started.elapsed();
             let started = Instant::now();
             nodes += touch(&root);
             resolve += started.elapsed();
-            drop(root);
+            arena.reset();
             let started = Instant::now();
-            std::hint::black_box(decode_value(cbor).ok());
+            std::hint::black_box(decode_value(cbor, &arena).ok());
             eager += started.elapsed();
         }
     }

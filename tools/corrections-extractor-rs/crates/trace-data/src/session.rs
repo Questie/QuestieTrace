@@ -149,7 +149,7 @@ impl<'v, 'a> Event<'v, 'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::decode_trace;
+    use crate::value::{decode_trace, Arena};
 
     fn text(s: &str) -> Vec<u8> {
         let mut out = vec![0x60 | s.len() as u8];
@@ -199,7 +199,8 @@ mod tests {
         ];
         for (case, event) in events {
             let bytes = session_bytes(&event);
-            let root = decode_trace(&bytes).unwrap().unwrap();
+            let arena = Arena::new();
+            let root = decode_trace(&bytes, &arena).unwrap().unwrap();
             let sessions = root.get("sessions").and_then(Value::as_array).unwrap();
             let session = Session::new(&sessions[0]).unwrap_or_else(|| panic!("{case}: no session"));
             let header = session.event(0).unwrap();
