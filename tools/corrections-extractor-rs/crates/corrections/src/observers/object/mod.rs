@@ -4,4 +4,3 @@ pub mod encounters;
 pub mod name;
 pub mod spawns;
 pub mod spawns_merge;
-pub mod zone_id;

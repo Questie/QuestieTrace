@@ -3,8 +3,6 @@
 //! Observers only observe: they walk one session and return observations. Merging them across
 //! sessions into one value per entity happens once, at finalize, never inside an observer.
 
-use indexmap::IndexSet;
-
 /// How directly a value was observed. Ordered: `High` is the best.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Confidence {
@@ -58,49 +56,31 @@ impl<T> Observation<T> {
     }
 }
 
-/// A pseudonymous contributor, as an index into [`Sessions`]' contributor table.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ContributorId(u32);
-
 /// What merges may know about the sessions observations came from.
 #[derive(Default)]
 pub struct Sessions {
-    sessions: Vec<SessionInfo>,
-    contributors: IndexSet<String>,
-}
-
-struct SessionInfo {
-    contributor: Option<ContributorId>,
-    /// First GetServerTime() of the session: the realm time around its start.
-    server_time: Option<f64>,
+    /// Per session, its first GetServerTime(): the realm time around its start.
+    server_times: Vec<Option<f64>>,
 }
 
 impl Sessions {
     /// Registers the next folded session.
-    pub fn add(&mut self, contributor: Option<&str>, server_time: Option<f64>) -> SessionId {
-        let contributor = contributor
-            .filter(|c| !c.is_empty())
-            .map(|c| ContributorId(self.contributors.insert_full(c.to_owned()).0 as u32));
-        self.sessions.push(SessionInfo { contributor, server_time });
-        SessionId(self.sessions.len() as u32 - 1)
+    pub fn add(&mut self, server_time: Option<f64>) -> SessionId {
+        self.server_times.push(server_time);
+        SessionId(self.server_times.len() as u32 - 1)
     }
 
     pub fn len(&self) -> usize {
-        self.sessions.len()
+        self.server_times.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.sessions.is_empty()
-    }
-
-    /// The submitting contributor; None when the submission did not say.
-    pub fn contributor(&self, session: SessionId) -> Option<ContributorId> {
-        self.sessions[session.0 as usize].contributor
+        self.server_times.is_empty()
     }
 
     /// The session's first server time; None when it was not recorded.
     pub fn server_time(&self, session: SessionId) -> Option<f64> {
-        self.sessions[session.0 as usize].server_time
+        self.server_times[session.0 as usize]
     }
 }
 

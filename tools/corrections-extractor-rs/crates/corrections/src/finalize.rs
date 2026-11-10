@@ -5,8 +5,8 @@
 //! Merges run on typed values; each exported value is turned into the JS shape the TS writer
 //! renders ([`Js`]) only when its record is built.
 
-use crate::aggregate::{Fact, Num, ObservationsByEntity, ScalarSummary};
-use crate::fold::{Accumulator, LookupAccumulator};
+use crate::accumulator::{Accumulator, LookupAccumulator};
+use crate::aggregate::{Num, ObservationsByEntity, ScalarSummary};
 use crate::js::format_number;
 use crate::lua::{write_corrections, write_lookup, write_quest_xp, Header, Js, LookupTable, Record};
 use crate::observation::Observation;
@@ -34,11 +34,11 @@ pub struct Bundle {
 struct Records(IndexMap<i64, Record>);
 
 impl Records {
-    /// emit/records.ts: a field is set on every entity that has a fact for it, fields in the
-    /// order they are added.
-    fn field<T>(&mut self, name: &str, facts: &IndexMap<i64, Fact<T>>, to_js: impl Fn(&T) -> Js) {
-        for (&id, fact) in facts {
-            self.0.entry(id).or_default().push((name.to_owned(), to_js(&fact.value)));
+    /// emit/records.ts: the field is set on every entity that has a value for it. Fields appear
+    /// in a record (and in the Lua output) in the order they are added.
+    fn field<T>(&mut self, name: &str, values: &IndexMap<i64, T>, to_js: impl Fn(&T) -> Js) {
+        for (&id, value) in values {
+            self.0.entry(id).or_default().push((name.to_owned(), to_js(value)));
         }
     }
 
@@ -60,30 +60,9 @@ fn zone_coordinates(zones: impl IntoIterator<Item = (f64, Vec<[f64; 2]>)>) -> Js
     )
 }
 
-/// The facts whose merge decided to export a value (TS `onlyDefinedFacts`).
-fn only_defined<T>(facts: IndexMap<i64, Fact<Option<T>>>) -> IndexMap<i64, Fact<T>> {
-    facts
-        .into_iter()
-        .filter_map(|(id, fact)| {
-            let Fact {
-                value,
-                confidence,
-                observation_count,
-                alternative_count,
-            } = fact;
-            value.map(|value| {
-                (
-                    id,
-                    Fact {
-                        value,
-                        confidence,
-                        observation_count,
-                        alternative_count,
-                    },
-                )
-            })
-        })
-        .collect()
+/// The values a merge decided to export (TS `onlyDefinedFacts`).
+fn only_defined<T>(values: IndexMap<i64, Option<T>>) -> IndexMap<i64, T> {
+    values.into_iter().filter_map(|(id, value)| value.map(|value| (id, value))).collect()
 }
 
 /// A merge over each entity's observations of `field` followed by those of `extra` (TS
@@ -193,7 +172,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     let quest_level = acc.quest_level.aggregate();
     let mut quest_xp_rows = Vec::new();
     for (quest_id, observations) in acc.quest_xp.iter() {
-        let level = quest_level.get(&quest_id).map(|fact| fact.value.0);
+        let level = quest_level.get(&quest_id).map(|level| level.0);
         if let (Some(xp), Some(level)) = (quest_xp::merge(observations, level), level) {
             quest_xp_rows.push((quest_id, level, xp));
         }
@@ -204,31 +183,31 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
 
     let objective_count = acc.objective_count.aggregate();
     // Objectives only count when every objective the API reports was matched to an id.
-    let quest_objectives: IndexMap<i64, Fact<objectives::QuestObjectivesValue>> = acc
+    let quest_objectives: IndexMap<i64, objectives::QuestObjectivesValue> = acc
         .objectives
         .merge(objectives::merge)
         .into_iter()
-        .filter(|(id, fact)| {
-            let matched = fact.value.creatures.len() + fact.value.objects.len() + fact.value.items.len();
-            objective_count.get(id).is_some_and(|count| count.value == Num(matched as f64))
+        .filter(|(id, value)| {
+            let matched = value.creatures.len() + value.objects.len() + value.items.len();
+            objective_count.get(id) == Some(&Num(matched as f64))
         })
         .collect();
     let trigger_end = acc
         .trigger_end
-        .merge(|obs| trigger_end::merge(obs, zone_or_sort.get(&obs[0].entity_id).map(|fact| fact.value.0)));
+        .merge(|obs| trigger_end::merge(obs, zone_or_sort.get(&obs[0].entity_id).map(|zone| zone.0)));
     // requiredLevel never exceeds questLevel.
-    let required_level: IndexMap<i64, Fact<f64>> = acc
+    let required_level: IndexMap<i64, f64> = acc
         .required_level
         .merge(required_level::merge)
         .into_iter()
-        .map(|(id, mut fact)| {
-            if let Some(level) = quest_level.get(&id).filter(|level| fact.value > level.value.0) {
-                fact.value = level.value.0;
-            }
-            (id, fact)
+        .map(|(id, required)| match quest_level.get(&id) {
+            Some(level) if required > level.0 => (id, level.0),
+            _ => (id, required),
         })
         .collect();
 
+    // The order of the field calls is the order of the fields in the Lua output (TS: the order of
+    // the QuestFacts / NpcFacts / ... object literals in extract/index.ts).
     let mut quests = Records::default();
     quests.field("name", &acc.quest_name.aggregate_newest(), |name| Js::str(name));
     quests.field("questLevel", &quest_level, |level| Js::Num(level.0));
@@ -274,8 +253,8 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     let mut quest_npc_ids = HashSet::new();
     let mut quest_object_ids = HashSet::new();
     for id in quests.0.keys() {
-        let starters = started_by.get(id).map(|fact| (&fact.value.creatures, &fact.value.objects));
-        let finishers = finished_by.get(id).map(|fact| (&fact.value.creatures, &fact.value.objects));
+        let starters = started_by.get(id).map(|v| (&v.creatures, &v.objects));
+        let finishers = finished_by.get(id).map(|v| (&v.creatures, &v.objects));
         for (creatures, objects) in starters.into_iter().chain(finishers) {
             quest_npc_ids.extend(creatures.iter().copied());
             quest_object_ids.extend(objects.iter().copied());
@@ -291,8 +270,8 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     npcs.field("name", &acc.npc_name.aggregate_newest(), |name| Js::str(name));
     npcs.field("minLevel", &npc_level, |range| Js::Num(range.min));
     npcs.field("maxLevel", &npc_level, |range| Js::Num(range.max));
-    npcs.field("spawns", &as_facts(npc_spawns), |spawns| zone_coordinates(spawns.iter().cloned()));
-    npcs.field("zoneID", &as_facts(npc_zones), |zone| Js::Num(*zone));
+    npcs.field("spawns", &npc_spawns, |spawns| zone_coordinates(spawns.iter().cloned()));
+    npcs.field("zoneID", &npc_zones, |zone| Js::Num(*zone));
     npcs.field(
         "friendlyToFaction",
         &only_defined(acc.npc_friendly_to_faction.merge(friendly_to_faction::merge)),
@@ -311,16 +290,16 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     let object_zones = merge_with_extra(&acc.object_spawns, &object_turn_in, |_, obs| object_spawns_merge::merge_zone_id(obs));
     let mut objects = Records::default();
     objects.field("name", &acc.object_name.aggregate_newest(), |name| Js::str(name));
-    objects.field("spawns", &as_facts(object_spawns), |spawns| zone_coordinates(spawns.iter().cloned()));
-    objects.field("zoneID", &as_facts(object_zones), |zone| Js::Num(*zone));
+    objects.field("spawns", &object_spawns, |spawns| zone_coordinates(spawns.iter().cloned()));
+    objects.field("zoneID", &object_zones, |zone| Js::Num(*zone));
 
     // Quests below MAX_IDS are already known to Questie, but may be started or finished by new
     // npcs/objects: those relations are exported on the quest, and below on the entity.
     let mut exported_quests: Vec<(i64, Record)> = Vec::new();
     let mut exported_relations: IndexMap<i64, (Option<Relation>, Option<Relation>)> = IndexMap::new();
     for (id, record) in quests.0 {
-        let starters = started_by.get(&id).map(|fact| &fact.value);
-        let finishers = finished_by.get(&id).map(|fact| &fact.value);
+        let starters = started_by.get(&id);
+        let finishers = finished_by.get(&id);
         let (record, starts, ends) = if id > max.quest {
             let starts = starters.map(|v| Relation {
                 creatures: v.creatures.clone(),
@@ -379,24 +358,6 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     }
 }
 
-/// Wraps merged values as facts so they can be added as record fields.
-fn as_facts<T>(values: IndexMap<i64, T>) -> IndexMap<i64, Fact<T>> {
-    values
-        .into_iter()
-        .map(|(id, value)| {
-            (
-                id,
-                Fact {
-                    value,
-                    confidence: crate::observation::Confidence::Low,
-                    observation_count: 0,
-                    alternative_count: 0,
-                },
-            )
-        })
-        .collect()
-}
-
 type Ids<'r> = (&'r Vec<i64>, &'r Vec<i64>);
 
 /// For a quest below MAX_IDS: only its starters and finishers that are new npcs or objects.
@@ -429,24 +390,20 @@ fn relations_to_new_entities(starters: Option<Ids>, finishers: Option<Ids>, max:
 
 /// requiredRaces from the factions that saw each quest, the reactions of its NPC starters, and
 /// the factions that saw the other quests of those starters.
-fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, Fact<started_by::StartedByValue>>) -> IndexMap<i64, Fact<u64>> {
+fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, started_by::StartedByValue>) -> IndexMap<i64, u64> {
     let npc_reactions = acc.npc_friendly_to_faction.merge(summarize_reactions);
     let quest_factions = acc.quest_factions.merge(merge_quest_factions);
     let mut factions_by_starter: IndexMap<i64, IndexMap<i64, &IndexSet<Faction>>> = IndexMap::new();
-    for (&quest_id, fact) in &quest_factions {
-        for &npc_id in started_by.get(&quest_id).map(|f| f.value.creatures.as_slice()).unwrap_or_default() {
-            factions_by_starter.entry(npc_id).or_default().insert(quest_id, &fact.value);
+    for (&quest_id, factions) in &quest_factions {
+        for &npc_id in started_by.get(&quest_id).map(|s| s.creatures.as_slice()).unwrap_or_default() {
+            factions_by_starter.entry(npc_id).or_default().insert(quest_id, factions);
         }
     }
     let mut required_races = IndexMap::new();
-    for (&quest_id, fact) in &quest_factions {
-        let starters = started_by.get(&quest_id).map(|f| &f.value);
+    for (&quest_id, seen_factions) in &quest_factions {
+        let starters = started_by.get(&quest_id);
         let npc_starters: Vec<ReactionSummary> = match starters {
-            Some(s) if s.objects.is_empty() && s.items.is_empty() => s
-                .creatures
-                .iter()
-                .map(|id| npc_reactions.get(id).map(|f| f.value).unwrap_or_default())
-                .collect(),
+            Some(s) if s.objects.is_empty() && s.items.is_empty() => s.creatures.iter().map(|id| npc_reactions.get(id).copied().unwrap_or_default()).collect(),
             _ => Vec::new(),
         };
         let mut sibling_factions = IndexSet::new();
@@ -457,16 +414,8 @@ fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, Fact<started_by:
                 }
             }
         }
-        if let Some(mask) = merge_required_races(&fact.value, &npc_starters, &sibling_factions) {
-            required_races.insert(
-                quest_id,
-                Fact {
-                    value: mask,
-                    confidence: fact.confidence,
-                    observation_count: fact.observation_count,
-                    alternative_count: fact.alternative_count,
-                },
-            );
+        if let Some(mask) = merge_required_races(seen_factions, &npc_starters, &sibling_factions) {
+            required_races.insert(quest_id, mask);
         }
     }
     required_races
@@ -475,8 +424,8 @@ fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, Fact<started_by:
 /// lookups.ts `valuesFor`: one value per entity above `max_id` in `locale`.
 fn values_for<T: Clone + Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>, locale: &str, newest_wins: bool, max_id: i64) -> IndexMap<i64, T> {
     let Some(summary) = by_locale.get(locale) else { return IndexMap::new() };
-    let facts = if newest_wins { summary.aggregate_newest() } else { summary.aggregate() };
-    facts.into_iter().filter(|(id, _)| *id > max_id).map(|(id, fact)| (id, fact.value)).collect()
+    let values = if newest_wins { summary.aggregate_newest() } else { summary.aggregate() };
+    values.into_iter().filter(|(id, _)| *id > max_id).collect()
 }
 
 fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) -> Vec<String> {

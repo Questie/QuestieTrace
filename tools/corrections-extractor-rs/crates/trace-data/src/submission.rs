@@ -1,8 +1,8 @@
 //! One trace-data submission file: `submissions/<yyyy-mm>/<stamp>_<id>.json`, holding one or
 //! more addon exports in `export_string`.
 //!
-//! Only pseudonymous fields are read: the submission id, the contributor id and the export.
-//! Free-text fields such as `nickname` are never deserialized.
+//! Only the submission id and the export are read. Every other field (the pseudonymous
+//! contributor id, free text such as `nickname`) is never deserialized.
 //!
 //! Reading happens in two steps, so decoded values can borrow the inflated bytes:
 //! [`Submission::read`] inflates every export, [`Submission::decode`] decodes them.
@@ -18,8 +18,6 @@ use std::path::Path;
 pub struct Submission {
     /// The file's `id`, else the id in its file name.
     pub submission_id: String,
-    /// Pseudonymous contributor id; empty when missing.
-    pub contributor_id: String,
     /// Why the file could not be read at all.
     error: Option<String>,
     /// Per export: its CBOR bytes, or why it was dropped.
@@ -61,8 +59,6 @@ struct Envelope<'a> {
     #[serde(borrow)]
     id: Option<&'a RawValue>,
     #[serde(borrow)]
-    contributor_id: Option<&'a RawValue>,
-    #[serde(borrow)]
     export_string: Option<&'a RawValue>,
 }
 
@@ -82,7 +78,6 @@ impl Submission {
     pub fn read(path: &Path, inflater: &mut Inflater) -> Submission {
         let mut submission = Submission {
             submission_id: submission_id_from_path(path),
-            contributor_id: String::new(),
             error: None,
             exports: Vec::new(),
         };
@@ -109,7 +104,6 @@ impl Submission {
         if let Some(id) = json_string(envelope.id).filter(|id| !id.is_empty()) {
             submission.submission_id = id;
         }
-        submission.contributor_id = json_string(envelope.contributor_id).unwrap_or_default();
         let Some(export_string) = json_string(envelope.export_string) else {
             submission.error = Some("no export_string".into());
             return submission;
