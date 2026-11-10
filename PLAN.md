@@ -38,10 +38,11 @@ full archive with both tools.
   `Cursor::item` 8.6%, `Decoder::map` 6.8%, memcpy/memset ~10% (a third of it the inflate copy),
   SipHash ~2%.
 
-## Experiments, in order
+## Experiments, in the planned order
 
 CPU by profile weight first, then memory where it is cheap, then the structural ones. Full-archive
-Rust runs after the CPU batch, after the memory batch, and at the end.
+Rust runs after the CPU batch, after the memory batch, and at the end. The order changed as the
+profiles came in; see the results for what actually ran.
 
 | # | Experiment | Why | Expected | Complexity |
 |---|---|---|---|---|
@@ -51,19 +52,6 @@ Rust runs after the CPU batch, after the memory batch, and at the end.
 | P3 | Build table entries in place (no `into_entries` copy, fewer allocations) | Allocation ~18% | −5% | low |
 | P4 | CBOR lengths of 1/2/4 bytes read as integers (doubles only for 8 bytes) | `Cursor::item` 8.6% | −2% | low |
 | P5 | FxHash instead of SipHash in observer maps and sets (unit state pairing, etc.) | SipHash ~2% | −2% | low |
-| P6 | Borrow `export_string` when it has no escapes; inflate into recycled buffers (no copy, no zero-fill) | 33.5 / 33.3 s vs 37.4 / 38.0 s (−11%) | 5.8 GB | yes | 590fa89 |
-| R1 | Re-profile: decoding is ~55% (value building 16.5%, CBOR headers 13.5%, validation ~9%, alloc/free ~14%); eager event decoding is ~40% of value building — events are built but, after P2, barely read | | | | |
-| F0 | **Full archive, CPU batch (P1–P6):** 11 min 49 s (was 18 min 43 s); fold thread busy 121 s, finalize 48 s; outputs identical to the first full run | — | **18.5 GB** (was 13.4 GB): recycled inflate buffers stay per thread, plus the purge delay | — | 590fa89 |
-| P10 | Lazy events: an event stays undecoded; `Session::new` reads `e`/`t`/`tp` straight from its bytes (falls back to decoding for anything odd) | 28.7 / 28.5 s vs 33.1 / 33.8 s (−14%) | 5.4 GB | yes | 1c36e8d |
-| M-a | Keep one spare inflate buffer per thread (the largest), not one per export of the largest submission seen | 28.8 / 29.0 s vs 28.6 / 28.8 s (+0.7%, noise) | 4.8–4.9 GB vs 5.2 GB (−8%) | yes | bfbb5d2 |
-| M1 | Threads 24 / 16 instead of 32 (same binary, `--threads`) | 24: 30.5 / 31.1 s (+4.5%); 16: 34.4 s (+16%) vs 29.1 / 30.4 s | 24: 3.9 GB (−21%); 16: 2.7 GB (−45%) | **no**: ~2% and ~3.6% speed per 10% memory, over the 1% rule; `--threads` stays available | — |
-| M2 | Objectives folded as per-session slots (kind, position, id): the merge never reads the matched name and text, and counts sessions per slot | 28.9 / 28.7 s vs 28.9 / 28.5 s (noise) | fold 616 → 319 MB (−48%); at full scale ~−5 GB | yes | 7dd06f3 |
-| R2 | Re-profile: CBOR walking dominates (`Cursor::item` 18.4%: half the validation walk, the rest resolving streams and event headers); alloc/free ~12%; finalize is 77% npc spawn merges | | | | |
-| P8 | Parallel finalize, mild: the per-entity spawn merges (npc and object) run on all cores, entities handed out one at a time, entity order kept; nothing else in finalize changes | finalize 0.9 → 0.3 s on 5% (full scale: see F1) | — | yes | 64346ce |
-| P11 | `npc_drops`: look loot sources up by time in a map instead of scanning the source stream per link | 27.8 / 27.5 s vs 27.2 / 27.5 s: no gain | — | **no** | — |
-| — | Rejected on inspection: parse JSON before the lossy UTF-8 pass (that pass is already the only validation; nothing to save) | | | — | — |
-| P12a | Trusted walking of already validated bytes (event headers; shapes of lazy entries while a lazy value decodes): an item counter, no error checks, no recursion | 26.5 / 26.8 s vs 28.5 / 27.8 s (−5%) | 4.5–4.6 GB | yes | 7be09d1 |
-| — | Noise check: the same binary on both sides gave 37.0–37.8 s, so differences under ~2% are within noise | | | | |
 | P6 | Borrow `export_string` when it has no escapes; avoid copying the inflate buffer | memcpy ~10% | −2% | low |
 | R1 | Re-profile; re-rank what is left | | | |
 | F0 | Full archive, Rust, after the CPU batch | Milestone | | |
@@ -80,14 +68,6 @@ M0 result (5% sample): the fold holds ~616 MB, growing linearly with sessions (~
 scale). Objectives are 51% of it (314 MB), then npc spawns 10%, npc reactions 8%, finishers 5%,
 quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submissions in flight.
 
-## Final measurements
-
-| # | What |
-|---|---|
-| F1 | Full archive, Rust, final binary, under the memory watchdog: time and peak memory |
-| F2 | Full archive, TypeScript tool from scratch (empty store, scratch directories): time and peak memory |
-| F3 | Diff the two full-archive outputs (parity on the whole archive, not only samples) |
-
 ## Results
 
 | # | Result | Time (5%) | Peak memory (5%) | Kept? | Commit |
@@ -102,3 +82,25 @@ quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submiss
 | P4 | CBOR header arguments read as integers (doubles only for 8-byte values above 2^53) | 38.7 / 38.6 s vs 39.5 / 39.7 s (−2%) | 6.0 GB | yes | acda299 |
 | P3 | Finish decoded tables in place (`filter_map` collects into the slots' own allocation) | 37.9 / 37.9 s vs 39.4 / 39.1 s (−3%) | 6.0 GB | yes | 206e1b3 |
 | P5 | FxHash instead of SipHash in observer maps/sets and the decoder's table index | 37.6 / 37.4 s vs 38.0 / 37.8 s (−1%) | 5.6–5.8 GB | yes | 525fc94 |
+| P6 | Borrow `export_string` when it has no escapes; inflate into recycled buffers (no copy, no zero-fill) | 33.5 / 33.3 s vs 37.4 / 38.0 s (−11%) | 5.8 GB | yes | 590fa89 |
+| R1 | Re-profile: decoding is ~55% (value building 16.5%, CBOR headers 13.5%, validation ~9%, alloc/free ~14%); eager event decoding is ~40% of value building — events are built but, after P2, barely read | | | | |
+| F0 | **Full archive, CPU batch (P1–P6):** 11 min 49 s (was 18 min 43 s); fold thread busy 121 s, finalize 48 s; outputs identical to the first full run | — | **18.5 GB** (was 13.4 GB): recycled inflate buffers stay per thread, plus the purge delay | — | 590fa89 |
+| P10 | Lazy events: an event stays undecoded; `Session::new` reads `e`/`t`/`tp` straight from its bytes (falls back to decoding for anything odd) | 28.7 / 28.5 s vs 33.1 / 33.8 s (−14%) | 5.4 GB | yes | 1c36e8d |
+| M-a | Keep one spare inflate buffer per thread (the largest), not one per export of the largest submission seen | 28.8 / 29.0 s vs 28.6 / 28.8 s (+0.7%, noise) | 4.8–4.9 GB vs 5.2 GB (−8%) | yes | bfbb5d2 |
+| M1 | Threads 24 / 16 instead of 32 (same binary, `--threads`) | 24: 30.5 / 31.1 s (+4.5%); 16: 34.4 s (+16%) vs 29.1 / 30.4 s | 24: 3.9 GB (−21%); 16: 2.7 GB (−45%) | **no**: ~2% and ~3.6% speed per 10% memory, over the 1% rule; `--threads` stays available | — |
+| M2 | Objectives folded as per-session slots (kind, position, id): the merge never reads the matched name and text, and counts sessions per slot | 28.9 / 28.7 s vs 28.9 / 28.5 s (noise) | fold 616 → 319 MB (−48%); at full scale ~−5 GB | yes | 7dd06f3 |
+| R2 | Re-profile: CBOR walking dominates (`Cursor::item` 18.4%: half the validation walk, the rest resolving streams and event headers); alloc/free ~12%; finalize is 77% npc spawn merges | | | | |
+| P8 | Parallel finalize, mild: the per-entity spawn merges (npc and object) run on all cores, entities handed out one at a time, entity order kept; nothing else in finalize changes | finalize 0.9 → 0.3 s on 5% (full scale: see F1) | — | yes | 64346ce |
+| P11 | `npc_drops`: look loot sources up by time in a map instead of scanning the source stream per link | 27.8 / 27.5 s vs 27.2 / 27.5 s: no gain | — | **no** | — |
+| — | Rejected on inspection: parse JSON before the lossy UTF-8 pass (that pass is already the only validation; nothing to save) | | | — | — |
+| P12a | Trusted walking of already validated bytes (event headers; shapes of lazy entries while a lazy value decodes): an item counter, no error checks, no recursion | 26.5 / 26.8 s vs 28.5 / 27.8 s (−5%) | 4.5–4.6 GB | yes | 7be09d1 |
+| — | Noise check: the same binary on both sides gave 37.0–37.8 s, so differences under ~2% are within noise | | | | |
+| F1 | **Full archive, everything through P12a:** 9 min 6 s (F0 11 min 49 s, −23%); fold thread busy 104 s (was 121 s), finalize **6.8 s** (was 48 s); outputs identical to F0 | — | **11.0 GB** (F0 18.5 GB, −41%) | — | 0df3ac2 |
+
+## Final measurements
+
+| # | What | Result |
+|---|---|---|
+| F1 | Full archive, Rust, best binary so far, under the memory watchdog | 9 min 6 s, 11.0 GB peak (546.6 s elapsed, 13,681 s user, 627 s sys) |
+| F2 | Full archive, TypeScript tool from scratch (empty store, scratch directories): time and peak memory | pending |
+| F3 | Diff the two full-archive outputs (parity on the whole archive, not only samples) | pending |
