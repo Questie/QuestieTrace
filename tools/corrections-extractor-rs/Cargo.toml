@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/trace-data", "crates/corrections"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+trace-data = { path = "crates/trace-data" }
+indexmap = "2"
+libdeflater = "1.26"
+memchr = "2"
+rayon = "1"
+ryu-js = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
