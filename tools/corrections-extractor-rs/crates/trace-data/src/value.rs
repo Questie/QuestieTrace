@@ -30,7 +30,6 @@ use std::fmt;
 /// Where decoded values are allocated. Reset it (or drop it) once nothing borrows from it.
 pub type Arena = bumpalo::Bump;
 
-#[derive(Clone)]
 pub enum Value<'a> {
     Bool(bool),
     Num(f64),
@@ -334,7 +333,6 @@ pub fn format_number(n: f64) -> String {
 }
 
 /// A table that is not an array, in JS property order.
-#[derive(Clone, Copy)]
 pub struct Object<'a> {
     /// Array-index keys ascending, then the other keys in insertion order.
     entries: &'a [(JsKey<'a>, Value<'a>)],
@@ -413,8 +411,8 @@ fn sort_into_property_order(entries: &mut [(JsKey, Value)]) -> usize {
     entries.iter().take_while(|(key, _)| matches!(key, JsKey::Index(_))).count()
 }
 
-/// A validated, undecoded value.
-#[derive(Clone)]
+/// A validated, undecoded value. Deliberately not `Clone`: a copy would decode again, into
+/// the arena again.
 pub struct Lazy<'a> {
     raw: &'a [u8],
     /// Where the value goes once decoded.
@@ -642,7 +640,9 @@ impl<'a> Decoder<'a> {
             }
             match (item, &mut raw) {
                 (None, None) => {
-                    let mut entries = ArenaVec::with_capacity_in(items.capacity(), arena);
+                    // Sized to the items so far, not the declared length: a hostile length
+                    // must not reserve its room twice.
+                    let mut entries = ArenaVec::with_capacity_in(items.len(), arena);
                     entries.extend(items.drain(..).enumerate().map(|(i, v)| (JsKey::Index(i as u32 + 1), v)));
                     raw = Some(entries);
                 }
