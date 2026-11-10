@@ -320,19 +320,34 @@ impl<'a> Object<'a> {
     }
 
     pub fn get(&self, key: KeyRef<'_>) -> Option<&Value<'a>> {
-        match key.js_key() {
-            JsKey::Index(i) => {
-                let indexed = &self.entries[..self.index_count];
-                indexed
-                    .binary_search_by_key(&i, |(key, _)| match key {
-                        JsKey::Index(k) => *k,
-                        JsKey::Name(_) => unreachable!("index keys come first"),
-                    })
-                    .ok()
-                    .map(|at| &indexed[at].1)
-            }
-            name @ JsKey::Name(_) => self.entries[self.index_count..].iter().find(|(key, _)| *key == name).map(|(_, v)| v),
+        match key {
+            // The hot paths: a name that cannot be an array index (every `t`, `tp`, `v`, every
+            // function name) is compared as it is, and an integral number is an index.
+            KeyRef::Str(name) if !name.as_bytes().first().is_some_and(u8::is_ascii_digit) => self.get_name(name),
+            KeyRef::Num(n) if n.fract() == 0.0 && (0.0..=MAX_ARRAY_INDEX).contains(&n) => self.get_index(n as u32),
+            _ => match key.js_key() {
+                JsKey::Index(i) => self.get_index(i),
+                JsKey::Name(name) => self.get_name(&name),
+            },
         }
+    }
+
+    fn get_index(&self, i: u32) -> Option<&Value<'a>> {
+        let indexed = &self.entries[..self.index_count];
+        indexed
+            .binary_search_by_key(&i, |(key, _)| match key {
+                JsKey::Index(k) => *k,
+                JsKey::Name(_) => unreachable!("index keys come first"),
+            })
+            .ok()
+            .map(|at| &indexed[at].1)
+    }
+
+    fn get_name(&self, name: &str) -> Option<&Value<'a>> {
+        self.entries[self.index_count..]
+            .iter()
+            .find(|(key, _)| matches!(key, JsKey::Name(n) if n.as_ref() == name))
+            .map(|(_, v)| v)
     }
 
     /// Builds an object from entries in insertion order (unique keys).
@@ -1004,6 +1019,21 @@ mod tests {
     fn a_proto_key_is_an_ordinary_entry() {
         let item: Vec<u8> = [0xa1, 0x69].into_iter().chain(ascii("__proto__")).chain([0x01]).collect();
         decodes_to(&item, r#"{"__proto__":1}"#);
+    }
+
+    #[test]
+    fn numbers_and_strings_find_the_same_keys() {
+        // {"b": 1, 10: 2, "007": 3, -1: 4}
+        let item = [0xa4, 0x61, b'b', 0x01, 0x0a, 0x02, 0x63, b'0', b'0', b'7', 0x03, 0x20, 0x04];
+        let value = decode_value(&item).unwrap().unwrap();
+        let num = |key: KeyRef| value.get(key).and_then(Value::as_num);
+        assert_eq!((num(KeyRef::Num(10.0)), num(KeyRef::Str("10"))), (Some(2.0), Some(2.0)));
+        assert_eq!(
+            (num(KeyRef::Str("b")), num(KeyRef::Str("007")), num(KeyRef::Num(7.0))),
+            (Some(1.0), Some(3.0), None)
+        );
+        assert_eq!((num(KeyRef::Num(-1.0)), num(KeyRef::Str("-1"))), (Some(4.0), Some(4.0)));
+        assert_eq!((num(KeyRef::Num(-0.0)), num(KeyRef::Str("")), num(KeyRef::Num(10.5))), (None, None, None));
     }
 
     #[test]
