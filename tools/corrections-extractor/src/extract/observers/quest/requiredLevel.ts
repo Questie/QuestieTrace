@@ -1,17 +1,23 @@
 // questKeys.requiredLevel - Questie field 4.
 //
-// Primary source: QuestAcceptLevel stream recorded by addon at QUEST_ACCEPTED
-// (player's level at acceptance time). Take the minimum observed acceptance
-// level across all sessions.
+// The player's level at each QUEST_ACCEPTED, read from the UnitLevel("player") stream. The
+// lowest level across sessions wins.
 //
-// Fallback: If QuestAcceptLevel is not available (older traces), correlate
-// QUEST_ACCEPTED events with the UnitLevel("player") stream to find the
-// player's level at acceptance time, then take the minimum across sessions.
+// That stream only records changes, and UnitLevel("player") can still report the old level
+// inside PLAYER_LEVEL_UP, so it shows a new level up to about a second late. A quest accepted
+// in that gap would lower requiredLevel for good; the level PLAYER_LEVEL_UP announced is used
+// when it is higher. Levels never drop within a session.
+//
+// Traces before schema 18 also hold a QuestAcceptLevel stream. It is ignored: on Forever it
+// read QUEST_ACCEPTED's quest ID as a quest log index, recording levels against whichever
+// quest sat at that position. Where it named the right quest, its level always equalled
+// UnitLevel("player") at the event.
 
-import { getParamKeys, getStream, valueAt } from "../../../core/emulator";
-import type { SessionRecord, EventEntry } from "../../../core/types";
+import { getStream, valueAt } from "../../../core/emulator";
+import type { SessionRecord } from "../../../core/types";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
 
+/** Era, TBC, Wrath and Mists send (questLogIndex, questID), Forever sends (questID) alone. */
 function unpackQuestId(args: unknown): number | null {
   if (args !== null && args !== undefined && typeof args === "object" && !Array.isArray(args)) {
     const obj = args as Record<string, unknown>;
@@ -45,64 +51,23 @@ export function mergeRequiredLevel(observations: Observation<number>[]): number 
 }
 
 export const observeRequiredLevel: FieldObserver<number> = (session) => {
-  const observations: Observation<number>[] = [];
-
-  // --- Primary: QuestAcceptLevel (direct observation at acceptance) ---
-  const acceptRoot = session.functions["QuestAcceptLevel"];
-  if (acceptRoot && !Array.isArray(acceptRoot)) {
-    const acceptObs = new Map<number, { level: number; t: number }>();
-
-    for (const questIdKey of getParamKeys(acceptRoot)) {
-      const questID = Number(questIdKey);
-      if (!Number.isFinite(questID)) continue;
-
-      const stream = getStream(session, "QuestAcceptLevel", questIdKey) ?? [];
-      if (stream.length === 0) continue;
-
-      let minLevel: number | null = null;
-      let firstT: number | null = null;
-      for (const entry of stream) {
-        const level = typeof entry.v === "number" ? entry.v : null;
-        if (level === null) continue;
-        if (minLevel === null || level < minLevel) {
-          minLevel = level;
-        }
-        if (firstT === null) firstT = entry.t;
-      }
-
-      if (minLevel !== null && firstT !== null) {
-        acceptObs.set(questID, { level: minLevel, t: firstT });
-      }
-    }
-
-    // Emit observations from QuestAcceptLevel
-    for (const [entityId, { level, t }] of acceptObs) {
-      observations.push({
-        entityId,
-        value: level,
-        confidence: "high",
-        provenance: { session: sessionLabel(session), t },
-      });
-    }
-  }
-
-  // --- Fallback: UnitLevel at QUEST_ACCEPTED event time (for traces without QuestAcceptLevel) ---
-  if (observations.length > 0) {
-    // Already have high-confidence data from QuestAcceptLevel
-    return observations;
-  }
-
-  // Find all QUEST_ACCEPTED events
   const acceptedQuests = new Map<number, { level: number; t: number }>();
+  let levelUpLevel: number | null = null; // announced by the newest PLAYER_LEVEL_UP so far
 
   for (const event of session.events) {
+    if (event.e === "PLAYER_LEVEL_UP") {
+      const newLevel = event.a?.[1];
+      if (typeof newLevel === "number" && Number.isFinite(newLevel)) levelUpLevel = newLevel;
+      continue;
+    }
     if (event.e !== "QUEST_ACCEPTED") continue;
 
     const questId = unpackQuestId(event.a);
     if (questId === null || questId <= 0) continue;
 
-    const playerLevel = findPlayerLevelAtTime(session, event.t);
-    if (playerLevel === null) continue;
+    const knownLevels = [findPlayerLevelAtTime(session, event.t), levelUpLevel].filter((level) => level !== null);
+    if (knownLevels.length === 0) continue;
+    const playerLevel = Math.max(...knownLevels);
 
     const current = acceptedQuests.get(questId);
     if (current === undefined || playerLevel < current.level) {
@@ -110,6 +75,7 @@ export const observeRequiredLevel: FieldObserver<number> = (session) => {
     }
   }
 
+  const observations: Observation<number>[] = [];
   for (const [entityId, { level, t }] of acceptedQuests) {
     observations.push({
       entityId,
