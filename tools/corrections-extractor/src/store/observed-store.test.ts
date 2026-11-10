@@ -10,7 +10,7 @@ import type { Confidence, Observation } from "../extract/observation";
 import { objectivesRealTraceFixture } from "../extract/observers/quest/__fixtures__/objectives.realTrace.fixture";
 import { ObservedStore, type ReplayedSession } from "./observed-store";
 import { OBSERVER_SOURCES, observerVersion } from "./observer-version";
-import { rcloneSource, sampledSource, samplePercentFromEnv } from "./source";
+import { rcloneSource, sampledSource, samplePercentFromEnv, sourceFromEnv } from "./source";
 
 const tempDirs: string[] = [];
 
@@ -329,7 +329,25 @@ describe("samplePercentFromEnv", () => {
   });
 });
 
+describe("sourceFromEnv", () => {
+  it("should read a local checkout when TRACE_DATA_DIR is set", async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, "submissions", "2026-10"), { recursive: true });
+    writeFileSync(join(dir, "submissions", "2026-10", "a.json"), "{}");
+
+    expect(await sourceFromEnv({ TRACE_DATA_DIR: dir, TRACE_REMOTE: "remote:bucket" }).list()).toEqual(["2026-10/a.json"]);
+  });
+});
+
 describe("rcloneSource", () => {
+  it("should explain how to choose another source when rclone cannot list the remote", async () => {
+    const script = join(tempDir(), "rclone");
+    writeFileSync(script, "#!/bin/sh\necho \"didn't find section in config file\" >&2\nexit 1\n");
+    chmodSync(script, 0o755);
+
+    await expect(rcloneSource("missing:bucket", script).list()).rejects.toThrow(/missing:bucket\/submissions.*TRACE_REMOTE.*TRACE_DATA_DIR[\s\S]*didn't find section/);
+  });
+
   /** A stand-in for rclone that serves `remoteDir` for lsf and copy. */
   function fakeRclone(remoteDir: string): string {
     const script = join(tempDir(), "rclone");

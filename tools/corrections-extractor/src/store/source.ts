@@ -40,7 +40,13 @@ export function rcloneSource(remote: string, rclone = "rclone"): SubmissionSourc
   const submissions = `${remote.replace(/\/+$/, "")}/submissions`;
   return {
     list: async () => {
-      const { stdout } = await run(rclone, ["lsf", "--recursive", "--files-only", submissions], { maxBuffer: 1024 * 1024 * 1024 });
+      let stdout: string;
+      try {
+        ({ stdout } = await run(rclone, ["lsf", "--recursive", "--files-only", submissions], { maxBuffer: 1024 * 1024 * 1024 }));
+      } catch (e) {
+        const reason = e instanceof Error ? e.message.trim() : String(e);
+        throw new Error(`Listing ${submissions} with rclone failed. Set TRACE_REMOTE to your rclone remote, or TRACE_DATA_DIR to a local trace-data checkout.\n${reason}`);
+      }
       return stdout.split("\n").filter((key) => key.endsWith(".json"));
     },
     fetch: async (keys) => {
@@ -59,10 +65,13 @@ export function rcloneSource(remote: string, rclone = "rclone"): SubmissionSourc
   };
 }
 
-/** TRACE_REMOTE (an rclone remote) when set, else the local checkout. */
-export function sourceFromEnv(defaultTraceDataDir: string, env: NodeJS.ProcessEnv = process.env): SubmissionSource {
-  const remote = env.TRACE_REMOTE;
-  return remote && remote.length > 0 ? rcloneSource(remote) : localSource(defaultTraceDataDir);
+/** The team's archive bucket, as named in everyone's rclone config. */
+export const DEFAULT_REMOTE = "ovhcloud-de:trace-intake-ovh";
+
+/** TRACE_DATA_DIR (a local trace-data checkout) when set, else TRACE_REMOTE, else DEFAULT_REMOTE. */
+export function sourceFromEnv(env: NodeJS.ProcessEnv = process.env): SubmissionSource {
+  if (env.TRACE_DATA_DIR) return localSource(resolve(env.TRACE_DATA_DIR));
+  return rcloneSource(env.TRACE_REMOTE || DEFAULT_REMOTE);
 }
 
 /**

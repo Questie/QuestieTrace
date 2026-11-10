@@ -6,7 +6,7 @@ Status: Accepted · 2026-11-09
 The local rclone mirror of the bucket reached 141 GB, and the disk ran low. Exports are cumulative, but deduplicating sessions would still leave about 60–95 GB. OVH charges nothing for downloads or API requests.
 
 ## Decision
-The OVH bucket `trace-intake-ovh` is the only copy of raw submissions. The extractor lists it with rclone and downloads only new submissions, in batches into a temporary directory that is removed after each batch. No raw submissions or sessions are kept locally; only their observations are, in `trace-session-store` ([0001](0001-observations-store-in-parquet.md)).
+The OVH bucket `trace-intake-ovh` is the only copy of raw submissions, and the extractor's default source. The extractor lists it with rclone (remote `ovhcloud-de`, the same name for the whole team) and downloads only new submissions, in batches into a temporary directory that is removed after each batch. No raw submissions or sessions are kept locally; only their observations are, in `trace-session-store` ([0001](0001-observations-store-in-parquet.md)).
 
 ## Consequences
 - Local disk use is the observation store (a few GB) plus outputs.
