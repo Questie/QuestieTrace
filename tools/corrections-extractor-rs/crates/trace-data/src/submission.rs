@@ -7,10 +7,11 @@
 //! Reading happens in two steps, so decoded values can borrow the inflated bytes:
 //! [`Submission::read`] inflates every export, [`Submission::decode`] decodes them.
 
-use crate::export::{decode_for_print, find_exports, is_js_whitespace, Export, Inflater};
+use crate::export::{decode_for_print, find_exports, is_js_whitespace, Export, Inflated, Inflater};
 use crate::session::Session;
 use crate::value::{decode_trace, Value};
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -21,7 +22,7 @@ pub struct Submission {
     /// Why the file could not be read at all.
     error: Option<String>,
     /// Per export: its CBOR bytes, or why it was dropped.
-    exports: Vec<Result<Vec<u8>, String>>,
+    exports: Vec<Result<Inflated, String>>,
 }
 
 /// A decoded submission: one trace per export that decoded.
@@ -60,8 +61,15 @@ type Envelope<'a> = HashMap<String, &'a RawValue>;
 
 /// A JSON string field's value. A lone UTF-16 surrogate (which JS strings allow, Rust strings
 /// do not) makes it unreadable: "no export_string" where the TS tool would decode on.
-fn json_string(raw: Option<&RawValue>) -> Option<String> {
-    raw.and_then(|raw| serde_json::from_str::<String>(raw.get()).ok())
+/// Borrowed when the string has no escapes, as an export string never has: the raw JSON was
+/// validated, so the text between the quotes is the value.
+fn json_string(raw: Option<&RawValue>) -> Option<Cow<'_, str>> {
+    let json = raw?.get();
+    let inner = json.strip_prefix('"').and_then(|rest| rest.strip_suffix('"'));
+    match inner {
+        Some(inner) if !inner.contains('\\') => Some(Cow::Borrowed(inner)),
+        _ => serde_json::from_str::<String>(json).ok().map(Cow::Owned),
+    }
 }
 
 /// trace-data names files `<received stamp>_<submission id>.json`.
@@ -107,7 +115,7 @@ impl Submission {
             }
         };
         if let Some(id) = json_string(envelope.get("id").copied()).filter(|id| !id.is_empty()) {
-            submission.submission_id = id;
+            submission.submission_id = id.into_owned();
         }
         let Some(export_string) = json_string(envelope.get("export_string").copied()) else {
             submission.error = Some("no export_string".into());
@@ -126,6 +134,11 @@ impl Submission {
         submission
     }
 
+    /// Hands the inflated exports' buffers back to `inflater` for the next submission.
+    pub fn recycle(self, inflater: &mut Inflater) {
+        inflater.recycle(self.exports.into_iter().filter_map(Result::ok));
+    }
+
     /// Decodes every inflated export. When none decodes, the submission fails with every
     /// export's reason, as decode.ts does.
     pub fn decode(&self) -> Decoded<'_> {
@@ -141,7 +154,7 @@ impl Submission {
         for (index, export) in self.exports.iter().enumerate() {
             match export {
                 Err(message) => dropped_exports.push(message.clone()),
-                Ok(cbor) => match decode_root(cbor) {
+                Ok(inflated) => match decode_root(inflated.bytes()) {
                     Ok(root) => traces.push(Trace { root }),
                     Err(message) => dropped_exports.push(format!("export {}: {message}", index + 1)),
                 },
@@ -162,7 +175,7 @@ impl Submission {
     }
 }
 
-fn inflate_export(index: usize, export: &Export, inflater: &mut Inflater) -> Result<Vec<u8>, String> {
+fn inflate_export(index: usize, export: &Export, inflater: &mut Inflater) -> Result<Inflated, String> {
     let number = index + 1;
     let payload = match export {
         Export::Unterminated => return Err(format!("export {number} has no matching end marker")),
@@ -309,6 +322,16 @@ mod tests {
         invalid.push(0xff);
         invalid.extend(format!(r#"", "export_string": "{tiny}"}}"#).into_bytes());
         assert_eq!(read(&invalid).decode().traces.len(), 1);
+    }
+
+    #[test]
+    fn json_strings_with_escapes_are_unescaped_and_others_borrowed() {
+        let raw = |json: &str| serde_json::from_str::<&RawValue>(json).unwrap().get().to_owned();
+        let plain = raw(r#""abc""#);
+        let escaped = raw(r#""a\u0062\"c""#);
+        assert!(matches!(json_string(Some(serde_json::from_str(&plain).unwrap())), Some(Cow::Borrowed("abc"))));
+        assert_eq!(json_string(Some(serde_json::from_str(&escaped).unwrap())).as_deref(), Some("ab\"c"));
+        assert_eq!(json_string(Some(serde_json::from_str("5").unwrap())), None);
     }
 
     #[test]

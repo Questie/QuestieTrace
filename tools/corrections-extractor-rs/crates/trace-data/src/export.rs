@@ -180,46 +180,70 @@ fn decode_clean_print(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Raw-deflate inflating with an output buffer kept between calls: each export is inflated once
-/// into memory that is already there (growing only past the largest export seen), then copied
-/// out at its exact size.
-pub struct Inflater {
-    decompressor: Decompressor,
-    scratch: Vec<u8>,
+/// An inflated export: the first `size` bytes of `buffer`. The buffer keeps its full length so
+/// that, recycled into an [`Inflater`], it is reused without being cleared.
+pub struct Inflated {
+    buffer: Vec<u8>,
+    size: usize,
 }
 
-impl Default for Inflater {
-    fn default() -> Self {
-        Self::new()
+impl std::fmt::Debug for Inflated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Inflated({} bytes)", self.size)
     }
+}
+
+impl Inflated {
+    pub fn bytes(&self) -> &[u8] {
+        &self.buffer[..self.size]
+    }
+}
+
+/// Raw-deflate inflating into recycled buffers: an export is inflated once, straight into a
+/// buffer an earlier export left behind (see [`Inflater::recycle`]), so neither copying nor
+/// clearing memory is needed in the common case.
+#[derive(Default)]
+pub struct Inflater {
+    decompressor: Option<Decompressor>,
+    spare: Vec<Vec<u8>>,
 }
 
 impl Inflater {
     pub fn new() -> Self {
         Inflater {
-            decompressor: Decompressor::new(),
-            scratch: Vec::new(),
+            decompressor: Some(Decompressor::new()),
+            spare: Vec::new(),
         }
     }
 
-    pub fn inflate(&mut self, compressed: &[u8]) -> Result<Vec<u8>, String> {
+    /// Hands buffers back for later exports.
+    pub fn recycle(&mut self, inflated: impl IntoIterator<Item = Inflated>) {
+        self.spare.extend(inflated.into_iter().map(|inflated| inflated.buffer));
+    }
+
+    pub fn inflate(&mut self, compressed: &[u8]) -> Result<Inflated, String> {
         let wanted = (compressed.len() * 8).clamp(64 * 1024, MAX_CBOR_BYTES);
-        if self.scratch.len() < wanted {
-            self.scratch.resize(wanted, 0);
+        let mut buffer = self.spare.pop().unwrap_or_default();
+        if buffer.len() < wanted {
+            buffer.resize(wanted, 0);
         }
+        let decompressor = self.decompressor.get_or_insert_with(Decompressor::new);
         loop {
-            match self.decompressor.deflate_decompress(compressed, &mut self.scratch) {
-                Ok(size) => return Ok(self.scratch[..size].to_vec()),
-                Err(DecompressionError::InsufficientSpace) if self.scratch.len() < MAX_CBOR_BYTES => {
-                    let grown = (self.scratch.len() * 2).min(MAX_CBOR_BYTES);
-                    self.scratch.resize(grown, 0);
+            match decompressor.deflate_decompress(compressed, &mut buffer) {
+                Ok(size) => return Ok(Inflated { buffer, size }),
+                Err(DecompressionError::InsufficientSpace) if buffer.len() < MAX_CBOR_BYTES => {
+                    let grown = (buffer.len() * 2).min(MAX_CBOR_BYTES);
+                    buffer.resize(grown, 0);
                 }
-                Err(DecompressionError::InsufficientSpace) => {
-                    return Err(format!(
-                        "payload could not be decompressed: Cannot create a Buffer larger than {MAX_CBOR_BYTES} bytes"
-                    ));
+                Err(error) => {
+                    self.spare.push(buffer);
+                    return Err(match error {
+                        DecompressionError::InsufficientSpace => {
+                            format!("payload could not be decompressed: Cannot create a Buffer larger than {MAX_CBOR_BYTES} bytes")
+                        }
+                        DecompressionError::BadData => format!("payload could not be decompressed: {}", zlib_error(compressed)),
+                    });
                 }
-                Err(DecompressionError::BadData) => return Err(format!("payload could not be decompressed: {}", zlib_error(compressed))),
             }
         }
     }
@@ -320,6 +344,24 @@ mod tests {
     }
 
     #[test]
+    fn a_recycled_buffer_inflates_a_smaller_export_without_its_stale_bytes() {
+        let compress = |data: &[u8]| {
+            let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
+            let mut out = vec![0; compressor.deflate_compress_bound(data.len())];
+            let size = compressor.deflate_compress(data, &mut out).unwrap();
+            out.truncate(size);
+            out
+        };
+        let large: Vec<u8> = (0..200_000u32).map(|i| (i % 7) as u8 + 1).collect();
+        let small = b"short export".to_vec();
+        let mut inflater = Inflater::new();
+        let first = inflater.inflate(&compress(&large)).unwrap();
+        assert_eq!(first.bytes(), large);
+        inflater.recycle([first]);
+        assert_eq!(inflater.inflate(&compress(&small)).unwrap().bytes(), small);
+    }
+
+    #[test]
     fn corrupt_and_cut_off_deflate_data_get_zlibs_messages() {
         let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
         let data: Vec<u8> = (0..20_000u32).flat_map(|i| (i % 251).to_le_bytes()).collect();
@@ -327,7 +369,7 @@ mod tests {
         let size = compressor.deflate_compress(&data, &mut compressed).unwrap();
         compressed.truncate(size);
         let mut inflater = Inflater::new();
-        assert_eq!(inflater.inflate(&compressed).unwrap(), data);
+        assert_eq!(inflater.inflate(&compressed).unwrap().bytes(), data);
         // Node: "unexpected end of file" for input that ends inside the stream.
         assert_eq!(
             inflater.inflate(&compressed[..size / 2]).unwrap_err(),
