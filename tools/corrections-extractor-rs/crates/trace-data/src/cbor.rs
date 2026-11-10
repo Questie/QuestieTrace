@@ -52,6 +52,17 @@ impl<'a> Cursor<'a> {
         self.pos
     }
 
+    /// How many items of a container with `length` items to allocate room for: every item takes
+    /// at least one byte, so a hostile length cannot reserve more than the data left.
+    pub fn capacity_for(&self, length: f64) -> usize {
+        let left = self.bytes.len() - self.pos;
+        if length < left as f64 {
+            length as usize
+        } else {
+            left
+        }
+    }
+
     pub fn is_done(&self) -> bool {
         self.pos >= self.bytes.len()
     }

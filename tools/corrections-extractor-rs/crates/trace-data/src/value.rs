@@ -277,6 +277,10 @@ impl<'a> Object<'a> {
 
     /// Builds an object from entries in insertion order (unique keys).
     fn from_insertion_order(mut entries: Vec<(JsKey<'a>, Value<'a>)>) -> Self {
+        // Most objects (every stream entry {t, tp, v}) have no index key: nothing to reorder.
+        if entries.iter().all(|(key, _)| matches!(key, JsKey::Name(_))) {
+            return Object { entries, index_count: 0 };
+        }
         // Stable: names keep their insertion order behind the sorted indices.
         entries.sort_by(|(a, _), (b, _)| match (a, b) {
             (JsKey::Index(a), JsKey::Index(b)) => a.cmp(b),
@@ -403,7 +407,7 @@ impl<'a> Decoder<'a> {
         if depth > MAX_NESTING_DEPTH {
             return Err(depth_error());
         }
-        let mut items = Vec::new();
+        let mut items = Vec::with_capacity(self.cursor.capacity_for(length));
         let mut first_integer_keyed = false;
         // Set once an item is nil: the table has a hole and is no plain array any more.
         let mut raw: Option<Vec<(JsKey<'a>, Value<'a>)>> = None;
@@ -439,7 +443,7 @@ impl<'a> Decoder<'a> {
         if depth > MAX_NESTING_DEPTH {
             return Err(depth_error());
         }
-        let mut table = TableBuilder::default();
+        let mut table = TableBuilder::with_capacity(self.cursor.capacity_for(length));
         let mut first_integer_keyed = false;
         let mut has_other_key = false;
         let mut has_deleted = false;
@@ -688,6 +692,13 @@ struct TableBuilder<'a> {
 }
 
 impl<'a> TableBuilder<'a> {
+    fn with_capacity(capacity: usize) -> Self {
+        TableBuilder {
+            entries: Vec::with_capacity(capacity),
+            index: None,
+        }
+    }
+
     fn position(&self, key: &JsKey<'a>) -> Option<usize> {
         match &self.index {
             Some(index) => index.get(key).copied(),

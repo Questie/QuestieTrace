@@ -4,7 +4,7 @@
 
 use std::fmt::Write;
 use trace_data::submission::Submission;
-use trace_data::{format_number, Decompressor, Value};
+use trace_data::{format_number, Inflater, Value};
 
 fn json_string(out: &mut String, s: &str) {
     out.push('"');
@@ -58,9 +58,9 @@ fn json_value(out: &mut String, value: &Value) {
 
 /// The TS side stringifies the whole trace; this reaches the same tree through `root`.
 fn main() {
-    let mut decompressor = Decompressor::new();
+    let mut inflater = Inflater::new();
     for path in std::env::args().skip(1) {
-        let submission = Submission::read(path.as_ref(), &mut decompressor);
+        let submission = Submission::read(path.as_ref(), &mut inflater);
         let decoded = submission.decode();
         let mut out = String::from("{\"traces\":[");
         for (i, trace) in decoded.traces.iter().enumerate() {
