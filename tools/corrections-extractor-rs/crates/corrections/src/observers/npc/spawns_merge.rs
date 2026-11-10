@@ -287,18 +287,7 @@ fn first_close_pair(clusters: &[GrowingCluster], threshold: f64) -> Option<(usiz
 struct CoordKey(Num, String, String);
 
 fn coord_key(zone_id: f64, x: f64, y: f64) -> CoordKey {
-    CoordKey(Num(zone_id), to_fixed_4(x), to_fixed_4(y))
-}
-
-/// JS `x.toFixed(4)` as far as keys go: values that print alike in JS print alike here.
-/// Rust rounds an exact tie to even, JS away from zero; with 4 decimals the ties are the odd
-/// multiples of 1/32. JS prints -0 as "0.0000".
-fn to_fixed_4(x: f64) -> String {
-    let x = x + 0.0;
-    let thirty_seconds = x.abs() * 32.0;
-    let tie = thirty_seconds.fract() == 0.0 && thirty_seconds % 2.0 == 1.0;
-    let away_from_zero = if x > 0.0 { x.next_up() } else { x.next_down() };
-    format!("{:.4}", if tie { away_from_zero } else { x })
+    CoordKey(Num(zone_id), js::to_fixed_4(x), js::to_fixed_4(y))
 }
 
 /// The zones in the order a JS object iterates them: array-index keys (integers
@@ -594,16 +583,6 @@ mod tests {
     }
 
     // Not in the TS tests: the JS behaviour the port has to reproduce.
-
-    #[test]
-    fn coordinate_keys_round_like_js_to_fixed() {
-        // Expected values printed by node: (x).toFixed(4).
-        assert_eq!(to_fixed_4(30.03125), "30.0313");
-        assert_eq!(to_fixed_4(-0.03125), "-0.0313");
-        assert_eq!(to_fixed_4(0.09375), "0.0938");
-        assert_eq!(to_fixed_4(62.5625), "62.5625");
-        assert_eq!(to_fixed_4(-0.0), "0.0000");
-    }
 
     #[test]
     fn zones_come_out_in_js_property_order() {

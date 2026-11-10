@@ -34,6 +34,29 @@ pub fn entry_t(entry: &Value) -> f64 {
     entry.get("t").and_then(Value::as_num).unwrap_or(f64::NAN)
 }
 
+/// An entry's precise time `tp`, which orders samples taken at the same `t`; NaN when missing.
+pub fn entry_tp(entry: &Value) -> f64 {
+    entry.get("tp").and_then(Value::as_num).unwrap_or(f64::NAN)
+}
+
+/// The binary search of emulator.ts `valueAt`: the last of `len` entries for which `at_or_before`
+/// holds, assuming it holds for a prefix. On data that breaks that assumption (an unsorted
+/// stream) it still lands where the TS loop lands, so every "latest at" lookup shares it.
+pub fn last_at_or_before(len: usize, at_or_before: impl Fn(usize) -> bool) -> Option<usize> {
+    let (mut lo, mut hi) = (0isize, len as isize - 1);
+    let mut result = None;
+    while lo <= hi {
+        let mid = ((lo + hi) as usize) >> 1;
+        if at_or_before(mid) {
+            result = Some(mid);
+            lo = mid as isize + 1;
+        } else {
+            hi = mid as isize - 1;
+        }
+    }
+    result
+}
+
 /// An entry's value `v`; None stands for nil.
 pub fn entry_v<'v, 'a>(entry: &'v Value<'a>) -> Option<&'v Value<'a>> {
     entry.get("v")
@@ -41,18 +64,7 @@ pub fn entry_v<'v, 'a>(entry: &'v Value<'a>) -> Option<&'v Value<'a>> {
 
 /// emulator.ts `valueAt`: `v` of the latest entry with `t <= target`.
 pub fn value_at<'v, 'a>(stream: Stream<'v, 'a>, target: f64) -> Option<&'v Value<'a>> {
-    let (mut lo, mut hi) = (0isize, stream.len() as isize - 1);
-    let mut result = None;
-    while lo <= hi {
-        let mid = ((lo + hi) as usize) >> 1;
-        if entry_t(&stream[mid]) <= target {
-            result = Some(mid);
-            lo = mid as isize + 1;
-        } else {
-            hi = mid as isize - 1;
-        }
-    }
-    entry_v(&stream[result?])
+    entry_v(&stream[last_at_or_before(stream.len(), |i| entry_t(&stream[i]) <= target)?])
 }
 
 /// correlate.ts `DEFAULT_CORRELATION_WINDOW_SECONDS`.

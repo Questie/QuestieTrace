@@ -4,6 +4,8 @@ members = ["crates/trace-data", "crates/corrections"]
 
 [workspace.package]
 edition = "2021"
+# f64::next_up (1.86), LazyLock, Option::is_none_or and precise capturing (`use<..>`).
+rust-version = "1.86"
 publish = false
 
 [workspace.dependencies]

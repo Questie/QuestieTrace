@@ -186,8 +186,9 @@ impl Header<'_> {
 /// One entity's sparse record: field name -> value, in insertion order.
 pub type Record = Vec<(String, Js)>;
 
-/// corrections-writer.ts `writeQuestieCorrectionsLua`. `records` must be sorted by id or not:
-/// they are written in ascending id order; entities without fields are skipped.
+/// corrections-writer.ts `writeQuestieCorrectionsLua`. `records` need not be sorted: they are
+/// written in ascending id order. Entities without fields are skipped; an entity whose only
+/// fields are held back (requiredLevel, zoneOrSort) still gets an empty block, as in TS.
 pub fn write_corrections(module: &str, keys_local: &str, records: &[(i64, Record)], header: &Header) -> String {
     let mut lines: Vec<String> = vec![
         format!("---@class {module}"),

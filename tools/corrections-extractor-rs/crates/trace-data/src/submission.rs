@@ -76,22 +76,27 @@ fn submission_id_from_path(path: &Path) -> String {
 impl Submission {
     /// Reads and inflates the file at `path`; never fails, errors are kept for [`Self::decode`].
     pub fn read(path: &Path, inflater: &mut Inflater) -> Submission {
+        match std::fs::read(path) {
+            Ok(bytes) => Self::from_json(&bytes, submission_id_from_path(path), inflater),
+            Err(_) => Submission {
+                submission_id: submission_id_from_path(path),
+                error: Some("unreadable submission JSON".into()),
+                exports: Vec::new(),
+            },
+        }
+    }
+
+    /// A submission file's content; `fallback_id` is used when the file has no `id`.
+    pub fn from_json(bytes: &[u8], fallback_id: String, inflater: &mut Inflater) -> Submission {
         let mut submission = Submission {
-            submission_id: submission_id_from_path(path),
+            submission_id: fallback_id,
             error: None,
             exports: Vec::new(),
         };
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                submission.error = Some("unreadable submission JSON".into());
-                return submission;
-            }
-        };
-        let envelope = match serde_json::from_slice::<Envelope>(&bytes) {
+        let envelope = match serde_json::from_slice::<Envelope>(bytes) {
             Ok(envelope) => envelope,
             // An array is a JS object too: it parses, but has no export_string.
-            Err(_) if serde_json::from_slice::<Vec<&RawValue>>(&bytes).is_ok() => {
+            Err(_) if serde_json::from_slice::<Vec<&RawValue>>(bytes).is_ok() => {
                 submission.error = Some("no export_string".into());
                 return submission;
             }
@@ -185,10 +190,119 @@ fn decode_root(cbor: &[u8]) -> Result<Value<'_>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::to_json;
+
+    /// The TS tests' TINY_EXPORT (core/trace-data/fixtures.ts), built by the addon's own pipeline:
+    /// one session with packed args, a nil hole, nil stream values, index-keyed streams, floats
+    /// and UTF-8. Read from there so both tools test the same bytes.
+    pub(crate) fn tiny_export() -> &'static str {
+        let fixtures = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../corrections-extractor/src/core/trace-data/fixtures.ts"
+        ));
+        let declaration = fixtures.find("export const TINY_EXPORT =").expect("TINY_EXPORT is declared");
+        let open = declaration + fixtures[declaration..].find('"').expect("a string literal") + 1;
+        let close = open + fixtures[open..].find('"').expect("a closing quote");
+        &fixtures[open..close]
+    }
+
+    fn submission(export_string: &str) -> Submission {
+        let json = serde_json::json!({ "id": "test", "export_string": export_string, "nickname": "never read" });
+        Submission::from_json(json.to_string().as_bytes(), "fallback".into(), &mut Inflater::new())
+    }
+
+    fn traces_json(decoded: &Decoded) -> Vec<String> {
+        decoded.traces.iter().map(|trace| to_json(trace.root())).collect()
+    }
 
     #[test]
     fn the_id_comes_from_the_file_name_after_the_last_underscore() {
         assert_eq!(submission_id_from_path(Path::new("2026-11/2026-11-05_204720Z_0b9d.json")), "0b9d");
         assert_eq!(submission_id_from_path(Path::new("plain.json")), "plain");
+    }
+
+    #[test]
+    fn decodes_packed_args_holes_nil_values_and_index_keyed_streams_like_the_addon_recorded_them() {
+        let submission = submission(tiny_export());
+        let decoded = submission.decode();
+        assert_eq!((decoded.error.as_deref(), decoded.dropped_exports.len(), decoded.traces.len()), (None, 0, 1));
+        let sessions = decoded.traces[0].sessions();
+        let session = &sessions[0];
+        let args: Vec<String> = session.events().map(|event| to_json(event.args().expect("args"))).collect();
+        // Packed args keep their `n` and stay objects; nil args are simply absent.
+        assert_eq!(args, [r#"{"1":7,"2":92579,"n":2}"#, r#"{"n":1}"#]);
+        let function = |name: &str| session.function(name).expect(name);
+        // A nil stream value leaves no `v` key; a nil hole in an array leaves a sparse object.
+        assert_eq!(to_json(function("UnitGUID").get("npc").and_then(|s| s.get(1)).unwrap()), r#"{"t":2,"tp":2}"#);
+        assert_eq!(to_json(function("Sparse").get(0).and_then(|e| e.get("v")).unwrap()), r#"{"1":10,"3":30}"#);
+        // Index-keyed streams stay maps so a stream can be looked up by index. Keys keep the
+        // order the addon wrote them in (the TS test's toEqual ignores order; JSON does not).
+        assert_eq!(
+            to_json(function("GetAvailableTitle")),
+            r#"{"1":[{"t":1,"v":"Ünïcode Title","tp":1.5}],"2":[{"t":1,"v":"Second","tp":1.5}]}"#
+        );
+        assert_eq!(
+            to_json(function("Numbers").get(0).and_then(|e| e.get("v")).unwrap()),
+            "[-1,-1.5,65504,1e+300,9007199254740992]"
+        );
+        assert_eq!(
+            to_json(session.function_delta("C_QuestLog.GetAllCompletedQuestIDs").unwrap()),
+            r#"{"t":0,"tp":0,"delta":[{"t":5,"tp":5.25,"add":[4]}],"initial":[1,2,3]}"#
+        );
+    }
+
+    #[test]
+    fn decodes_every_export_of_a_submission_even_when_line_wrapped() {
+        let tiny = tiny_export();
+        let wrapped: String = tiny
+            .chars()
+            .collect::<Vec<_>>()
+            .chunks(76)
+            .map(|line| line.iter().collect::<String>() + "\n")
+            .collect();
+        let submission = submission(&format!("{tiny}\n{wrapped}"));
+        let decoded = submission.decode();
+        let traces = traces_json(&decoded);
+        assert_eq!(traces.len(), 2);
+        assert_eq!(traces[1], traces[0]);
+        assert!(decoded.dropped_exports.is_empty());
+    }
+
+    #[test]
+    fn decodes_an_export_pasted_into_another_and_drops_the_one_it_cut_off() {
+        let tiny = tiny_export();
+        let (cut_off, tail) = (&tiny[..200], &tiny[tiny.len() - 60..]);
+        let alone = submission(tiny);
+        let pasted = submission(&format!("{cut_off}{tiny}{tail}"));
+        let decoded = pasted.decode();
+        assert_eq!(traces_json(&decoded), traces_json(&alone.decode()));
+        assert_eq!(decoded.dropped_exports, ["export 1 has no matching end marker"]);
+    }
+
+    #[test]
+    fn keeps_the_exports_that_decode_when_another_does_not() {
+        let submission = submission(&format!("!QuestieTrace:1!abc$def!End:QuestieTrace:1!\n{}", tiny_export()));
+        let decoded = submission.decode();
+        assert_eq!(decoded.traces.len(), 1);
+        assert_eq!(decoded.dropped_exports, ["export 1: payload is not valid print-encoded data (character \"$\")"]);
+    }
+
+    #[test]
+    fn fails_when_no_export_decodes() {
+        let error = |export_string: &str| submission(export_string).decode().error.expect("fails");
+        assert!(error("not an export").contains("markers"));
+        assert_eq!(
+            error("!QuestieTrace:1!abc$def!End:QuestieTrace:1!"),
+            "export 1: payload is not valid print-encoded data (character \"$\")"
+        );
+        assert_eq!(error(&tiny_export()[..200]), "export 1 has no matching end marker");
+    }
+
+    #[test]
+    fn a_file_that_is_no_json_object_names_why() {
+        let read = |json: &str| Submission::from_json(json.as_bytes(), "fallback".into(), &mut Inflater::new()).decode().error;
+        assert_eq!(read("not json").as_deref(), Some("unreadable submission JSON"));
+        assert_eq!(read("[1, 2]").as_deref(), Some("no export_string"));
+        assert_eq!(read(r#"{"export_string": 5}"#).as_deref(), Some("no export_string"));
     }
 }

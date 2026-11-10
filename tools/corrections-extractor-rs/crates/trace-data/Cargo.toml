@@ -2,6 +2,7 @@
 name = "trace-data"
 version = "0.1.0"
 edition.workspace = true
+rust-version.workspace = true
 publish.workspace = true
 description = "Reads QuestieTrace submissions: export decoding, CBOR and a lazy session view"
 

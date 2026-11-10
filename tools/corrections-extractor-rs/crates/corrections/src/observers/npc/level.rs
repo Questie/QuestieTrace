@@ -10,6 +10,7 @@
 //! 23-24) but keeps real ranges of spawns with mixed levels.
 
 use crate::aggregate::Num;
+use crate::js;
 use crate::observation::{Confidence, Observation, SessionId};
 use crate::observers::npc::unit_state::unit_state_encounters;
 use indexmap::{IndexMap, IndexSet};
@@ -60,23 +61,9 @@ pub fn merge(observations: &[Observation<f64>]) -> Option<NpcLevelRange> {
         return None;
     }
     Some(NpcLevelRange {
-        min: js_min(&levels),
-        max: js_max(&levels),
+        min: js::min(&levels),
+        max: js::max(&levels),
     })
-}
-
-/// JS `Math.min(...values)`: NaN when any value is NaN.
-fn js_min(values: &[f64]) -> f64 {
-    values
-        .iter()
-        .fold(f64::INFINITY, |min, &v| if min.is_nan() || v.is_nan() { f64::NAN } else { min.min(v) })
-}
-
-/// JS `Math.max(...values)`: NaN when any value is NaN.
-fn js_max(values: &[f64]) -> f64 {
-    values
-        .iter()
-        .fold(f64::NEG_INFINITY, |max, &v| if max.is_nan() || v.is_nan() { f64::NAN } else { max.max(v) })
 }
 
 #[cfg(test)]
@@ -171,7 +158,8 @@ mod tests {
             "UnitGUID": { "target": [sample(3.0, 3.0, creature_guid(200001).into()), sample(4.0, 4.0, Json::Null), sample(5.0, 5.0, creature_guid(200001).into())] },
             "UnitLevel": { "target": [sample(3.0, 3.0, 12.into()), sample(4.0, 4.0, 30.into()), sample(5.0, 5.0, 12.into())] },
         });
-        assert_eq!(observed(functions, vec![]).len(), 1);
+        let levels: Vec<(i64, f64)> = observed(functions, vec![]).into_iter().map(|(id, level, ..)| (id, level)).collect();
+        assert_eq!(levels, [(200001, 12.0)]);
     }
 
     #[test]

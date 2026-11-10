@@ -30,7 +30,8 @@ pub struct Observation<T> {
     pub confidence: Confidence,
     /// Seconds into the session at which the value was observed.
     pub t: f64,
-    /// Set by the fold; [`SessionId::UNSET`] while observing.
+    /// Set by the fold; [`SessionId::UNSET`] while observing. Merge tests set it themselves:
+    /// observations left UNSET all count as one session.
     pub session: SessionId,
 }
 

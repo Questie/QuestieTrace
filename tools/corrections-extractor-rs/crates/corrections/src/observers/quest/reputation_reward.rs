@@ -280,15 +280,6 @@ fn standing_gains(streams: &IndexMap<Num, Vec<Vec<StandingSample>>>, t: f64) -> 
     Some(gains)
 }
 
-/// JS `Math.sign`: ±0 and NaN keep themselves.
-fn js_sign(x: f64) -> f64 {
-    if x == 0.0 || x.is_nan() {
-        x
-    } else {
-        x.signum()
-    }
-}
-
 /// Splits off gains that spill over from a larger gain in the same direction of the same
 /// turn-in; the largest matching gain is the source. Returns (gains, spillover).
 fn split_spillover(all_gains: &FactionRecord) -> (FactionRecord, FactionRecord) {
@@ -296,7 +287,7 @@ fn split_spillover(all_gains: &FactionRecord) -> (FactionRecord, FactionRecord) 
     let mut spillover = FactionRecord::default();
     for (faction_id, amount) in all_gains.iter() {
         let is_source =
-            |other: f64| js_sign(other) == js_sign(amount) && other.abs() > amount.abs() && (amount - other / SPILLOVER_RATIO).abs() <= SPILLOVER_TOLERANCE;
+            |other: f64| js::sign(other) == js::sign(amount) && other.abs() > amount.abs() && (amount - other / SPILLOVER_RATIO).abs() <= SPILLOVER_TOLERANCE;
         // The first of the largest, as a stable sort by |amount| descending would put first.
         let mut source: Option<(f64, f64)> = None;
         for (other_id, other) in all_gains.iter().filter(|&(_, other)| is_source(other)) {

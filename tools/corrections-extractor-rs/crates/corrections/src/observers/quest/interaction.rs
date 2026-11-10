@@ -9,7 +9,7 @@
 //! Times are compared like JS numbers. A missing `t`/`tp` reads as NaN, where TS compares
 //! `undefined` (and `undefined === undefined`); the addon always records both.
 
-use trace_data::stream::{entry_t, entry_v, get_stream};
+use trace_data::stream::{entry_t, entry_tp, entry_v, get_stream, last_at_or_before};
 use trace_data::{KeyRef, Session, Value};
 
 /// What a quest interaction saw of one API stream.
@@ -62,25 +62,12 @@ impl<'v, 'a> InteractionLookup<'v, 'a> {
     }
 }
 
-fn entry_tp(entry: &Value) -> f64 {
-    entry.get("tp").and_then(Value::as_num).unwrap_or(f64::NAN)
-}
-
 fn value_before_next_event<'v, 'a>(stream: &'v [Value<'a>], t: f64, tp: f64) -> InteractionValue<'v, 'a> {
-    let (mut lo, mut hi) = (0isize, stream.len() as isize - 1);
-    let mut result = None;
-    while lo <= hi {
-        let mid = ((lo + hi) as usize) >> 1;
-        let sample = &stream[mid];
-        let sample_t = entry_t(sample);
-        if sample_t < t || (sample_t == t && entry_tp(sample) <= tp) {
-            result = Some(mid);
-            lo = mid as isize + 1;
-        } else {
-            hi = mid as isize - 1;
-        }
-    }
-    let Some(selected) = result.map(|i| &stream[i]) else {
+    let at_or_before = |i: usize| {
+        let sample_t = entry_t(&stream[i]);
+        sample_t < t || (sample_t == t && entry_tp(&stream[i]) <= tp)
+    };
+    let Some(selected) = last_at_or_before(stream.len(), at_or_before).map(|i| &stream[i]) else {
         return InteractionValue::Known(None);
     };
     if entry_t(selected) == t && entry_tp(selected) == tp {

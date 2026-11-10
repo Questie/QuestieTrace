@@ -123,6 +123,65 @@ impl<'a> Value<'a> {
     }
 }
 
+/// The value as `JSON.stringify` prints the TS decoder's result: for comparing the two decoders
+/// and in tests. Lazy values are decoded.
+pub fn to_json(value: &Value) -> String {
+    let mut out = String::new();
+    write_json(&mut out, value);
+    out
+}
+
+fn write_json_string(out: &mut String, s: &str) {
+    use std::fmt::Write;
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32).expect("writing to a String"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+fn write_json(out: &mut String, value: &Value) {
+    match value.resolved() {
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Num(n) if n.is_finite() => out.push_str(&format_number(*n)),
+        Value::Num(_) => out.push_str("null"),
+        Value::Str(s) => write_json_string(out, s),
+        Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_json(out, item);
+            }
+            out.push(']');
+        }
+        Value::Object(object) => {
+            out.push('{');
+            for (i, (key, item)) in object.entries().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_json_string(out, &key.to_string());
+                out.push(':');
+                write_json(out, item);
+            }
+            out.push('}');
+        }
+        Value::Lazy(_) => unreachable!("resolved() never returns a lazy value"),
+    }
+}
+
 /// A key to look up: a number or a string, compared as JS property keys.
 #[derive(Clone, Copy)]
 pub enum KeyRef<'k> {
@@ -786,5 +845,180 @@ impl<'a> TableBuilder<'a> {
                 self.index = Some(self.entries.iter().enumerate().map(|(i, (k, _))| (k.clone(), i)).collect());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The cases of the TS decoder's tests (core/trace-data/cbor.test.ts), each decoded three
+    //! ways: in full, as a lazily decoded function stream and as lazily decoded event
+    //! arguments. All three must give the TS result; errors must surface while decoding, never
+    //! later from a lazy value.
+
+    use super::*;
+
+    fn text(s: &str) -> Vec<u8> {
+        let mut out = vec![0x60 | s.len() as u8];
+        out.extend(s.as_bytes());
+        out
+    }
+
+    /// `{"sessions": [{"events": [{"e": "E", "a": item}], "functions": {"F": item}, "functionsDelta": item}]}`
+    fn in_a_session(item: &[u8]) -> Vec<u8> {
+        let mut out = vec![0xa1];
+        out.extend(text("sessions"));
+        out.extend([0x81, 0xa3]);
+        out.extend(text("events"));
+        out.extend([0x81, 0xa2]);
+        out.extend(text("e"));
+        out.extend(text("E"));
+        out.extend(text("a"));
+        out.extend(item);
+        out.extend(text("functions"));
+        out.push(0xa1);
+        out.extend(text("F"));
+        out.extend(item);
+        out.extend(text("functionsDelta"));
+        out.extend(item);
+        out
+    }
+
+    /// The item's JSON as decoded in full, as a function stream and as event arguments.
+    fn decoded_three_ways(item: &[u8]) -> [String; 3] {
+        let full = to_json(&decode_value(item).expect("decodes").expect("not nil"));
+        let bytes = in_a_session(item);
+        let root = decode_trace(&bytes).expect("decodes").expect("not nil");
+        let session = &root.get("sessions").and_then(Value::as_array).expect("sessions")[0];
+        let stream = to_json(session.get("functions").and_then(|f| f.get("F")).expect("F"));
+        let args = to_json(session.get("events").and_then(|e| e.get(0)).and_then(|e| e.get("a")).expect("a"));
+        [full, stream, args]
+    }
+
+    #[track_caller]
+    fn decodes_to(item: &[u8], json: &str) {
+        let [full, stream, args] = decoded_three_ways(item);
+        assert_eq!(full, json, "decoded in full");
+        assert_eq!(stream, json, "decoded lazily as a function stream");
+        assert_eq!(args, json, "decoded lazily as event arguments");
+    }
+
+    #[track_caller]
+    fn fails_with(item: &[u8], message: &str) {
+        let full = decode_value(item).map(|_| ()).expect_err("the full decode fails").0;
+        assert!(full.contains(message), "{full}");
+        let lazy = decode_trace(&in_a_session(item))
+            .map(|_| ())
+            .expect_err("validation fails while decoding, not later")
+            .0;
+        assert_eq!(lazy, full);
+    }
+
+    fn ascii(s: &str) -> impl Iterator<Item = u8> + '_ {
+        s.bytes()
+    }
+
+    #[test]
+    fn integers_are_doubles_like_the_lua_reference() {
+        assert_eq!(decode_value(&[0x38, 0x63]).unwrap().unwrap().as_num(), Some(-100.0));
+        // 2^53 + 1 cannot be represented; Lua and the TS decoder both round to 2^53.
+        decodes_to(&[0x81, 0x1b, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01], "[9007199254740992]");
+    }
+
+    #[test]
+    fn half_single_and_double_floats() {
+        let num = |bytes: &[u8]| decode_value(bytes).unwrap().unwrap().as_num().unwrap();
+        assert_eq!(num(&[0xf9, 0xc4, 0x00]), -4.0);
+        assert_eq!(num(&[0xf9, 0x00, 0x01]), 2f64.powi(-24));
+        assert_eq!(num(&[0xf9, 0x7c, 0x00]), f64::INFINITY);
+        assert_eq!(num(&[0xfa, 0x47, 0xc3, 0x50, 0x00]), 100000.0);
+        assert_eq!(num(&[0xfb, 0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a]), 1.1);
+    }
+
+    #[test]
+    fn arrays_stay_arrays_and_arrays_with_holes_become_objects_keyed_from_1() {
+        decodes_to(&[0x82, 0x01, 0x02], "[1,2]");
+        decodes_to(&[0x83, 0x01, 0xf6, 0x03], r#"{"1":1,"3":3}"#);
+        decodes_to(&[0x83, 0x01, 0x02, 0xf6], "[1,2]");
+        decodes_to(&[0x80], "[]");
+        decodes_to(&[0xa0], "[]");
+    }
+
+    #[test]
+    fn maps_keyed_1_to_n_become_arrays() {
+        decodes_to(&[0xa2, 0x02, 0x61, b'b', 0x01, 0x61, b'a'], r#"["a","b"]"#);
+        decodes_to(&[0xa1, 0x02, 0x61, b'b'], r#"{"2":"b"}"#);
+        decodes_to(&[0xa2, 0x61, b'1', 0x0a, 0x61, b'2', 0x14], "[10,20]");
+        decodes_to(&[0xa3, 0x61, b'a', 0x01, 0x61, b'a', 0xf6, 0x01, 0x05], "[5]");
+    }
+
+    #[test]
+    fn packed_args_and_tables_with_string_keys_stay_objects() {
+        decodes_to(&[0xa2, 0x01, 0x07, 0x61, b'n', 0x01], r#"{"1":7,"n":1}"#);
+        decodes_to(&[0xa1, 0x61, b'x', 0x82, 0x01, 0x02], r#"{"x":[1,2]}"#);
+    }
+
+    #[test]
+    fn a_table_whose_first_value_is_integer_keyed_stays_an_object_like_index_keyed_streams() {
+        decodes_to(&[0x82, 0x81, 0x01, 0x81, 0x02], r#"{"1":[1],"2":[2]}"#);
+        decodes_to(&[0x82, 0xa1, 0x02, 0x01, 0x81, 0x02], r#"{"1":{"2":1},"2":[2]}"#);
+        decodes_to(&[0x82, 0x80, 0x81, 0x02], "[[],[2]]");
+        decodes_to(&[0x82, 0xa1, 0x61, b'x', 0x01, 0x81, 0x02], r#"[{"x":1},[2]]"#);
+    }
+
+    #[test]
+    fn only_number_and_string_keys_are_kept_and_a_nil_value_removes_a_key() {
+        decodes_to(&[0xa1, 0x01, 0x61, b'x'], r#"["x"]"#);
+        decodes_to(&[0xa2, 0x61, b'a', 0x01, 0x61, b'a', 0xf6], "[]");
+        decodes_to(&[0xa2, 0xf5, 0x01, 0x80, 0x02], "[]");
+    }
+
+    #[test]
+    fn non_canonical_numeric_string_keys_stay_object_keys() {
+        decodes_to(&[0xa1, 0x62, b'0', b'1', 0x05], r#"{"01":5}"#);
+        decodes_to(&[0xa1, 0x63, b'1', b'.', b'0', 0x05], r#"{"1.0":5}"#);
+    }
+
+    #[test]
+    fn a_proto_key_is_an_ordinary_entry() {
+        let item: Vec<u8> = [0xa1, 0x69].into_iter().chain(ascii("__proto__")).chain([0x01]).collect();
+        decodes_to(&item, r#"{"__proto__":1}"#);
+    }
+
+    #[test]
+    fn index_keys_iterate_ascending_before_names_in_insertion_order() {
+        // {"b": 1, 10: 2, "a": 3, 2: 4}: JS iterates 2, 10, b, a.
+        decodes_to(
+            &[0xa4, 0x61, b'b', 0x01, 0x0a, 0x02, 0x61, b'a', 0x03, 0x02, 0x04],
+            r#"{"2":4,"10":2,"b":1,"a":3}"#,
+        );
+    }
+
+    #[test]
+    fn byte_and_text_strings_read_as_utf8() {
+        decodes_to(&[0x81, 0x42, 0xc3, 0xa9], r#"["é"]"#);
+        decodes_to(&[0x81, 0x62, 0xc3, 0xa9], r#"["é"]"#);
+    }
+
+    #[test]
+    fn rejects_what_blizzard_cbor_rejects_while_decoding_lazy_values_too() {
+        fails_with(&[0x81, 0xc0, 0x00], "tags");
+        fails_with(&[0x81, 0x9f, 0xff], "indefinite");
+        fails_with(&[0x81, 0x19, 0x01], "truncated");
+        fails_with(&[0xa1, 0xf6, 0x01], "nil");
+        fails_with(&[0xa1, 0xfb, 0x7f, 0xf8, 0, 0, 0, 0, 0, 0, 0x01], "NaN");
+        assert!(decode_value(&[0x01, 0x02]).unwrap_err().0.contains("trailing"));
+    }
+
+    #[test]
+    fn a_nan_key_after_a_deleted_key_is_still_an_error() {
+        // {"a": nil, NaN: 1}: the deleted key replays the map, which must still check the rest.
+        fails_with(&[0xa2, 0x61, b'a', 0xf6, 0xfb, 0x7f, 0xf8, 0, 0, 0, 0, 0, 0, 0x01], "NaN");
+    }
+
+    #[test]
+    fn allows_100_nested_tables_and_rejects_101() {
+        let nested = |depth: usize| -> Vec<u8> { std::iter::repeat_n(0x81, depth).chain([0x80]).collect() };
+        assert!(decode_value(&nested(99)).is_ok());
+        assert!(decode_value(&nested(100)).unwrap_err().0.contains("depth"));
     }
 }

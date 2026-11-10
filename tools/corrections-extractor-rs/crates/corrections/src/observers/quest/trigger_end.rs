@@ -28,15 +28,6 @@ pub struct QuestTriggerEndValue {
     pub locations: Vec<(f64, Vec<(f64, f64)>)>,
 }
 
-/// JS `Math.max` of two numbers: NaN when either is NaN.
-fn js_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        f64::NAN
-    } else {
-        a.max(b)
-    }
-}
-
 struct CoordTally {
     position: (f64, f64),
     count: usize,
@@ -110,7 +101,7 @@ pub fn merge(observations: &[Observation<QuestTriggerEndValue>], preferred_zone:
                 coords: IndexMap::new(),
             });
             tally.count += 1;
-            tally.latest_t = js_max(tally.latest_t, observation.t);
+            tally.latest_t = js::max(&[tally.latest_t, observation.t]);
             for &position in positions {
                 let coord = tally.coords.entry((Num(position.0), Num(position.1))).or_insert(CoordTally {
                     position,
@@ -118,7 +109,7 @@ pub fn merge(observations: &[Observation<QuestTriggerEndValue>], preferred_zone:
                     latest_t: 0.0,
                 });
                 coord.count += 1;
-                coord.latest_t = js_max(coord.latest_t, observation.t);
+                coord.latest_t = js::max(&[coord.latest_t, observation.t]);
             }
         }
     }
