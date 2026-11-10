@@ -48,6 +48,78 @@ body {
   font-size: 12px;
 }
 
+.file-picker {
+  position: relative;
+}
+
+.file-picker input {
+  width: 340px;
+  background: #222244;
+  color: #ccc;
+  border: 1px solid #3a3a5e;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.file-picker input::placeholder {
+  color: #aaa;
+}
+
+.file-picker-list {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  max-height: 60vh;
+  overflow-y: auto;
+  list-style: none;
+  background: #222244;
+  border: 1px solid #3a3a5e;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.file-picker-list li {
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.file-picker-list li.highlighted {
+  background: #3a3a6e;
+}
+
+.file-picker-list li.file-picker-more {
+  color: #888;
+  cursor: default;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #aaaaee;
+  font-size: 12px;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #3a3a6e;
+  border-top-color: #aaaaee;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .player-identity {
   font-family: monospace;
   color: #aaa;
