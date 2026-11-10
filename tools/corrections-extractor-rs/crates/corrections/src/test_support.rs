@@ -121,3 +121,67 @@ fn write(out: &mut Vec<u8>, value: &Json) {
         }
     }
 }
+
+const PRINT_ALPHABET: &[u8; 64] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789()";
+
+/// LibDeflate:EncodeForPrint: 3 bytes in 4 characters, least significant 6 bits first.
+fn encode_for_print(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let bits = chunk.iter().rev().fold(0u32, |acc, &b| (acc << 8) | b as u32);
+        let characters = (chunk.len() * 8).div_ceil(6);
+        for i in 0..characters {
+            out.push(PRINT_ALPHABET[(bits >> (6 * i) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+/// An addon export (`!QuestieTrace:1!...!End:QuestieTrace:1!`) holding `sessions`, encoded the
+/// way Modules/Export/Encoding.lua does: CBOR, raw deflate, print alphabet.
+pub fn export_string(sessions: &[Json]) -> String {
+    let cbor = encode(&json!({ "sessions": sessions }));
+    let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
+    let mut compressed = vec![0; compressor.deflate_compress_bound(cbor.len())];
+    let size = compressor.deflate_compress(&cbor, &mut compressed).expect("compresses");
+    compressed.truncate(size);
+    format!("!QuestieTrace:1!{}!End:QuestieTrace:1!", encode_for_print(&compressed))
+}
+
+/// A directory removed again when dropped.
+pub struct TempDir(pub std::path::PathBuf);
+
+impl TempDir {
+    pub fn new(name: &str) -> TempDir {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let unique = format!("corrections-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+        let path = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&path).expect("creates the temp dir");
+        TempDir(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn encoded_exports_read_back_through_the_real_decoder() {
+    let session = session_json(json!({ "F": stream([(1.0, json!("x"))]) }), vec![event(2.0, "E", packed(&[json!(5)]))]);
+    let export = export_string(&[session]);
+    let exports = trace_data::export::find_exports(&export).unwrap();
+    let trace_data::export::Export::Payload(payload) = &exports[0] else {
+        panic!("one complete export")
+    };
+    let cbor = trace_data::Inflater::new()
+        .inflate(&trace_data::export::decode_for_print(payload).unwrap())
+        .unwrap();
+    let root = decode_trace(&cbor).unwrap().unwrap();
+    assert_eq!(
+        trace_data::value::to_json(&root),
+        r#"{"sessions":[{"startedAt":0,"startedAtPrecise":0,"events":[{"t":2,"tp":2,"e":"E","a":{"1":5,"n":1}}],"functions":{"F":[{"t":1,"tp":1,"v":"x"}]}}]}"#
+    );
+}

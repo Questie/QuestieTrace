@@ -4,7 +4,7 @@ A Rust port of [corrections-extractor](../corrections-extractor/README.md): it r
 
 ## Requirements
 
-- Rust 1.82 or newer (`cargo`)
+- Rust 1.86 or newer (`cargo`)
 
 ## Usage
 

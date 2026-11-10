@@ -40,33 +40,8 @@ fn is_compact(coords: &[[f64; 2]]) -> bool {
     coords.iter().enumerate().all(|(i, &[ax, ay])| {
         coords[i + 1..]
             .iter()
-            .all(|&[bx, by]| js_hypot(ax - bx, ay - by) <= OBJECT_COMPACT_EXTENT + CLUSTER_EPSILON)
+            .all(|&[bx, by]| js::hypot(ax - bx, ay - by) <= OBJECT_COMPACT_EXTENT + CLUSTER_EPSILON)
     })
-}
-
-/// JS `Math.hypot(a, b)` as V8 computes it (normalized Kahan sum); it differs from
-/// `f64::hypot` in the last bit for about a third of inputs.
-fn js_hypot(a: f64, b: f64) -> f64 {
-    if a.is_infinite() || b.is_infinite() {
-        return f64::INFINITY;
-    }
-    if a.is_nan() || b.is_nan() {
-        return f64::NAN;
-    }
-    let (a, b) = (a.abs(), b.abs());
-    let max = a.max(b);
-    if max == 0.0 {
-        return 0.0;
-    }
-    let (mut sum, mut compensation) = (0.0f64, 0.0f64);
-    for value in [a, b] {
-        let n = value / max;
-        let summand = n * n - compensation;
-        let preliminary = sum + summand;
-        compensation = (preliminary - sum) - summand;
-        sum = preliminary;
-    }
-    sum.sqrt() * max
 }
 
 #[cfg(test)]
@@ -367,13 +342,5 @@ mod tests {
             obs(40.0, 50.0, 70.0, 30.0, QuestPoi),
         ];
         assert_eq!(merge_zone_id(&observations), 40.0);
-    }
-
-    // Not in the TS tests: the JS behaviour the port has to reproduce.
-
-    #[test]
-    fn hypot_matches_v8_where_libm_differs() {
-        // node: Math.hypot(-40.17, 61.260000000000005) === 73.25582911959975; f64::hypot gives ...77.
-        assert_eq!(js_hypot(-40.17, 61.260000000000005), 73.25582911959975);
     }
 }

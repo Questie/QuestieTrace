@@ -11,9 +11,9 @@
 
 use crate::aggregate::Num;
 use crate::guid::GuidKind;
-use crate::observers::guid_encounters::{entry_tp, guid_encounters};
+use crate::observers::guid_encounters::guid_encounters;
 use std::collections::{HashMap, HashSet};
-use trace_data::stream::{entry_t, entry_v, get_stream, value_at};
+use trace_data::stream::{entry_t, entry_tp, entry_v, get_stream, last_at_or_before, value_at};
 use trace_data::{KeyRef, Session, Value};
 
 const UNIT_STATE_TOKENS: [&str; 2] = ["target", "mouseover"];
@@ -62,7 +62,8 @@ pub fn unit_state_encounters<'v, 'a>(session: &Session<'v, 'a>, name: &str, lead
                         .iter()
                         .filter(|entry| entry_t(entry) < encounter.t || entry_tp(entry) < next_tp)
                         .collect();
-                    value_at_entries(&before_next, encounter.t)
+                    // emulator.ts valueAt over the filtered stream.
+                    last_at_or_before(before_next.len(), |i| entry_t(before_next[i]) <= encounter.t).and_then(|i| entry_v(before_next[i]))
                 }
             };
             let Some(value) = value else { continue };
@@ -75,20 +76,4 @@ pub fn unit_state_encounters<'v, 'a>(session: &Session<'v, 'a>, name: &str, lead
         }
     }
     out
-}
-
-/// `trace_data::stream::value_at` over a filtered stream (emulator.ts `valueAt`, same search).
-fn value_at_entries<'v, 'a>(stream: &[&'v Value<'a>], target: f64) -> Option<&'v Value<'a>> {
-    let (mut lo, mut hi) = (0isize, stream.len() as isize - 1);
-    let mut result = None;
-    while lo <= hi {
-        let mid = ((lo + hi) as usize) >> 1;
-        if entry_t(stream[mid]) <= target {
-            result = Some(mid);
-            lo = mid as isize + 1;
-        } else {
-            hi = mid as isize - 1;
-        }
-    }
-    entry_v(stream[result?])
 }

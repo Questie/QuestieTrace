@@ -324,6 +324,10 @@ mod tests {
 
     #[test]
     fn no_start_marker_is_an_error() {
-        assert!(find_exports("QuestieTrace:1!ab").is_err());
+        let error = find_exports("QuestieTrace:1!ab!End:QuestieTrace:1!").err();
+        assert_eq!(
+            error.as_deref(),
+            Some("export string must be wrapped in !QuestieTrace:N! and !End:QuestieTrace:N! markers")
+        );
     }
 }
