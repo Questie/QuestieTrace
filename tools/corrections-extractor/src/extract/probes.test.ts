@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../core/types";
 import {
+  completedQuestsAt,
   playerPosAt,
   playerPosNear,
   playerZoneAt,
@@ -126,5 +127,75 @@ describe("probes", () => {
     expect(playerPosAt(session, 0)).toBeNull();
     expect(unitGuidAt(session, "target", 0)).toBeNull();
     expect(questIdAt(session, 0)).toBeNull();
+  });
+});
+
+describe("completedQuestsAt", () => {
+  const MODERN = "C_QuestLog.GetAllCompletedQuestIDs";
+
+  function withDelta(functionsDelta: SessionRecord["functionsDelta"]): SessionRecord {
+    return { ...makeSession({}), functionsDelta };
+  }
+
+  it("should apply every change recorded at or before the time to the initial set", () => {
+    const session = withDelta({
+      [MODERN]: {
+        t: 0,
+        tp: 0,
+        initial: [1, 2],
+        delta: [
+          { t: 5, tp: 5, add: [3] },
+          { t: 10, tp: 10, add: [4], remove: [1] },
+          { t: 20, tp: 20, add: [5] },
+        ],
+      },
+    });
+
+    expect(completedQuestsAt(session, 0)).toEqual(new Set([1, 2]));
+    expect(completedQuestsAt(session, 10)).toEqual(new Set([2, 3, 4]));
+    expect(completedQuestsAt(session, 15)).toEqual(new Set([2, 3, 4]));
+  });
+
+  it("should fall back to GetQuestsCompleted when the modern API was not recorded", () => {
+    const session = withDelta({ GetQuestsCompleted: { t: 0, tp: 0, initial: [7], delta: [] } });
+
+    expect(completedQuestsAt(session, 0)).toEqual(new Set([7]));
+  });
+
+  it("should include a change recorded in the same frame as the time asked for", () => {
+    const session = withDelta({ [MODERN]: { t: 0, tp: 0, initial: [], delta: [{ t: 5, tp: 5.2, add: [3] }] } });
+
+    expect(completedQuestsAt(session, 5)).toEqual(new Set([3]));
+    expect(completedQuestsAt(session, 4.99)).toEqual(new Set());
+  });
+
+  it("should use GetQuestsCompleted when the modern API was recorded but stayed empty", () => {
+    const session = withDelta({
+      [MODERN]: { t: 0, tp: 0, initial: [], delta: [] },
+      GetQuestsCompleted: { t: 0, tp: 0, initial: [2], delta: [] },
+    });
+
+    expect(completedQuestsAt(session, 0)).toEqual(new Set([2]));
+  });
+
+  it("should prefer the modern API when both were recorded", () => {
+    const session = withDelta({
+      [MODERN]: { t: 0, tp: 0, initial: [1], delta: [] },
+      GetQuestsCompleted: { t: 0, tp: 0, initial: [2], delta: [] },
+    });
+
+    expect(completedQuestsAt(session, 0)).toEqual(new Set([1]));
+  });
+
+  it("should return undefined when completed quests were not recorded, unlike an empty set", () => {
+    expect(completedQuestsAt(makeSession({}), 0)).toBeUndefined();
+    expect(completedQuestsAt(withDelta({ [MODERN]: { t: 0, tp: 0, initial: [], delta: [] } }), 0)).toEqual(new Set());
+  });
+
+  it("should not change the session's stream", () => {
+    const stream = { t: 0, tp: 0, initial: [1], delta: [{ t: 1, tp: 1, remove: [1] }] };
+    completedQuestsAt(withDelta({ [MODERN]: stream }), 5);
+
+    expect(stream.initial).toEqual([1]);
   });
 });

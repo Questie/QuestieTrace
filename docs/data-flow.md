@@ -37,7 +37,7 @@ Changing any observer code empties the store, and the next run observes everythi
 ## Adding an observer
 
 1. Write a test first, next to the observer: `src/extract/observers/<entity>/<field>.test.ts`.
-2. Add the observer, one file per field. It reads one session and returns `Observation[]`, and never merges. Values are stored as JSON, so they must survive `JSON.parse(JSON.stringify(v))`: no `undefined`, `NaN`, `Map` or `Set`.
+2. Add the observer, one file per field. It reads one session and returns `Observation[]`, and never merges. Helpers for the player's state at a time live in `src/extract/probes.ts` (zone, position, faction, race, completed quests via `completedQuestsAt`, …). Values are stored as JSON, so they must survive `JSON.parse(JSON.stringify(v))`: no `undefined`, `NaN`, `Map` or `Set`.
 3. Register it in `src/extract/observe.ts`:
    - `SCALAR_OBSERVERS` when one value per entity wins by count. These are summarized in DuckDB (`ObservedStore.scalarGroups`), so a change to `addToScalarSummary` must be mirrored there.
    - `OBSERVERS` with a merge function otherwise. Add the field to `OBSERVER_ENTITIES` so Classic IDs are dropped before they are stored.
