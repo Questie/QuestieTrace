@@ -132,7 +132,7 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
 });
 
 describe("extractAll (quest/item/object entities)", () => {
-  it("should produce a paste-ready quest XP file from the reward XP of new quests", () => {
+  it("should produce a paste-ready quest XP file from the reward XP of new and known quests", () => {
     const session = makeForeverSession({
       GetQuestID: [apiSample(10, 10.5, 96659), apiSample(10, 10.6, 0)],
       GetRewardXP: [apiSample(10, 10.5, 900), apiSample(10, 10.6, 0)],
@@ -144,7 +144,7 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(questXp).toContain("QuestXP.db[96659] = {12, 910}");
 
     const known = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 96659, item: 0, object: 0 } });
-    expect(known.questXp).not.toContain("QuestXP.db[");
+    expect(known.questXp).toContain("QuestXP.db[96659] = {12, 910}");
   });
 
   it("should produce a paste-ready foreverQuestTraces.lua correction for a quest encountered in the session", () => {

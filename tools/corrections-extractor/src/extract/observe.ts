@@ -142,10 +142,10 @@ export const OBSERVERS = {
  * The entity each npc, item and object field is about. Only entities above MAX_IDS are
  * exported, so their observations at or below it are dropped while folding.
  * npcFriendlyToFaction is kept for every NPC: Classic NPCs start Forever quests, and
- * their reactions decide those quests' requiredRaces.
+ * their reactions decide those quests' requiredRaces. questXp is kept for every quest:
+ * Forever's XP can differ from Classic's, so the XP of known quests is exported too.
  */
 export const OBSERVER_ENTITIES: Partial<Record<keyof typeof OBSERVERS, keyof typeof MAX_IDS>> = {
-  questXp: "quest",
   npcSpawns: "npc",
   npcLevel: "npc",
   npcRank: "npc",

@@ -2,7 +2,7 @@
 
 Extracts Questie DB corrections and translations from every submission in the OVH archive bucket (or a local [trace-data](https://github.com/Questie/trace-data) checkout) and writes them as paste-ready `forever*Traces.lua` and lookup modules.
 
-The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported.
+The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported (except quest XP, which is exported for every quest).
 
 ## Requirements
 
@@ -63,7 +63,7 @@ The results are written to `output/`:
 | `foreverQuestTraces.lua` | Quest corrections |
 | `foreverItemTraces.lua` | Item corrections |
 | `foreverObjectTraces.lua` | Object corrections |
-| `xpDB-traces.lua` | Quest XP rows (`QuestXP.db[questId] = {level, xp}`) for new quests, from `GetRewardXP`. Only samples where the quest is at most five levels below the player are used, as the client scales the reward down beyond that. The shown XP is rounded, so it is matched with the Forever `QuestXP` DBC table (`src/extract/resources/QuestXP.*.csv`) and the table's raw value is written; samples that match no value of the quest level are dropped. Place it in QuestieDB `support/Forever/QuestXP/` |
+| `xpDB-traces.lua` | Quest XP rows (`QuestXP.db[questId] = {level, xp}`) for every quest seen in Forever, Classic ones included (unlike the other exports, not limited to IDs above the Classic maximum), from `GetRewardXP`. Only samples where the quest is at most five levels below the player are used, as the client scales the reward down beyond that. The shown XP is rounded, so it is matched with the Forever `QuestXP` DBC table (`src/extract/resources/QuestXP.*.csv`) and the table's raw value is written; samples that match no value of the quest level are dropped. Place it in QuestieDB `support/Forever/QuestXP/` |
 | `lookup{Npcs,Quests,Items,Objects}/<locale>.lua` | Translations, see below |
 | `meta.json` | `sessionCount`, `submissionCount`, `exportCount`, `skippedFiles`, `partialFiles` (submissions of which only some exports could be decoded), `duplicateSessionsSkipped` and `generatedAt` of the run |
 
