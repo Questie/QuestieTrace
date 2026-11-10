@@ -14,6 +14,7 @@ path = "src/main.rs"
 trace-data.workspace = true
 indexmap.workspace = true
 mimalloc.workspace = true
+libmimalloc-sys.workspace = true
 rustc-hash.workspace = true
 ryu-js.workspace = true
 serde.workspace = true
