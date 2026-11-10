@@ -438,6 +438,43 @@ pub fn observe(session: &Session) -> Vec<Observation<Vec<ObjectiveMatch>>> {
 }
 
 /// Objective index -> matched id -> sessions that matched it.
+/// What the merge needs of a match: which objective (kind and position) and which id. The
+/// matched name and text only explain the match; the fold keeps just this.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ObjectiveSlot {
+    pub kind: ObjectiveKind,
+    pub index: usize,
+    pub id: Num,
+}
+
+impl ObjectiveMatch {
+    pub fn slot(&self) -> ObjectiveSlot {
+        ObjectiveSlot {
+            kind: self.kind,
+            index: self.index,
+            id: Num(self.id),
+        }
+    }
+}
+
+/// One session's observations reduced to what the merge reads: per quest, each slot once (the
+/// merge counts sessions per slot, so a slot seen again in the same session adds nothing), in
+/// the order first seen. All `observations` must come from one session.
+pub fn per_session(observations: Vec<Observation<Vec<ObjectiveMatch>>>) -> Vec<Observation<Vec<ObjectiveSlot>>> {
+    let mut by_quest: IndexMap<i64, (Observation<()>, IndexSet<ObjectiveSlot>)> = IndexMap::new();
+    for observation in observations {
+        let slots = observation.value.iter().map(ObjectiveMatch::slot);
+        let (_, seen) = by_quest
+            .entry(observation.entity_id)
+            .or_insert_with(|| (observation.clone().map(|_| ()), IndexSet::new()));
+        seen.extend(slots);
+    }
+    by_quest
+        .into_values()
+        .map(|(first, slots)| first.map(|()| slots.into_iter().collect()))
+        .collect()
+}
+
 type SessionsBySlot = IndexMap<usize, IndexMap<Num, IndexSet<SessionId>>>;
 
 /// Merges matched objectives across observations into Questie's positional buckets.
@@ -446,7 +483,7 @@ type SessionsBySlot = IndexMap<usize, IndexMap<Num, IndexSet<SessionId>>>;
 /// unmatched objectives leave gaps in each observation's matches. Observations may resolve one
 /// objective to different ids (creatures sharing a name), so each objective gets one id: the
 /// one matched in the most sessions, lowest id on ties.
-pub fn merge(observations: &[Observation<Vec<ObjectiveMatch>>]) -> QuestObjectivesValue {
+pub fn merge(observations: &[Observation<Vec<ObjectiveSlot>>]) -> QuestObjectivesValue {
     let (mut monsters, mut objects, mut items) = (SessionsBySlot::new(), SessionsBySlot::new(), SessionsBySlot::new());
     for observation in observations {
         for objective in &observation.value {
@@ -458,7 +495,7 @@ pub fn merge(observations: &[Observation<Vec<ObjectiveMatch>>]) -> QuestObjectiv
             slots
                 .entry(objective.index)
                 .or_default()
-                .entry(Num(objective.id))
+                .entry(objective.id)
                 .or_default()
                 .insert(observation.session);
         }
@@ -871,10 +908,10 @@ mod tests {
         assert_eq!(name_without_trailing_verb("Cured Ham", ObjectiveKind::Item), None);
     }
 
-    fn obs(value: Vec<ObjectiveMatch>, t: f64, session: u32) -> Observation<Vec<ObjectiveMatch>> {
+    fn obs(value: Vec<ObjectiveMatch>, t: f64, session: u32) -> Observation<Vec<ObjectiveSlot>> {
         Observation {
             entity_id: 33,
-            value,
+            value: value.iter().map(ObjectiveMatch::slot).collect(),
             confidence: Confidence::Low,
             t,
             session: SessionId(session),
@@ -971,5 +1008,34 @@ mod tests {
             matched(ObjectiveKind::Item, "Item A", "Item A: 0/1", 100.0, 5),
         ];
         assert_eq!(merge(&[obs(matches, 1.0, 0)]), value(&[200.0, 100.0], &[100.0, 200.0], &[300.0, 100.0]));
+    }
+
+    #[test]
+    fn per_session_keeps_each_slot_of_a_quest_once_and_merges_alike() {
+        let at = |entity_id: i64, matches: Vec<ObjectiveMatch>, t: f64| Observation {
+            entity_id,
+            value: matches,
+            confidence: Confidence::Low,
+            t,
+            session: SessionId::UNSET,
+        };
+        let observations = vec![
+            at(33, vec![item(750.0, 0), item(751.0, 1)], 1.0),
+            at(44, vec![item(900.0, 0)], 2.0),
+            at(33, vec![item(751.0, 1), item(752.0, 1)], 3.0),
+        ];
+        let reduced = per_session(observations.clone());
+        let slots = |o: &Observation<Vec<ObjectiveSlot>>| (o.entity_id, o.t, o.value.iter().map(|s| (s.index, s.id.0)).collect::<Vec<_>>());
+        assert_eq!(
+            reduced.iter().map(slots).collect::<Vec<_>>(),
+            [(33, 1.0, vec![(0, 750.0), (1, 751.0), (1, 752.0)]), (44, 2.0, vec![(0, 900.0)])]
+        );
+        // The merge cannot tell: it counts sessions per slot.
+        let quest_33: Vec<_> = observations
+            .iter()
+            .filter(|o| o.entity_id == 33)
+            .map(|o| o.clone().map(|m| m.iter().map(ObjectiveMatch::slot).collect()))
+            .collect();
+        assert_eq!(merge(&reduced[..1]), merge(&quest_33));
     }
 }
