@@ -13,6 +13,7 @@ trace-data = { path = "crates/trace-data" }
 indexmap = "2"
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 libdeflater = "1.26"
+bumpalo = { version = "3.20", features = ["collections"] }
 memchr = "2"
 mimalloc = { version = "0.1", default-features = false }
 libmimalloc-sys = { version = "0.1", features = ["extended"] }

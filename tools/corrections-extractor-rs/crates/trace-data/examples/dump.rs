@@ -4,7 +4,7 @@
 
 use trace_data::submission::Submission;
 use trace_data::value::to_json;
-use trace_data::Inflater;
+use trace_data::{Arena, Inflater};
 
 fn json_string(s: &str) -> String {
     serde_json::to_string(s).expect("a string always serializes")
@@ -12,9 +12,11 @@ fn json_string(s: &str) -> String {
 
 fn main() {
     let mut inflater = Inflater::new();
+    let mut arena = Arena::new();
     for path in std::env::args().skip(1) {
+        arena.reset();
         let submission = Submission::read(path.as_ref(), &mut inflater);
-        let decoded = submission.decode();
+        let decoded = submission.decode(&arena);
         let traces: Vec<String> = decoded.traces.iter().map(|trace| to_json(trace.root())).collect();
         let dropped: Vec<String> = decoded.dropped_exports.iter().map(|m| json_string(m)).collect();
         let error = decoded.error.as_deref().map_or("null".to_owned(), json_string);

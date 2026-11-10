@@ -9,7 +9,7 @@ use corrections::observers::{item, npc, object, quest};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 use trace_data::submission::Submission;
-use trace_data::{Inflater, Session};
+use trace_data::{Arena, Inflater, Session};
 
 type Observer = (&'static str, fn(&Session) -> usize);
 
@@ -57,12 +57,14 @@ fn main() {
     let mut first: BTreeMap<&str, Duration> = BTreeMap::new();
     let mut again: BTreeMap<&str, Duration> = BTreeMap::new();
     let mut sessions = 0;
+    let mut arena = Arena::new();
     for path in std::env::args().skip(1) {
+        arena.reset();
         let started = Instant::now();
         let submission = Submission::read(path.as_ref(), &mut inflater);
         read += started.elapsed();
         let started = Instant::now();
-        let decoded = submission.decode();
+        let decoded = submission.decode(&arena);
         decode += started.elapsed();
         for trace in &decoded.traces {
             for session in trace.sessions() {

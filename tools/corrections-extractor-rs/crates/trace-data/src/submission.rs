@@ -9,7 +9,7 @@
 
 use crate::export::{decode_for_print, find_exports, is_js_whitespace, Export, Inflated, Inflater};
 use crate::session::Session;
-use crate::value::{decode_trace, Value};
+use crate::value::{decode_trace, Arena, Value};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -139,9 +139,9 @@ impl Submission {
         inflater.recycle(self.exports.into_iter().filter_map(Result::ok));
     }
 
-    /// Decodes every inflated export. When none decodes, the submission fails with every
-    /// export's reason, as decode.ts does.
-    pub fn decode(&self) -> Decoded<'_> {
+    /// Decodes every inflated export into `arena`. When none decodes, the submission fails
+    /// with every export's reason, as decode.ts does.
+    pub fn decode<'a>(&'a self, arena: &'a Arena) -> Decoded<'a> {
         if let Some(error) = &self.error {
             return Decoded {
                 traces: Vec::new(),
@@ -154,7 +154,7 @@ impl Submission {
         for (index, export) in self.exports.iter().enumerate() {
             match export {
                 Err(message) => dropped_exports.push(message.clone()),
-                Ok(inflated) => match decode_root(inflated.bytes()) {
+                Ok(inflated) => match decode_root(inflated.bytes(), arena) {
                     Ok(root) => traces.push(Trace { root }),
                     Err(message) => dropped_exports.push(format!("export {}: {message}", index + 1)),
                 },
@@ -189,8 +189,8 @@ fn inflate_export(index: usize, export: &Export, inflater: &mut Inflater) -> Res
 }
 
 /// decode.ts `decodePayload` after inflating: the payload must decode to a table.
-fn decode_root(cbor: &[u8]) -> Result<Value<'_>, String> {
-    match decode_trace(cbor).map_err(|e| e.0)? {
+fn decode_root<'a>(cbor: &'a [u8], arena: &'a Arena) -> Result<Value<'a>, String> {
+    match decode_trace(cbor, arena).map_err(|e| e.0)? {
         Some(root) if root.is_table() => Ok(root),
         Some(Value::Num(_)) => Err("decoded payload is not a table (got number)".into()),
         Some(Value::Str(_)) => Err("decoded payload is not a table (got string)".into()),
@@ -237,7 +237,8 @@ mod tests {
     #[test]
     fn decodes_packed_args_holes_nil_values_and_index_keyed_streams_like_the_addon_recorded_them() {
         let submission = submission(tiny_export());
-        let decoded = submission.decode();
+        let arena = Arena::new();
+        let decoded = submission.decode(&arena);
         assert_eq!((decoded.error.as_deref(), decoded.dropped_exports.len(), decoded.traces.len()), (None, 0, 1));
         let sessions = decoded.traces[0].sessions();
         let session = &sessions[0];
@@ -274,7 +275,8 @@ mod tests {
             .map(|line| line.iter().collect::<String>() + "\n")
             .collect();
         let submission = submission(&format!("{tiny}\n{wrapped}"));
-        let decoded = submission.decode();
+        let arena = Arena::new();
+        let decoded = submission.decode(&arena);
         let traces = traces_json(&decoded);
         assert_eq!(traces.len(), 2);
         assert_eq!(traces[1], traces[0]);
@@ -287,22 +289,24 @@ mod tests {
         let (cut_off, tail) = (&tiny[..200], &tiny[tiny.len() - 60..]);
         let alone = submission(tiny);
         let pasted = submission(&format!("{cut_off}{tiny}{tail}"));
-        let decoded = pasted.decode();
-        assert_eq!(traces_json(&decoded), traces_json(&alone.decode()));
+        let arena = Arena::new();
+        let decoded = pasted.decode(&arena);
+        assert_eq!(traces_json(&decoded), traces_json(&alone.decode(&arena)));
         assert_eq!(decoded.dropped_exports, ["export 1 has no matching end marker"]);
     }
 
     #[test]
     fn keeps_the_exports_that_decode_when_another_does_not() {
         let submission = submission(&format!("!QuestieTrace:1!abc$def!End:QuestieTrace:1!\n{}", tiny_export()));
-        let decoded = submission.decode();
+        let arena = Arena::new();
+        let decoded = submission.decode(&arena);
         assert_eq!(decoded.traces.len(), 1);
         assert_eq!(decoded.dropped_exports, ["export 1: payload is not valid print-encoded data (character \"$\")"]);
     }
 
     #[test]
     fn fails_when_no_export_decodes() {
-        let error = |export_string: &str| submission(export_string).decode().error.expect("fails");
+        let error = |export_string: &str| submission(export_string).decode(&Arena::new()).error.expect("fails");
         assert!(error("not an export").contains("markers"));
         assert_eq!(
             error("!QuestieTrace:1!abc$def!End:QuestieTrace:1!"),
@@ -316,12 +320,12 @@ mod tests {
         let tiny = tiny_export();
         let repeated = format!(r#"{{"export_string": "not an export", "export_string": "{tiny}"}}"#);
         let read = |bytes: &[u8]| Submission::from_json(bytes, "fallback".into(), &mut Inflater::new());
-        assert_eq!(read(repeated.as_bytes()).decode().traces.len(), 1);
+        assert_eq!(read(repeated.as_bytes()).decode(&Arena::new()).traces.len(), 1);
         // An invalid byte in a free-text field must not make the file unreadable.
         let mut invalid = br#"{"nickname": "x"#.to_vec();
         invalid.push(0xff);
         invalid.extend(format!(r#"", "export_string": "{tiny}"}}"#).into_bytes());
-        assert_eq!(read(&invalid).decode().traces.len(), 1);
+        assert_eq!(read(&invalid).decode(&Arena::new()).traces.len(), 1);
     }
 
     #[test]
@@ -336,7 +340,11 @@ mod tests {
 
     #[test]
     fn a_file_that_is_no_json_object_names_why() {
-        let read = |json: &str| Submission::from_json(json.as_bytes(), "fallback".into(), &mut Inflater::new()).decode().error;
+        let read = |json: &str| {
+            Submission::from_json(json.as_bytes(), "fallback".into(), &mut Inflater::new())
+                .decode(&Arena::new())
+                .error
+        };
         assert_eq!(read("not json").as_deref(), Some("unreadable submission JSON"));
         assert_eq!(read("[1, 2]").as_deref(), Some("no export_string"));
         assert_eq!(read(r#"{"export_string": 5}"#).as_deref(), Some("no export_string"));
