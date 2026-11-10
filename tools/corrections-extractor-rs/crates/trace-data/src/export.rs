@@ -113,6 +113,9 @@ pub(crate) fn is_js_whitespace(c: char) -> bool {
 /// Reverses LibDeflate:EncodeForPrint: 4 characters carry 3 bytes, least significant 6 bits
 /// first; a short tail carries the remaining whole bytes. Whitespace is ignored anywhere.
 pub fn decode_for_print(text: &str) -> Result<Vec<u8>, String> {
+    if let Some(out) = decode_clean_print(text.as_bytes()) {
+        return Ok(out);
+    }
     let kept = text.chars().filter(|&c| !is_js_whitespace(c)).count();
     if kept == 1 {
         return Err("payload is not valid print-encoded data".into());
@@ -135,6 +138,40 @@ pub fn decode_for_print(text: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
+}
+
+/// The common case: a payload of alphabet characters only, decoded 4 characters (3 bytes) at a
+/// time. None when anything else (whitespace, an invalid character) or a single character needs
+/// the general path above.
+fn decode_clean_print(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() <= 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3 + 2);
+    let mut chunks = bytes.chunks_exact(4);
+    for chunk in &mut chunks {
+        let [a, b, c, d] = [chunk[0], chunk[1], chunk[2], chunk[3]].map(|byte| SIX_BIT[byte as usize]);
+        if (a | b | c | d) < 0 {
+            return None;
+        }
+        let bits = a as u32 | (b as u32) << 6 | (c as u32) << 12 | (d as u32) << 18;
+        out.extend_from_slice(&[bits as u8, (bits >> 8) as u8, (bits >> 16) as u8]);
+    }
+    let (mut cache, mut bits) = (0u32, 0u32);
+    for &byte in chunks.remainder() {
+        let value = SIX_BIT[byte as usize];
+        if value < 0 {
+            return None;
+        }
+        cache |= (value as u32) << bits;
+        bits += 6;
+        if bits >= 8 {
+            out.push(cache as u8);
+            cache >>= 8;
+            bits -= 8;
+        }
+    }
+    Some(out)
 }
 
 /// Raw-deflate inflating with an output buffer kept between calls: each export is inflated once
@@ -203,6 +240,17 @@ mod tests {
         // are 33, 9, 54, 24: alphabet characters H, j, 2, y.
         assert_eq!(decode_for_print("Hj2y").unwrap(), b"abc");
         assert_eq!(decode_for_print(" H j\n2\u{a0}y ").unwrap(), b"abc");
+    }
+
+    #[test]
+    fn the_clean_fast_path_agrees_with_the_general_path_for_every_tail_length() {
+        let alphabet = std::str::from_utf8(PRINT_ALPHABET).unwrap();
+        for length in 2..40 {
+            let text: String = alphabet.chars().cycle().skip(length * 7).take(length).collect();
+            // Interleaved whitespace forces the general path over the same characters.
+            let spaced: String = text.chars().flat_map(|c| [c, ' ']).collect();
+            assert_eq!(decode_for_print(&text).unwrap(), decode_for_print(&spaced).unwrap(), "length {length}");
+        }
     }
 
     #[test]

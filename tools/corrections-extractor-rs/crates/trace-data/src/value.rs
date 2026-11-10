@@ -13,7 +13,8 @@
 //! Function streams, `functionsDelta` and event arguments are most of a session and most of
 //! them are never read, so they are only validated while decoding and stay [`Value::Lazy`]
 //! until first read. Validation reports every error a full decode would, so a lazy value
-//! always decodes later.
+//! always decodes later. A function stream, once read, keeps its entries lazy in turn: most are
+//! only ever probed by a binary search over time.
 
 use crate::cbor::{CborError, Cursor, Item, Result, MAX_NESTING_DEPTH};
 use std::borrow::Cow;
@@ -297,6 +298,8 @@ impl<'a> Object<'a> {
 pub struct Lazy<'a> {
     raw: &'a [u8],
     depth: u32,
+    /// How to decode it when read: in full, or as a function stream with lazy entries.
+    decode_as: Context,
     decoded: OnceCell<Box<Value<'a>>>,
 }
 
@@ -308,7 +311,7 @@ impl<'a> Lazy<'a> {
                 last_table_integer_keyed: false,
             };
             let value = decoder
-                .value(self.depth, Context::Plain)
+                .value(self.depth, self.decode_as)
                 .expect("a lazy value was validated when it was skipped");
             Box::new(value.expect("a nil value is never kept lazy"))
         })
@@ -326,8 +329,14 @@ enum Context {
     Event,
     /// Decoded in full.
     Plain,
-    /// Validated now, decoded on first read.
+    /// Validated now, decoded in full on first read.
     Lazy,
+    /// A function stream: validated now, decoded as [`Context::Stream`] on first read.
+    LazyStream,
+    /// Inside a function stream: tables are decoded, but array items (the stream entries
+    /// `{t, tp, v}`) stay lazy, so a binary search over a stream decodes only the entries it
+    /// probes.
+    Stream,
 }
 
 impl Context {
@@ -339,7 +348,8 @@ impl Context {
             Context::Session if name("functions") => Context::Functions,
             Context::Session if name("functionsDelta") => Context::Lazy,
             Context::Session if name("events") => Context::Events,
-            Context::Functions => Context::Lazy,
+            Context::Functions => Context::LazyStream,
+            Context::Stream => Context::Stream,
             Context::Events => Context::Event,
             Context::Event if name("a") => Context::Lazy,
             _ => Context::Plain,
@@ -390,8 +400,10 @@ fn text(bytes: &[u8]) -> Cow<'_, str> {
 impl<'a> Decoder<'a> {
     /// One value; None stands for nil.
     fn value(&mut self, depth: u32, context: Context) -> Result<Option<Value<'a>>> {
-        if context == Context::Lazy {
-            return self.lazy(depth);
+        match context {
+            Context::Lazy => return self.lazy(depth, Context::Plain),
+            Context::LazyStream => return self.lazy(depth, Context::Stream),
+            _ => {}
         }
         Ok(match self.cursor.item()? {
             Item::Num(n) => Some(Value::Num(n)),
@@ -414,7 +426,9 @@ impl<'a> Decoder<'a> {
         let mut index = 1.0;
         while index <= length {
             let key = JsKey::Index(index as u32);
-            let item = self.value(depth + 1, context.child(&key))?;
+            // Stream entries stay lazy; other arrays follow their context.
+            let item_context = if context == Context::Stream { Context::Lazy } else { context.child(&key) };
+            let item = self.value(depth + 1, item_context)?;
             if index == 1.0 {
                 first_integer_keyed = item.as_ref().is_some_and(Value::is_table_shape) && self.last_table_integer_keyed;
             }
@@ -513,7 +527,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// Validates one value without decoding it; records its shape for the parent.
-    fn lazy(&mut self, depth: u32) -> Result<Option<Value<'a>>> {
+    fn lazy(&mut self, depth: u32, decode_as: Context) -> Result<Option<Value<'a>>> {
         let start = self.cursor.pos();
         let shape = self.skip(depth, true)?;
         let raw = self.cursor.slice_from(start);
@@ -522,6 +536,7 @@ impl<'a> Decoder<'a> {
             Shape::Scalar => Some(Value::Lazy(Lazy {
                 raw,
                 depth,
+                decode_as,
                 decoded: OnceCell::new(),
             })),
             Shape::Table { integer_keyed } => {
@@ -529,6 +544,7 @@ impl<'a> Decoder<'a> {
                 Some(Value::Lazy(Lazy {
                     raw,
                     depth,
+                    decode_as,
                     decoded: OnceCell::new(),
                 }))
             }
@@ -566,9 +582,11 @@ impl<'a> Decoder<'a> {
                 Ok(Shape::Table { integer_keyed: present > 0 })
             }
             Item::Map(length) => {
-                let mut keys: Vec<JsKey<'a>> = Vec::new();
+                // Without deleted keys the shape follows from flags alone, so no key list is
+                // built; a nil value (rare) rewinds and replays the map with set semantics.
+                let first_key = self.cursor.pos();
                 let mut has_other_key = false;
-                let mut has_deleted = false;
+                let mut has_kept_key = false;
                 let mut i = 0.0;
                 while i < length {
                     i += 1.0;
@@ -577,30 +595,56 @@ impl<'a> Decoder<'a> {
                     let key = match key {
                         None => continue,
                         Some(SkippedKey::Num(n)) if n.is_nan() => return Err(CborError("table index is NaN".into())),
-                        Some(SkippedKey::Num(n)) => JsKey::from_num(n),
-                        Some(SkippedKey::Str(bytes)) => JsKey::from_str(text(bytes)),
+                        Some(key) => key,
                     };
                     if item == Shape::Nil {
-                        keys.retain(|k| *k != key);
-                        has_deleted = true;
-                    } else {
-                        if !has_other_key && !key.is_positive_integer() {
-                            has_other_key = true;
-                        }
-                        if !keys.contains(&key) {
-                            keys.push(key);
-                        }
+                        self.cursor.set_pos(first_key);
+                        return self.map_shape_with_deletes(length, depth);
+                    }
+                    has_kept_key = true;
+                    if !has_other_key && !key.is_positive_integer() {
+                        has_other_key = true;
                     }
                 }
-                let integer_keyed = if has_other_key && !has_deleted {
-                    false
-                } else {
-                    !keys.is_empty() && keys.iter().all(JsKey::is_positive_integer)
-                };
-                Ok(Shape::Table { integer_keyed })
+                Ok(Shape::Table {
+                    integer_keyed: has_kept_key && !has_other_key,
+                })
             }
             _ => unreachable!("scalars returned above"),
         }
+    }
+
+    /// The shape of a map that deletes keys: replays it from its first key with JS set/delete
+    /// semantics over the kept keys, validating the items the first pass had not reached.
+    fn map_shape_with_deletes(&mut self, length: f64, depth: u32) -> Result<Shape> {
+        let mut keys: Vec<JsKey<'a>> = Vec::new();
+        let mut has_other_key = false;
+        let mut i = 0.0;
+        while i < length {
+            i += 1.0;
+            let key = self.skip_key(depth + 1)?;
+            let item = self.skip(depth + 1, false)?;
+            let key = match key {
+                None => continue,
+                Some(SkippedKey::Num(n)) if n.is_nan() => return Err(CborError("table index is NaN".into())),
+                Some(SkippedKey::Num(n)) => JsKey::from_num(n),
+                Some(SkippedKey::Str(bytes)) => JsKey::from_str(text(bytes)),
+            };
+            if item == Shape::Nil {
+                keys.retain(|k| *k != key);
+            } else {
+                if !has_other_key && !key.is_positive_integer() {
+                    has_other_key = true;
+                }
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+        // A deleted key always takes the full rule (cbor.ts skips its fast path then).
+        Ok(Shape::Table {
+            integer_keyed: !keys.is_empty() && keys.iter().all(JsKey::is_positive_integer),
+        })
     }
 
     /// Validates the items of a container whose header was read.
@@ -649,6 +693,20 @@ impl<'a> Decoder<'a> {
 enum SkippedKey<'a> {
     Num(f64),
     Str(&'a [u8]),
+}
+
+impl SkippedKey<'_> {
+    /// cbor.ts `isIntegerKey` without building the key: names starting with a letter or an
+    /// underscore never read back as numbers.
+    fn is_positive_integer(&self) -> bool {
+        match self {
+            SkippedKey::Num(n) => n.is_finite() && n.fract() == 0.0 && *n >= 1.0,
+            SkippedKey::Str(bytes) => match bytes.first() {
+                Some(b) if b.is_ascii_alphabetic() || *b == b'_' => false,
+                _ => JsKey::from_str(text(bytes)).is_positive_integer(),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
