@@ -80,4 +80,6 @@ quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submiss
 | # | Result | Time (5%) | Peak memory (5%) | Kept? | Commit |
 |---|---|---|---|---|---|
 | base | starting point | 57.2 s | 6.1 GB | — | ed77d0c |
-| M0 | `--stats` per-field memory report | no change (off by default) | — | yes | (next) |
+| M0 | `--stats` per-field memory report | no change (off by default) | — | yes | 8780de9 |
+| — | **re-baselined on the now idle machine** (M0 binary) | 43.9 / 44.8 s | 5.9–6.2 GB | — | — |
+| P1 | `Object::get` fast path for name and index keys | 42.8 / 42.3 s (−3%) | 5.9–6.0 GB | yes | (next) |
