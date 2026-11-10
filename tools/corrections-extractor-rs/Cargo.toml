@@ -15,6 +15,7 @@ flate2 = { version = "1", default-features = false, features = ["zlib"] }
 libdeflater = "1.26"
 memchr = "2"
 mimalloc = { version = "0.1", default-features = false }
+libmimalloc-sys = { version = "0.1", features = ["extended"] }
 rustc-hash = "2"
 ryu-js = "1"
 serde = { version = "1", features = ["derive"] }
