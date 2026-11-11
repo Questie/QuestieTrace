@@ -62,13 +62,24 @@ pub fn write_episodes(path: &Path, episodes: &[QuestEpisode]) -> Result<()> {
 
 pub fn read_episodes(path: &Path) -> Result<Vec<QuestEpisode>> {
     let file = File::open(path).with_context(|| format!("{} is missing: run `relations ingest` first", path.display()))?;
+    let mut reader = BufReader::new(file);
     let mut episodes = Vec::new();
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        let line = line.with_context(|| format!("reading {}", path.display()))?;
-        if !line.is_empty() {
-            episodes.push(serde_json::from_str(&line).with_context(|| format!("{} line {}", path.display(), index + 1))?);
+    // One buffer for every line: episodes can be megabytes of JSON each.
+    let mut line = String::new();
+    for number in 1.. {
+        line.clear();
+        if reader.read_line(&mut line).with_context(|| format!("reading {}", path.display()))? == 0 {
+            break;
+        }
+        let json = line.trim_end_matches(['\n', '\r']);
+        if !json.is_empty() {
+            let mut episode: QuestEpisode = serde_json::from_str(json).with_context(|| format!("{} line {number}", path.display()))?;
+            // Every step holds every episode: keep only what they contain.
+            episode.shrink_to_fit();
+            episodes.push(episode);
         }
     }
+    episodes.shrink_to_fit();
     Ok(episodes)
 }
 

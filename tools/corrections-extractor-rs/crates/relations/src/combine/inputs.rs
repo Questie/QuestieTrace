@@ -8,8 +8,8 @@
 
 use super::edges::{collect_edges, truth_lookup, Edge, EdgeKey, QuestDomains, Truth};
 use super::features::Coverage;
-use super::is_js_whitespace;
 use crate::model::{CandidateFile, GroundTruth, QuestCatalog, QuestId};
+use crate::text::js_trim;
 use anyhow::{bail, Result};
 use indexmap::IndexMap;
 
@@ -65,7 +65,7 @@ pub fn prepare_inputs<'a>(all_files: &'a [CandidateFile], catalog: &'a QuestCata
 /// Same-name copies share a family (faction/race/profession variants of one quest).
 pub fn family_of(catalog: &QuestCatalog, quest_id: QuestId) -> String {
     match catalog.quest(quest_id).and_then(|quest| quest.name.as_deref()).filter(|name| !name.is_empty()) {
-        Some(name) => format!("name:{}", name.trim_matches(is_js_whitespace).to_lowercase()),
+        Some(name) => format!("name:{}", js_trim(name).to_lowercase()),
         None => format!("id:{quest_id}"),
     }
 }

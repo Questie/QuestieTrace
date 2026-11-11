@@ -77,8 +77,8 @@ fn json_string(raw: Option<&RawValue>) -> Option<Cow<'_, str>> {
     }
 }
 
-/// trace-data names files `<received stamp>_<submission id>.json`.
-fn submission_id_from_path(path: &Path) -> String {
+/// The submission id in a file name: trace-data names files `<received stamp>_<submission id>.json`.
+pub fn submission_id_from_path(path: &Path) -> String {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     let name = name.strip_suffix(".json").unwrap_or(name);
     name.rsplit_once('_').map_or(name, |(_, id)| id).to_owned()

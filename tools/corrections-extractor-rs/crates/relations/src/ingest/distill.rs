@@ -7,13 +7,14 @@
 
 use super::short_hash;
 use super::streams::{
-    as_integer, as_positive_int, entries_between, entry_time, event_arg, event_time, last_index_before, packed, positive_int, sampled_before,
-    value_at_or_before, value_before,
+    as_integer, as_positive_int, entries_between, entry_time, event_arg, event_time, finite_entry_time, finite_event_time, last_index_before, packed,
+    positive_int, sampled_before, value_at_or_before, value_before,
 };
 use crate::model::{
     CompletedChange, CompletedSource, CompletedTimeline, Faction, GiverKind, GiverRef, OfferSnapshot, OfferSource, OfferedQuest, PlayerContext,
-    QuestClientInfo, QuestEvent, QuestEventKind, QuestId, SessionTime, TimedValue,
+    QuestClientInfo, QuestEpisode, QuestEvent, QuestEventKind, QuestId, SessionTime, TimedValue,
 };
+use crate::text::js_trim;
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
@@ -102,25 +103,50 @@ pub struct EpisodeDraft {
     pub quest_info: Option<BTreeMap<QuestId, QuestClientInfo>>,
 }
 
+/// What merging the copies of a session and grouping characters add to its draft.
+pub struct EpisodeIdentity {
+    pub key: String,
+    pub contributor_id: String,
+    pub character_key: String,
+    /// Sorted.
+    pub submission_ids: Vec<String>,
+    pub session_order: u32,
+}
+
 impl EpisodeDraft {
+    pub fn into_episode(self, identity: EpisodeIdentity) -> QuestEpisode {
+        QuestEpisode {
+            key: identity.key,
+            contributor_id: identity.contributor_id,
+            character_key: identity.character_key,
+            submission_ids: identity.submission_ids,
+            session_name: self.session_name,
+            session_order: identity.session_order,
+            interface_version: self.interface_version,
+            locale: self.locale,
+            player: self.player,
+            duration: self.duration,
+            levels: self.levels,
+            completed: self.completed,
+            quest_log: self.quest_log,
+            quest_events: self.quest_events,
+            offers: self.offers,
+            quest_info: self.quest_info,
+        }
+    }
+
     /// Frees the room vectors grew into. Drafts are held until every submission is read (on the
     /// 5% sample a third of their memory was such room), so this is done once, when distilled.
     fn shrink_to_fit(&mut self) {
         self.levels.shrink_to_fit();
-        if let Some(completed) = &mut self.completed {
-            completed.initial.shrink_to_fit();
-            completed.changes.shrink_to_fit();
-        }
+        self.completed.iter_mut().for_each(CompletedTimeline::shrink_to_fit);
         self.quest_log.shrink_to_fit();
         for entry in &mut self.quest_log {
             entry.v.shrink_to_fit();
         }
         self.quest_events.shrink_to_fit();
         self.offers.shrink_to_fit();
-        for offer in &mut self.offers {
-            offer.available.shrink_to_fit();
-            offer.active.iter_mut().for_each(Vec::shrink_to_fit);
-        }
+        self.offers.iter_mut().for_each(OfferSnapshot::shrink_to_fit);
     }
 }
 
@@ -261,13 +287,11 @@ fn read_player(session: &Session) -> PlayerContext {
 fn read_levels(session: &Session) -> Vec<TimedValue<i64>> {
     let mut levels: Vec<TimedValue<i64>> = Vec::new();
     for entry in get_stream(session, "UnitLevel", &[KeyRef::Str("player")]).unwrap_or_default() {
-        if let Some(level) = as_positive_int(entry_v(entry)) {
-            if levels.last().is_none_or(|last| last.v != level) {
-                levels.push(TimedValue {
-                    t: entry_time(entry),
-                    v: level,
-                });
-            }
+        let (Some(t), Some(level)) = (finite_entry_time(entry), as_positive_int(entry_v(entry))) else {
+            continue;
+        };
+        if levels.last().is_none_or(|last| last.v != level) {
+            levels.push(TimedValue { t, v: level });
         }
     }
     levels
@@ -331,11 +355,11 @@ fn read_completed(session: &Session, stats: &mut DistillStats) -> Option<Complet
     let mut changes = Vec::new();
     for delta in stream.get("delta").and_then(Value::as_array).unwrap_or_default() {
         let (add, remove) = (quest_ids(delta.get("add")), quest_ids(delta.get("remove")));
-        if add.is_empty() && remove.is_empty() {
+        let Some(t) = finite_entry_time(delta).filter(|_| !add.is_empty() || !remove.is_empty()) else {
             continue;
-        }
+        };
         changes.push(CompletedChange {
-            t: entry_time(delta),
+            t,
             add: (!add.is_empty()).then_some(add),
             remove: (!remove.is_empty()).then_some(remove),
         });
@@ -354,14 +378,16 @@ fn read_completed(session: &Session, stats: &mut DistillStats) -> Option<Complet
 fn read_quest_log(session: &Session) -> Vec<TimedValue<Vec<QuestId>>> {
     let mut log: Vec<TimedValue<Vec<QuestId>>> = Vec::new();
     for entry in get_stream(session, "QuestLog", &[]).unwrap_or_default() {
-        let Some(rows) = entry_v(entry).filter(|v| v.is_array()) else { continue };
+        let (Some(t), Some(rows)) = (finite_entry_time(entry), entry_v(entry).filter(|v| v.is_array())) else {
+            continue;
+        };
         let mut ids = quest_ids(Some(rows));
         ids.sort_unstable();
         ids.dedup();
         if log.last().is_some_and(|last| last.v == ids) {
             continue;
         }
-        log.push(TimedValue { t: entry_time(entry), v: ids });
+        log.push(TimedValue { t, v: ids });
     }
     log
 }
@@ -551,9 +577,9 @@ fn giver_from_guid(guid: Option<&Value>) -> Option<GiverRef> {
     Some(GiverRef { kind, id })
 }
 
-/// A string that is not blank, as given (untrimmed).
+/// A string that is not blank by JS rules, as given (untrimmed).
 fn non_empty_title<'v>(value: Option<&'v Value>) -> Option<&'v str> {
-    value?.as_str().filter(|title| !title.trim().is_empty())
+    value?.as_str().filter(|title| !js_trim(title).is_empty())
 }
 
 fn same_giver(a: Option<GiverRef>, b: Option<GiverRef>) -> bool {
@@ -673,6 +699,22 @@ impl<'s, 'v, 'a> SessionReader<'s, 'v, 'a> {
         // UnitInteraction samples the npc token just before the lists, in the same handler.
         let npc = value_at_or_before(self.stream("UnitGUID", &[KeyRef::Str("npc")]), last_read);
         same_giver(giver, giver_from_guid(npc))
+    }
+
+    /// The list indices 1, 2, ... up to `count` (a list's recorded length) that per-index streams
+    /// `functions[name][index]` can answer for: indices above the highest one they recorded read
+    /// nothing. Bounding by it also keeps a damaged count from looping (nearly) forever.
+    fn indices_read(&self, names: [&str; 2], count: f64) -> impl Iterator<Item = u32> {
+        let recorded = names.iter().filter_map(|name| self.session.function(name)?.as_object());
+        let highest = recorded
+            .flat_map(|streams| streams.entries())
+            .filter_map(|(key, _)| match key {
+                JsKey::Index(index) => Some(*index),
+                JsKey::Name(_) => None,
+            })
+            .max()
+            .unwrap_or(0);
+        (1..=highest).take_while(move |&index| f64::from(index) <= count)
     }
 
     fn giver_at(&self, i: usize, tokens: [&str; 2]) -> Option<GiverRef> {
@@ -817,11 +859,10 @@ fn greeting_step(reader: &SessionReader, i: usize, stats: &mut DistillStats, tit
 
     let mut available: Vec<OfferedQuest> = Vec::new();
     let mut available_titles: Vec<String> = Vec::new();
-    let mut index = 1u32;
-    while f64::from(index) <= num_available {
+    let read_available = reader.indices_read(["GetAvailableQuestInfo", "GetAvailableTitle"], num_available);
+    for index in read_available {
         let info = reader.dialog_value(i, "GetAvailableQuestInfo", &[KeyRef::from(index)]);
         let title = non_empty_title(reader.dialog_value(i, "GetAvailableTitle", &[KeyRef::from(index)]));
-        index += 1;
         let Some(id) = as_positive_int(packed(info, 5)) else {
             available_titles.extend(title.map(str::to_owned));
             continue;
@@ -837,11 +878,9 @@ fn greeting_step(reader: &SessionReader, i: usize, stats: &mut DistillStats, tit
 
     let mut active: Vec<QuestId> = Vec::new();
     let mut active_titles: Vec<String> = Vec::new();
-    let mut index = 1u32;
-    while f64::from(index) <= num_active {
+    for index in reader.indices_read(["GetActiveQuestID", "GetActiveTitle"], num_active) {
         let id = as_positive_int(reader.dialog_value(i, "GetActiveQuestID", &[KeyRef::from(index)]));
         let title = non_empty_title(packed(reader.dialog_value(i, "GetActiveTitle", &[KeyRef::from(index)]), 1));
-        index += 1;
         match id {
             Some(id) => {
                 titles.add(title, Some(id), giver);
@@ -1281,7 +1320,8 @@ pub fn distill_session(session: &Session, key: String) -> DistilledSession {
 
     let mut steps: Vec<Step> = Vec::new();
     for (i, event) in reader.events.iter().enumerate() {
-        let tp = event_time(event);
+        // Steps become quest events and offers on the session's timeline: they need a time.
+        let Some(tp) = finite_event_time(event) else { continue };
         let quest =
             |kind: QuestStepKind, quest_id: Option<QuestId>, replay: bool| quest_id.map(|quest_id| Step::Quest(QuestStep { kind, tp, quest_id, replay }));
         let step = match event.name() {
@@ -1352,17 +1392,18 @@ pub fn distill_session(session: &Session, key: String) -> DistilledSession {
         }
     }
 
-    let last_event_tp = reader.events.last().map_or(0.0, event_time);
+    let last_event_tp = reader.events.iter().rev().find_map(finite_event_time).unwrap_or(0.0);
     let recorded = session
         .field("durationPrecise")
         .and_then(Value::as_num)
         .or_else(|| session.field("duration").and_then(Value::as_num));
-    // A session recovered after a client restart gets its stop time from the new clock.
+    // A session recovered after a client restart gets its stop time from the new clock. The range
+    // check also turns away a non-finite recording.
     let duration = recorded
         .filter(|&recorded| recorded >= last_event_tp && recorded <= last_event_tp + DURATION_SLACK_SECONDS)
         .unwrap_or(last_event_tp);
     let server_time = get_stream(session, "GetServerTime", &[]).and_then(<[Value]>::first);
-    let start_server_time = server_time.and_then(|entry| Some(entry_v(entry)?.as_num()? - entry_time(entry)));
+    let start_server_time = server_time.and_then(|entry| Some(entry_v(entry)?.as_num()? - finite_entry_time(entry)?).filter(|t| t.is_finite()));
     let name = session.field("name").and_then(Value::as_str);
 
     let mut episode = EpisodeDraft {
@@ -1550,6 +1591,26 @@ mod tests {
             giver: npc(240),
         };
         assert!(result.titles.contains(&manhunt), "{:?}", result.titles);
+    }
+
+    #[test]
+    fn reads_a_greeting_with_a_damaged_huge_count_without_walking_every_index_up_to_it() {
+        // Walking 1..=count would take hours (and overflow a u32 index); only recorded indices matter.
+        let result = TraceBuilder::new()
+            .frame(10.0)
+            .event("QUEST_GREETING", &[])
+            .sample_param("UnitGUID", "npc", json!(creature(240)))
+            .sample("GetNumAvailableQuests", json!(1e15))
+            .sample("GetNumActiveQuests", json!(1e15))
+            .sample_param(
+                "GetAvailableQuestInfo",
+                "1",
+                json!({ "1": false, "2": 0, "3": false, "4": false, "5": 147, "n": 5 }),
+            )
+            .sample_param("GetActiveQuestID", "2", json!(123))
+            .build();
+        let expected = offer(OfferSource::Greeting, npc(240), vec![listed(147)], Some(vec![123]), false);
+        assert_eq!(offers(&result), [expected]);
     }
 
     #[test]
@@ -1763,9 +1824,12 @@ mod tests {
             .sample_param("UnitGUID", "questnpc", player.clone())
             .sample_param("UnitGUID", "npc", player)
             .build();
-        assert!(result.episode.offers.iter().all(|offer| offer.giver.is_none()));
-        assert!(result.episode.quest_events.iter().all(|event| event.giver.is_none()));
-        assert!(result.titles.iter().all(|title| title.giver.is_none()));
+        // The gossip list (at the pet) and the detail picked from it are still read, giverless.
+        let sources: Vec<OfferSource> = result.episode.offers.iter().map(|offer| offer.source).collect();
+        assert_eq!(sources, [OfferSource::Gossip]);
+        assert_eq!(result.episode.offers[0].giver, None);
+        assert_eq!(events(&result), [(Detail, 7, None)]);
+        assert!(!result.titles.is_empty() && result.titles.iter().all(|title| title.giver.is_none()));
         let written = serde_json::to_string(&(&result.episode.offers, &result.episode.quest_events)).unwrap();
         for leaked in ["Player-", "Pet-", "1234", "165189"] {
             assert!(!written.contains(leaked), "{leaked} in {written}");
@@ -1854,6 +1918,52 @@ mod tests {
         let next_to_accept = TraceBuilder::new().frame(10.0).event("QUEST_ACCEPTED", &[json!(8)]);
         let next_to_accept = next_to_accept.frame(11.0).event("QUEST_REMOVED", &[json!(7), json!(false)]).build();
         assert_eq!(kinds(&next_to_accept), [(Accepted, 8), (Removed, 7)]);
+    }
+
+    // --- times ---
+
+    #[test]
+    fn leaves_out_what_has_no_time_so_a_written_episode_reads_back_as_it_was() {
+        // A damaged trace: an accept, a level sample, a quest log entry and a completed change
+        // without `t` or `tp`, after a timed accept and level sample.
+        let mut builder = TraceBuilder::new()
+            .frame(10.0)
+            .event("QUEST_ACCEPTED", &[json!(7)])
+            .sample_param("UnitLevel", "player", json!(5));
+        let timeless = |value: Json| json!({ "v": value });
+        builder.session["events"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "e": "QUEST_ACCEPTED", "a": { "1": 8, "n": 1 } }));
+        builder.session["functions"]["UnitLevel"]["player"]
+            .as_array_mut()
+            .unwrap()
+            .push(timeless(json!(6)));
+        builder.session["functions"]["QuestLog"] = json!([timeless(json!([8]))]);
+        builder.session["functionsDelta"]["C_QuestLog.GetAllCompletedQuestIDs"] = json!({ "initial": [], "delta": [{ "add": [8] }] });
+        let result = builder.build();
+
+        assert_eq!(kinds(&result), [(Accepted, 7)]);
+        assert_eq!(result.episode.levels.iter().map(|level| level.v).collect::<Vec<_>>(), [5]);
+        assert!(result.episode.quest_log.is_empty());
+        assert_eq!(result.episode.completed.as_ref().map(|completed| completed.changes.len()), Some(0));
+        // The session lasts until its last event that has a time.
+        assert_eq!(result.episode.duration, result.episode.quest_events[0].t);
+
+        // JSON has no NaN: a time that is not finite would be written as null and fail the read.
+        let identity = EpisodeIdentity {
+            key: result.key.clone(),
+            contributor_id: "contributor".into(),
+            character_key: "character".into(),
+            submission_ids: vec!["submission".into()],
+            session_order: 0,
+        };
+        let episode = result.episode.into_episode(identity);
+        let path = std::env::temp_dir().join(format!("relations-timeless-{}.jsonl", std::process::id()));
+        crate::io::write_episodes(&path, std::slice::from_ref(&episode)).unwrap();
+        let read = crate::io::read_episodes(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(read.unwrap(), [episode]);
     }
 
     // --- identity ---

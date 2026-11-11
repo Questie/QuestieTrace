@@ -23,6 +23,17 @@ pub fn event_time(event: &Event) -> f64 {
     }
 }
 
+/// [`entry_time`] when it is finite. Episodes only hold finite times: what has none cannot be
+/// placed on the session's timeline, and JSON could not carry it (NaN would be written as null).
+pub fn finite_entry_time(entry: &Value) -> Option<f64> {
+    Some(entry_time(entry)).filter(|t| t.is_finite())
+}
+
+/// [`event_time`] when it is finite; see [`finite_entry_time`].
+pub fn finite_event_time(event: &Event) -> Option<f64> {
+    Some(event_time(event)).filter(|t| t.is_finite())
+}
+
 /// Index of the last entry with time < `before` (or <= with `inclusive`). Streams are appended
 /// in time order.
 pub fn last_index_before(stream: Stream, before: f64, inclusive: bool) -> Option<usize> {

@@ -294,12 +294,6 @@ fn summary(
     )
 }
 
-/// The characters JS `trim()` and `\s` treat as whitespace. Rust's whitespace adds U+0085 and
-/// leaves out U+FEFF; quest names go through this, and their families decide folds and copy rules.
-fn is_js_whitespace(c: char) -> bool {
-    c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}')
-}
-
 /// `value` rounded to `decimals` digits, like the TS pipeline's `Number(value.toFixed(n))`.
 fn rounded(value: f64, decimals: usize) -> f64 {
     if !value.is_finite() {

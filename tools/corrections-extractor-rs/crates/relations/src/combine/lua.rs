@@ -16,9 +16,9 @@
 
 use super::assumptions::assumption;
 use super::edges::QuestDomains;
-use super::is_js_whitespace;
 use super::views::QuestView;
 use crate::model::{QuestCatalog, QuestId, RelationField, RelationSet};
+use crate::text::is_js_whitespace;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
 

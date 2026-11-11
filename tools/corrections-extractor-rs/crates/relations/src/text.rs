@@ -1,6 +1,17 @@
-//! Numbers in text (evidence, notes, the review, Lua comments) as the TypeScript pipeline prints
-//! them, so both pipelines' text outputs read the same. The values never differ; only exact
-//! rounding ties and a few spellings do between JS and Rust formatting.
+//! Text as the TypeScript pipeline treats it, so both pipelines read and print text the same:
+//! numbers in text (evidence, notes, the review, Lua comments), where only exact rounding ties
+//! and a few spellings differ between JS and Rust formatting, and JS whitespace.
+
+/// The characters JS `trim()` and `\s` treat as whitespace. Rust's whitespace adds U+0085 and
+/// leaves out U+FEFF; titles and quest names go through this, and it decides which of them match.
+pub fn is_js_whitespace(c: char) -> bool {
+    c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}')
+}
+
+/// JS `text.trim()`.
+pub fn js_trim(text: &str) -> &str {
+    text.trim_matches(is_js_whitespace)
+}
 
 /// JS `x.toFixed(digits)` for numbers below 1e21. Rust's `{:.N}` rounds an exact decimal tie to
 /// even ("0.12" for 0.125), JS away from zero ("0.13"), and ratios of small counts hit those ties
@@ -73,6 +84,13 @@ mod tests {
         assert_eq!(round_to(0.123456, 4), 0.1235);
         assert_eq!(round_to(0.8125, 3), 0.813, "an exact tie rounds away from zero");
         assert_eq!(round_to(f64::INFINITY, 3), f64::INFINITY);
+    }
+
+    #[test]
+    fn js_trim_trims_what_js_trims() {
+        // node: "﻿  Manhunt  ".trim() === "Manhunt"; "\u0085Manhunt".trim() keeps U+0085.
+        assert_eq!(js_trim("\u{feff}\u{a0} Manhunt \u{2028}"), "Manhunt");
+        assert_eq!(js_trim("\u{85}Manhunt\u{85}"), "\u{85}Manhunt\u{85}");
     }
 
     #[test]
