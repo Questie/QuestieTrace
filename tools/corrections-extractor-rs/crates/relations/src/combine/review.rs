@@ -5,7 +5,7 @@
 
 use super::crossval::{FittedKind, ScoredEdge};
 use super::edges::{Claim, Domain, EdgeKey, Reference};
-use super::fixed;
+use crate::text::to_fixed;
 use super::meta::InputSummary;
 use super::resolve::Outcome;
 use super::views::{EdgeView, HintView, QuestView, Status};
@@ -144,11 +144,11 @@ fn hint_line(hint: &HintView, input: &ReviewInput) -> String {
 }
 
 fn signed(value: f64, decimals: usize) -> String {
-    format!("{}{}", if value >= 0.0 { "+" } else { "" }, fixed(value, decimals))
+    format!("{}{}", if value >= 0.0 { "+" } else { "" }, to_fixed(value, decimals))
 }
 
 fn edge_block(edge: &EdgeView, input: &ReviewInput, evidence_lines: bool) -> Vec<String> {
-    let score = format!("{}{}", fixed(edge.probability, 3), if edge.held_out { " held-out" } else { "" });
+    let score = format!("{}{}", to_fixed(edge.probability, 3), if edge.held_out { " held-out" } else { "" });
     let mut lines = vec![format!(
         "- **{}** {} · {score} · {}",
         edge.field,
@@ -447,7 +447,7 @@ pub fn render_review(input: &ReviewInput) -> String {
         );
         lines.push(format!(
             "- {relation} · {} · {} · inherited: {}",
-            fixed(edge.probability, 3),
+            to_fixed(edge.probability, 3),
             signals.join(", "),
             if instead.is_empty() { "nothing".to_owned() } else { instead.join("; ") }
         ));
@@ -506,7 +506,7 @@ pub fn render_review(input: &ReviewInput) -> String {
             "- **{kind}** ({} judged edges, {} true): intercept {}; {}",
             fitted.judged,
             fitted.positives,
-            fixed(fitted.model.intercept, 2),
+            to_fixed(fitted.model.intercept, 2),
             weights.join(", ")
         ));
     }

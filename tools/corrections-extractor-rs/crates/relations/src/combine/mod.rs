@@ -294,47 +294,6 @@ fn summary(
     )
 }
 
-/// `value` with `decimals` digits after the point, as the TS pipeline's `toFixed` prints it, so
-/// the review and the Lua comments read the same: an exact decimal tie rounds away from zero
-/// (Rust's formatting rounds it to even; a precision of 13/16 = 0.8125 is "0.813" in JS), a
-/// negative zero prints unsigned, and infinities print as JS words.
-fn fixed(value: f64, decimals: usize) -> String {
-    if value.is_infinite() {
-        return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_owned();
-    }
-    let value = value + 0.0;
-    round_tie_away_from_zero(value, decimals).unwrap_or_else(|| format!("{value:.decimals$}"))
-}
-
-/// `value` rounded away from zero when it lies exactly halfway at `decimals` digits, else None. A
-/// tie (2k + 1) / (2 * 10^decimals) is a binary fraction only with at most `decimals + 1` binary
-/// digits, so its decimal expansion is exactly `decimals + 1` digits long and ends in 5.
-fn round_tie_away_from_zero(value: f64, decimals: usize) -> Option<String> {
-    let scaled = value * 2f64.powi(i32::try_from(decimals).ok()? + 1);
-    if !scaled.is_finite() || scaled.fract() != 0.0 {
-        return None;
-    }
-    // Exact: the value has no more decimal digits than this.
-    let exact = format!("{value:.0$}", decimals + 1);
-    let mut digits = exact.strip_suffix('5')?.trim_end_matches('.').as_bytes().to_vec();
-    // One unit more in the last kept place, carried through nines.
-    let mut carry = true;
-    for digit in digits.iter_mut().rev().filter(|byte| byte.is_ascii_digit()) {
-        if *digit == b'9' {
-            *digit = b'0';
-        } else {
-            *digit += 1;
-            carry = false;
-            break;
-        }
-    }
-    if carry {
-        let after_sign = usize::from(digits.first() == Some(&b'-'));
-        digits.insert(after_sign, b'1');
-    }
-    Some(String::from_utf8(digits).expect("ASCII digits"))
-}
-
 /// The characters JS `trim()` and `\s` treat as whitespace. Rust's whitespace adds U+0085 and
 /// leaves out U+FEFF; quest names go through this, and their families decide folds and copy rules.
 fn is_js_whitespace(c: char) -> bool {
@@ -346,7 +305,7 @@ fn rounded(value: f64, decimals: usize) -> f64 {
     if !value.is_finite() {
         return value;
     }
-    fixed(value, decimals).parse().expect("a formatted number parses")
+    crate::text::to_fixed(value, decimals).parse().expect("a formatted number parses")
 }
 
 // ---------------------------------------------------------------------------
@@ -543,18 +502,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fixed_prints_what_js_to_fixed_prints() {
-        // Expected values from Node's Number.prototype.toFixed.
-        assert_eq!(fixed(0.99523, 3), "0.995");
-        assert_eq!(fixed(0.8125, 3), "0.813", "an exact tie rounds up, not to even");
-        assert_eq!(fixed(-0.125, 2), "-0.13", "a negative tie rounds away from zero");
-        assert_eq!(fixed(9.5, 0), "10", "the carry runs through nines");
-        assert_eq!(fixed(0.5, 0), "1");
-        assert_eq!(fixed(0.15, 1), "0.1", "0.15 is just below the tie in binary");
-        assert_eq!(fixed(-0.04, 1), "-0.0");
-        assert_eq!(fixed(-0.0, 1), "0.0");
-        assert_eq!(fixed(f64::NEG_INFINITY, 1), "-Infinity");
+    fn rounded_reads_back_what_to_fixed_prints() {
         assert_eq!(rounded(0.123456, 4), 0.1235);
+        assert_eq!(rounded(0.8125, 3), 0.813, "an exact tie rounds up, as Number(x.toFixed(3)) does");
     }
 
     #[test]

@@ -4,7 +4,8 @@
 
 use super::observe::CharacterView;
 use super::variants::VariantIndex;
-use super::{to_fixed, Params};
+use super::Params;
+use crate::text::to_fixed;
 use crate::eligibility::{class_allowed, race_allowed};
 use crate::model::{Evidence, GiverKind, GiverRef, QuestCatalog, QuestEpisode, QuestEventKind, QuestId};
 use indexmap::IndexMap;

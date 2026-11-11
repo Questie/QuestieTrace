@@ -25,6 +25,7 @@ use self::prerequisites::{infer_prerequisites, PrerequisiteEdge, PrerequisitePar
 use super::{Signal, SignalInput, SignalOutput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
 use crate::model::{CandidateFile, Evidence, QuestCatalog, QuestEpisode, QuestId, RelationCandidate, RelationField};
+use crate::text::{to_exponential, to_fixed};
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use serde_json::json;
@@ -187,7 +188,7 @@ fn prerequisite_candidate(edge: &PrerequisiteEdge) -> RelationCandidate {
             implication.unordered,
             edge.baseline.completed,
             edge.baseline.of,
-            exponential1(edge.null_probability),
+            to_exponential(edge.null_probability, 1),
             edge.shape.name(),
             edge.siblings,
             edge.rank,
@@ -202,13 +203,13 @@ fn exclusion_candidates(edge: &ExclusionEdge) -> [RelationCandidate; 2] {
     let pair = &edge.pair;
     let kind = match edge.kind {
         ExclusionKind::Pair => "pair".to_owned(),
-        ExclusionKind::Group { size, expected } => format!("group groupSize={size} groupExpected={}", fixed1(expected)),
+        ExclusionKind::Group { size, expected } => format!("group groupSize={size} groupExpected={}", to_fixed(expected, 1)),
     };
     let note = format!(
         "completers={}+{} expected={} kind={kind} switched={}",
         pair.completers_a,
         pair.completers_b,
-        fixed1(pair.expected),
+        to_fixed(pair.expected, 1),
         edge.switched
     );
     both_directions(
@@ -270,44 +271,10 @@ fn count(characters: usize) -> u32 {
     u32::try_from(characters).expect("fewer than 4 billion characters")
 }
 
-/// `x` with one decimal, as JS `toFixed(1)` writes it in notes and evidence: halfway cases round
-/// away from zero (Rust rounds them to even), and negative zero is "0.0".
-fn fixed1(x: f64) -> String {
-    // At one decimal a tie is exactly k + 0.25 or k + 0.75, i.e. 4x is an odd integer (scaling by 4
-    // is exact).
-    let quarters = x * 4.0;
-    let tie = quarters.fract() == 0.0 && quarters % 2.0 != 0.0;
-    let rounded = if tie { (x * 10.0).round() / 10.0 } else { x };
-    // Adding 0.0 turns -0.0 into 0.0.
-    format!("{:.1}", rounded + 0.0)
-}
-
-/// `x` as JS `toExponential(1)` writes it: an explicit sign on non-negative exponents ("1.0e+0").
-/// Halfway cases cannot occur for null probabilities (all at most 0.05, where no binary fraction
-/// sits exactly halfway at two significant digits), so Rust's digits are JS's.
-fn exponential1(x: f64) -> String {
-    let formatted = format!("{x:.1e}");
-    match formatted.split_once('e') {
-        Some((mantissa, exponent)) if !exponent.starts_with('-') => format!("{mantissa}e+{exponent}"),
-        _ => formatted,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::signals::cooccurrence::fixtures::{catalog_of, session, SessionSpec};
-
-    #[test]
-    fn numbers_in_notes_are_written_as_the_ts_pipeline_writes_them() {
-        assert_eq!(fixed1(100.25), "100.3", "halfway rounds away from zero");
-        assert_eq!(fixed1(0.75), "0.8");
-        assert_eq!(fixed1(-0.25), "-0.3");
-        assert_eq!(fixed1(2.8), "2.8");
-        assert_eq!(fixed1(-0.0), "0.0");
-        assert_eq!(exponential1(0.0123), "1.2e-2");
-        assert_eq!(exponential1(0.0), "0.0e+0");
-    }
 
     #[test]
     fn co_flags_are_claimed_on_both_quests_and_cover_only_quests_judged_for_both_fields() {
