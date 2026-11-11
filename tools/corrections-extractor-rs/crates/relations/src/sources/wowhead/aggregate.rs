@@ -41,7 +41,7 @@ pub struct WowheadCandidate {
     pub provenance: Provenance,
 }
 
-/// Candidates per surface, each list by quest, field name and target.
+/// Candidates per surface, each list in [`RelationCandidate::canonical_order`].
 pub fn aggregate_claims(claims: Vec<PageClaim>, series_positions: &SeriesPositions) -> BTreeMap<Surface, Vec<WowheadCandidate>> {
     // Within a group, claims stay in page order: ties below go to the first page.
     let mut groups: BTreeMap<ClaimKey, Vec<PageClaim>> = BTreeMap::new();
@@ -58,12 +58,7 @@ pub fn aggregate_claims(claims: Vec<PageClaim>, series_positions: &SeriesPositio
             .push(to_candidate(group, series_positions, &pages_by_quest));
     }
     for list in by_surface.values_mut() {
-        // By field name, as the TypeScript pipeline sorts (its localeCompare orders these
-        // lowercase-first camelCase names like plain byte order does).
-        list.sort_by(|a, b| {
-            let (a, b) = (&a.candidate, &b.candidate);
-            (a.quest_id, a.field.name(), a.target).cmp(&(b.quest_id, b.field.name(), b.target))
-        });
+        list.sort_by_key(|wowhead| wowhead.candidate.canonical_order());
     }
     by_surface
 }

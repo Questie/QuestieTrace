@@ -28,7 +28,7 @@ use self::timing::TimingHistogram;
 use self::variants::{quests_in_variant_edges, variant_edges, CompletionMoments, SameNameVariants};
 use super::{to_json, Findings, Signal, SignalInput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
-use crate::model::{QuestEpisode, QuestId};
+use crate::model::{QuestEpisode, QuestId, RelationCandidate};
 use crate::timeline::EpisodeTimeline;
 use indexmap::IndexMap;
 use rayon::prelude::*;
@@ -183,13 +183,7 @@ fn run(input: &SignalInput) -> Findings {
     let mut candidates = prerequisite_candidates(&tally, &all_of);
     candidates.extend(variant_candidates(&variant_edges, &tally, &moments, &all_of));
     candidates.extend(next_in_chain_candidates(&tally));
-    // The TS sorts fields with localeCompare; for these camelCase names that is plain string order.
-    candidates.sort_by(|a, b| {
-        a.quest_id
-            .cmp(&b.quest_id)
-            .then_with(|| a.field.name().cmp(b.field.name()))
-            .then(a.target.cmp(&b.target))
-    });
+    candidates.sort_by_key(RelationCandidate::canonical_order);
     // Copies get candidates without being observed; covering them keeps recall honest.
     covered.extend(candidates.iter().map(|candidate| candidate.quest_id));
 

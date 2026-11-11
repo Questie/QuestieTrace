@@ -520,6 +520,17 @@ pub struct RelationCandidate {
     pub note: Option<String>,
 }
 
+impl RelationCandidate {
+    /// The sort key of the order candidate files list candidates in: quest, field name, target.
+    /// Fields compare by name, not in [`RelationField`] order, as the TS pipeline sorts them (its
+    /// localeCompare agrees with byte order on these ASCII camelCase names). Two signals keep
+    /// their TS versions' own orders instead: offer-set (quest, best score first, target) and
+    /// breadcrumbs (best score first, quest).
+    pub fn canonical_order(&self) -> (QuestId, &'static str, QuestId) {
+        (self.quest_id, self.field.name(), self.target)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateFile {
@@ -534,4 +545,41 @@ pub struct CandidateFile {
     /// them. Used for recall.
     pub covered_quest_ids: Vec<QuestId>,
     pub candidates: Vec<RelationCandidate>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_order_sorts_fields_by_name_not_by_declaration() {
+        let candidate = |quest_id: QuestId, field: RelationField, target: QuestId| RelationCandidate {
+            quest_id,
+            field,
+            target,
+            score: 0.5,
+            support: 1,
+            contradict: 0,
+            evidence: vec![],
+            note: None,
+        };
+        let mut candidates = [
+            candidate(2, RelationField::ExclusiveTo, 1),
+            candidate(1, RelationField::PreQuestSingle, 5),
+            candidate(1, RelationField::ExclusiveTo, 9),
+            candidate(1, RelationField::ExclusiveTo, 3),
+        ];
+        candidates.sort_by_key(RelationCandidate::canonical_order);
+        let order: Vec<_> = candidates.iter().map(|c| (c.quest_id, c.field, c.target)).collect();
+        // preQuestSingle is declared before exclusiveTo but sorts after it by name, as in the TS files.
+        assert_eq!(
+            order,
+            [
+                (1, RelationField::ExclusiveTo, 3),
+                (1, RelationField::ExclusiveTo, 9),
+                (1, RelationField::PreQuestSingle, 5),
+                (2, RelationField::ExclusiveTo, 1),
+            ]
+        );
+    }
 }
