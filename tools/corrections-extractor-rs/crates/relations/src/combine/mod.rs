@@ -49,7 +49,8 @@ const REVIEW_FILE: &str = "relations-review.md";
 const META_FILE: &str = "relations-meta.json";
 
 pub struct CombineInput<'a> {
-    /// Every candidates file (signals and sources), sorted by signal name.
+    /// Every candidates file (signals and sources), in any order: combine orders them by signal
+    /// name itself (see `inputs::prepare_inputs`).
     pub candidate_files: Vec<CandidateFile>,
     pub catalog: &'a QuestCatalog,
     pub ground_truth: &'a GroundTruth,
