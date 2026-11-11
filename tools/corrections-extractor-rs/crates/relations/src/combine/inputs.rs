@@ -41,7 +41,8 @@ pub fn prepare_inputs<'a>(all_files: &'a [CandidateFile], catalog: &'a QuestCata
         bail!("no candidate files; run the signals first");
     }
     // Signal-name order decides edge order, and with it every tie in the model and resolution.
-    // Sorting file paths is not the same: "wowhead-requires-any.json" < "wowhead-requires.json".
+    // This is the one place that orders the files; callers may pass them in any order. Sorting
+    // file paths is not the same: "wowhead-requires-any.json" < "wowhead-requires.json".
     let mut sorted: Vec<&CandidateFile> = all_files.iter().collect();
     sorted.sort_by(|a, b| a.signal.cmp(&b.signal));
     let (context_files, files): (Vec<&CandidateFile>, Vec<&CandidateFile>) = sorted.into_iter().partition(|file| is_context_only(&file.signal));

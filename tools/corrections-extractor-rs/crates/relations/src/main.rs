@@ -139,18 +139,22 @@ fn pipeline(config: &Config) -> Result<()> {
     wowhead.write(config)?;
     done("source:wowhead");
 
+    // Combine gets the candidate files this run produced, not whatever candidates/ holds: a file a
+    // renamed or removed signal left there must not count.
+    let mut candidate_files = wowhead.files;
     let input = SignalInput {
         episodes: &ingested.episodes,
         catalog: &cataloged.catalog,
         generated_at: &config.generated_at,
     };
-    // Each signal's result is written and dropped before the next one runs.
-    signals::run_all(&input, |output| output.write(config))?;
+    // Each signal's result is written before the next one runs; only its candidates are kept.
+    signals::run_all(&input, |output| {
+        output.write(config)?;
+        candidate_files.push(output.candidates);
+        Ok(())
+    })?;
     done("signals");
 
-    // Combine reads every candidates file there is, like the TS pipeline, so files of signals run
-    // separately before count too.
-    let candidate_files = io::read_candidate_files(&config.candidates_dir())?;
     let input = CombineInput {
         candidate_files,
         catalog: &cataloged.catalog,
