@@ -8,6 +8,7 @@
 //! ([`Findings`]); [`run_one`] adds what every candidates file shares (its name, the run's time).
 
 use crate::config::Config;
+use crate::eligibility::is_forever_interface;
 use crate::io;
 use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
 use anyhow::Result;
@@ -20,6 +21,7 @@ pub mod offer_set;
 
 /// What every signal reads.
 pub struct SignalInput<'a> {
+    /// Every episode; signals look at the [`forever_episodes`] only.
     pub episodes: &'a [QuestEpisode],
     pub catalog: &'a QuestCatalog,
     /// The run's start time, for `generatedAt`.
@@ -74,6 +76,12 @@ pub fn registry() -> Vec<&'static dyn Signal> {
         &cooccurrence::Cooccurrence,
         &breadcrumbs::Breadcrumbs,
     ]
+}
+
+/// The episodes signals read: Forever builds, and old traces that recorded no build (see
+/// [`is_forever_interface`]). Combine counts these too, as the episodes behind the relations.
+pub(crate) fn forever_episodes(episodes: &[QuestEpisode]) -> Vec<&QuestEpisode> {
+    episodes.iter().filter(|episode| is_forever_interface(episode.interface_version)).collect()
 }
 
 /// Params and reports as JSON. They are plain data (numbers, strings, lists, maps keyed by strings

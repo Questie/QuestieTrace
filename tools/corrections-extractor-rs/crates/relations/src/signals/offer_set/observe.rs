@@ -122,6 +122,8 @@ enum Usability {
     EmptyHistory,
 }
 
+/// The same Forever filter as [`crate::signals::forever_episodes`], as the first of the reasons
+/// [`ObserveStats`] counts episodes out for.
 fn usability(episode: &QuestEpisode) -> Usability {
     if !is_forever_interface(episode.interface_version) {
         return Usability::NotForever;

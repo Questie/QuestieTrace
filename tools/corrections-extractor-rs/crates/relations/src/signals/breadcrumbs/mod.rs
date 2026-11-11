@@ -14,8 +14,7 @@ pub mod observe;
 use self::infer::{judge_tally, BreadcrumbResult, Tally, MIN_COVERAGE_CHARACTERS};
 use self::links::{BreadcrumbParams, LinkCollector};
 use self::observe::{observe_episode, ObservationKind};
-use super::{to_json, Findings, Signal, SignalInput};
-use crate::eligibility::is_forever_interface;
+use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::model::{QuestCatalog, QuestEpisode, QuestId};
 use rayon::prelude::*;
 use serde::Serialize;
@@ -35,11 +34,7 @@ impl Signal for Breadcrumbs {
 
     fn run(&self, input: &SignalInput) -> Findings {
         let params = BreadcrumbParams::default();
-        let episodes: Vec<&QuestEpisode> = input
-            .episodes
-            .iter()
-            .filter(|episode| is_forever_interface(episode.interface_version))
-            .collect();
+        let episodes = forever_episodes(input.episodes);
         let result = infer(&episodes, input.catalog, &params);
         let catalog = input.catalog;
 

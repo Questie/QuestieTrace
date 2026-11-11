@@ -6,8 +6,8 @@
 use super::edges::{Domain, Reference};
 use super::lua::LuaRecords;
 use super::views::{QuestView, Status};
-use crate::eligibility::is_forever_interface;
 use crate::model::{CandidateFile, QuestEpisode};
+use crate::signals::forever_episodes;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
@@ -75,10 +75,10 @@ pub struct RelationsMeta {
     pub caveat: &'static str,
 }
 
-/// Counts the same episodes the signals read (see [`is_forever_interface`]), and their distinct
+/// Counts the same episodes the signals read ([`forever_episodes`]), and their distinct
 /// characters: (episodes, characters).
 pub fn count_episodes(episodes: &[QuestEpisode]) -> (usize, usize) {
-    let read: Vec<&QuestEpisode> = episodes.iter().filter(|episode| is_forever_interface(episode.interface_version)).collect();
+    let read = forever_episodes(episodes);
     let characters: FxHashSet<&str> = read.iter().map(|episode| episode.character_key.as_str()).collect();
     (read.len(), characters.len())
 }

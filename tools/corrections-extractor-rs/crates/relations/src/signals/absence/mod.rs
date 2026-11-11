@@ -22,8 +22,8 @@ mod params;
 mod score;
 mod states;
 
-use super::{to_json, Findings, Signal, SignalInput};
-use crate::eligibility::{is_forever_interface, is_forever_quest_id};
+use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
+use crate::eligibility::is_forever_quest_id;
 use crate::model::{QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
 use blocked::{Blocked, BlockedCollector, SkipReason};
 use indexmap::IndexMap;
@@ -73,7 +73,7 @@ struct AbsenceResult<'a> {
 
 /// The absence signal end to end, over the episodes of Forever builds.
 fn analyze<'a>(episodes: &'a [QuestEpisode], catalog: &'a QuestCatalog, params: AbsenceParams) -> AbsenceResult<'a> {
-    let forever: Vec<&QuestEpisode> = episodes.iter().filter(|episode| is_forever_interface(episode.interface_version)).collect();
+    let forever = forever_episodes(episodes);
     let index = offers::index_offers(&forever, catalog, params);
 
     let locality = Locality::new(&index, catalog);
