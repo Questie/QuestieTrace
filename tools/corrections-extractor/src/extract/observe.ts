@@ -57,6 +57,12 @@ function getInterfaceVersion(session: SessionRecord): number | undefined {
   return typeof firstEntry.v === "number" ? firstEntry.v : undefined;
 }
 
+/** The interface version from the session's top-level buildInfo; undefined when absent or not a number. */
+function getTopLevelInterfaceVersion(session: SessionRecord): number | undefined {
+  const version = Number(session.buildInfo?.["4"]);
+  return Number.isInteger(version) && version > 0 ? version : undefined;
+}
+
 /**
  * Checks if an interfaceVersion is from a WoW Forever build.
  * Forever builds have interfaceVersion starting with "16" (e.g. 16001, 16002, etc.)
@@ -84,9 +90,13 @@ export function sessionClient(session: SessionRecord): SessionClient {
   };
 }
 
-/** Sessions without GetBuildInfo count as Forever (see foldSessions). */
+/**
+ * Sessions count as Forever unless their version says otherwise: the GetBuildInfo stream is
+ * read first, then the session's top-level buildInfo ("4" is the interface version). Sessions
+ * with neither count as Forever too (see foldSessions).
+ */
 export function isForeverSession(session: SessionRecord): boolean {
-  const version = getInterfaceVersion(session);
+  const version = getInterfaceVersion(session) ?? getTopLevelInterfaceVersion(session);
   return version === undefined || isForeverBuild(version);
 }
 

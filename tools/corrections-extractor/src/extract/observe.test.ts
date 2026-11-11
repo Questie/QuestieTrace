@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiSample, makeSession } from "../test/fixtures";
 import { createAccumulator, finalize } from "./index";
 import { createLookupAccumulator, finalizeLookups } from "./lookups";
-import { OBSERVERS, SCALAR_OBSERVERS, sessionClient } from "./observe";
+import { isForeverSession, OBSERVERS, SCALAR_OBSERVERS, sessionClient } from "./observe";
 import { LOOKUP_OBSERVERS } from "./observe-lookups";
 
 /** Records every key read from `target`. */
@@ -49,6 +49,33 @@ describe("registered observers", () => {
     finalizeLookups(acc);
 
     expect(Object.keys(LOOKUP_OBSERVERS).filter((key) => !used.has(key))).toEqual([]);
+  });
+});
+
+describe("isForeverSession", () => {
+  it("should reject a Classic session known only from its top-level buildInfo", () => {
+    const session = { ...makeSession({}), buildInfo: { "4": 11508, n: 4 } };
+
+    expect(isForeverSession(session)).toBe(false);
+  });
+
+  it("should accept a Forever session known only from its top-level buildInfo", () => {
+    const session = { ...makeSession({}), buildInfo: { "4": 16001, n: 4 } };
+
+    expect(isForeverSession(session)).toBe(true);
+  });
+
+  it("should prefer the GetBuildInfo stream over the top-level buildInfo", () => {
+    const session = {
+      ...makeSession({ GetBuildInfo: { player: [apiSample(0, 0, 16001)] } }),
+      buildInfo: { "4": 11508, n: 4 },
+    };
+
+    expect(isForeverSession(session)).toBe(true);
+  });
+
+  it("should accept a session that has no version information", () => {
+    expect(isForeverSession(makeSession({}))).toBe(true);
   });
 });
 
