@@ -13,7 +13,7 @@ use super::offers::{Character, Moment, OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
 use super::states::{EpisodeStates, QuestSet};
 use crate::eligibility::{has_untracked_requirements, is_statically_eligible};
-use crate::model::{CatalogQuest, GiverKind, GiverRef, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
+use crate::model::{CatalogQuest, GiverRef, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
 use crate::text::to_fixed;
 use crate::timeline::Completion;
 use indexmap::IndexMap;
@@ -125,9 +125,6 @@ pub struct Blocked<'a> {
     pub skipped: IndexMap<SkipReason, usize, FxBuildHasher>,
     pub blocked_moments: usize,
 }
-
-const REPEATABLE_FLAG: i64 = 1;
-const EVENT_FLAG: i64 = 2;
 
 /// Skill, reputation and spell requirements: quests with equal ones have the same untracked gate.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -259,11 +256,10 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
         let Some(quest) = self.catalog.quest(quest_id) else {
             return Some(SkipReason::Uncataloged);
         };
-        let flags = quest.special_flags.unwrap_or(0);
-        if offers.periodic || flags & REPEATABLE_FLAG != 0 {
+        if offers.periodic || quest.is_repeatable() {
             return Some(SkipReason::Periodic);
         }
-        if flags & EVENT_FLAG != 0 {
+        if quest.needs_event() {
             return Some(SkipReason::Seasonal);
         }
 
@@ -463,14 +459,9 @@ struct ListRead<'r> {
     offered_here: &'r [SessionTime],
 }
 
-/// "npc:123", as the TypeScript pipeline keys givers.
+/// "npc:123", as the TypeScript absence signal keys givers (not [`GiverRef::label`]'s "npc 123").
 fn giver_label(giver: GiverRef) -> String {
-    let kind = match giver.kind {
-        GiverKind::Npc => "npc",
-        GiverKind::Object => "object",
-        GiverKind::Item => "item",
-    };
-    format!("{kind}:{}", giver.id)
+    format!("{}:{}", giver.kind.name(), giver.id)
 }
 
 fn describe_state(states: &EpisodeStates, kind: BlockKind, members: &[QuestId], t: SessionTime) -> String {

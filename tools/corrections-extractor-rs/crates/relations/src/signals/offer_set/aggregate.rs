@@ -140,19 +140,8 @@ impl<'a> FinisherIndex<'a> {
     }
 }
 
-fn giver_kind_name(kind: GiverKind) -> &'static str {
-    match kind {
-        GiverKind::Npc => "npc",
-        GiverKind::Object => "object",
-        GiverKind::Item => "item",
-    }
-}
-
 fn describe_sighting(view: &CharacterView) -> String {
-    let at = view
-        .giver
-        .map(|giver| format!(" at {} {}", giver_kind_name(giver.kind), giver.id))
-        .unwrap_or_default();
+    let at = view.giver.map(|giver| format!(" at {}", giver.label())).unwrap_or_default();
     let level = view.level.map_or_else(|| "?".to_string(), |level| level.to_string());
     format!("{} first seen ({}){at}, level {level}", view.quest_id, view.kind.name())
 }
