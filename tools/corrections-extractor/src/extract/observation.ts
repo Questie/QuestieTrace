@@ -28,6 +28,8 @@ export interface Observation<T> {
   value: T;
   confidence: Confidence;
   provenance: Provenance;
+  /** Unit token (`questnpc`, `npc`, `target`, ...) the observed unit was read through; own column in the store. */
+  token?: string;
 }
 
 /**

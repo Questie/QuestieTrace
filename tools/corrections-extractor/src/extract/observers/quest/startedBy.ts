@@ -88,6 +88,7 @@ function pushGuidObservations(
         value: { creatureId: parsed.id },
         confidence: "medium",
         provenance: { session: sessionLabel(session), t },
+        token,
       });
       return;
     } else if (parsed.kind === "object" && parsed.id && token === "questnpc") {
@@ -96,6 +97,7 @@ function pushGuidObservations(
         value: { objectId: parsed.id },
         confidence: "low",
         provenance: { session: sessionLabel(session), t },
+        token,
       });
       return;
     }
