@@ -1,8 +1,8 @@
 //! One trace-data submission file: `submissions/<yyyy-mm>/<stamp>_<id>.json`, holding one or
 //! more addon exports in `export_string`.
 //!
-//! Only the submission id and the export are read. Every other field (the pseudonymous
-//! contributor id, free text such as `nickname`) is never deserialized.
+//! Only the submission id, the pseudonymous contributor id, the receive time and the export are
+//! read. Every other field (free text such as `nickname`) is never deserialized.
 //!
 //! Reading happens in two steps, so decoded values can borrow the inflated bytes:
 //! [`Submission::read`] inflates every export, [`Submission::decode`] decodes them.
@@ -19,6 +19,10 @@ use std::path::Path;
 pub struct Submission {
     /// The file's `id`, else the id in its file name.
     pub submission_id: String,
+    /// The pseudonymous `contributor_id`; empty when missing, as in the TS reader.
+    pub contributor_id: String,
+    /// `received_at`: when trace-data received the submission (ISO 8601); empty when missing.
+    pub received_at: String,
     /// Why the file could not be read at all.
     error: Option<String>,
     /// Per export: its CBOR bytes, or why it was dropped.
@@ -55,8 +59,9 @@ impl<'a> Trace<'a> {
     }
 }
 
-/// The top-level fields of a submission file, as raw JSON: only `id` and `export_string` are
-/// ever parsed. A key that appears twice keeps its last value, as with `JSON.parse`.
+/// The top-level fields of a submission file, as raw JSON: only `id`, `contributor_id`,
+/// `received_at` and `export_string` are ever parsed. A key that appears twice keeps its last
+/// value, as with `JSON.parse`.
 type Envelope<'a> = HashMap<String, &'a RawValue>;
 
 /// A JSON string field's value. A lone UTF-16 surrogate (which JS strings allow, Rust strings
@@ -86,6 +91,8 @@ impl Submission {
             Ok(bytes) => Self::from_json(&bytes, submission_id_from_path(path), inflater),
             Err(_) => Submission {
                 submission_id: submission_id_from_path(path),
+                contributor_id: String::new(),
+                received_at: String::new(),
                 error: Some("unreadable submission JSON".into()),
                 exports: Vec::new(),
             },
@@ -96,6 +103,8 @@ impl Submission {
     pub fn from_json(bytes: &[u8], fallback_id: String, inflater: &mut Inflater) -> Submission {
         let mut submission = Submission {
             submission_id: fallback_id,
+            contributor_id: String::new(),
+            received_at: String::new(),
             error: None,
             exports: Vec::new(),
         };
@@ -117,6 +126,9 @@ impl Submission {
         if let Some(id) = json_string(envelope.get("id").copied()).filter(|id| !id.is_empty()) {
             submission.submission_id = id.into_owned();
         }
+        let text_field = |name: &str| json_string(envelope.get(name).copied()).map(Cow::into_owned).unwrap_or_default();
+        submission.contributor_id = text_field("contributor_id");
+        submission.received_at = text_field("received_at");
         let Some(export_string) = json_string(envelope.get("export_string").copied()) else {
             submission.error = Some("no export_string".into());
             return submission;
@@ -336,6 +348,23 @@ mod tests {
         assert!(matches!(json_string(Some(serde_json::from_str(&plain).unwrap())), Some(Cow::Borrowed("abc"))));
         assert_eq!(json_string(Some(serde_json::from_str(&escaped).unwrap())).as_deref(), Some("ab\"c"));
         assert_eq!(json_string(Some(serde_json::from_str("5").unwrap())), None);
+    }
+
+    #[test]
+    fn reads_the_contributor_and_receive_time_and_leaves_them_empty_when_missing_or_not_text() {
+        let read = |json: serde_json::Value| Submission::from_json(json.to_string().as_bytes(), "fallback".into(), &mut Inflater::new());
+        let full = read(serde_json::json!({
+            "contributor_id": "c0ffee", "received_at": "2026-10-01T00:05:00.708876249Z", "export_string": tiny_export(),
+        }));
+        assert_eq!(
+            (full.contributor_id.as_str(), full.received_at.as_str()),
+            ("c0ffee", "2026-10-01T00:05:00.708876249Z")
+        );
+        // Kept for a submission that fails to decode too: ingest still attributes the failure.
+        let undecodable = read(serde_json::json!({ "contributor_id": "c0ffee", "export_string": 5 }));
+        assert_eq!(undecodable.contributor_id, "c0ffee");
+        let wrong_types = read(serde_json::json!({ "contributor_id": 7, "received_at": null, "export_string": tiny_export() }));
+        assert_eq!((wrong_types.contributor_id.as_str(), wrong_types.received_at.as_str()), ("", ""));
     }
 
     #[test]
