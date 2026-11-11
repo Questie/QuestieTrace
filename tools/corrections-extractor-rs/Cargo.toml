@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/trace-data", "crates/corrections"]
+members = ["crates/trace-data", "crates/corrections", "crates/relations"]
 
 [workspace.package]
 edition = "2021"
@@ -10,7 +10,9 @@ publish = false
 
 [workspace.dependencies]
 trace-data = { path = "crates/trace-data" }
-indexmap = "2"
+indexmap = { version = "2", features = ["serde"] }
+anyhow = "1"
+rayon = "1.10"
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 libdeflater = "1.26"
 bumpalo = { version = "3.20", features = ["collections"] }
