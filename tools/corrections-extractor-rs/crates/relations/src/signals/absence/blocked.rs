@@ -11,7 +11,7 @@
 use super::locality::Locality;
 use super::offers::{Character, Moment, OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
-use super::states::{without_catch_ups, EpisodeStates, QuestSet};
+use super::states::{EpisodeStates, QuestSet};
 use crate::eligibility::{has_untracked_requirements, is_statically_eligible};
 use crate::model::{CatalogQuest, GiverKind, GiverRef, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
 use crate::text::to_fixed;
@@ -189,8 +189,7 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
         if episode.quest_log.is_empty() {
             return self.skip(SkipReason::NoQuestLog);
         }
-        let caught_up = without_catch_ups(episode, self.params.catch_up_batch);
-        let mut states = EpisodeStates::new(&caught_up, self.params.state_slack);
+        let mut states = EpisodeStates::new(episode, &self.params);
         let offered_here = offer_times_of(episode);
         let mut last_state: FxHashMap<QuestId, (Rc<QuestSet>, Vec<QuestId>)> = FxHashMap::default();
         let mut last_list_with_quests: FxHashMap<GiverRef, SessionTime> = FxHashMap::default();
@@ -404,7 +403,7 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
 /// order: log, completed set, required quests, required groups.
 fn suspects_at(index: &OfferIndex, offers: &QuestOffers, quest_id: QuestId, read: &ListRead, max_contradictions: usize) -> Vec<Explanation> {
     let ListRead { completed, log, .. } = *read;
-    let consistent = |contradicting: Option<&FxHashSet<Character>>| contradicting.map_or(0, FxHashSet::len) <= max_contradictions;
+    let consistent = |contradicting: Option<&u32>| contradicting.map_or(0, |&characters| characters as usize) <= max_contradictions;
     let required = &offers.required;
     let in_required_group = |other: QuestId| offers.required_any.values().any(|members| members.contains(&other));
     let mut suspects = Vec::new();

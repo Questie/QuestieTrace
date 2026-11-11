@@ -1,7 +1,7 @@
 //! Point-in-time lookups over one episode: "at time t, was quest X completed / in the log, and
 //! what level was the character?". Every signal needs these, so they are built once per episode.
 
-use crate::model::{QuestEpisode, QuestEventKind, QuestId, SessionTime, TimedValue};
+use crate::model::{CompletedTimeline, QuestEpisode, QuestEventKind, QuestId, SessionTime, TimedValue};
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 
@@ -40,9 +40,15 @@ impl<'e> EpisodeTimeline<'e> {
     /// (delay-sampled) completed delta shows it. Repeatable quests are never flagged completed by
     /// the client, so this over-reports them. The TS default is true.
     pub fn new(episode: &'e QuestEpisode, include_turn_ins: bool) -> Self {
-        let initial_completed = episode.completed.iter().flat_map(|c| c.initial.iter().copied()).collect();
+        Self::with_completed(episode, episode.completed.as_ref(), include_turn_ins)
+    }
+
+    /// Like [`EpisodeTimeline::new`], with `completed` read in place of the episode's own completed
+    /// history (e.g. one with catch-up reads folded in). `completed` is not kept.
+    pub fn with_completed(episode: &'e QuestEpisode, completed: Option<&CompletedTimeline>, include_turn_ins: bool) -> Self {
+        let initial_completed = completed.iter().flat_map(|c| c.initial.iter().copied()).collect();
         let mut toggles: IndexMap<QuestId, Vec<Toggle>, FxBuildHasher> = IndexMap::default();
-        for change in episode.completed.iter().flat_map(|c| &c.changes) {
+        for change in completed.iter().flat_map(|c| &c.changes) {
             for &id in change.add.iter().flatten() {
                 toggles.entry(id).or_default().push(Toggle { t: change.t, completed: true });
             }

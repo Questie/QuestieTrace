@@ -28,9 +28,8 @@ use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationC
 use blocked::{Blocked, BlockedCollector, SkipReason};
 use indexmap::IndexMap;
 use locality::Locality;
-use offers::{OfferIndex, OfferIndexBuilder};
+use offers::OfferIndex;
 use params::AbsenceParams;
-use rustc_hash::FxHashMap;
 use serde::Serialize;
 
 pub struct Absence;
@@ -78,18 +77,12 @@ struct AbsenceResult<'a> {
 
 /// The absence signal end to end, over the episodes of Forever builds.
 fn analyze<'a>(episodes: &'a [QuestEpisode], catalog: &'a QuestCatalog, params: AbsenceParams) -> AbsenceResult<'a> {
-    let forever = || episodes.iter().filter(|episode| is_forever_interface(episode.interface_version));
-
-    let mut offers = OfferIndexBuilder::new(params);
-    for episode in forever() {
-        offers.add(episode);
-    }
-    let names: FxHashMap<QuestId, &str> = catalog.quests.iter().filter_map(|(&id, quest)| Some((id, quest.name.as_deref()?))).collect();
-    let index = offers.build(|quest_id| names.get(&quest_id).copied());
+    let forever: Vec<&QuestEpisode> = episodes.iter().filter(|episode| is_forever_interface(episode.interface_version)).collect();
+    let index = offers::index_offers(&forever, catalog, params);
 
     let locality = Locality::new(&index, catalog);
     let mut collector = BlockedCollector::new(&index, &locality, catalog, params);
-    for episode in forever() {
+    for episode in forever {
         collector.add(episode);
     }
     let blocked = collector.finish();
