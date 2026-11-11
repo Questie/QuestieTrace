@@ -16,11 +16,13 @@
 use crate::model::{GiverKind, GiverRef, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+use serde::Serialize;
 
 pub(super) type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 pub(super) type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BreadcrumbParams {
     /// A detail this soon after a turn-in at the same giver, with no list in between, is the server's follow-up.
     pub auto_pop_seconds: SessionTime,
