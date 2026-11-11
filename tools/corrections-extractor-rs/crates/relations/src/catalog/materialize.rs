@@ -77,6 +77,9 @@ pub fn lua_interpreter(questie_db_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("lua5.1"))
 }
 
+/// Marks the corrections layout the catalog script expects.
+const GENERATED_BASE: &str = "src/corrections/Forever/generated/foreverBaseQuest.lua";
+
 /// `fields`: Questie quest field names to export (src/meta/questMeta.lua keys).
 pub fn materialize_forever_quests(questie_db_dir: &Path, fields: &[&str], options: MaterializeOptions) -> Result<MaterializedQuests> {
     // The script runs with the checkout as its working directory, so every path must be absolute.
@@ -84,6 +87,16 @@ pub fn materialize_forever_quests(questie_db_dir: &Path, fields: &[&str], option
     if !questie_db_dir.join("generator/flavor.lua").exists() {
         bail!(
             "{} is not a QuestieDB checkout (no generator/flavor.lua). Set QUESTIEDB_DIR.",
+            questie_db_dir.display()
+        );
+    }
+    // The script layers legacy -> generated -> traces -> authored corrections. A checkout without
+    // the generated base (the restructured `forever` branch) would silently lose nearly every
+    // Forever-new quest, so refuse it as the Exporters dump does.
+    if !questie_db_dir.join(GENERATED_BASE).exists() {
+        bail!(
+            "{} has no {GENERATED_BASE}: this QuestieDB layout (e.g. the restructured `forever` branch) would lose nearly every \
+             Forever-new quest. Use a checkout of master, as the Exporters dump pins.",
             questie_db_dir.display()
         );
     }
