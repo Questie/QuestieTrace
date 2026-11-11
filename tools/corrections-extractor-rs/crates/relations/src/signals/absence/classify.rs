@@ -29,9 +29,9 @@ use super::locality::{LocalReason, Locality};
 use super::offers::{Character, OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
 use super::score::{score_edge, ScoreGroup};
-use crate::text::to_fixed;
 use crate::eligibility::is_forever_quest_id;
 use crate::model::{QuestCatalog, QuestId, RelationCandidate, RelationField};
+use crate::text::to_fixed;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxBuildHasher, FxHashSet};
 

@@ -6,9 +6,9 @@
 //! single signal is therefore also charged for quests only other signals saw, which is the fair
 //! question here: what would we get using that signal alone?
 
-use crate::text::to_fixed;
 use crate::model::{CandidateFile, GroundTruth, QuestId, RelationCandidate, RelationSet, Tier};
 use crate::score::{score_candidates, FieldScore, ScoredField};
+use crate::text::to_fixed;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 

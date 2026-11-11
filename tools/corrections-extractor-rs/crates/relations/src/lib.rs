@@ -54,6 +54,8 @@ pub fn iso_timestamp(unix_millis: i64) -> String {
 
 /// The current time as [`iso_timestamp`].
 pub fn now_iso() -> String {
-    let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
     iso_timestamp(millis)
 }

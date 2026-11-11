@@ -96,7 +96,12 @@ fn jsonl(path: &str) -> Vec<Value> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let option = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(|v| v.parse::<f64>().expect("a number"));
+    let option = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+            .map(|v| v.parse::<f64>().expect("a number"))
+    };
     let [expected, actual] = [&args[0], &args[1]];
     let mut compare = Compare {
         tolerance: option("--tolerance").unwrap_or(1e-9),
@@ -105,9 +110,8 @@ fn main() -> ExitCode {
     };
     if expected.ends_with(".jsonl") {
         let (a, b) = (jsonl(expected), jsonl(actual));
-        let keyed = |records: &[Value]| -> Option<BTreeMap<String, Value>> {
-            records.iter().map(|r| Some((r.get("key")?.as_str()?.to_owned(), r.clone()))).collect()
-        };
+        let keyed =
+            |records: &[Value]| -> Option<BTreeMap<String, Value>> { records.iter().map(|r| Some((r.get("key")?.as_str()?.to_owned(), r.clone()))).collect() };
         match (keyed(&a), keyed(&b)) {
             (Some(a), Some(b)) => {
                 println!("{} vs {} records, matched by key", a.len(), b.len());

@@ -15,10 +15,10 @@
 //! (which exclusiveTo would have hidden). A breadcrumb flagged by its target's turn-in fails that
 //! check, because characters who took the breadcrumb itself completed it earlier than the target.
 
-use crate::text::to_fixed;
 use super::history::{held_together, Stamp, When};
 use super::population::{Character, Population};
 use crate::model::{Evidence, QuestEventKind, QuestId, SessionTime};
+use crate::text::to_fixed;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;

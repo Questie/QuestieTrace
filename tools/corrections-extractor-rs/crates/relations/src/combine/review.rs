@@ -5,11 +5,11 @@
 
 use super::crossval::{FittedKind, ScoredEdge};
 use super::edges::{Claim, Domain, EdgeKey, Reference};
-use crate::text::to_fixed;
 use super::meta::InputSummary;
 use super::resolve::Outcome;
 use super::views::{EdgeView, HintView, QuestView, Status};
 use crate::model::{QuestCatalog, QuestId, RelationField};
+use crate::text::to_fixed;
 use indexmap::IndexMap;
 use rustc_hash::FxHashSet;
 use std::cmp::Ordering;

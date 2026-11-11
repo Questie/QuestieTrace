@@ -52,7 +52,13 @@ pub trait Signal: Sync {
 
 /// Every signal, in the order the pipeline lists them.
 pub fn registry() -> Vec<&'static dyn Signal> {
-    vec![&handoff::Handoff, &offer_set::OfferSet, &absence::Absence, &cooccurrence::Cooccurrence, &breadcrumbs::Breadcrumbs]
+    vec![
+        &handoff::Handoff,
+        &offer_set::OfferSet,
+        &absence::Absence,
+        &cooccurrence::Cooccurrence,
+        &breadcrumbs::Breadcrumbs,
+    ]
 }
 
 /// Runs every signal on all cores; results in registry order.

@@ -5,23 +5,23 @@
 /// 32 and 33. Mirrors QuestieDB `src/corrections/enum/expansions.lua` raceMaskById.
 pub fn race_bit(race_id: i64) -> Option<u64> {
     Some(match race_id {
-        1 => 1,                // Human
-        2 => 2,                // Orc
-        3 => 4,                // Dwarf
-        4 => 8,                // Night Elf
-        5 => 16,               // Undead
-        6 => 32,               // Tauren
-        7 => 64,               // Gnome
-        8 => 128,              // Troll
-        9 => 256,              // Goblin
-        10 => 512,             // Blood Elf
-        11 => 1024,            // Draenei
-        22 => 1 << 21,         // Worgen
-        24 => 1 << 23,         // Pandaren
-        25 => 1 << 24,         // Pandaren (Alliance)
-        26 => 1 << 25,         // Pandaren (Horde)
-        95 => 1 << 32,         // Skyborne (Alliance)
-        96 => 1 << 33,         // Skyborne (Horde)
+        1 => 1,        // Human
+        2 => 2,        // Orc
+        3 => 4,        // Dwarf
+        4 => 8,        // Night Elf
+        5 => 16,       // Undead
+        6 => 32,       // Tauren
+        7 => 64,       // Gnome
+        8 => 128,      // Troll
+        9 => 256,      // Goblin
+        10 => 512,     // Blood Elf
+        11 => 1024,    // Draenei
+        22 => 1 << 21, // Worgen
+        24 => 1 << 23, // Pandaren
+        25 => 1 << 24, // Pandaren (Alliance)
+        26 => 1 << 25, // Pandaren (Horde)
+        95 => 1 << 32, // Skyborne (Alliance)
+        96 => 1 << 33, // Skyborne (Horde)
         _ => return None,
     })
 }
