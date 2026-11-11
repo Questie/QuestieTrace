@@ -108,7 +108,7 @@ impl Signal for Cooccurrence {
 
 /// The signal's result without I/O.
 pub struct Analysis {
-    /// Sorted by quest, field name, target.
+    /// In [`RelationCandidate::canonical_order`].
     pub candidates: Vec<RelationCandidate>,
     /// Only quests judged for both fields, so neither field's recall counts quests it never saw.
     pub covered: Vec<QuestId>,
@@ -129,14 +129,7 @@ pub fn analyze(episodes: &[&QuestEpisode], catalog: &QuestCatalog, params: &Para
     let mut candidates: Vec<RelationCandidate> = prerequisites.edges.iter().map(prerequisite_candidate).collect();
     candidates.extend(coflags.edges.iter().flat_map(co_flag_candidates));
     candidates.extend(exclusions.edges.iter().flat_map(exclusion_candidates));
-    // Fields by name, as the TS pipeline sorts them (its localeCompare agrees with byte order on
-    // these ASCII names).
-    candidates.sort_by(|a, b| {
-        a.quest_id
-            .cmp(&b.quest_id)
-            .then_with(|| a.field.name().cmp(b.field.name()))
-            .then_with(|| a.target.cmp(&b.target))
-    });
+    candidates.sort_by_key(RelationCandidate::canonical_order);
 
     let co_flag_covered: FxHashSet<QuestId> = coflags.covered.iter().copied().collect();
     let covered: Vec<QuestId> = prerequisites

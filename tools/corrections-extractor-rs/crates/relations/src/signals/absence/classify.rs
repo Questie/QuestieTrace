@@ -103,14 +103,7 @@ pub fn classify(
             note: Some(note),
         });
     }
-    // By field name, as the TypeScript pipeline sorts (localeCompare agrees with byte order on
-    // these ASCII camelCase names).
-    candidates.sort_by(|a, b| {
-        a.quest_id
-            .cmp(&b.quest_id)
-            .then_with(|| a.field.name().cmp(b.field.name()))
-            .then(a.target.cmp(&b.target))
-    });
+    candidates.sort_by_key(RelationCandidate::canonical_order);
     candidates
 }
 
