@@ -74,6 +74,14 @@ describe("isForeverSession", () => {
     expect(isForeverSession(session)).toBe(true);
   });
 
+  it("should treat a top-level buildInfo version that is not a number or string as unavailable", () => {
+    for (const version of [true, null, [], {}]) {
+      const session = { ...makeSession({}), buildInfo: { "4": version, n: 4 } };
+
+      expect(isForeverSession(session)).toBe(true);
+    }
+  });
+
   it("should accept a session that has no version information", () => {
     expect(isForeverSession(makeSession({}))).toBe(true);
   });

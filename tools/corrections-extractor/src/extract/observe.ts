@@ -59,7 +59,9 @@ function getInterfaceVersion(session: SessionRecord): number | undefined {
 
 /** The interface version from the session's top-level buildInfo; undefined when absent or not a number. */
 function getTopLevelInterfaceVersion(session: SessionRecord): number | undefined {
-  const version = Number(session.buildInfo?.["4"]);
+  const raw = session.buildInfo?.["4"];
+  if (typeof raw !== "number" && typeof raw !== "string") return undefined;
+  const version = Number(raw);
   return Number.isInteger(version) && version > 0 ? version : undefined;
 }
 
@@ -92,8 +94,10 @@ export function sessionClient(session: SessionRecord): SessionClient {
 
 /**
  * Sessions count as Forever unless their version says otherwise: the GetBuildInfo stream is
- * read first, then the session's top-level buildInfo ("4" is the interface version). Sessions
- * with neither count as Forever too (see foldSessions).
+ * read first, then the session's top-level buildInfo ("4" is the interface version). The stream
+ * is the older, interface-version-only record; the top-level buildInfo (schema 15+) covers
+ * sessions where the stream is missing. Sessions with neither count as Forever too (see
+ * foldSessions).
  */
 export function isForeverSession(session: SessionRecord): boolean {
   const version = getInterfaceVersion(session) ?? getTopLevelInterfaceVersion(session);
