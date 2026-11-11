@@ -11,7 +11,7 @@
 //!   are immediate. P's completion is one explanation; anything else that changed in between (a
 //!   level-up, another completion, a quest leaving the log) is recorded as a [`Confounder`].
 
-use crate::model::{CatalogQuest, GiverKind, GiverRef, OfferSnapshot, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
+use crate::model::{CatalogQuest, GiverRef, OfferSnapshot, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
 use crate::timeline::EpisodeTimeline;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
@@ -115,20 +115,6 @@ pub struct EpisodeHandoffs {
 /// How old a completion dialog may be for its giver to stand in for a turn-in event's missing one.
 const COMPLETION_DIALOG_MAX_AGE: SessionTime = 120.0;
 
-/// "npc 1234", as evidence names a giver.
-pub fn giver_label(giver: GiverRef) -> String {
-    let kind = match giver.kind {
-        GiverKind::Npc => "npc",
-        GiverKind::Object => "object",
-        GiverKind::Item => "item",
-    };
-    format!("{kind} {}", giver.id)
-}
-
-/// Repeatable quests never show as completed, so they cannot gate anything we can observe.
-fn is_repeatable(quest: Option<&CatalogQuest>) -> bool {
-    quest.and_then(|quest| quest.special_flags).is_some_and(|flags| flags % 2 == 1)
-}
 
 fn is_giver_list(offer: &OfferSnapshot) -> bool {
     matches!(offer.source, OfferSource::Gossip | OfferSource::Greeting) && offer.giver.is_some()
@@ -140,7 +126,7 @@ pub fn find_handoffs(timeline: &EpisodeTimeline, catalog: &QuestCatalog, params:
     let any_lists: Vec<&OfferSnapshot> = episode.offers.iter().filter(|offer| is_giver_list(offer)).collect();
     let lists: Vec<&OfferSnapshot> = any_lists.iter().copied().filter(|offer| offer.list_complete).collect();
     let repeatable_in_lists = repeatable_in_episode(episode);
-    let is_repeatable_quest = |quest_id: QuestId| repeatable_in_lists.contains(&quest_id) || is_repeatable(catalog.quest(quest_id));
+    let is_repeatable_quest = |quest_id: QuestId| repeatable_in_lists.contains(&quest_id) || catalog.quest(quest_id).is_some_and(CatalogQuest::is_repeatable);
     let mut observations = Vec::new();
     let mut compared_quests = BTreeSet::new();
 
@@ -368,7 +354,7 @@ fn log_list_at(episode: &QuestEpisode, t: SessionTime) -> &[QuestId] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CompletedChange, CompletedSource, CompletedTimeline, OfferedQuest, QuestEvent, TimedValue};
+    use crate::model::{CompletedChange, CompletedSource, CompletedTimeline, GiverKind, OfferedQuest, QuestEvent, TimedValue};
     use crate::test_support::{catalog, catalog_quest, event, gossip, make_episode, npc};
 
     const PARAMS: HandoffParams = HandoffParams {

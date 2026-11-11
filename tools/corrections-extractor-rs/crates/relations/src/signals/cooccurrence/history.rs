@@ -171,7 +171,7 @@ pub fn unstable_quests(episodes: &[&QuestEpisode], catalog: &QuestCatalog) -> Fx
     let mut unstable: FxHashSet<QuestId> = catalog
         .quests
         .values()
-        .filter(|quest| is_repeatable(quest.special_flags))
+        .filter(|quest| quest.is_repeatable())
         .map(|quest| quest.id)
         .collect();
     for episode in episodes {
@@ -199,11 +199,6 @@ pub fn unstable_quests(episodes: &[&QuestEpisode], catalog: &QuestCatalog) -> Fx
         }
     }
     unstable
-}
-
-/// specialFlags bit 1 (repeatable).
-fn is_repeatable(special_flags: Option<i64>) -> bool {
-    special_flags.unwrap_or(0) % 2 == 1
 }
 
 #[derive(Clone, Debug, Serialize)]

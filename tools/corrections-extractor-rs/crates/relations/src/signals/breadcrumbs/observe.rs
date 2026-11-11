@@ -109,17 +109,7 @@ struct PendingAbsence {
 }
 
 fn describe_giver(giver: Option<GiverRef>) -> String {
-    match giver {
-        Some(GiverRef { kind, id }) => {
-            let kind = match kind {
-                GiverKind::Npc => "npc",
-                GiverKind::Object => "object",
-                GiverKind::Item => "item",
-            };
-            format!("{kind} {id}")
-        }
-        None => "unknown giver".into(),
-    }
+    giver.map_or_else(|| "unknown giver".into(), GiverRef::label)
 }
 
 fn time(t: SessionTime) -> String {
@@ -189,7 +179,7 @@ impl Observer<'_> {
     /// "Not offered" only counts when nothing but relationships could have hidden the quest.
     fn absence_eligible(&self, quest_id: QuestId, t: SessionTime) -> bool {
         let Some(quest) = self.catalog.quest(quest_id) else { return false };
-        if has_untracked_requirements(quest) || quest.special_flags.unwrap_or(0) & 2 != 0 || !race_class_allow(Some(quest), &self.episode.player) {
+        if has_untracked_requirements(quest) || quest.needs_event() || !race_class_allow(Some(quest), &self.episode.player) {
             return false;
         }
         let level = self.timeline.level_at(t);

@@ -127,11 +127,29 @@ pub enum GiverKind {
     Item,
 }
 
+impl GiverKind {
+    /// As the JSON files and evidence texts name it.
+    pub fn name(self) -> &'static str {
+        match self {
+            GiverKind::Npc => "npc",
+            GiverKind::Object => "object",
+            GiverKind::Item => "item",
+        }
+    }
+}
+
 /// The entity a quest dialog or offer list belongs to. Players are never givers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct GiverRef {
     pub kind: GiverKind,
     pub id: i64,
+}
+
+impl GiverRef {
+    /// "npc 1234", as evidence names a giver.
+    pub fn label(self) -> String {
+        format!("{} {}", self.kind.name(), self.id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +388,19 @@ pub struct QuestCatalog {
     /// Source files in layering order.
     pub sources: Vec<String>,
     pub quests: BTreeMap<QuestId, CatalogQuest>,
+}
+
+impl CatalogQuest {
+    /// specialFlags bit 1. Repeatable quests never show as completed, so they cannot gate
+    /// anything a trace can observe.
+    pub fn is_repeatable(&self) -> bool {
+        self.special_flags.is_some_and(|flags| flags & 1 != 0)
+    }
+
+    /// specialFlags bit 2: only available during a world event.
+    pub fn needs_event(&self) -> bool {
+        self.special_flags.is_some_and(|flags| flags & 2 != 0)
+    }
 }
 
 impl QuestCatalog {
