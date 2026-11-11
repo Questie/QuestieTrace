@@ -2,13 +2,15 @@
 
 use super::characters::{self, CharacterParams};
 use super::distill::{self, DistillParams, DistillStats};
+use super::submission::SubmissionError;
 use super::titles::GreetingStats;
 use crate::model::{CompletedSource, GiverKind, OfferSource, QuestEpisode, QuestEventKind};
 use indexmap::IndexMap;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
-/// At most this many failures are listed (all are counted).
+/// At most this many failures and crashes are listed (all are counted).
+const LISTED_CRASHES: usize = 5;
 const LISTED_FAILURES: usize = 20;
 
 #[derive(Serialize)]
@@ -44,6 +46,19 @@ pub struct Failure {
     pub error: String,
 }
 
+impl Failure {
+    fn new((submission_id, error): &(String, SubmissionError)) -> Self {
+        let error = match error {
+            SubmissionError::Unreadable(reason) => reason.clone(),
+            SubmissionError::Crashed => "panicked while reading (a bug; see the run's log)".into(),
+        };
+        Failure {
+            submission_id: submission_id.clone(),
+            error,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmissionCounts {
@@ -52,6 +67,9 @@ pub struct SubmissionCounts {
     pub decoded_this_run: usize,
     pub failed: usize,
     pub failures: Vec<Failure>,
+    /// "<submission id>: panicked" for the first few submissions whose reading panicked (a bug;
+    /// the panics are in the run's log). They are failures too.
+    pub worker_crashes: Vec<String>,
     pub exports: usize,
     pub with_multiple_exports: usize,
 }
@@ -132,8 +150,8 @@ pub struct QuestEventCounts {
 /// What the merge and the episode build counted, for [`IngestReport::new`].
 pub struct Tally {
     pub submissions: usize,
-    /// In path order.
-    pub failures: Vec<Failure>,
+    /// (submission id, why), in path order.
+    pub failures: Vec<(String, SubmissionError)>,
     pub exports: usize,
     pub with_multiple_exports: usize,
     pub copies: usize,
@@ -212,7 +230,14 @@ impl IngestReport {
                 total: tally.submissions,
                 decoded_this_run: tally.submissions,
                 failed: tally.failures.len(),
-                failures: tally.failures.into_iter().take(LISTED_FAILURES).collect(),
+                failures: tally.failures.iter().take(LISTED_FAILURES).map(Failure::new).collect(),
+                worker_crashes: tally
+                    .failures
+                    .iter()
+                    .filter(|(_, error)| *error == SubmissionError::Crashed)
+                    .take(LISTED_CRASHES)
+                    .map(|(submission_id, _)| format!("{submission_id}: panicked"))
+                    .collect(),
                 exports: tally.exports,
                 with_multiple_exports: tally.with_multiple_exports,
             },

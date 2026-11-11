@@ -17,9 +17,10 @@
 //! - Different contributor ids for one player (e.g. reinstalls) are never joined.
 
 use super::short_hash;
-use crate::model::{Faction, PlayerContext, QuestId};
+use crate::model::{CompletedTimeline, Faction, PlayerContext, QuestId};
 use indexmap::IndexMap;
 use serde::Serialize;
+use std::collections::BTreeSet;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,22 +51,43 @@ pub struct CharacterInput<'e> {
     pub session_name: Option<&'e str>,
     pub first_level: Option<i64>,
     pub last_level: Option<i64>,
-    /// Completed quest ids at capture start and at its end, sorted ascending.
-    pub initial_completed: Option<&'e [QuestId]>,
-    pub final_completed: Option<Vec<QuestId>>,
+    pub completed: Option<&'e CompletedTimeline>,
 }
 
-struct Character<'i> {
+impl CharacterInput<'_> {
+    /// Completed quest ids at capture start, ascending.
+    fn initial_completed(&self) -> Option<&[QuestId]> {
+        self.completed.map(|completed| completed.initial.as_slice())
+    }
+
+    /// Completed quest ids at the end of the session, ascending: the initial set with every change
+    /// applied. Worked out only for the session a character continues with, so a run never holds
+    /// a second set per session.
+    fn final_completed(&self) -> Option<Vec<QuestId>> {
+        let completed = self.completed?;
+        let mut set: BTreeSet<QuestId> = completed.initial.iter().copied().collect();
+        for change in &completed.changes {
+            set.extend(change.add.iter().flatten());
+            for id in change.remove.iter().flatten() {
+                set.remove(id);
+            }
+        }
+        Some(set.into_iter().collect())
+    }
+}
+
+struct Character {
     key: String,
     last_end: Option<f64>,
     last_level: Option<i64>,
-    completed: Option<&'i [QuestId]>,
+    /// Completed quest ids at the end of its last session, ascending.
+    completed: Option<Vec<QuestId>>,
 }
 
-impl Character<'_> {
+impl Character {
     /// Its history's length; -1 without one, so any history beats none.
     fn history(&self) -> i64 {
-        self.completed.map_or(-1, |completed| completed.len() as i64)
+        self.completed.as_ref().map_or(-1, |completed| completed.len() as i64)
     }
 }
 
@@ -95,7 +117,7 @@ fn fits(character: &Character, session: &CharacterInput) -> bool {
             return false;
         }
     }
-    if let (Some(completed), Some(initial)) = (character.completed, session.initial_completed) {
+    if let (Some(completed), Some(initial)) = (&character.completed, session.initial_completed()) {
         let allowed = (PARAMS.max_missing_quests as f64).max(PARAMS.max_missing_ratio * completed.len() as f64);
         if count_missing(completed, initial) as f64 > allowed {
             return false;
@@ -154,7 +176,7 @@ pub fn assign_characters(sessions: &[CharacterInput]) -> Vec<String> {
             if session.last_level.is_some() {
                 character.last_level = session.last_level;
             }
-            if let Some(completed) = &session.final_completed {
+            if let Some(completed) = session.final_completed() {
                 character.completed = Some(completed);
             }
             keys[index].clone_from(&character.key);
@@ -173,7 +195,7 @@ pub fn order_sessions(sessions: &[CharacterInput], characters: &[String]) -> Vec
     for (index, character) in characters.iter().enumerate() {
         by_character.entry(character).or_default().push(index);
     }
-    let progress = |session: &CharacterInput| session.initial_completed.map_or(0, <[QuestId]>::len);
+    let progress = |session: &CharacterInput| session.initial_completed().map_or(0, <[QuestId]>::len);
     let mut order = vec![0; sessions.len()];
     for mut list in by_character.into_values() {
         list.sort_by(|&a, &b| {
@@ -194,6 +216,7 @@ pub fn order_sessions(sessions: &[CharacterInput], characters: &[String]) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{CompletedChange, CompletedSource};
 
     const ORC_WARRIOR: PlayerContext = PlayerContext {
         race_id: Some(2),
@@ -205,7 +228,21 @@ mod tests {
         (from..=to).collect()
     }
 
-    fn session<'e>(key: &'e str, start: f64, levels: (i64, i64), initial: &'e [QuestId], last: Vec<QuestId>) -> CharacterInput<'e> {
+    /// Completed `initial` at capture start and `last` at the end (never fewer).
+    fn history(initial: Vec<QuestId>, last: Vec<QuestId>) -> CompletedTimeline {
+        let added = last.iter().copied().filter(|id| !initial.contains(id)).collect();
+        CompletedTimeline {
+            source: CompletedSource::Modern,
+            initial,
+            changes: vec![CompletedChange {
+                t: 1.0,
+                add: Some(added),
+                remove: None,
+            }],
+        }
+    }
+
+    fn session<'e>(key: &'e str, start: f64, levels: (i64, i64), completed: &'e CompletedTimeline) -> CharacterInput<'e> {
         CharacterInput {
             episode_key: key,
             contributor_id: "contributor",
@@ -216,20 +253,24 @@ mod tests {
             session_name: None,
             first_level: Some(levels.0),
             last_level: Some(levels.1),
-            initial_completed: Some(initial),
-            final_completed: Some(last),
+            completed: Some(completed),
         }
     }
 
     #[test]
     fn keeps_a_same_race_and_class_alt_apart_from_the_main_even_though_the_main_did_all_its_quests() {
         // Both start in the same zone, so the alt's quests 1..10 are a subset of the main's history.
-        let (main_1, alt_2, main_2) = (range(1, 300), range(1, 10), range(1, 310));
+        let histories = [
+            history(range(1, 300), range(1, 310)),
+            history(vec![], range(1, 10)),
+            history(range(1, 310), range(1, 320)),
+            history(range(1, 10), range(1, 20)),
+        ];
         let sessions = [
-            session("main-1", 0.0, (30, 31), &main_1, range(1, 310)),
-            session("alt-1", 10_000.0, (1, 5), &[], range(1, 10)),
-            session("main-2", 20_000.0, (31, 32), &main_2, range(1, 320)),
-            session("alt-2", 30_000.0, (5, 8), &alt_2, range(1, 20)),
+            session("main-1", 0.0, (30, 31), &histories[0]),
+            session("alt-1", 10_000.0, (1, 5), &histories[1]),
+            session("main-2", 20_000.0, (31, 32), &histories[2]),
+            session("alt-2", 30_000.0, (5, 8), &histories[3]),
         ];
         let keys = assign_characters(&sessions);
         assert_eq!(keys[2], keys[0], "main-2 continues main-1");
@@ -239,27 +280,57 @@ mod tests {
 
     #[test]
     fn splits_sessions_that_overlap_in_time_or_would_lose_completed_quests() {
-        let (a, overlapping, lost) = (range(1, 50), range(1, 60), range(1, 20));
+        let histories = [
+            history(range(1, 50), range(1, 60)),
+            history(range(1, 60), range(1, 60)),
+            history(range(1, 20), range(1, 20)),
+        ];
         let sessions = [
-            session("a", 0.0, (10, 10), &a, range(1, 60)),
-            session("overlapping", 1800.0, (10, 10), &overlapping, range(1, 60)),
-            session("lost-history", 10_000.0, (12, 12), &lost, range(1, 20)),
+            session("a", 0.0, (10, 10), &histories[0]),
+            session("overlapping", 1800.0, (10, 10), &histories[1]),
+            session("lost-history", 10_000.0, (12, 12), &histories[2]),
         ];
         let keys = assign_characters(&sessions);
         assert!(keys[0] != keys[1] && keys[1] != keys[2] && keys[0] != keys[2], "{keys:?}");
     }
 
     #[test]
+    fn a_session_ends_with_its_initial_set_and_every_change_applied() {
+        // Quest 2 is a daily the reset removed; 5 was completed during the session.
+        let completed = CompletedTimeline {
+            source: CompletedSource::Modern,
+            initial: vec![1, 2, 3],
+            changes: vec![
+                CompletedChange {
+                    t: 1.0,
+                    add: Some(vec![5]),
+                    remove: None,
+                },
+                CompletedChange {
+                    t: 2.0,
+                    add: None,
+                    remove: Some(vec![2]),
+                },
+            ],
+        };
+        assert_eq!(session("s", 0.0, (1, 1), &completed).final_completed(), Some(vec![1, 3, 5]));
+    }
+
+    #[test]
     fn orders_a_characters_sessions_by_progress_then_start_time_whether_or_not_they_have_a_name() {
-        let (forty, forty_five) = (range(1, 40), range(1, 45));
+        let histories = [
+            history(range(1, 40), range(1, 45)),
+            history(range(1, 45), range(1, 50)),
+            history(range(1, 40), range(1, 40)),
+        ];
         let named = CharacterInput {
             session_name: Some("2026-10-01_12-00-00"),
-            ..session("named", 2000.0, (10, 10), &forty, range(1, 45))
+            ..session("named", 2000.0, (10, 10), &histories[0])
         };
         // In-progress exports carry no name; this one started later with more history.
-        let unnamed_later = session("unnamed-later", 9000.0, (10, 11), &forty_five, range(1, 50));
+        let unnamed_later = session("unnamed-later", 9000.0, (10, 11), &histories[1]);
         // Same progress as `named` but captured earlier: the start time breaks the tie.
-        let unnamed_tie = session("unnamed-tie", 1000.0, (10, 10), &forty, range(1, 40));
+        let unnamed_tie = session("unnamed-tie", 1000.0, (10, 10), &histories[2]);
         let sessions = [unnamed_later, named, unnamed_tie];
         let order = order_sessions(&sessions, &vec!["character".to_string(); 3]);
         assert_eq!(order, [2, 1, 0]);

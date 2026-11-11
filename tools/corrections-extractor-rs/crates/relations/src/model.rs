@@ -199,6 +199,17 @@ pub struct CompletedTimeline {
     pub changes: Vec<CompletedChange>,
 }
 
+impl CompletedTimeline {
+    /// See [`QuestEpisode::shrink_to_fit`].
+    pub fn shrink_to_fit(&mut self) {
+        self.initial.shrink_to_fit();
+        self.changes.shrink_to_fit();
+        for change in &mut self.changes {
+            change.add.iter_mut().chain(&mut change.remove).for_each(Vec::shrink_to_fit);
+        }
+    }
+}
+
 /// - `Detail`: the accept dialog was shown (QUEST_DETAIL).
 /// - `Accepted` / `TurnedIn`: QUEST_ACCEPTED / QUEST_TURNED_IN.
 /// - `Progress` / `Complete`: the turn-in dialog pages (QUEST_PROGRESS / QUEST_COMPLETE).
@@ -272,6 +283,15 @@ pub struct OfferSnapshot {
     pub list_complete: bool,
 }
 
+impl OfferSnapshot {
+    /// See [`QuestEpisode::shrink_to_fit`].
+    pub fn shrink_to_fit(&mut self) {
+        self.available.shrink_to_fit();
+        self.unresolved_titles.iter_mut().for_each(Vec::shrink_to_fit);
+        self.active.iter_mut().for_each(Vec::shrink_to_fit);
+    }
+}
+
 /// Client-side facts about a quest that newer traces record directly (Forever-only APIs).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -325,6 +345,24 @@ pub struct QuestEpisode {
     /// Per-quest client facts. Absent in traces older than the addon change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quest_info: Option<BTreeMap<QuestId, QuestClientInfo>>,
+}
+
+impl QuestEpisode {
+    /// Frees the room its lists grew into. Lists grow by doubling while being built or read (a
+    /// serde read cannot know a list's length up front), so before this an episode holds about
+    /// 40% more than its contents, and every step holds every episode.
+    pub fn shrink_to_fit(&mut self) {
+        self.submission_ids.shrink_to_fit();
+        self.levels.shrink_to_fit();
+        self.completed.iter_mut().for_each(CompletedTimeline::shrink_to_fit);
+        self.quest_log.shrink_to_fit();
+        for entry in &mut self.quest_log {
+            entry.v.shrink_to_fit();
+        }
+        self.quest_events.shrink_to_fit();
+        self.offers.shrink_to_fit();
+        self.offers.iter_mut().for_each(OfferSnapshot::shrink_to_fit);
+    }
 }
 
 // ---------------------------------------------------------------------------

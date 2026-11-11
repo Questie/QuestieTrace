@@ -23,6 +23,7 @@
 use super::history::held_together;
 use super::population::{Character, Population};
 use crate::model::{Evidence, QuestId};
+use crate::text::js_trim;
 use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::{FxBuildHasher, FxHashSet};
@@ -356,7 +357,7 @@ fn structural_clusters(population: &Population, min_completers: usize) -> Vec<Ve
 pub fn name_stem(name: Option<&str>) -> Option<String> {
     let name = name.filter(|name| !name.is_empty())?;
     let head = name.split(':').next().unwrap_or(name).split(" - ").next().unwrap_or(name);
-    let stem = head.trim().to_lowercase();
+    let stem = js_trim(head).to_lowercase();
     (stem.chars().count() >= 4).then_some(stem)
 }
 
