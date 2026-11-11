@@ -388,8 +388,8 @@ pub fn to_candidate(edge: &InferredEdge, score: f64) -> RelationCandidate {
 
 #[cfg(test)]
 mod tests {
-    use super::super::aggregate::{aggregate_quest, FinisherIndex};
-    use super::super::observe::{observe_character, prerequisite_candidates, CharacterView};
+    use super::super::aggregate::{FinisherIndex, QuestFold};
+    use super::super::observe::{observe_character, prerequisite_candidates};
     use super::super::PARAMS;
     use super::*;
     use crate::model::*;
@@ -460,25 +460,26 @@ mod tests {
 
     /// Every quest's assessment, each episode being its own character. Finishers come from the
     /// catalog only.
-    fn assess(catalog: &QuestCatalog, episodes: &[QuestEpisode]) -> BTreeMap<QuestId, QuestAssessment> {
+    fn assess(catalog: &QuestCatalog, episodes: &[QuestEpisode], params: &Params) -> BTreeMap<QuestId, QuestAssessment> {
         let candidates = prerequisite_candidates(catalog);
-        let mut views: BTreeMap<QuestId, Vec<CharacterView>> = BTreeMap::new();
+        let variants = VariantIndex::new(catalog);
+        let mut folds: BTreeMap<QuestId, QuestFold> = BTreeMap::new();
         for episode in episodes {
-            for view in observe_character(&[episode], catalog, &candidates, PARAMS.completion_tolerance_seconds) {
-                views.entry(view.quest_id).or_default().push(view);
+            for view in observe_character(&[episode], catalog, &candidates, params.completion_tolerance_seconds) {
+                let fold = folds.entry(view.quest_id).or_insert_with(|| QuestFold::new(view.quest_id));
+                fold.add(&view, catalog, params, &variants);
             }
         }
-        let variants = VariantIndex::new(catalog);
         let finishers = FinisherIndex::new(catalog, std::iter::empty());
-        views
-            .iter()
-            .map(|(&id, list)| (id, aggregate_quest(id, list, catalog, &TEST_PARAMS, &finishers, &variants)))
+        folds
+            .into_iter()
+            .map(|(id, fold)| (id, fold.finish(catalog, params, &finishers, &variants)))
             .collect()
     }
 
     /// The quest's edges as (target, features), in the order they were inferred.
     fn infer(catalog: &QuestCatalog, episodes: &[QuestEpisode], quest_id: QuestId) -> Vec<(QuestId, EdgeFeatures)> {
-        let assessments = assess(catalog, episodes);
+        let assessments = assess(catalog, episodes, &TEST_PARAMS);
         let variants = VariantIndex::new(catalog);
         infer_quest(&assessments[&quest_id], &assessments, &variants, &TEST_PARAMS)
             .into_iter()
@@ -517,9 +518,26 @@ mod tests {
             (features.field, features.tier, features.link, features.latest),
             (PrerequisiteField::Single, EdgeTier::Primary, true, 2)
         );
-        let assessments = assess(&catalog, &episodes);
+        let assessments = assess(&catalog, &episodes, &TEST_PARAMS);
         let universal = assessments[&QUEST].alive_stats(UNIVERSAL).expect("UNIVERSAL survives");
         assert_eq!((universal.support, universal.background, universal.pending, universal.latest), (2, 2, 0, 0));
+    }
+
+    #[test]
+    fn with_a_contradiction_allowed_counts_a_candidate_the_first_character_lacked() {
+        let catalog = chain_catalog();
+        let episodes = [
+            play_chain(&[UNIVERSAL], &[], QUEST, &[]),
+            play_chain(&[UNIVERSAL], &[P1], QUEST, &[]),
+            play_chain(&[UNIVERSAL], &[P1], QUEST, &[]),
+        ];
+        let one_allowed = Params {
+            max_contradictions: 1,
+            ..TEST_PARAMS
+        };
+        let assessments = assess(&catalog, &episodes, &one_allowed);
+        let p1 = assessments[&QUEST].alive_stats(P1).expect("P1 lacked by one character only");
+        assert_eq!((p1.support, p1.contradict, p1.pending, p1.background, p1.latest), (2, 1, 2, 0, 2));
     }
 
     #[test]
