@@ -75,17 +75,27 @@ scraper --wowhead--> context candidates ----------------------+--combine--> Lua,
    `name()` (the candidates file name and the `signal:<name>` command), `describe()`, and
    `run(&SignalInput) -> Findings` (its candidates, covered quests, input count, params and any
    reports; the pipeline adds the signal name and `generatedAt` to make the candidates file).
+   Keep its tunables in one `#[derive(Serialize)]` struct and write that as `params`, so none
+   can go missing from the file.
 2. Add it to `signals::registry()`.
 
-That is all: the pipeline runs it with the others, writes its files, `score <name>` measures it,
-and combine picks its candidates up as one more model column. Fill `covered_quest_ids` honestly
+The pipeline then runs it with the others, writes its files, `score <name>` measures it, and
+combine picks its candidates up as one more model column. Fill `covered_quest_ids` honestly
 (every quest the signal could judge, with or without a candidate), or recall means nothing.
+
+Two places outside the module go by signal name and may need a line:
+
+- `combine/assumptions.rs` (`phrase`): how the Lua module's `-- Assumption:` comment words the
+  signal's evidence, per field. Without an entry the comment just says `<name> signal`.
+- `combine/inputs.rs` (`is_context_only`): files whose name starts with "wowhead" are context for
+  reviewers only and never decide anything. A new source like that needs a name it matches; a new
+  signal must not match it.
 
 Rules every signal follows (they are why the output can be trusted): never read the ground truth;
 gate negative evidence ("X was not offered" only counts when the character could have taken X:
 level, race, class, not completed, not in the log, and the giver starts X); count independent
-characters, not sessions; keep a few concrete evidence lines per candidate; only Forever sessions;
-no player names, GUIDs, realms or guilds anywhere.
+characters, not sessions; keep a few concrete evidence lines per candidate; only Forever sessions
+(`signals::forever_episodes`); no player names, GUIDs, realms or guilds anywhere.
 
 ## Checking it against the TypeScript pipeline
 
