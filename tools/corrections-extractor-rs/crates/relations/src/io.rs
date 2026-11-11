@@ -79,6 +79,8 @@ pub fn read_candidate_files(dir: &Path) -> Result<Vec<CandidateFile>> {
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
         .collect();
-    paths.sort();
+    // By signal name (the file stem), not by path: "wowhead-requires" sorts before
+    // "wowhead-requires-any", as the TS pipeline orders them.
+    paths.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
     paths.iter().map(|path| read_json(path, "pipeline")).collect()
 }
