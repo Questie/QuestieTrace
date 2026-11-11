@@ -6,16 +6,15 @@
 //! [`registry`]. The pipeline runs it, writes `candidates/<name>.json` and its reports, and
 //! combine picks its candidates up like any other signal's.
 
-pub mod cooccurrence;
-
 use crate::config::Config;
 use crate::io;
 use crate::model::{CandidateFile, QuestCatalog, QuestEpisode};
 use anyhow::Result;
 
+pub mod breadcrumbs;
+pub mod cooccurrence;
 pub mod handoff;
 pub mod offer_set;
-pub mod breadcrumbs;
 
 /// What every signal reads.
 pub struct SignalInput<'a> {
