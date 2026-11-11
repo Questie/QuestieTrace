@@ -22,9 +22,9 @@ mod params;
 mod score;
 mod states;
 
-use super::{Signal, SignalInput, SignalOutput};
+use super::{Findings, Signal, SignalInput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
-use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
+use crate::model::{QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
 use blocked::{Blocked, BlockedCollector, SkipReason};
 use indexmap::IndexMap;
 use locality::Locality;
@@ -43,7 +43,7 @@ impl Signal for Absence {
         "complete offer lists without a quest -> blockers/exclusivity"
     }
 
-    fn run(&self, input: &SignalInput) -> SignalOutput {
+    fn run(&self, input: &SignalInput) -> Findings {
         let params = AbsenceParams::default();
         let result = analyze(input.episodes, input.catalog, params);
         let summary = Summary::of(&result, input.generated_at);
@@ -53,15 +53,11 @@ impl Signal for Absence {
             covered_quest_ids,
             ..
         } = result;
-        SignalOutput {
-            candidates: CandidateFile {
-                signal: self.name().to_owned(),
-                generated_at: input.generated_at.to_owned(),
-                input_count: index.episodes,
-                params: serde_json::to_value(params).expect("the params serialize to JSON"),
-                covered_quest_ids,
-                candidates,
-            },
+        Findings {
+            input_count: index.episodes,
+            params: serde_json::to_value(params).expect("the params serialize to JSON"),
+            covered_quest_ids,
+            candidates,
             reports: vec![("absence-summary", serde_json::to_value(summary).expect("the summary serializes to JSON"))],
         }
     }

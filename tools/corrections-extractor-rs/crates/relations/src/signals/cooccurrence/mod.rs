@@ -22,9 +22,9 @@ use self::exclusion::{infer_exclusions, ExclusionEdge, ExclusionKind, ExclusionP
 use self::history::{build_histories, unstable_quests, HistoryParams};
 use self::population::Population;
 use self::prerequisites::{infer_prerequisites, PrerequisiteEdge, PrerequisiteParams};
-use super::{Signal, SignalInput, SignalOutput};
+use super::{Findings, Signal, SignalInput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
-use crate::model::{CandidateFile, Evidence, QuestCatalog, QuestEpisode, QuestId, RelationCandidate, RelationField};
+use crate::model::{Evidence, QuestCatalog, QuestEpisode, QuestId, RelationCandidate, RelationField};
 use crate::text::{to_exponential, to_fixed};
 use rustc_hash::FxHashSet;
 use serde::Serialize;
@@ -70,7 +70,7 @@ impl Signal for Cooccurrence {
         "completion histories across characters -> implication/exclusion"
     }
 
-    fn run(&self, input: &SignalInput) -> SignalOutput {
+    fn run(&self, input: &SignalInput) -> Findings {
         let episodes: Vec<&QuestEpisode> = input
             .episodes
             .iter()
@@ -86,15 +86,11 @@ impl Signal for Cooccurrence {
         params["support"] =
             json!("prerequisites: takers of the quest who could take the target; exclusiveTo: completers of either quest who could take the other");
         params["contradict"] = json!("always 0 for prerequisites and never-together exclusions (one contradiction drops the edge); co-flags: 0 as well");
-        SignalOutput {
-            candidates: CandidateFile {
-                signal: self.name().to_owned(),
-                generated_at: input.generated_at.to_owned(),
-                input_count: episodes.len(),
-                params,
-                covered_quest_ids: covered,
-                candidates,
-            },
+        Findings {
+            input_count: episodes.len(),
+            params,
+            covered_quest_ids: covered,
+            candidates,
             reports: vec![("cooccurrence-summary", report)],
         }
     }

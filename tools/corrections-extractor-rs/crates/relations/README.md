@@ -72,7 +72,8 @@ scraper --wowhead--> context candidates ----------------------+--combine--> Lua,
 
 1. Write `src/signals/<name>/mod.rs` with a type implementing `signals::Signal`:
    `name()` (the candidates file name and the `signal:<name>` command), `describe()`, and
-   `run(&SignalInput) -> SignalOutput` (a `CandidateFile` plus any reports).
+   `run(&SignalInput) -> Findings` (its candidates, covered quests, input count, params and any
+   reports; the pipeline adds the signal name and `generatedAt` to make the candidates file).
 2. Add it to `signals::registry()`.
 
 That is all: the pipeline runs it with the others, writes its files, `score <name>` measures it,
