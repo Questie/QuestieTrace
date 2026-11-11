@@ -26,9 +26,9 @@ use self::detect::{find_handoffs, EpisodeHandoffs, HandoffObservation};
 use self::tally::{HandoffTally, Pair, PairStats};
 use self::timing::TimingHistogram;
 use self::variants::{quests_in_variant_edges, variant_edges, CompletionMoments, SameNameVariants};
-use super::{to_json, Findings, Signal, SignalInput};
-use crate::eligibility::{is_forever_interface, is_forever_quest_id};
-use crate::model::{QuestEpisode, QuestId, RelationCandidate};
+use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
+use crate::eligibility::is_forever_quest_id;
+use crate::model::{QuestId, RelationCandidate};
 use crate::timeline::EpisodeTimeline;
 use indexmap::IndexMap;
 use rayon::prelude::*;
@@ -117,11 +117,7 @@ type CompanionStates = (Pair, Vec<(QuestId, bool)>);
 
 fn run(input: &SignalInput) -> Findings {
     let catalog = input.catalog;
-    let episodes: Vec<&QuestEpisode> = input
-        .episodes
-        .iter()
-        .filter(|episode| is_forever_interface(episode.interface_version))
-        .collect();
+    let episodes = forever_episodes(input.episodes);
 
     let found: Vec<EpisodeHandoffs> = episodes
         .par_iter()
@@ -267,7 +263,7 @@ fn companion_states(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CatalogQuest, CompletedChange, CompletedSource, CompletedTimeline, QuestEventKind, RelationField, TimedValue};
+    use crate::model::{CatalogQuest, CompletedChange, CompletedSource, CompletedTimeline, QuestEpisode, QuestEventKind, RelationField, TimedValue};
     use crate::test_support::{catalog, catalog_quest, event, gossip, make_episode, npc};
 
     /// A character who turns in `prerequisite` at npc 1 at t = 100 and gets `quest`'s accept dialog
