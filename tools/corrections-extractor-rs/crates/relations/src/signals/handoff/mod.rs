@@ -26,9 +26,9 @@ use self::detect::{find_handoffs, EpisodeHandoffs, HandoffObservation};
 use self::tally::{HandoffTally, Pair, PairStats};
 use self::timing::TimingHistogram;
 use self::variants::{quests_in_variant_edges, variant_edges, CompletionMoments, SameNameVariants};
-use super::{Signal, SignalInput, SignalOutput};
+use super::{Findings, Signal, SignalInput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
-use crate::model::{CandidateFile, QuestEpisode, QuestId};
+use crate::model::{QuestEpisode, QuestId};
 use crate::timeline::EpisodeTimeline;
 use indexmap::IndexMap;
 use rayon::prelude::*;
@@ -58,7 +58,7 @@ impl Signal for Handoff {
         "turn-in -> immediate next offer chains"
     }
 
-    fn run(&self, input: &SignalInput) -> SignalOutput {
+    fn run(&self, input: &SignalInput) -> Findings {
         run(input)
     }
 }
@@ -115,7 +115,7 @@ struct PairsReport<'a> {
 /// Quests other observed prerequisites of X were completed or not at one hand-off to X.
 type CompanionStates = (Pair, Vec<(QuestId, bool)>);
 
-fn run(input: &SignalInput) -> SignalOutput {
+fn run(input: &SignalInput) -> Findings {
     let catalog = input.catalog;
     let episodes: Vec<&QuestEpisode> = input
         .episodes
@@ -226,15 +226,11 @@ fn run(input: &SignalInput) -> SignalOutput {
         // Observed pairs come first in the tally, before those added for copies.
         pairs: tally.pairs().take(observed.len()).map(PairSummary::of).collect(),
     };
-    SignalOutput {
-        candidates: CandidateFile {
-            signal: "handoff".to_owned(),
-            generated_at: input.generated_at.to_owned(),
-            input_count: episodes.len(),
-            params: to_json(&params),
-            covered_quest_ids: covered.into_iter().collect(),
-            candidates,
-        },
+    Findings {
+        input_count: episodes.len(),
+        params: to_json(&params),
+        covered_quest_ids: covered.into_iter().collect(),
+        candidates,
         reports: vec![
             ("handoff-timing", to_json(&timing.report(input.generated_at, PARAMS))),
             ("handoff-pairs", to_json(&pairs)),
@@ -305,7 +301,7 @@ mod tests {
         }
     }
 
-    fn run_on(episodes: &[QuestEpisode], quests: Vec<CatalogQuest>) -> SignalOutput {
+    fn run_on(episodes: &[QuestEpisode], quests: Vec<CatalogQuest>) -> Findings {
         let catalog = catalog(quests);
         Handoff.run(&SignalInput {
             episodes,
@@ -345,9 +341,8 @@ mod tests {
         ];
         let quests = vec![named(10001, "Intro"), named(10002, "Intro"), named(10010, "Next"), named(10020, "Other")];
 
-        let output = run_on(&episodes, quests);
-        let file = &output.candidates;
-        let edges: Vec<_> = file
+        let found = run_on(&episodes, quests);
+        let edges: Vec<_> = found
             .candidates
             .iter()
             .map(|c| (c.quest_id, c.field, c.target, c.support, c.contradict))
@@ -361,14 +356,14 @@ mod tests {
             ],
             "10020's pop is contradicted and rivalled: no candidate, but its character still counts against 10010"
         );
-        assert_eq!(file.input_count, 5, "the Classic build is skipped");
-        assert_eq!(file.covered_quest_ids, [10001, 10010, 10020]);
+        assert_eq!(found.input_count, 5, "the Classic build is skipped");
+        assert_eq!(found.covered_quest_ids, [10001, 10010, 10020]);
         assert_eq!(
-            file.candidates[2].note.as_deref(),
+            found.candidates[2].note.as_deref(),
             Some("variant:prerequisite of 10010 <- 10001; pop 3+0?, list 0+0?, against 0 not started / 0 in log, 0 via alternatives")
         );
 
-        let pairs = &output.reports.iter().find(|(name, _)| *name == "handoff-pairs").unwrap().1["pairs"];
+        let pairs = &found.reports.iter().find(|(name, _)| *name == "handoff-pairs").unwrap().1["pairs"];
         let rows: Vec<(i64, i64, i64)> = pairs
             .as_array()
             .unwrap()
