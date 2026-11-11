@@ -14,9 +14,9 @@ pub mod observe;
 use self::infer::{judge_tally, BreadcrumbResult, Tally, MIN_COVERAGE_CHARACTERS};
 use self::links::{BreadcrumbParams, LinkCollector};
 use self::observe::{observe_episode, ObservationKind};
-use super::{Signal, SignalInput, SignalOutput};
+use super::{Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_interface;
-use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId};
+use crate::model::{QuestCatalog, QuestEpisode, QuestId};
 use rayon::prelude::*;
 use serde::Serialize;
 use serde_json::json;
@@ -33,7 +33,7 @@ impl Signal for Breadcrumbs {
         "optional lead-in quests (breadcrumbs) from episodes"
     }
 
-    fn run(&self, input: &SignalInput) -> SignalOutput {
+    fn run(&self, input: &SignalInput) -> Findings {
         let params = BreadcrumbParams::default();
         let episodes: Vec<&QuestEpisode> = input
             .episodes
@@ -72,20 +72,16 @@ impl Signal for Breadcrumbs {
         review.sort_by(|a, b| b.score.total_cmp(&a.score));
         let report = json!({ "linkedPairs": result.tally.pairs.len(), "judged": review.len(), "pairs": review });
 
-        SignalOutput {
-            candidates: CandidateFile {
-                signal: self.name().into(),
-                generated_at: input.generated_at.into(),
-                input_count: episodes.len(),
-                params: json!({
-                    "autoPopSeconds": params.auto_pop_seconds,
-                    "serverDropSeconds": params.server_drop_seconds,
-                    "absenceLevelMargin": params.absence_level_margin,
-                    "minCoverageCharacters": MIN_COVERAGE_CHARACTERS,
-                }),
-                covered_quest_ids: result.covered_quest_ids,
-                candidates: result.candidates,
-            },
+        Findings {
+            input_count: episodes.len(),
+            params: json!({
+                "autoPopSeconds": params.auto_pop_seconds,
+                "serverDropSeconds": params.server_drop_seconds,
+                "absenceLevelMargin": params.absence_level_margin,
+                "minCoverageCharacters": MIN_COVERAGE_CHARACTERS,
+            }),
+            covered_quest_ids: result.covered_quest_ids,
+            candidates: result.candidates,
             reports: vec![("breadcrumbs-pairs", report)],
         }
     }

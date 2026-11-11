@@ -4,11 +4,12 @@
 //!
 //! Adding a signal: write a module with a type implementing [`Signal`], and list it in
 //! [`registry`]. The pipeline runs it, writes `candidates/<name>.json` and its reports, and
-//! combine picks its candidates up like any other signal's.
+//! combine picks its candidates up like any other signal's. A signal returns only what it found
+//! ([`Findings`]); [`run_one`] adds what every candidates file shares (its name, the run's time).
 
 use crate::config::Config;
 use crate::io;
-use crate::model::{CandidateFile, QuestCatalog, QuestEpisode};
+use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
 use anyhow::Result;
 
 pub mod absence;
@@ -25,10 +26,22 @@ pub struct SignalInput<'a> {
     pub generated_at: &'a str,
 }
 
-/// A signal's result: its candidates, and reports for people tuning it.
+/// What a signal found: its own part of `candidates/<name>.json`, and reports for people tuning it.
+pub struct Findings {
+    /// Episodes the signal looked at.
+    pub input_count: usize,
+    /// The tunables the signal ran with, for reproducibility.
+    pub params: serde_json::Value,
+    /// Every quest the signal could judge, with or without a candidate: recall depends on it.
+    pub covered_quest_ids: Vec<QuestId>,
+    pub candidates: Vec<RelationCandidate>,
+    /// Written to `reports/<name>.json`, e.g. ("handoff-timing", {...}).
+    pub reports: Vec<(&'static str, serde_json::Value)>,
+}
+
+/// A signal's files: its candidates file and its reports.
 pub struct SignalOutput {
     pub candidates: CandidateFile,
-    /// Written to `reports/<name>.json`, e.g. ("handoff-timing", {...}).
     pub reports: Vec<(&'static str, serde_json::Value)>,
 }
 
@@ -47,7 +60,8 @@ pub trait Signal: Sync {
     fn name(&self) -> &'static str;
     /// One line for the command list.
     fn describe(&self) -> &'static str;
-    fn run(&self, input: &SignalInput) -> SignalOutput;
+    /// What the signal found; [`run_one`] makes its files of it.
+    fn run(&self, input: &SignalInput) -> Findings;
 }
 
 /// Every signal, in the order the pipeline lists them.
@@ -61,13 +75,35 @@ pub fn registry() -> Vec<&'static dyn Signal> {
     ]
 }
 
+/// Runs one signal and fills in what every candidates file shares: its name and the run's time.
+pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> SignalOutput {
+    let Findings {
+        input_count,
+        params,
+        covered_quest_ids,
+        candidates,
+        reports,
+    } = signal.run(input);
+    SignalOutput {
+        candidates: CandidateFile {
+            signal: signal.name().to_owned(),
+            generated_at: input.generated_at.to_owned(),
+            input_count,
+            params,
+            covered_quest_ids,
+            candidates,
+        },
+        reports,
+    }
+}
+
 /// Runs every signal, one after another (each uses every core itself), and hands each result to
 /// `write` as soon as it is done. Side by side, their working sets added up: on the full archive
 /// that is more memory than the episodes themselves several times over.
 pub fn run_all(input: &SignalInput, mut write: impl FnMut(SignalOutput) -> Result<()>) -> Result<()> {
     for signal in registry() {
         let started = std::time::Instant::now();
-        write(signal.run(input))?;
+        write(run_one(signal, input))?;
         eprintln!("== signal:{} done in {:.1}s", signal.name(), started.elapsed().as_secs_f64());
     }
     Ok(())
