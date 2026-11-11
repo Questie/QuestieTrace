@@ -61,8 +61,14 @@ pub fn registry() -> Vec<&'static dyn Signal> {
     ]
 }
 
-/// Runs every signal on all cores; results in registry order.
-pub fn run_all(input: &SignalInput) -> Vec<SignalOutput> {
-    use rayon::prelude::*;
-    registry().par_iter().map(|signal| signal.run(input)).collect()
+/// Runs every signal, one after another (each uses every core itself), and hands each result to
+/// `write` as soon as it is done. Side by side, their working sets added up: on the full archive
+/// that is more memory than the episodes themselves several times over.
+pub fn run_all(input: &SignalInput, mut write: impl FnMut(SignalOutput) -> Result<()>) -> Result<()> {
+    for signal in registry() {
+        let started = std::time::Instant::now();
+        write(signal.run(input))?;
+        eprintln!("== signal:{} done in {:.1}s", signal.name(), started.elapsed().as_secs_f64());
+    }
+    Ok(())
 }

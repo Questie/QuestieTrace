@@ -44,7 +44,7 @@ fn main() -> ExitCode {
 
 fn run(config: &Config, args: &[String]) -> Result<()> {
     let Some(command) = args.first() else {
-        println!("{USAGE}");
+        println!("{}", usage());
         return Ok(());
     };
     match command.as_str() {
@@ -74,7 +74,7 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
                     .context("--min-score needs a number")?,
                 None => 0.0,
             };
-            let file: CandidateFile = io::read_json(&config.candidates(signal), signal)?;
+            let file: CandidateFile = io::read_json(&config.candidates(signal), &format!("signal:{signal}"))?;
             let truth: GroundTruth = io::read_json(&config.ground_truth(), "catalog")?;
             let report = score::score_candidates(&file, &truth, min_score);
             io::write_json(&config.report(&format!("score-{signal}")), &report)?;
@@ -95,12 +95,15 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
                 };
                 signal.run(&input).write(config)
             }),
-            None => {
-                let names: Vec<String> = signals::registry().iter().map(|s| format!("signal:{}", s.name())).collect();
-                bail!("unknown command {other:?}\n\n{USAGE}\n\nSignals: {}", names.join(", "))
-            }
+            None => bail!("unknown command {other:?}\n\n{}", usage()),
         },
     }
+}
+
+/// The usage text, with one line per registered signal.
+fn usage() -> String {
+    let signals: Vec<String> = signals::registry().iter().map(|s| format!("  signal:{:<15} {}", s.name(), s.describe())).collect();
+    format!("{USAGE}\n\nSignals:\n{}", signals.join("\n"))
 }
 
 fn timed(step: &str, work: impl FnOnce() -> Result<()>) -> Result<()> {
@@ -137,10 +140,8 @@ fn pipeline(config: &Config) -> Result<()> {
         catalog: &cataloged.catalog,
         generated_at: &config.generated_at,
     };
-    let outputs = signals::run_all(&input);
-    for output in &outputs {
-        output.write(config)?;
-    }
+    // Each signal's result is written and dropped before the next one runs.
+    signals::run_all(&input, |output| output.write(config))?;
     done("signals");
 
     // Combine reads every candidates file there is, like the TS pipeline, so files of signals run
