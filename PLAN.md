@@ -106,11 +106,13 @@ quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submiss
 | P12b | Validation of nested items in one loop over a stack of open containers instead of recursion (same errors, same order); new seeded differential fuzz test (lazy vs full decode) and a lazy depth-limit test, both mutation-checked | 21.9 / 21.7 s vs 22.5 / 22.0 s (−1.5%), user −2% | 5.0 GB | yes | 85ec28b |
 | P13 | Submission UTF-8: `from_utf8` (ASCII fast path) before falling back to `from_utf8_lossy` | 21.9 / 21.7 s vs 21.5 / 21.8 s: noise (user −1%) | — | **no** | — |
 | P14 | Print decoding into a pre-sized (zero-filled) buffer instead of `extend_from_slice` per chunk | 22.1 / 22.0 s vs 21.7 / 21.7 s: slower | — | **no** | — |
+| F4 | **Full archive, final binary (arena + P12b):** 7 min 22 s (F1 9 min 6 s, −19%; first run 18 min 43 s, −61%); user 10,698 s (F1 13,681 s, −22%); fold thread busy 101 s, finalize 5.9 s; outputs identical to F1 | — | **11.0 GB** (same as F1) | — | dcd87c5 |
 
 ## Final measurements
 
 | # | What | Result |
 |---|---|---|
 | F1 | Full archive, Rust, best binary so far, under the memory watchdog | 9 min 6 s, 11.0 GB peak (546.6 s elapsed, 13,681 s user, 627 s sys) |
-| F2 | Full archive, TypeScript tool from scratch (empty store, scratch directories): time and peak memory | pending |
+| F4 | Full archive, Rust, final binary (arena + iterative validation) | **7 min 22 s, 11.0 GB peak** (442.2 s elapsed, 10,698 s user, 638 s sys); outputs identical to F1 |
+| F2 | Full archive, TypeScript tool from scratch (empty store, scratch directories): time and peak memory | running (started 01:09, commit ab5f87f, the version the Rust parity is measured against) |
 | F3 | Diff the two full-archive outputs (parity on the whole archive, not only samples) | pending |
