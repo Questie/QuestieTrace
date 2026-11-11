@@ -27,15 +27,16 @@ use crate::io;
 use crate::model::QuestEpisode;
 use anyhow::{bail, Context, Result};
 use characters::{assign_characters, order_sessions, CharacterInput};
-use distill::DistillStats;
+use distill::{DistillStats, EpisodeIdentity};
 use merge::{MergedSession, SessionMerger, SubmissionInfo};
 use rayon::prelude::*;
-use report::{Failure, IngestReport, Skipped, Tally};
+use report::{IngestReport, Skipped, Tally};
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::mpsc;
 use std::time::Instant;
-use submission::{distill_submission, DistilledSubmission};
+use submission::{distill_submission, DistilledSubmission, SubmissionError};
 use titles::{resolve_greeting, GreetingStats, TitleIndex};
 use trace_data::source::{list_submissions, SubmissionFile};
 use trace_data::{Arena, Inflater};
@@ -70,7 +71,9 @@ pub fn run(config: &Config) -> Result<IngestOutput> {
     eprintln!("ingest: decoding {} submissions", files.len());
 
     let mut read = ReadTally::default();
-    distill_all(&files, config.require_forever_version, |index, submission| {
+    let require_forever = config.require_forever_version;
+    let distill = |file: &SubmissionFile, inflater: &mut Inflater, arena: &mut Arena| distill_submission(&file.path, require_forever, inflater, arena);
+    distill_all(&files, distill, |index, submission| {
         read.add(index, submission);
         if read.submissions % 1000 == 0 {
             eprintln!("ingest: {}/{} decoded ({:.0}s)", read.submissions, files.len(), started.elapsed().as_secs_f64());
@@ -96,17 +99,27 @@ pub fn run(config: &Config) -> Result<IngestOutput> {
 /// Results waiting for the merge at most; workers block beyond that.
 const RESULTS_IN_FLIGHT: usize = 64;
 
-/// Decodes and distills every submission on all cores and hands each result, with its position in
-/// `files`, to `merge` on this thread in whatever order they finish (the merge does not depend on
-/// that order).
-fn distill_all(files: &[SubmissionFile], require_forever: bool, mut merge: impl FnMut(usize, DistilledSubmission)) {
+/// Runs `distill` (decode and distill one submission) on every file on all cores and hands each
+/// result, with its position in `files`, to `merge` on this thread in whatever order they finish
+/// (the merge does not depend on that order). A submission whose `distill` panics becomes a
+/// [`SubmissionError::Crashed`] failure of its own; the run goes on.
+fn distill_all(
+    files: &[SubmissionFile],
+    distill: impl Fn(&SubmissionFile, &mut Inflater, &mut Arena) -> DistilledSubmission + Sync,
+    mut merge: impl FnMut(usize, DistilledSubmission),
+) {
     let (results, received) = mpsc::sync_channel(RESULTS_IN_FLIGHT);
+    let distill = &distill;
     std::thread::scope(|scope| {
         scope.spawn(move || {
             files.par_iter().enumerate().for_each_init(
                 || (Inflater::new(), Arena::new()),
                 |(inflater, arena), (index, file)| {
-                    let distilled = distill_submission(&file.path, require_forever, inflater, arena);
+                    let distilled = catch_unwind(AssertUnwindSafe(|| distill(file, inflater, arena))).unwrap_or_else(|_| {
+                        // Nothing borrows the crashed submission's values any more.
+                        arena.reset();
+                        DistilledSubmission::crashed(&file.path)
+                    });
                     // Only fails once the merge stopped listening, which it does by panicking.
                     let _ = results.send((index, distilled));
                 },
@@ -122,8 +135,8 @@ fn distill_all(files: &[SubmissionFile], require_forever: bool, mut merge: impl 
 #[derive(Default)]
 struct ReadTally {
     submissions: usize,
-    /// With the submission's position in path order.
-    failures: Vec<(usize, Failure)>,
+    /// (position in path order, submission id, why).
+    failures: Vec<(usize, String, SubmissionError)>,
     exports: usize,
     with_multiple_exports: usize,
     merger: SessionMerger,
@@ -134,8 +147,7 @@ impl ReadTally {
     fn add(&mut self, index: usize, submission: DistilledSubmission) {
         self.submissions += 1;
         if let Some(error) = submission.error {
-            let submission_id = submission.submission_id.clone();
-            self.failures.push((index, Failure { submission_id, error }));
+            self.failures.push((index, submission.submission_id.clone(), error));
         }
         self.exports += submission.exports;
         self.with_multiple_exports += usize::from(submission.exports > 1);
@@ -166,20 +178,6 @@ impl ReadTally {
 fn has_quest_data(merged: &MergedSession) -> bool {
     let episode = &merged.session.episode;
     episode.completed.is_some() || !episode.quest_events.is_empty() || !episode.offers.is_empty() || episode.quest_log.iter().any(|entry| !entry.v.is_empty())
-}
-
-/// The completed set at the end of the session: the initial set with every change applied,
-/// ascending.
-fn final_completed(merged: &MergedSession) -> Option<Vec<i64>> {
-    let completed = merged.session.episode.completed.as_ref()?;
-    let mut set: std::collections::BTreeSet<i64> = completed.initial.iter().copied().collect();
-    for change in &completed.changes {
-        set.extend(change.add.iter().flatten());
-        for id in change.remove.iter().flatten() {
-            set.remove(id);
-        }
-    }
-    Some(set.into_iter().collect())
 }
 
 /// Days from 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's algorithm).
@@ -219,7 +217,7 @@ fn parse_received_at(text: &str) -> Option<f64> {
     if bytes.len() < 20 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' || bytes[13] != b':' || bytes[16] != b':' {
         return None;
     }
-    let mut rest = &text[19..];
+    let mut rest = text.get(19..)?;
     let mut millis = 0.0;
     if let Some(fraction) = rest.strip_prefix('.') {
         let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
@@ -342,8 +340,7 @@ fn build_episodes(read: ReadTally) -> (Vec<QuestEpisode>, Tally) {
                 session_name: episode.session_name.as_deref(),
                 first_level: episode.levels.first().map(|level| level.v),
                 last_level: episode.levels.last().map(|level| level.v),
-                initial_completed: episode.completed.as_ref().map(|completed| completed.initial.as_slice()),
-                final_completed: final_completed(merged),
+                completed: episode.completed.as_ref(),
             }
         })
         .collect();
@@ -356,25 +353,14 @@ fn build_episodes(read: ReadTally) -> (Vec<QuestEpisode>, Tally) {
         .zip(characters)
         .zip(session_orders)
         .map(|((merged, character_key), session_order)| {
-            let draft = merged.session.episode;
-            QuestEpisode {
+            let identity = EpisodeIdentity {
                 key: merged.session.key,
                 contributor_id: merged.contributor_id,
                 character_key,
                 submission_ids: merged.submission_ids.into_iter().collect(),
-                session_name: draft.session_name,
                 session_order,
-                interface_version: draft.interface_version,
-                locale: draft.locale,
-                player: draft.player,
-                duration: draft.duration,
-                levels: draft.levels,
-                completed: draft.completed,
-                quest_log: draft.quest_log,
-                quest_events: draft.quest_events,
-                offers: draft.offers,
-                quest_info: draft.quest_info,
-            }
+            };
+            merged.session.episode.into_episode(identity)
         })
         .collect();
     // Contributor ids and keys are lowercase hex, so comparing them as text orders them like the
@@ -382,10 +368,10 @@ fn build_episodes(read: ReadTally) -> (Vec<QuestEpisode>, Tally) {
     episodes
         .sort_by(|a, b| (&a.contributor_id, &a.character_key, a.session_order, &a.key).cmp(&(&b.contributor_id, &b.character_key, b.session_order, &b.key)));
 
-    failures.sort_by_key(|(index, _)| *index);
+    failures.sort_by_key(|(index, _, _)| *index);
     let tally = Tally {
         submissions,
-        failures: failures.into_iter().map(|(_, failure)| failure).collect(),
+        failures: failures.into_iter().map(|(_, submission_id, error)| (submission_id, error)).collect(),
         exports,
         with_multiple_exports,
         copies,
@@ -409,9 +395,39 @@ mod tests {
         assert_eq!(parse_received_at("2026-10-01T00:05:00.708876249+02:00"), Some(1790805900.708));
         assert_eq!(parse_received_at("2026-10-01T00:05:00Z"), Some(1790813100.0));
         assert_eq!(parse_received_at(""), None);
+        // A multi-byte character where the time zone starts is no time, not a crash.
+        assert_eq!(parse_received_at("2026-10-01T00:05:0\u{e9}Z"), None);
         // node: Date.UTC(2026, 9, 1, 12, 0, 0) / 1000; out-of-range fields carry over.
         assert_eq!(session_name_time(Some("2026-10-01_12-00-00")), Some(1790856000.0));
         assert_eq!(session_name_time(Some("2026-13-31_24-00-00")), Some(1801440000.0));
         assert_eq!(session_name_time(Some("raid night")), None);
+    }
+
+    #[test]
+    fn a_submission_whose_reading_panics_fails_alone_and_the_run_goes_on() {
+        let files: Vec<SubmissionFile> = (0..40)
+            .map(|i| {
+                let name = format!("2026-10-01_000000Z_{i:02}.json");
+                SubmissionFile {
+                    key: format!("2026-10/{name}"),
+                    path: std::path::Path::new("/nowhere").join(name),
+                }
+            })
+            .collect();
+        let distill = |file: &SubmissionFile, _: &mut Inflater, _: &mut Arena| {
+            assert!(!file.key.ends_with("_13.json"), "a bug met reading submission 13");
+            DistilledSubmission {
+                exports: 1,
+                error: None,
+                ..DistilledSubmission::crashed(&file.path)
+            }
+        };
+        let mut results = std::collections::BTreeMap::new();
+        distill_all(&files, distill, |index, submission| {
+            results.insert(index, (submission.submission_id, submission.error));
+        });
+        assert_eq!(results.len(), 40, "every submission has a result");
+        assert_eq!(results[&13], ("13".to_string(), Some(SubmissionError::Crashed)));
+        assert!(results.iter().all(|(&index, (_, error))| index == 13 || error.is_none()));
     }
 }

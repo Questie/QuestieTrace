@@ -12,6 +12,7 @@
 
 use super::distill::{PendingGreeting, TitleObservation};
 use crate::model::{Faction, GiverRef, OfferSnapshot, OfferedQuest, QuestId};
+use crate::text::js_trim;
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
@@ -108,7 +109,12 @@ impl TitleIndex {
     }
 
     /// Records that a contributor saw a title anywhere: dialog, gossip list, quest log or greeting.
+    /// A submission without a contributor id cannot tell who saw it, so it does not count (TS
+    /// counted the empty id as one more contributor).
     pub fn note_sighting(&mut self, locale: Option<&str>, title: &str, contributor_id: &str) {
+        if contributor_id.is_empty() {
+            return;
+        }
         let Some(entry) = self.entry(locale, title) else { return };
         if entry.seen_by.len() < SHARED_BY && !entry.seen_by.iter().any(|seen| seen == contributor_id) {
             entry.seen_by.push(contributor_id.to_owned());
@@ -203,9 +209,9 @@ pub fn resolve_greeting(
     }
 }
 
-/// Titles are compared without surrounding whitespace.
+/// Titles are compared without surrounding (JS) whitespace.
 fn normalize_title(title: &str) -> &str {
-    title.trim()
+    js_trim(title)
 }
 
 #[cfg(test)]
@@ -240,6 +246,8 @@ mod tests {
         }
         // Seen by one contributor only, e.g. an older trace's unsanitized title naming the player.
         titles.note_sighting(Some("enUS"), "Never Seen", "a");
+        // A submission without a contributor id is not a second contributor.
+        titles.note_sighting(Some("enUS"), "Never Seen", "");
         titles
     }
 
@@ -341,10 +349,16 @@ mod tests {
     }
 
     #[test]
-    fn titles_match_without_surrounding_whitespace_and_never_without_a_locale() {
+    fn titles_match_without_surrounding_js_whitespace_and_never_without_a_locale() {
         let titles = index();
         let alliance = Some(Faction::Alliance);
         assert_eq!(titles.resolve(Some("enUS"), alliance, None, "  Westbrook Garrison Needs Help! "), Some(239));
+        // JS trim() removes a byte order mark but not U+0085 (Rust's trim() does the reverse).
+        assert_eq!(
+            titles.resolve(Some("enUS"), alliance, None, "\u{feff}Westbrook Garrison Needs Help!"),
+            Some(239)
+        );
+        assert_eq!(titles.resolve(Some("enUS"), alliance, None, "\u{85}Westbrook Garrison Needs Help!"), None);
         assert_eq!(titles.resolve(Some(""), alliance, None, "Westbrook Garrison Needs Help!"), None);
         assert_eq!(titles.resolve(Some("deDE"), alliance, None, "Westbrook Garrison Needs Help!"), None);
     }

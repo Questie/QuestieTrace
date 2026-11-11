@@ -3,7 +3,7 @@
 
 use super::distill::{distill_session, episode_key, is_recorded_forever, DistilledSession};
 use std::path::Path;
-use trace_data::submission::Submission;
+use trace_data::submission::{submission_id_from_path, Submission};
 use trace_data::{Arena, Inflater, Session, Value};
 
 /// One submission, distilled.
@@ -15,9 +15,32 @@ pub struct DistilledSubmission {
     pub received_at: String,
     /// Exports that decoded.
     pub exports: usize,
-    /// Why the submission could not be read; `sessions` is then empty.
-    pub error: Option<String>,
+    /// Why the submission gave nothing; `sessions` is then empty.
+    pub error: Option<SubmissionError>,
     pub sessions: Vec<DistilledSession>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SubmissionError {
+    /// It could not be read or decoded: the reader's reason.
+    Unreadable(String),
+    /// Reading it panicked: a bug, whose message is in the run's log. Only the submission is
+    /// lost, as with a crashed worker in the TS pipeline.
+    Crashed,
+}
+
+impl DistilledSubmission {
+    /// The stand-in for a submission whose reading panicked; only its file name is known.
+    pub fn crashed(path: &Path) -> Self {
+        DistilledSubmission {
+            submission_id: submission_id_from_path(path),
+            contributor_id: String::new(),
+            received_at: String::new(),
+            exports: 0,
+            error: Some(SubmissionError::Crashed),
+            sessions: Vec::new(),
+        }
+    }
 }
 
 /// The most arena memory a worker keeps between submissions. A reset arena keeps its largest
@@ -43,7 +66,7 @@ pub fn distill_submission(path: &Path, require_forever: bool, inflater: &mut Inf
         contributor_id: submission.contributor_id.clone(),
         received_at: submission.received_at.clone(),
         exports,
-        error,
+        error: error.map(SubmissionError::Unreadable),
         sessions,
     };
     // The next submission inflates into this one's buffers and decodes into this arena.
