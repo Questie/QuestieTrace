@@ -5,9 +5,9 @@
 //! layering is QuestieDB's own; `build` shapes the rows into the [`QuestCatalog`] and
 //! [`GroundTruth`] contracts; `summary` counts what came out (reports/catalog.json).
 
-pub mod build;
-pub mod materialize;
-pub mod summary;
+mod build;
+mod materialize;
+mod summary;
 
 use crate::config::Config;
 use crate::io;
@@ -37,6 +37,7 @@ impl CatalogOutput {
 pub fn run(config: &Config) -> Result<CatalogOutput> {
     let options = MaterializeOptions {
         trace_modules_dir: config.trace_modules_dir.as_deref(),
+        #[cfg(test)]
         fixture: None,
     };
     let materialized = materialize_forever_quests(config.questie_db_dir()?, &build::exported_fields(), options)?;

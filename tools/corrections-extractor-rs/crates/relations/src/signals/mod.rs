@@ -13,11 +13,11 @@ use crate::io;
 use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
 use anyhow::Result;
 
-pub mod absence;
-pub mod breadcrumbs;
-pub mod cooccurrence;
-pub mod handoff;
-pub mod offer_set;
+mod absence;
+mod breadcrumbs;
+mod cooccurrence;
+mod handoff;
+mod offer_set;
 
 /// What every signal reads.
 pub struct SignalInput<'a> {

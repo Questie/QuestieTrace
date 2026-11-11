@@ -85,19 +85,6 @@ impl<'e> EpisodeTimeline<'e> {
         }
     }
 
-    /// The full completed set at `t`. Costs O(completed history); prefer `is_completed_at` in loops.
-    pub fn completed_at(&self, t: SessionTime) -> FxHashSet<QuestId> {
-        let mut result = self.initial_completed.clone();
-        for &quest_id in self.toggles.keys() {
-            if self.is_completed_at(quest_id, t) {
-                result.insert(quest_id);
-            } else {
-                result.remove(&quest_id);
-            }
-        }
-        result
-    }
-
     /// When the quest first became completed in this session, if ever.
     pub fn completion_time(&self, quest_id: QuestId) -> Option<Completion> {
         if self.initial_completed.contains(&quest_id) {
@@ -175,9 +162,7 @@ mod tests {
         assert!(timeline.is_completed_at(2, 20.0));
         assert!(!timeline.is_completed_at(3, 9.9));
         assert!(timeline.is_completed_at(3, 10.0));
-        let mut at_15: Vec<_> = timeline.completed_at(15.0).into_iter().collect();
-        at_15.sort();
-        assert_eq!(at_15, [1, 3]);
+        assert!(timeline.is_completed_at(1, 15.0), "an initial completion no change touches stays");
     }
 
     #[test]

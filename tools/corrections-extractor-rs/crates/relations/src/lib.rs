@@ -12,25 +12,26 @@
 //! (see [`model`] for the contracts). `pipeline` runs them in order in one process; each step is
 //! also a command of its own, reading its inputs from the files the previous step wrote.
 
+// The steps and contracts `main.rs` drives are public; the helpers they share are crate-internal.
 pub mod catalog;
 pub mod combine;
 pub mod config;
-pub mod eligibility;
+mod eligibility;
 pub mod ingest;
 pub mod io;
 pub mod model;
-pub mod race_masks;
+mod race_masks;
 pub mod score;
 pub mod signals;
 pub mod sources;
-pub mod text;
-pub mod timeline;
+mod text;
+mod timeline;
 
 #[cfg(test)]
-pub mod test_support;
+mod test_support;
 
 /// `unix_millis` as an ISO 8601 UTC timestamp with milliseconds, like JS `Date.toISOString()`.
-pub fn iso_timestamp(unix_millis: i64) -> String {
+fn iso_timestamp(unix_millis: i64) -> String {
     let days = unix_millis.div_euclid(86_400_000);
     let ms_of_day = unix_millis.rem_euclid(86_400_000);
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
