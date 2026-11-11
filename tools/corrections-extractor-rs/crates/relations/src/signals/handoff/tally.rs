@@ -4,6 +4,7 @@
 use super::counter::{CounterKind, CounterObservation};
 use super::detect::{giver_label, HandoffKind, HandoffObservation};
 use crate::model::{Evidence, QuestEpisode, QuestId};
+use crate::text::to_fixed;
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
@@ -194,14 +195,12 @@ fn describe_handoff(observation: &HandoffObservation) -> String {
         ..
     } = observation;
     let giver = giver_label(*giver);
-    // Unlike JS toFixed, Rust rounds an exact tie (a delay of exactly 0.25s) to even; session times
-    // carry a dozen decimals, so such ties do not occur in practice.
-    let delay = format!("{:.1}", offered_at - turn_in_at);
+    let delay = to_fixed(offered_at - turn_in_at, 1);
     let base = match observation.kind {
         HandoffKind::Pop => format!("turned in {turned_in} at {giver}, its accept dialog for {offered} opened {delay}s later"),
         HandoffKind::List { previous_list_at } => format!(
-            "turned in {turned_in} at {giver}; its list {delay}s later offered {offered}, its list {:.1}s before did not",
-            turn_in_at - previous_list_at
+            "turned in {turned_in} at {giver}; its list {delay}s later offered {offered}, its list {}s before did not",
+            to_fixed(turn_in_at - previous_list_at, 1)
         ),
     };
     if observation.confounders.is_empty() {

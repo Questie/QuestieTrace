@@ -18,6 +18,15 @@ pub fn to_fixed(x: f64, digits: usize) -> String {
     format!("{:.digits$}", if tie { away_from_zero } else { x })
 }
 
+/// JS `Number(x.toFixed(digits))`: `x` rounded to `digits` decimals the way the TypeScript
+/// pipeline rounds numbers it stores (ties away from zero).
+pub fn round_to(x: f64, digits: usize) -> f64 {
+    if !x.is_finite() {
+        return x;
+    }
+    to_fixed(x, digits).parse().expect("a fixed-point number parses")
+}
+
 /// JS `x.toExponential(digits)`: like Rust's `{:.Ne}`, but with an explicit sign on non-negative
 /// exponents ("1.2e-2", "1.0e+0").
 pub fn to_exponential(x: f64, digits: usize) -> String {
@@ -57,6 +66,13 @@ mod tests {
         assert_eq!(to_fixed(-0.04, 1), "-0.0");
         assert_eq!(to_fixed(-0.0, 1), "0.0");
         assert_eq!(to_fixed(f64::NEG_INFINITY, 1), "-Infinity");
+    }
+
+    #[test]
+    fn round_to_reads_back_what_to_fixed_prints() {
+        assert_eq!(round_to(0.123456, 4), 0.1235);
+        assert_eq!(round_to(0.8125, 3), 0.813, "an exact tie rounds away from zero");
+        assert_eq!(round_to(f64::INFINITY, 3), f64::INFINITY);
     }
 
     #[test]

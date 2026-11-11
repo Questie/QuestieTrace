@@ -9,6 +9,7 @@
 use super::links::{find_auto_pops, BreadcrumbParams, FxIndexMap, FxIndexSet, Links, Pair};
 use crate::eligibility::{class_allowed, has_untracked_requirements, is_statically_eligible, race_allowed};
 use crate::model::{CatalogQuest, Evidence, GiverKind, GiverRef, PlayerContext, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
+use crate::text::to_fixed;
 use crate::timeline::EpisodeTimeline;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
@@ -122,7 +123,7 @@ fn describe_giver(giver: Option<GiverRef>) -> String {
 }
 
 fn time(t: SessionTime) -> String {
-    format!("{t:.1}s")
+    format!("{}s", to_fixed(t, 1))
 }
 
 /// Race and class allow the quest, and are actually known whenever the quest restricts them.
@@ -343,9 +344,9 @@ impl Observer<'_> {
         for pop in find_auto_pops(self.episode, self.params) {
             let Pair { breadcrumb, target } = pop.pair;
             let text = format!(
-                "turned in {breadcrumb} at {}, {target} opened {:.1}s later",
+                "turned in {breadcrumb} at {}, {target} opened {}s later",
                 describe_giver(pop.giver),
-                pop.detail_t - pop.turn_in_t
+                to_fixed(pop.detail_t - pop.turn_in_t, 1)
             );
             self.add(breadcrumb, target, ObservationKind::AutoPop, pop.turn_in_t, text);
         }
