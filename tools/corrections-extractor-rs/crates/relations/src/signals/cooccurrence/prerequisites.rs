@@ -16,7 +16,7 @@
 //! (P1 OR P2).
 
 use super::coflag::CoFlagged;
-use super::fixed1;
+use crate::text::to_fixed;
 use super::history::{lead_within_session, order, Order, Stamp, When};
 use super::population::{Character, Population};
 use crate::model::{Evidence, QuestId, RelationField, SessionTime};
@@ -493,7 +493,7 @@ fn describe(character: &Character, stamp: &Stamp) -> String {
     let episode = character.history.episode_key(stamp);
     match stamp.when {
         When::AtStart => format!("before session {episode} started"),
-        When::During { t, .. } => format!("at {episode} t={}", fixed1(t)),
+        When::During { t, .. } => format!("at {episode} t={}", to_fixed(t, 1)),
     }
 }
 

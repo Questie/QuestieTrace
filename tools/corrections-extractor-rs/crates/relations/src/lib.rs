@@ -23,6 +23,7 @@ pub mod race_masks;
 pub mod score;
 pub mod signals;
 pub mod sources;
+pub mod text;
 pub mod timeline;
 
 #[cfg(test)]

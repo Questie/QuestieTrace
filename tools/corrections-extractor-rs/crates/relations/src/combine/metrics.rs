@@ -6,7 +6,7 @@
 //! single signal is therefore also charged for quests only other signals saw, which is the fair
 //! question here: what would we get using that signal alone?
 
-use super::fixed;
+use crate::text::to_fixed;
 use crate::model::{CandidateFile, GroundTruth, QuestId, RelationCandidate, RelationSet, Tier};
 use crate::score::{score_candidates, FieldScore, ScoredField};
 use serde::Serialize;
@@ -182,8 +182,8 @@ fn field_name(field: ScoredField) -> &'static str {
 fn cell(score: &FieldScore) -> String {
     format!(
         "{} / {} ({}/{}/{})",
-        fixed(score.precision, 3),
-        fixed(score.recall, 3),
+        to_fixed(score.precision, 3),
+        to_fixed(score.recall, 3),
         score.true_positives,
         score.false_positives,
         score.false_negatives

@@ -15,7 +15,7 @@
 //! (which exclusiveTo would have hidden). A breadcrumb flagged by its target's turn-in fails that
 //! check, because characters who took the breadcrumb itself completed it earlier than the target.
 
-use super::fixed1;
+use crate::text::to_fixed;
 use super::history::{held_together, Stamp, When};
 use super::population::{Character, Population};
 use crate::model::{Evidence, QuestEventKind, QuestId, SessionTime};
@@ -203,7 +203,7 @@ fn observations_of(character: &Character, population: &Population, window_second
                         text: format!(
                             "character {}: {a} and {b} became completed {}s apart{outcome}",
                             history.key,
-                            fixed1(second_t - first_t)
+                            to_fixed(second_t - first_t, 1)
                         ),
                     },
                 });

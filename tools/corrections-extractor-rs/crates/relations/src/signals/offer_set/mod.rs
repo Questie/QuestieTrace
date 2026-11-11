@@ -61,15 +61,6 @@ pub const PARAMS: Params = Params {
     min_secondary_support: 5,
 };
 
-/// JS `x.toFixed(digits)` for non-negative x, as the TS signal formats evidence gaps and notes:
-/// Rust rounds an exact decimal tie to even, JS up. The ties are the odd multiples of
-/// 2^-(digits + 1), e.g. a level-unlocked share of 2/16 is "0.13" in TS (seen in real output).
-fn to_fixed(x: f64, digits: i32) -> String {
-    let scaled = x * 2f64.powi(digits + 1);
-    let tie = scaled.fract() == 0.0 && scaled % 2.0 == 1.0;
-    format!("{:.*}", digits as usize, if tie { x.next_up() } else { x })
-}
-
 pub struct OfferSet;
 
 impl Signal for OfferSet {
@@ -152,20 +143,5 @@ impl Signal for OfferSet {
             },
             reports: vec![("offer-set-summary", summary)],
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::to_fixed;
-
-    #[test]
-    fn to_fixed_rounds_exact_ties_up_like_js() {
-        // Expected values printed by node: (x).toFixed(digits).
-        assert_eq!(to_fixed(2.0 / 16.0, 2), "0.13");
-        assert_eq!(to_fixed(3.0 / 8.0, 2), "0.38");
-        assert_eq!(to_fixed(1.0 / 3.0, 2), "0.33");
-        assert_eq!(to_fixed(0.25, 1), "0.3");
-        assert_eq!(to_fixed(0.35, 1), "0.3", "0.35 is just below the tie as a double");
     }
 }

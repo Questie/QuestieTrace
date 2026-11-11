@@ -21,7 +21,8 @@
 
 use super::aggregate::{CandidateStats, OrGroup, QuestAssessment};
 use super::variants::VariantIndex;
-use super::{to_fixed, Params};
+use super::Params;
+use crate::text::to_fixed;
 use crate::eligibility::is_forever_quest_id;
 use crate::model::{Evidence, QuestId, RelationCandidate, RelationField};
 use std::collections::BTreeMap;

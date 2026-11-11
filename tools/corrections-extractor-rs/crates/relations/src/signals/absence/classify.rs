@@ -29,7 +29,7 @@ use super::locality::{LocalReason, Locality};
 use super::offers::{Character, OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
 use super::score::{score_edge, ScoreGroup};
-use super::to_fixed;
+use crate::text::to_fixed;
 use crate::eligibility::is_forever_quest_id;
 use crate::model::{QuestCatalog, QuestId, RelationCandidate, RelationField};
 use indexmap::{IndexMap, IndexSet};
