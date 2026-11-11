@@ -115,7 +115,6 @@ pub struct EpisodeHandoffs {
 /// How old a completion dialog may be for its giver to stand in for a turn-in event's missing one.
 const COMPLETION_DIALOG_MAX_AGE: SessionTime = 120.0;
 
-
 fn is_giver_list(offer: &OfferSnapshot) -> bool {
     matches!(offer.source, OfferSource::Gossip | OfferSource::Greeting) && offer.giver.is_some()
 }

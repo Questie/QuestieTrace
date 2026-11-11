@@ -103,7 +103,10 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
 
 /// The usage text, with one line per registered signal.
 fn usage() -> String {
-    let signals: Vec<String> = signals::registry().iter().map(|s| format!("  signal:{:<15} {}", s.name(), s.describe())).collect();
+    let signals: Vec<String> = signals::registry()
+        .iter()
+        .map(|s| format!("  signal:{:<15} {}", s.name(), s.describe()))
+        .collect();
     format!("{USAGE}\n\nSignals:\n{}", signals.join("\n"))
 }
 

@@ -168,12 +168,7 @@ pub struct HistoryReport {
 /// Quests whose completion state is not a one-way "done forever" flag, so co-occurrence says
 /// nothing about them.
 pub fn unstable_quests(episodes: &[&QuestEpisode], catalog: &QuestCatalog) -> FxHashSet<QuestId> {
-    let mut unstable: FxHashSet<QuestId> = catalog
-        .quests
-        .values()
-        .filter(|quest| quest.is_repeatable())
-        .map(|quest| quest.id)
-        .collect();
+    let mut unstable: FxHashSet<QuestId> = catalog.quests.values().filter(|quest| quest.is_repeatable()).map(|quest| quest.id).collect();
     for episode in episodes {
         if let Some(completed) = &episode.completed {
             // Daily/weekly resets remove a few quests from the completed set. A change that drops
