@@ -600,7 +600,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
   it("should export questEnds for an object that finishes a quest", () => {
     const session = makeForeverSession({
       GetLocale: { player: [apiSample(0, 0, "enUS")] },
-      UnitGUID: { npc: [apiSample(3, 3, "GameObject-0-5208-0-7-410369-00002DDB54")] },
+      UnitGUID: { questnpc: [apiSample(3, 3, "GameObject-0-5208-0-7-410369-00002DDB54")] },
     });
     const withTurnIn = { ...session, events: [traceEvent("QUEST_TURNED_IN", 3, 3, 78261)] };
 

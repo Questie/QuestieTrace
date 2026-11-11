@@ -22,11 +22,12 @@ describe("observeFinishedBy", () => {
         value: { creatureId: 197 },
         confidence: "medium",
         provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
       },
     ]);
   });
 
-  it("should capture a creature finisher from npc GUID when questnpc is absent", () => {
+  it("should not take a creature finisher from npc GUID at QUEST_COMPLETE when questnpc is absent", () => {
     const session = makeSession(
       {
         GetQuestID: [apiSample(3, 3, 96659)],
@@ -39,17 +40,10 @@ describe("observeFinishedBy", () => {
       ]
     );
 
-    expect(observeFinishedBy(session)).toEqual([
-      {
-        entityId: 96659,
-        value: { creatureId: 197 },
-        confidence: "medium",
-        provenance: { session: "test-session", t: 3 },
-      },
-    ]);
+    expect(observeFinishedBy(session)).toEqual([]);
   });
 
-  it("should capture an object finisher from GameObject GUID on npc token", () => {
+  it("should not take an object finisher from GameObject GUID on npc token", () => {
     const session = makeSession(
       {
         GetQuestID: [apiSample(3, 3, 96659)],
@@ -62,14 +56,7 @@ describe("observeFinishedBy", () => {
       ]
     );
 
-    expect(observeFinishedBy(session)).toEqual([
-      {
-        entityId: 96659,
-        value: { objectId: 2843 },
-        confidence: "low",
-        provenance: { session: "test-session", t: 3 },
-      },
-    ]);
+    expect(observeFinishedBy(session)).toEqual([]);
   });
 
   it("should prefer the questnpc creature over a conflicting npc object", () => {
@@ -194,6 +181,7 @@ describe("observeFinishedBy", () => {
         value: { creatureId: 276171 },
         confidence: "medium",
         provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
       },
     ]);
   });
@@ -202,7 +190,7 @@ describe("observeFinishedBy", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          npc: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
+          questnpc: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
         },
       },
       [
@@ -216,6 +204,7 @@ describe("observeFinishedBy", () => {
         value: { objectId: 2843 },
         confidence: "low",
         provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
       },
     ]);
   });
@@ -282,6 +271,7 @@ describe("observeFinishedBy", () => {
         value: { creatureId: 276171 },
         confidence: "medium",
         provenance: { session: "test-session", t: 3 },
+        token: "npc",
       },
     ]);
   });
@@ -373,6 +363,7 @@ describe("observeFinishedBy", () => {
         value: { creatureId: 197 },
         confidence: "medium",
         provenance: { session: "test-session", t: 60 },
+        token: "questnpc",
       },
     ]);
   });
@@ -395,7 +386,7 @@ describe("observeFinishedBy interaction correlation", () => {
     expect(observeFinishedBy(session).map((o) => o.value)).toEqual([{ objectId: 410369 }]);
   });
 
-  it("should fall back to npc when questnpc is explicitly nil", () => {
+  it("should not fall back to npc at QUEST_TURNED_IN when questnpc is explicitly nil", () => {
     const session = makeSession(
       {
         UnitGUID: {
@@ -411,7 +402,7 @@ describe("observeFinishedBy interaction correlation", () => {
       ]
     );
 
-    expect(observeFinishedBy(session).map((o) => o.value)).toEqual([{ creatureId: 276172 }]);
+    expect(observeFinishedBy(session).map((o) => o.value)).toEqual([]);
   });
 
   it("should include synchronous probes without borrowing a later same-frame quest or giver", () => {
@@ -463,7 +454,7 @@ describe("observeFinishedBy interaction correlation", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          npc: [
+          questnpc: [
             apiSample(1, 1, objectGuid(410369)),
             apiSample(3, 3.012),
           ],
@@ -483,7 +474,7 @@ describe("observeFinishedBy interaction correlation", () => {
     const session = makeSession(
       {
         UnitGUID: {
-          npc: [apiSample(1, 1, objectGuid(410369))],
+          questnpc: [apiSample(1, 1, objectGuid(410369))],
         },
       },
       [

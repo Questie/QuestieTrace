@@ -9,7 +9,10 @@
 //   - GOSSIP_SHOW: replay the last observed C_GossipInfo.GetActiveQuests() list
 //     against the current questnpc/npc (Active = in log, can be turned in here).
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → finisher
-//   - Use questnpc when it identifies a giver; npc is only a fallback, not a second giver.
+//   - Use questnpc when it identifies a finisher. npc is only a fallback for gossip, where questnpc
+//     is never set. At QUEST_COMPLETE/QUEST_TURNED_IN npc is whatever the player last interacted
+//     with (e.g. a vendor next to the finisher), so it is never used there.
+//   - Objects are only taken from questnpc.
 //
 // Custom merge: set-union per finisher type across all observations.
 
@@ -22,6 +25,9 @@ function questIdAt(lookup: InteractionLookup): number | null {
   const v = lookup("GetQuestID");
   return typeof v === "number" && v !== 0 ? v : null;
 }
+
+const GOSSIP_TOKENS = ["questnpc", "npc"] as const;
+const QUEST_DIALOG_TOKENS = ["questnpc"] as const;
 
 interface GossipQuestEntry {
   questID?: number;
@@ -59,9 +65,8 @@ function pushGuidObservations(
   t: number,
   lookup: InteractionLookup,
   observations: Observation<FinishedByFinisher>[],
+  tokens: readonly ("questnpc" | "npc")[],
 ): void {
-  const tokens = ["questnpc", "npc"] as const;
-
   for (const token of tokens) {
     const guid = lookup("UnitGUID", token);
     if (guid === AMBIGUOUS_INTERACTION) return;
@@ -76,14 +81,16 @@ function pushGuidObservations(
         value: { creatureId: parsed.id },
         confidence: "medium",
         provenance: { session: sessionLabel(session), t },
+        token,
       });
       return;
-    } else if (parsed.kind === "object" && parsed.id) {
+    } else if (parsed.kind === "object" && parsed.id && token === "questnpc") {
       observations.push({
         entityId: questID,
         value: { objectId: parsed.id },
         confidence: "low",
         provenance: { session: sessionLabel(session), t },
+        token,
       });
       return;
     }
@@ -106,7 +113,7 @@ export const observeFinishedBy: FieldObserver<FinishedByFinisher> = (session) =>
       if (Array.isArray(quests)) {
         for (const quest of quests) {
           if (typeof quest?.questID === "number" && quest.questID > 0) {
-            pushGuidObservations(session, quest.questID, ev.t, lookup, observations);
+            pushGuidObservations(session, quest.questID, ev.t, lookup, observations, GOSSIP_TOKENS);
           }
         }
       }
@@ -129,7 +136,7 @@ export const observeFinishedBy: FieldObserver<FinishedByFinisher> = (session) =>
 
     if (questID === null) continue;
 
-    pushGuidObservations(session, questID, ev.t, lookup, observations);
+    pushGuidObservations(session, questID, ev.t, lookup, observations, QUEST_DIALOG_TOKENS);
   }
 
   return observations;
