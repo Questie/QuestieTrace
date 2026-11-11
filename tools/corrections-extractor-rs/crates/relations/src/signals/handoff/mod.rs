@@ -26,7 +26,7 @@ use self::detect::{find_handoffs, EpisodeHandoffs, HandoffObservation};
 use self::tally::{HandoffTally, Pair, PairStats};
 use self::timing::TimingHistogram;
 use self::variants::{quests_in_variant_edges, variant_edges, CompletionMoments, SameNameVariants};
-use super::{Findings, Signal, SignalInput};
+use super::{to_json, Findings, Signal, SignalInput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
 use crate::model::{QuestEpisode, QuestId};
 use crate::timeline::EpisodeTimeline;
@@ -268,10 +268,6 @@ fn companion_states(
         quest: observation.offered,
     };
     (pair, states)
-}
-
-fn to_json(value: &impl Serialize) -> serde_json::Value {
-    serde_json::to_value(value).expect("handoff files hold only JSON-representable values")
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ pub mod observe;
 use self::infer::{judge_tally, BreadcrumbResult, Tally, MIN_COVERAGE_CHARACTERS};
 use self::links::{BreadcrumbParams, LinkCollector};
 use self::observe::{observe_episode, ObservationKind};
-use super::{Findings, Signal, SignalInput};
+use super::{to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_interface;
 use crate::model::{QuestCatalog, QuestEpisode, QuestId};
 use rayon::prelude::*;
@@ -74,17 +74,24 @@ impl Signal for Breadcrumbs {
 
         Findings {
             input_count: episodes.len(),
-            params: json!({
-                "autoPopSeconds": params.auto_pop_seconds,
-                "serverDropSeconds": params.server_drop_seconds,
-                "absenceLevelMargin": params.absence_level_margin,
-                "minCoverageCharacters": MIN_COVERAGE_CHARACTERS,
+            params: to_json(&FileParams {
+                tunables: &params,
+                min_coverage_characters: MIN_COVERAGE_CHARACTERS,
             }),
             covered_quest_ids: result.covered_quest_ids,
             candidates: result.candidates,
             reports: vec![("breadcrumbs-pairs", report)],
         }
     }
+}
+
+/// candidates/breadcrumbs.json `params`: the tunables and the coverage threshold.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileParams<'a> {
+    #[serde(flatten)]
+    tunables: &'a BreadcrumbParams,
+    min_coverage_characters: usize,
 }
 
 /// A judged pair in `reports/breadcrumbs-pairs.json`.
