@@ -30,8 +30,12 @@ The port keeps the observable behaviour and changes how it is computed:
 Source: a local trace-data checkout only (`--trace-data` or `TRACE_DATA_DIR`). Runs against the
 OVH bucket sync it first.
 
-Decoding allocates many small values on every thread, so the binary uses mimalloc as its global
-allocator: with the system allocator, threads contended on it and used twice the memory.
+Each worker decodes a submission into its own arena (bumpalo) and resets it once the
+submission is observed: decoded values own nothing, so a submission's tree is freed at once
+instead of value by value. A worker keeps at most 16 MB of arena between submissions, so one
+huge submission does not stay pinned for the rest of the run. Everything else (observations,
+the fold) uses mimalloc as the global allocator: with the system allocator, threads contended
+on it and used twice the memory.
 
 ## Layout
 

@@ -96,6 +96,16 @@ quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submiss
 | P12a | Trusted walking of already validated bytes (event headers; shapes of lazy entries while a lazy value decodes): an item counter, no error checks, no recursion | 26.5 / 26.8 s vs 28.5 / 27.8 s (−5%) | 4.5–4.6 GB | yes | 7be09d1 |
 | — | Noise check: the same binary on both sides gave 37.0–37.8 s, so differences under ~2% are within noise | | | | |
 | F1 | **Full archive, everything through P12a:** 9 min 6 s (F0 11 min 49 s, −23%); fold thread busy 104 s (was 121 s), finalize **6.8 s** (was 48 s); outputs identical to F0 | — | **11.0 GB** (F0 18.5 GB, −41%) | — | 0df3ac2 |
+| R3 | Re-profile (F1 binary): freeing the decoded tree is 7.7% (`drop_in_place`, 99% from the worker dropping a submission), mimalloc alloc paths ~8% more | | | | |
+| A | **Arena:** decoded values in a per-worker bumpalo arena, reset after each submission; strings borrowed, arrays/objects arena slices, lazy results arena references; `Value` owns nothing (compile-time `!needs_drop` check). Deleted map keys are marked in a side vector allocated on first delete (stays linear) | **22.6 / 22.8 s vs 26.9 / 27.2 s (−16%)**, user −21% | uncapped: 6.8–6.9 GB (+45%): a reset arena keeps its largest block, so every worker pinned the largest submission it ever saw | yes, with the cap below | e9304f1 (branch `exp/arena`) |
+| A-cap | Cap what a worker keeps between submissions (replace the arena when its kept block is larger). Per-submission arena: median 10 MB, p90 37 MB, p99 88 MB, max 165 MB. Caps 64 / 32 / 16 / 0 MB all ran 22.1–23.0 s | 16 MB: 22.1 / 22.4 s | 64: 6.2–6.6 GB; 32: 5.5–5.7 GB; **16: 4.9 GB**; 0: 5.0–5.3 GB (mimalloc's purge delay holds freed blocks anyway) | yes: 16 MB | e9304f1 |
+| A-review | Fresh reviewer on the arena commit: no bugs; a 200k-case old-vs-new differential decode was identical. Two follow-ups fixed: an array with a hole reserved its declared length twice (hostile lengths), and `Value`/`Lazy` were `Clone` (a cloned lazy value would decode into the arena again) | no change | — | fix | c7537f9 |
+| R4 | Re-profile (arena binary): 194k samples (was 248k); CBOR walking 19% (`Cursor::item`, half of it validation), UTF-8 checks of decoded strings ~5.7% (`Decoder::text` not inlined, plus `from_utf8`) | | | | |
+| T1 | Inline `Decoder::text`, the lossy repair in a cold function | 21.8 / 22.6 s vs 22.8 / 22.1 s: noise | — | **no** | — |
+| T2 | T1 plus an ASCII fast path (`from_utf8_unchecked` after `is_ascii`) | 22.4 / 21.8 s vs 21.4 / 22.1 s: no gain | — | **no** (and no `unsafe` needed) | — |
+| P12b | Validation of nested items in one loop over a stack of open containers instead of recursion (same errors, same order); new seeded differential fuzz test (lazy vs full decode) and a lazy depth-limit test, both mutation-checked | 21.9 / 21.7 s vs 22.5 / 22.0 s (−1.5%), user −2% | 5.0 GB | yes | 85ec28b |
+| P13 | Submission UTF-8: `from_utf8` (ASCII fast path) before falling back to `from_utf8_lossy` | 21.9 / 21.7 s vs 21.5 / 21.8 s: noise (user −1%) | — | **no** | — |
+| P14 | Print decoding into a pre-sized (zero-filled) buffer instead of `extend_from_slice` per chunk | 22.1 / 22.0 s vs 21.7 / 21.7 s: slower | — | **no** | — |
 
 ## Final measurements
 
