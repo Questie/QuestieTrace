@@ -139,6 +139,57 @@ describe("Encoding.EncodeExportPayload", function()
     assert.matches("depth exceeded", err)
   end)
 
+  it("should not recurse forever on a cyclic payload and report the encoding error", function()
+    local payload = { a = env.secret }
+    payload.self = payload
+    local calls = 0
+    env.C_EncodingUtil.SerializeCBOR = function(value)
+      calls = calls + 1
+      if value.a == env.secret then error("attempted to serialize a secret value") end
+      error("recursive reference")
+    end
+
+    local encoded, err = Core.EncodeExportPayload(payload)
+
+    assert.is_nil(encoded)
+    assert.matches("recursive reference", err)
+    assert.equal(2, calls)
+  end)
+
+  it("should remove nested tables the client reports as inaccessible", function()
+    local blocked = {}
+    env.canaccesstable = function(value) return value ~= blocked end
+    local payload = { a = env.secret, blocked = blocked, kept = { 1 } }
+
+    local encoded = Core.EncodeExportPayload(payload)
+
+    assert.equal("CBOR", encoded)
+    assert.is_nil(payload.blocked)
+    assert.equal(1, payload.kept[1])
+  end)
+
+  it("should return an error when the payload itself is inaccessible", function()
+    local payload = { a = env.secret }
+    env.canaccesstable = function() return false end
+
+    local encoded, err = Core.EncodeExportPayload(payload)
+
+    assert.is_nil(encoded)
+    assert.matches("not accessible", err)
+  end)
+
+  it("should return the error when removing secrets itself fails", function()
+    env.issecretvalue = function(value)
+      if value == "boom" then error("sanitizer exploded") end
+      return value == env.secret
+    end
+
+    local encoded, err = Core.EncodeExportPayload({ a = env.secret, b = "boom" })
+
+    assert.is_nil(encoded)
+    assert.matches("sanitizer exploded", err)
+  end)
+
   it("should not retry when issecretvalue is unavailable", function()
     env.issecretvalue = nil
     local payload = { a = env.secret }
