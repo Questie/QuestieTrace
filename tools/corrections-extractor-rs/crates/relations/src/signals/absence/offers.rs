@@ -5,13 +5,16 @@
 //! character's log while X was still offered cannot be what hides X while in the log, and so on.
 //! This pass also learns which givers really start X (as observed, not as the catalog claims),
 //! which quests are listed side by side, and which turn-ins hand off to which offers.
+//!
+//! Later passes only ask how many characters saw a state while X was offered, so a character's
+//! offers are tallied once all of their episodes are read (ingest lists a character's episodes
+//! together): only the characters being read keep their states.
 
 use super::params::AbsenceParams;
-use super::states::{without_catch_ups, EpisodeStates, QuestSet};
-use crate::model::{Faction, GiverRef, QuestEpisode, QuestEventKind, QuestId, SessionTime};
-use indexmap::{IndexMap, IndexSet};
+use super::states::{EpisodeStates, QuestSet};
+use crate::model::{CompletedTimeline, Faction, GiverRef, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
+use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
-use std::collections::BTreeSet;
 use std::rc::Rc;
 
 /// A character, by its pseudonymous `QuestEpisode::character_key`.
@@ -20,8 +23,6 @@ pub type Character<'a> = &'a str;
 /// What was observed while one quest was available.
 #[derive(Default)]
 pub struct QuestOffers<'a> {
-    /// Characters the quest was offered to (in any list, or accepted).
-    pub characters: FxHashSet<Character<'a>>,
     /// Lowest character level at an offer; blocked moments below it may be level gating.
     pub min_level: Option<i64>,
     pub factions: Vec<Faction>,
@@ -30,22 +31,27 @@ pub struct QuestOffers<'a> {
     /// Listed as daily/weekly/repeatable: completion does not stick, so absence says little.
     pub periodic: bool,
     /// Other quest -> characters that had it in the log at some moment this quest was offered.
-    pub in_log_when_offered: FxHashMap<QuestId, FxHashSet<Character<'a>>>,
+    pub in_log_when_offered: FxHashMap<QuestId, u32>,
     /// Other quest -> characters that had it completed at some moment this quest was offered.
-    pub completed_when_offered: FxHashMap<QuestId, FxHashSet<Character<'a>>>,
+    pub completed_when_offered: FxHashMap<QuestId, u32>,
     /// Quests completed at every giver offer of nearly every character (prerequisite suspects),
-    /// in the order the offers first showed them. Filled by build(); see
-    /// AbsenceParams::required_tolerance.
+    /// in the order the offers first showed them. See AbsenceParams::required_tolerance.
     pub required: QuestSet,
     /// Same-name quest groups (Forever's zone and race copies) of which one member was completed
     /// at nearly every offer, while no single member was: "any one of these" prerequisites.
-    /// Smallest member -> members seen completed (ascending). Filled by build().
+    /// Smallest member -> members seen completed (ascending).
     pub required_any: IndexMap<QuestId, Vec<QuestId>, FxBuildHasher>,
-    /// Per character, the earliest offer.
+    /// Per character the quest was offered to (in any list, or accepted), the earliest offer.
     pub first_offered_at: FxHashMap<Character<'a>, Moment>,
-    /// Per character, the quests completed at each of their giver offers (ascending). The input
-    /// of build(); characters in the order they were first offered the quest.
-    completed_at_each_offer: IndexMap<Character<'a>, Vec<QuestId>, FxBuildHasher>,
+    /// What `required` and `required_any` are made of once every character is tallied.
+    prerequisites: PrerequisiteTally<'a>,
+}
+
+impl QuestOffers<'_> {
+    /// Characters the quest was offered to.
+    pub fn characters(&self) -> usize {
+        self.first_offered_at.len()
+    }
 }
 
 #[derive(Default)]
@@ -121,34 +127,74 @@ impl Moment {
     }
 }
 
+/// Pass 1 over `episodes` (in file order: insertion orders follow it).
+pub fn index_offers<'a>(episodes: &[&'a QuestEpisode], catalog: &'a QuestCatalog, params: AbsenceParams) -> OfferIndex<'a> {
+    let last_episode_of: FxHashMap<Character, usize> = episodes.iter().enumerate().map(|(i, episode)| (episode.character_key.as_str(), i)).collect();
+    let mut builder = OfferIndexBuilder {
+        params,
+        shared_names: shared_names(catalog),
+        index: OfferIndex::default(),
+        reading: FxHashMap::default(),
+        batch_mates: FxHashMap::default(),
+        batch_counts: FxHashMap::default(),
+    };
+    for (i, &episode) in episodes.iter().enumerate() {
+        builder.add(episode);
+        // Any episode order gives the same index; with ingest's (a character's episodes together)
+        // only one character is being read at a time.
+        if last_episode_of[episode.character_key.as_str()] == i {
+            builder.tally_character(&episode.character_key);
+        }
+    }
+    builder.build()
+}
+
+/// The names of catalog quests that share their name with another one: Forever's zone and race
+/// copies. Only these can form a same-name group of two or more.
+fn shared_names(catalog: &QuestCatalog) -> FxHashMap<QuestId, &str> {
+    let mut quests_named: FxHashMap<&str, usize> = FxHashMap::default();
+    for name in catalog.quests.values().filter_map(|quest| quest.name.as_deref()) {
+        *quests_named.entry(name).or_default() += 1;
+    }
+    catalog
+        .quests
+        .iter()
+        .filter_map(|(&id, quest)| quest.name.as_deref().filter(|name| quests_named[name] >= 2).map(|name| (id, name)))
+        .collect()
+}
+
 struct OfferMoment {
     t: SessionTime,
     /// Reached through a known giver. Giverless details are party shares and pushed quests.
     from_giver: bool,
 }
 
-pub struct OfferIndexBuilder<'a> {
+/// What one character's episodes read so far showed about one quest offered to them.
+struct CharacterOffers {
+    first_offered_at: Moment,
+    in_log: FxHashSet<QuestId>,
+    completed: FxHashSet<QuestId>,
+    /// The character's rank among those offered the quest by a giver, and the quests completed
+    /// at each of those offers (ascending).
+    completed_at_each_giver_offer: Option<(u32, Vec<QuestId>)>,
+}
+
+struct OfferIndexBuilder<'a> {
     params: AbsenceParams,
+    /// Groups same-name copies for `required_any`.
+    shared_names: FxHashMap<QuestId, &'a str>,
     index: OfferIndex<'a>,
+    /// Per character whose episodes are being read, per quest offered to them.
+    reading: FxHashMap<Character<'a>, FxHashMap<QuestId, CharacterOffers>>,
     /// Quest -> quests in every completed-set batch it arrived in, and how many batches that was.
     batch_mates: FxHashMap<QuestId, FxHashSet<QuestId>>,
     batch_counts: FxHashMap<QuestId, usize>,
 }
 
 impl<'a> OfferIndexBuilder<'a> {
-    pub fn new(params: AbsenceParams) -> Self {
-        OfferIndexBuilder {
-            params,
-            index: OfferIndex::default(),
-            batch_mates: FxHashMap::default(),
-            batch_counts: FxHashMap::default(),
-        }
-    }
-
-    pub fn add(&mut self, episode: &'a QuestEpisode) {
+    fn add(&mut self, episode: &'a QuestEpisode) {
         self.index.episodes += 1;
-        let caught_up = without_catch_ups(episode, self.params.catch_up_batch);
-        let mut states = EpisodeStates::new(&caught_up, self.params.state_slack);
+        let mut states = EpisodeStates::new(episode, &self.params);
         let mut moments: IndexMap<QuestId, Vec<OfferMoment>, FxBuildHasher> = IndexMap::default();
 
         for snapshot in &episode.offers {
@@ -181,7 +227,9 @@ impl<'a> OfferIndexBuilder<'a> {
             self.record_offers(episode, &mut states, quest_id, list);
         }
         self.record_handoffs(episode);
-        self.record_batches(&caught_up);
+        if let Some(completed) = &states.completed_history {
+            self.record_batches(completed);
+        }
     }
 
     fn note(&mut self, moments: &mut IndexMap<QuestId, Vec<OfferMoment>, FxBuildHasher>, quest_id: QuestId, t: SessionTime, giver: Option<GiverRef>) {
@@ -194,38 +242,8 @@ impl<'a> OfferIndexBuilder<'a> {
         }
     }
 
-    /// `name_of` groups same-name copies for `required_any`.
-    pub fn build<'c>(self, name_of: impl Fn(QuestId) -> Option<&'c str>) -> OfferIndex<'a> {
-        let OfferIndexBuilder {
-            params,
-            mut index,
-            batch_mates,
-            batch_counts,
-        } = self;
-        for (&quest_id, mates) in &batch_mates {
-            let mut bundle: Vec<QuestId> = mates
-                .iter()
-                .copied()
-                .filter(|mate| {
-                    batch_mates.get(mate).is_some_and(|theirs| theirs.contains(&quest_id))
-                        && batch_counts.get(mate).is_some_and(|&count| count >= params.min_bundle_batches)
-                })
-                .collect();
-            if (2..=params.max_bundle).contains(&bundle.len()) {
-                bundle.sort_unstable();
-                index.bundles.insert(quest_id, bundle);
-            }
-        }
-        for (&quest_id, offers) in &mut index.quests {
-            offers.find_prerequisites(quest_id, &name_of, params.required_tolerance);
-        }
-        index
-    }
-
     fn record_offers(&mut self, episode: &'a QuestEpisode, states: &mut EpisodeStates, quest_id: QuestId, mut moments: Vec<OfferMoment>) {
         let offers = self.index.quests.entry(quest_id).or_default();
-        let character = episode.character_key.as_str();
-        offers.characters.insert(character);
         let player = &episode.player;
         if let Some(faction) = player.faction.filter(|faction| !offers.factions.contains(faction)) {
             offers.factions.push(faction);
@@ -235,19 +253,26 @@ impl<'a> OfferIndexBuilder<'a> {
 
         moments.sort_by(|a, b| a.t.total_cmp(&b.t));
         let first = Moment::of(episode, moments[0].t);
-        if offers.first_offered_at.get(character).is_none_or(|&known| first.is_earlier(known)) {
-            offers.first_offered_at.insert(character, first);
+        let seen = self
+            .reading
+            .entry(episode.character_key.as_str())
+            .or_default()
+            .entry(quest_id)
+            .or_insert_with(|| CharacterOffers {
+                first_offered_at: first,
+                in_log: FxHashSet::default(),
+                completed: FxHashSet::default(),
+                completed_at_each_giver_offer: None,
+            });
+        if first.is_earlier(seen.first_offered_at) {
+            seen.first_offered_at = first;
         }
 
         for moment in &moments {
             if let Some(level) = states.timeline.level_at(moment.t) {
                 offers.min_level = Some(offers.min_level.map_or(level, |min| min.min(level)));
             }
-            for &other in &states.log(moment.t) {
-                if other != quest_id {
-                    offers.in_log_when_offered.entry(other).or_default().insert(character);
-                }
-            }
+            seen.in_log.extend(states.log(moment.t).into_iter().filter(|&other| other != quest_id));
         }
 
         // Completions only grow within a session (daily resets aside), so the first and last
@@ -257,15 +282,9 @@ impl<'a> OfferIndexBuilder<'a> {
         }
         let at_first = states.completed(moments[0].t);
         let at_last = states.completed(moments[moments.len() - 1].t);
-        let both = if Rc::ptr_eq(&at_first, &at_last) {
-            vec![&at_last]
-        } else {
-            vec![&at_last, &at_first]
-        };
-        for &other in both.into_iter().flat_map(|set| set.iter()) {
-            if other != quest_id {
-                offers.completed_when_offered.entry(other).or_default().insert(character);
-            }
+        seen.completed.extend(at_last.iter().copied().filter(|&other| other != quest_id));
+        if !Rc::ptr_eq(&at_first, &at_last) {
+            seen.completed.extend(at_first.iter().copied().filter(|&other| other != quest_id));
         }
 
         // Prerequisites only from giver offers: shared and pushed quests skip the giver's checks.
@@ -280,14 +299,66 @@ impl<'a> OfferIndexBuilder<'a> {
             .filter(|&other| other != quest_id && at_last_giver.contains(&other))
             .collect();
         completed.sort_unstable();
-        if let Some(earlier) = offers.completed_at_each_offer.get(character) {
-            completed = intersect_sorted(earlier, &completed);
+        match &mut seen.completed_at_each_giver_offer {
+            Some((_, earlier)) => *earlier = intersect_sorted(earlier, &completed),
+            None => seen.completed_at_each_giver_offer = Some((offers.prerequisites.rank_next(), completed)),
         }
-        offers.completed_at_each_offer.insert(character, completed);
     }
 
-    fn record_batches(&mut self, episode: &QuestEpisode) {
-        for change in episode.completed.iter().flat_map(|completed| &completed.changes) {
+    /// Adds a character whose episodes have all been read to the counts of every quest offered to them.
+    fn tally_character(&mut self, character: &str) {
+        let Some((character, quests)) = self.reading.remove_entry(character) else {
+            return;
+        };
+        for (quest_id, seen) in quests {
+            let offers = &mut self.index.quests[&quest_id];
+            offers.first_offered_at.insert(character, seen.first_offered_at);
+            for other in seen.in_log {
+                *offers.in_log_when_offered.entry(other).or_default() += 1;
+            }
+            for other in seen.completed {
+                *offers.completed_when_offered.entry(other).or_default() += 1;
+            }
+            if let Some((rank, completed)) = seen.completed_at_each_giver_offer {
+                offers
+                    .prerequisites
+                    .add(rank, &completed, self.shared_names.get(&quest_id).copied(), &self.shared_names);
+            }
+        }
+    }
+
+    fn build(self) -> OfferIndex<'a> {
+        let OfferIndexBuilder {
+            params,
+            mut index,
+            reading,
+            batch_mates,
+            batch_counts,
+            ..
+        } = self;
+        debug_assert!(reading.is_empty(), "every character is tallied after their last episode");
+        for (&quest_id, mates) in &batch_mates {
+            let mut bundle: Vec<QuestId> = mates
+                .iter()
+                .copied()
+                .filter(|mate| {
+                    batch_mates.get(mate).is_some_and(|theirs| theirs.contains(&quest_id))
+                        && batch_counts.get(mate).is_some_and(|&count| count >= params.min_bundle_batches)
+                })
+                .collect();
+            if (2..=params.max_bundle).contains(&bundle.len()) {
+                bundle.sort_unstable();
+                index.bundles.insert(quest_id, bundle);
+            }
+        }
+        for offers in index.quests.values_mut() {
+            (offers.required, offers.required_any) = std::mem::take(&mut offers.prerequisites).prerequisites(params.required_tolerance);
+        }
+        index
+    }
+
+    fn record_batches(&mut self, completed: &CompletedTimeline) {
+        for change in &completed.changes {
             let batch = change.add.as_deref().unwrap_or_default();
             for &quest_id in batch {
                 *self.batch_counts.entry(quest_id).or_default() += 1;
@@ -324,37 +395,104 @@ impl<'a> OfferIndexBuilder<'a> {
     }
 }
 
-impl QuestOffers<'_> {
-    /// Fills `required` and `required_any` from `completed_at_each_offer`.
-    fn find_prerequisites<'c>(&mut self, quest_id: QuestId, name_of: impl Fn(QuestId) -> Option<&'c str>, tolerance: f64) {
-        let characters = self.completed_at_each_offer.len();
-        let enough = characters - (characters as f64 * tolerance).floor() as usize;
-        let own_name = name_of(quest_id);
-        let mut counts: IndexMap<QuestId, usize, FxBuildHasher> = IndexMap::default();
-        let mut group_counts: IndexMap<&str, usize, FxBuildHasher> = IndexMap::default();
-        let mut group_members: FxHashMap<&str, BTreeSet<QuestId>> = FxHashMap::default();
-        for completed in self.completed_at_each_offer.values() {
-            let mut groups_here: IndexSet<&str, FxBuildHasher> = IndexSet::default();
-            for &other in completed {
-                *counts.entry(other).or_default() += 1;
-                let Some(name) = name_of(other).filter(|&name| Some(name) != own_name) else {
-                    continue;
-                };
-                groups_here.insert(name);
-                group_members.entry(name).or_default().insert(other);
-            }
-            for name in groups_here {
-                *group_counts.entry(name).or_default() += 1;
-            }
+/// For one quest: per other quest, how many characters had it completed at every giver offer of
+/// this quest, and the same for same-name groups of other quests.
+///
+/// The TypeScript pipeline lists `required` and `required_any` in the order it meets them when
+/// it walks the characters in the order they were first offered the quest by a giver, each
+/// character's quests ascending. Characters are tallied when their episodes are all read, so
+/// each one carries that rank, and every count keeps the smallest (rank, quest) it was met at.
+#[derive(Default)]
+struct PrerequisiteTally<'a> {
+    /// Characters ranked so far: offered the quest by a giver, with a completed history.
+    characters: u32,
+    completed: FxHashMap<QuestId, Count>,
+    groups: FxHashMap<&'a str, GroupCount>,
+}
+
+/// Characters counted, and the best (smallest) rank among them.
+#[derive(Clone, Copy, Default)]
+struct Count {
+    characters: u32,
+    first_rank: u32,
+}
+
+impl Count {
+    /// Counts a character; true when its rank is the best so far.
+    fn add(&mut self, rank: u32) -> bool {
+        let first = self.characters == 0 || rank < self.first_rank;
+        if first {
+            self.first_rank = rank;
         }
-        self.required = counts.into_iter().filter(|&(_, count)| count >= enough).map(|(other, _)| other).collect();
-        for (name, count) in group_counts {
-            let members: Vec<QuestId> = group_members[name].iter().copied().collect();
-            if members.len() < 2 || count < enough || members.iter().any(|member| self.required.contains(member)) {
+        self.characters += 1;
+        first
+    }
+}
+
+/// Characters that had any member of a same-name group completed, and the members seen.
+#[derive(Default)]
+struct GroupCount {
+    count: Count,
+    /// The smallest member the best-ranked character had: the group's place in the list.
+    first_member: QuestId,
+    members: Vec<QuestId>,
+}
+
+impl<'a> PrerequisiteTally<'a> {
+    /// The rank of a character first offered the quest by a giver now.
+    fn rank_next(&mut self) -> u32 {
+        self.characters += 1;
+        self.characters - 1
+    }
+
+    /// One character's quests completed at each giver offer (ascending). `shared_names` holds
+    /// the quests whose name another catalog quest has: only those can form a group.
+    fn add(&mut self, rank: u32, completed: &[QuestId], own_name: Option<&str>, shared_names: &FxHashMap<QuestId, &'a str>) {
+        let mut groups_here: FxHashSet<&str> = FxHashSet::default();
+        for &other in completed {
+            self.completed.entry(other).or_default().add(rank);
+            let Some(&name) = shared_names.get(&other).filter(|&&name| Some(name) != own_name) else {
                 continue;
+            };
+            let group = self.groups.entry(name).or_default();
+            if !group.members.contains(&other) {
+                group.members.push(other);
             }
-            self.required_any.insert(members[0], members);
+            // Ascending: the first member met is the group's smallest for this character.
+            if groups_here.insert(name) && group.count.add(rank) {
+                group.first_member = other;
+            }
         }
+    }
+
+    fn prerequisites(self, tolerance: f64) -> (QuestSet, IndexMap<QuestId, Vec<QuestId>, FxBuildHasher>) {
+        let characters = self.characters;
+        let enough = characters - (f64::from(characters) * tolerance).floor() as u32;
+        let mut required: Vec<(u32, QuestId)> = self
+            .completed
+            .into_iter()
+            .filter(|(_, count)| count.characters >= enough)
+            .map(|(quest_id, count)| (count.first_rank, quest_id))
+            .collect();
+        required.sort_unstable();
+        let required: QuestSet = required.into_iter().map(|(_, quest_id)| quest_id).collect();
+
+        let mut groups: Vec<GroupCount> = self
+            .groups
+            .into_values()
+            .filter(|group| group.count.characters >= enough && group.members.len() >= 2)
+            .collect();
+        groups.sort_unstable_by_key(|group| (group.count.first_rank, group.first_member));
+        let required_any = groups
+            .into_iter()
+            .map(|mut group| {
+                group.members.sort_unstable();
+                group.members
+            })
+            .filter(|members| !members.iter().any(|member| required.contains(member)))
+            .map(|members| (members[0], members))
+            .collect();
+        (required, required_any)
     }
 }
 
@@ -373,4 +511,40 @@ fn intersect_sorted(a: &[QuestId], b: &[QuestId]) -> Vec<QuestId> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::CompletedSource;
+    use crate::test_support::{catalog, catalog_quest, gossip, make_episode, npc};
+
+    #[test]
+    fn lists_required_quests_as_the_first_offered_character_shows_them_even_when_tallied_last() {
+        // Ten characters are offered X by its giver. The first one offered it had only 30 done, the
+        // nine others 20 and 30: with 10% tolerance both are required. The TypeScript lists them as
+        // it meets them walking the characters in offer order: 30, then 20. The first character has
+        // a later episode too, so they are tallied last.
+        const X: QuestId = 100;
+        let offered = |character: &str, done: &[QuestId], session_order: u32| QuestEpisode {
+            character_key: character.into(),
+            session_order,
+            completed: Some(CompletedTimeline {
+                source: CompletedSource::Modern,
+                initial: done.to_vec(),
+                changes: vec![],
+            }),
+            offers: vec![gossip(5.0, npc(1), &[X], &[])],
+            ..make_episode()
+        };
+        let mut episodes = vec![offered("first", &[30], 0)];
+        episodes.extend((0..9).map(|i| offered(&format!("other-{i}"), &[20, 30], 0)));
+        episodes.push(offered("first", &[30], 1));
+        let catalog = catalog([catalog_quest(X)]);
+
+        let index = index_offers(&episodes.iter().collect::<Vec<_>>(), &catalog, AbsenceParams::default());
+
+        assert_eq!(index.quests[&X].required.iter().copied().collect::<Vec<_>>(), [30, 20]);
+        assert_eq!(index.quests[&X].characters(), 10);
+    }
 }

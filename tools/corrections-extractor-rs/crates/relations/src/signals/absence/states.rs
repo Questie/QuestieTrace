@@ -14,32 +14,23 @@
 //! order): that order is the order of a blocked moment's suspects, and through them of the
 //! floating-point sums over suspects and of the order in which explanations are first named.
 
+use super::params::AbsenceParams;
 use crate::model::{CompletedChange, CompletedTimeline, QuestEpisode, QuestEvent, QuestEventKind, QuestId, SessionTime};
 use crate::timeline::EpisodeTimeline;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use std::borrow::Cow;
-use std::ops::Deref;
 use std::rc::Rc;
 
 /// Quest ids in insertion order.
 pub type QuestSet = IndexSet<QuestId, FxBuildHasher>;
 
-/// An episode with its catch-up deltas folded into the initial completed set: what
-/// [`EpisodeStates`] reads. Made by [`without_catch_ups`].
-pub struct CaughtUp<'e>(Cow<'e, QuestEpisode>);
-
-impl Deref for CaughtUp<'_> {
-    type Target = QuestEpisode;
-
-    fn deref(&self) -> &QuestEpisode {
-        &self.0
-    }
-}
-
 pub struct EpisodeStates<'e> {
-    /// The episode with catch-up deltas folded into the initial completed set.
+    /// The episode as recorded; its own `completed` still has the catch-up reads.
     pub episode: &'e QuestEpisode,
+    /// The completed history with catch-up deltas folded into the initial set ([`without_catch_ups`]).
+    pub completed_history: Option<Cow<'e, CompletedTimeline>>,
+    /// Reads `completed_history`.
     pub timeline: EpisodeTimeline<'e>,
     slack: f64,
     /// Quest events sorted by time (stable).
@@ -55,17 +46,20 @@ pub struct EpisodeStates<'e> {
 }
 
 impl<'e> EpisodeStates<'e> {
-    pub fn new(episode: &'e CaughtUp<'_>, slack: f64) -> Self {
-        let episode: &'e QuestEpisode = episode;
+    pub fn new(episode: &'e QuestEpisode, params: &AbsenceParams) -> Self {
+        let completed_history = episode
+            .completed
+            .as_ref()
+            .map(|completed| without_catch_ups(completed, &episode.quest_events, params.catch_up_batch));
         let mut events: Vec<&QuestEvent> = episode.quest_events.iter().collect();
         events.sort_by(|a, b| a.t.total_cmp(&b.t));
-        let changes = || episode.completed.iter().flat_map(|completed| &completed.changes);
+        let changes = || completed_history.iter().flat_map(|completed| &completed.changes);
         let turn_ins = || episode.quest_events.iter().filter(|event| event.kind == QuestEventKind::TurnedIn);
 
         let mut completion_change_times: Vec<f64> = changes().map(|change| change.t).chain(turn_ins().map(|event| event.t)).collect();
         completion_change_times.sort_by(f64::total_cmp);
 
-        let mut completable: QuestSet = episode.completed.iter().flat_map(|completed| completed.initial.iter().copied()).collect();
+        let mut completable: QuestSet = completed_history.iter().flat_map(|completed| completed.initial.iter().copied()).collect();
         for change in changes() {
             completable.extend(change.add.iter().flatten().copied());
             completable.extend(change.remove.iter().flatten().copied());
@@ -74,8 +68,9 @@ impl<'e> EpisodeStates<'e> {
 
         EpisodeStates {
             episode,
-            timeline: EpisodeTimeline::new(episode, true),
-            slack,
+            timeline: EpisodeTimeline::with_completed(episode, completed_history.as_deref(), true),
+            completed_history,
+            slack: params.state_slack,
             event_times: events.iter().map(|event| event.t).collect(),
             events,
             completion_change_times,
@@ -182,12 +177,12 @@ impl<'e> EpisodeStates<'e> {
 
 /// Moves the quests of catch-up deltas (more than `limit` additions) into the initial completed
 /// set, except quests with their own events this session, whose completion time the events tell.
-pub fn without_catch_ups(episode: &QuestEpisode, limit: usize) -> CaughtUp<'_> {
+pub fn without_catch_ups<'e>(completed: &'e CompletedTimeline, quest_events: &[QuestEvent], limit: usize) -> Cow<'e, CompletedTimeline> {
     let is_catch_up = |change: &CompletedChange| change.add.as_ref().is_some_and(|add| add.len() > limit);
-    let Some(completed) = episode.completed.as_ref().filter(|completed| completed.changes.iter().any(is_catch_up)) else {
-        return CaughtUp(Cow::Borrowed(episode));
-    };
-    let active: FxHashSet<QuestId> = episode.quest_events.iter().map(|event| event.quest_id).collect();
+    if !completed.changes.iter().any(is_catch_up) {
+        return Cow::Borrowed(completed);
+    }
+    let active: FxHashSet<QuestId> = quest_events.iter().map(|event| event.quest_id).collect();
     let mut initial: QuestSet = completed.initial.iter().copied().collect();
     let mut changes = Vec::with_capacity(completed.changes.len());
     for change in &completed.changes {
@@ -205,15 +200,11 @@ pub fn without_catch_ups(episode: &QuestEpisode, limit: usize) -> CaughtUp<'_> {
             _ => changes.push(change.clone()),
         }
     }
-    let completed = CompletedTimeline {
+    Cow::Owned(CompletedTimeline {
         source: completed.source,
         initial: initial.into_iter().collect(),
         changes,
-    };
-    CaughtUp(Cow::Owned(QuestEpisode {
-        completed: Some(completed),
-        ..episode.clone()
-    }))
+    })
 }
 
 /// Number of entries `<= t` in an ascending slice.
@@ -265,8 +256,7 @@ mod tests {
     #[test]
     fn counts_completions_the_delayed_delta_reports_within_the_slack_except_later_turn_ins() {
         let episode = episode();
-        let caught_up = without_catch_ups(&episode, 60);
-        let mut states = EpisodeStates::new(&caught_up, 2.0);
+        let mut states = EpisodeStates::new(&episode, &AbsenceParams::default());
         assert!(states.is_completed(12, 50.1));
         assert!(states.is_completed(11, 50.1));
         // Read just before the turn-in: 11 is still in progress even though the delta follows soon.
@@ -282,8 +272,7 @@ mod tests {
             quest_events: vec![event(399.0, QuestEventKind::TurnedIn, 77, Some(npc(5)))],
             ..make_episode()
         };
-        let caught_up = without_catch_ups(&catch_up, 60);
-        let mut states = EpisodeStates::new(&caught_up, 2.0);
+        let mut states = EpisodeStates::new(&catch_up, &AbsenceParams::default());
         assert!(states.is_completed(1000, 5.0));
         assert!(!states.is_completed(77, 5.0));
         assert!(states.is_completed(77, 399.0));
@@ -292,8 +281,7 @@ mod tests {
     #[test]
     fn patches_the_sampled_log_with_accepts_and_removals_the_sample_has_not_caught_up_with() {
         let episode = episode();
-        let caught_up = without_catch_ups(&episode, 60);
-        let states = EpisodeStates::new(&caught_up, 2.0);
+        let states = EpisodeStates::new(&episode, &AbsenceParams::default());
         assert!(states.in_log(21, 30.2));
         assert!(states.log(30.2).contains(&21));
         assert!(!states.in_log(21, 29.0));
@@ -311,8 +299,7 @@ mod tests {
             quest_events: vec![event(20.0, QuestEventKind::TurnedIn, 2, Some(npc(5)))],
             ..make_episode()
         };
-        let caught_up = without_catch_ups(&episode, 60);
-        let mut states = EpisodeStates::new(&caught_up, 2.0);
+        let mut states = EpisodeStates::new(&episode, &AbsenceParams::default());
         assert_eq!(states.completed(30.0).iter().copied().collect::<Vec<_>>(), [5, 1, 9, 3, 2]);
     }
 }

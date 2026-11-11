@@ -232,8 +232,8 @@ fn edges_for<'a>(
     if in_log.is_none() && completed.is_none() {
         return edges;
     }
-    let log_contradict = offers.in_log_when_offered.get(&target).map_or(0, FxHashSet::len);
-    let completed_contradict = offers.completed_when_offered.get(&target).map_or(0, FxHashSet::len);
+    let log_contradict = offers.in_log_when_offered.get(&target).map_or(0, |&characters| characters as usize);
+    let completed_contradict = offers.completed_when_offered.get(&target).map_or(0, |&characters| characters as usize);
     let log_blocks = log_contradict <= params.max_contradictions;
     let completed_blocks = completed_contradict <= params.max_contradictions;
     let observed = match (in_log.is_some(), completed.is_some()) {
@@ -279,7 +279,7 @@ fn edges_for<'a>(
         };
         // Share of X's offered characters that had already completed Y: high means Y usually comes
         // first, so "Y in log" is more likely a stand-in for an unfinished prerequisite chain.
-        let precedes = completed_contradict as f64 / offers.characters.len().max(1) as f64;
+        let precedes = completed_contradict as f64 / offers.characters().max(1) as f64;
         let note = format!("blocked by log only; precedes {}", to_fixed(precedes, 2));
         edges.push(edge(field, target, group, in_log.clone(), log_contradict, note));
     } else if let Some(completed) = completed.filter(|_| completed_blocks) {
