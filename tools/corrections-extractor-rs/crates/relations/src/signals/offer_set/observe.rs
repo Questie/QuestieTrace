@@ -112,12 +112,7 @@ pub struct ObserveStats {
 /// Quests that can be prerequisite candidates: known to the catalog and not repeatable
 /// (completion of a repeatable quest is reset).
 pub fn prerequisite_candidates(catalog: &QuestCatalog) -> FxHashSet<QuestId> {
-    catalog
-        .quests
-        .values()
-        .filter(|quest| quest.special_flags.unwrap_or(0) & 1 == 0)
-        .map(|quest| quest.id)
-        .collect()
+    catalog.quests.values().filter(|quest| !quest.is_repeatable()).map(|quest| quest.id).collect()
 }
 
 enum Usability {
