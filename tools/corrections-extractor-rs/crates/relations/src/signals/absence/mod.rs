@@ -173,18 +173,6 @@ fn count_by<'c, K: std::hash::Hash + Eq>(
     counts
 }
 
-/// JS `x.toFixed(digits)` for finite numbers below 1e21. Evidence and notes print times, shares
-/// and rates this way, and those strings are compared with the TypeScript output: Rust rounds an
-/// exact tie to even ("0.12" for 0.125), JS away from zero ("0.13"). With `digits` decimals the
-/// exact ties are the odd multiples of 2^-(digits + 1). JS prints -0 as "0".
-fn to_fixed(x: f64, digits: usize) -> String {
-    let x = x + 0.0;
-    let scaled = x.abs() * f64::from(1u32 << (digits + 1));
-    let tie = scaled.fract() == 0.0 && scaled % 2.0 == 1.0;
-    let away_from_zero = if x > 0.0 { x.next_up() } else { x.next_down() };
-    format!("{:.digits$}", if tie { away_from_zero } else { x })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -745,19 +733,5 @@ mod tests {
                 assert!(edge(result, X, ExclusiveTo, Y).is_none());
             });
         }
-    }
-
-    #[test]
-    fn to_fixed_rounds_exact_ties_away_from_zero_like_js() {
-        // Expected values printed by node: (x).toFixed(d).
-        assert_eq!(to_fixed(0.125, 2), "0.13");
-        assert_eq!(to_fixed(0.625, 2), "0.63");
-        assert_eq!(to_fixed(12.25, 1), "12.3");
-        assert_eq!(to_fixed(12.5, 0), "13");
-        assert_eq!(to_fixed(2.5, 0), "3");
-        // Not ties: the doubles nearest 1.005 and 886.15 lie just below them, so they round down.
-        assert_eq!(to_fixed(1.005, 2), "1.00");
-        assert_eq!(to_fixed(886.15, 1), "886.1");
-        assert_eq!(to_fixed(86.5533093999984, 1), "86.6");
     }
 }

@@ -12,7 +12,7 @@ use super::locality::Locality;
 use super::offers::{Character, Moment, OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
 use super::states::{without_catch_ups, EpisodeStates, QuestSet};
-use super::to_fixed;
+use crate::text::to_fixed;
 use crate::eligibility::{has_untracked_requirements, is_statically_eligible};
 use crate::model::{CatalogQuest, GiverKind, GiverRef, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
 use crate::timeline::Completion;

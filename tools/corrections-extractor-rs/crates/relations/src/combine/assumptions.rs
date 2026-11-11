@@ -8,7 +8,7 @@
 //! relations-review.md has the full evidence for every relation.
 
 use super::edges::{Claim, EdgeKind};
-use super::fixed;
+use crate::text::to_fixed;
 use super::resolve::Outcome;
 use super::views::{EdgeView, QuestView};
 use crate::model::{QuestId, RelationField};
@@ -84,7 +84,7 @@ fn characters(support: u32) -> String {
 }
 
 fn reason(edge: &EdgeView, quest_id: QuestId, other: &str) -> String {
-    let score = format!("score {}", fixed(edge.probability, 3));
+    let score = format!("score {}", to_fixed(edge.probability, 3));
     if edge.outcome == Outcome::Derived {
         return format!("implied by its breadcrumb to {other}, {score}");
     }
