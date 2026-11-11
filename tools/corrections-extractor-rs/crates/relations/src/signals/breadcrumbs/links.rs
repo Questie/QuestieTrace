@@ -170,7 +170,7 @@ impl<'p> LinkCollector<'p> {
             {
                 collector.finished_at.entry(quest.id).or_default().insert(giver);
             }
-            if quest.special_flags.unwrap_or(0) & 1 != 0 {
+            if quest.is_repeatable() {
                 collector.repeatable.insert(quest.id);
             }
         }

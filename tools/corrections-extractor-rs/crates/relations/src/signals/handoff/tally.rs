@@ -2,7 +2,7 @@
 //! contributes at most once to each count of a pair, however many sessions or repeats it has.
 
 use super::counter::{CounterKind, CounterObservation};
-use super::detect::{giver_label, HandoffKind, HandoffObservation};
+use super::detect::{HandoffKind, HandoffObservation};
 use crate::model::{Evidence, QuestEpisode, QuestId};
 use crate::text::to_fixed;
 use indexmap::IndexMap;
@@ -194,7 +194,7 @@ fn describe_handoff(observation: &HandoffObservation) -> String {
         offered_at,
         ..
     } = observation;
-    let giver = giver_label(*giver);
+    let giver = giver.label();
     let delay = to_fixed(offered_at - turn_in_at, 1);
     let base = match observation.kind {
         HandoffKind::Pop => format!("turned in {turned_in} at {giver}, its accept dialog for {offered} opened {delay}s later"),
@@ -211,7 +211,7 @@ fn describe_handoff(observation: &HandoffObservation) -> String {
 }
 
 fn describe_counter(observation: &CounterObservation) -> String {
-    let place = observation.giver.map(|giver| format!(" by {}", giver_label(giver))).unwrap_or_default();
+    let place = observation.giver.map(|giver| format!(" by {}", giver.label())).unwrap_or_default();
     let state = match observation.kind {
         CounterKind::InLog => "in the log, not completed",
         CounterKind::NotStarted | CounterKind::Alternative => "not started",
