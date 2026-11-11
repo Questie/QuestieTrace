@@ -74,11 +74,13 @@ pub fn read_episodes(path: &Path) -> Result<Vec<QuestEpisode>> {
 
 /// Every candidates/*.json file, sorted by signal name.
 pub fn read_candidate_files(dir: &Path) -> Result<Vec<CandidateFile>> {
-    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
-        .with_context(|| format!("{} is missing: run the signals first", dir.display()))?
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .collect();
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("{} is missing: run the signals first", dir.display()))? {
+        let path = entry.with_context(|| format!("listing {}", dir.display()))?.path();
+        if path.extension().is_some_and(|ext| ext == "json") {
+            paths.push(path);
+        }
+    }
     // By signal name (the file stem), not by path: "wowhead-requires" sorts before
     // "wowhead-requires-any", as the TS pipeline orders them.
     paths.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
