@@ -2,6 +2,7 @@
 //! the hand-off windows from data rather than by guess.
 
 use super::detect::{HandoffParams, TurnIn};
+use crate::text::round_to;
 use indexmap::IndexMap;
 use serde::Serialize;
 
@@ -76,8 +77,7 @@ fn describe(values: &[f64]) -> Distribution {
     let quantile = |q: f64| {
         let last = sorted.len().checked_sub(1)?;
         let value = sorted[((q * sorted.len() as f64).floor() as usize).min(last)];
-        // Rounded to milliseconds through the decimal text, like the TS `Number(x.toFixed(3))`.
-        Some(format!("{value:.3}").parse::<f64>().expect("a fixed-point number parses"))
+        Some(round_to(value, 3))
     };
     let mut bins = IndexMap::new();
     let mut lower = 0.0;
