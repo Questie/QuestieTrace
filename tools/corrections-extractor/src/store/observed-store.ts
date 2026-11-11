@@ -27,7 +27,7 @@ import type { Confidence, Observation } from "../extract/observation";
 import { SKIPPED_LOCALE } from "../extract/observe-lookups";
 import type { ObservedSubmission } from "../observe-submission";
 
-const FORMAT_VERSION = 4;
+const FORMAT_VERSION = 5;
 
 export interface ManifestEntry {
   batch: number;
@@ -97,9 +97,9 @@ function appendNullable(appender: DuckDBAppender, value: string | number | null 
   } else appender.appendVarchar(value);
 }
 
-/** What an observation holds beyond its columns (e.g. the spawn observers' `token`), as JSON; null when nothing. */
+/** What an observation holds beyond its columns as JSON; null when nothing. */
 function extraOf(observation: Observation<unknown>): string | null {
-  const { entityId: _entityId, value: _value, confidence: _confidence, provenance, ...rest } = observation;
+  const { entityId: _entityId, value: _value, confidence: _confidence, token: _token, provenance, ...rest } = observation;
   const { session: _session, t: _t, ...provenanceRest } = provenance;
   const hasRest = Object.keys(rest).length > 0;
   const hasProvenanceRest = Object.keys(provenanceRest).length > 0;
@@ -190,7 +190,7 @@ export class ObservedStore {
     const batch = this.manifest.nextBatch;
     const c = this.connection;
     await c.run(`CREATE OR REPLACE TEMP TABLE sessions (submission VARCHAR, batch INTEGER, idx INTEGER, session_key VARCHAR, duplicate BOOLEAN, contributor VARCHAR, session_time DOUBLE, interface_version INTEGER, build INTEGER, locale VARCHAR, has_extract BOOLEAN, has_lookup BOOLEAN, error VARCHAR)`);
-    await c.run(`CREATE OR REPLACE TEMP TABLE observations (submission VARCHAR, batch INTEGER, idx INTEGER, kind VARCHAR, pos SMALLINT, field VARCHAR, seq INTEGER, entity INTEGER, locale VARCHAR, confidence VARCHAR, t DOUBLE, value VARCHAR, extra VARCHAR)`);
+    await c.run(`CREATE OR REPLACE TEMP TABLE observations (submission VARCHAR, batch INTEGER, idx INTEGER, kind VARCHAR, pos SMALLINT, field VARCHAR, seq INTEGER, entity INTEGER, locale VARCHAR, confidence VARCHAR, t DOUBLE, value VARCHAR, token VARCHAR, extra VARCHAR)`);
     const sessions = await c.createAppender("sessions");
     try {
       const observations = await c.createAppender("observations");
@@ -213,6 +213,7 @@ export class ObservedStore {
               observations.appendVarchar(observation.confidence);
               appendNullable(observations, observation.provenance.t);
               observations.appendVarchar(JSON.stringify(localized ? localized.value : observation.value) ?? "null");
+              appendNullable(observations, observation.token);
               appendNullable(observations, extraOf(observation));
               observations.endRow();
             });
@@ -316,7 +317,7 @@ export class ObservedStore {
       const range = `BETWEEN ${sqlString(bounds.oldest as string)} AND ${sqlString(bounds.newest as string)}`;
       const result = await c.stream(`
         SELECT w.submission, w.idx, w.session_key, w.contributor, w.session_time, w.has_extract, w.has_lookup, w.error,
-               o.kind, o.field, o.entity, o.locale, o.confidence, o.t, o.value, o.extra
+               o.kind, o.field, o.entity, o.locale, o.confidence, o.t, o.value, o.token, o.extra
         FROM (SELECT * FROM winners WHERE rank ${ranks}) w
         LEFT JOIN (SELECT * FROM read_parquet(${this.files("observations")}) WHERE submission ${range} ${kindFilter}) o
           ON o.submission = w.submission AND o.batch = w.batch AND o.idx = w.idx
@@ -351,6 +352,7 @@ export class ObservedStore {
           const value: unknown = JSON.parse(row.value as string);
           list.push({
             ...extra.o,
+            ...(row.token === null ? {} : { token: row.token as string }),
             entityId: row.entity as number,
             value: kind === "lookup" ? { locale: row.locale, value } : value,
             confidence: row.confidence as Confidence,
@@ -440,7 +442,7 @@ export class ObservedStore {
 CREATE OR REPLACE VIEW sessions AS SELECT * FROM 'sessions.parquet';
 CREATE OR REPLACE VIEW observations AS
 SELECT s.session_key, s.contributor, s.session_time, s.interface_version, s.build, s.locale AS client_locale,
-       o.kind, o.field, o.entity, o.locale, o.value, o.confidence, o.t, o.extra, o.submission, o.idx
+       o.kind, o.field, o.entity, o.locale, o.value, o.confidence, o.t, o.token, o.extra, o.submission, o.idx
 FROM read_parquet([${files}]) o JOIN sessions s USING (submission, batch, idx);
 `,
     );

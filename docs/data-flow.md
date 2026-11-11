@@ -61,13 +61,13 @@ duckdb -init views.sql
 -- Which builds and client locales the data comes from
 SELECT build, client_locale, count(DISTINCT session_key) FROM observations GROUP BY ALL ORDER BY 3 DESC;
 -- Spawn points of one NPC, with the unit token they were seen through
-SELECT value->>'zoneID', value->>'x', value->>'y', extra->>'$.o.token' FROM observations WHERE field = 'npcSpawns' AND entity = 250873;
+SELECT value->>'zoneID', value->>'x', value->>'y', token FROM observations WHERE field = 'npcSpawns' AND entity = 250873;
 ```
 
 | View | Columns |
 |---|---|
 | `sessions` | `session_key, contributor, session_time, interface_version, build, locale, rank` (0 = newest submission), `submission, batch, idx` |
-| `observations` | `session_key, contributor, session_time, interface_version, build, client_locale` (the session's), `kind` (`scalar`, `custom` or `lookup`), `field, entity, locale` (the translation's locale, lookups only), `value` (JSON), `confidence, t` (seconds into the session), `extra` (JSON, e.g. a spawn's `token`), `submission, idx` |
+| `observations` | `session_key, contributor, session_time, interface_version, build, client_locale` (the session's), `kind` (`scalar`, `custom` or `lookup`), `field, entity, locale` (the translation's locale, lookups only), `value` (JSON), `confidence, t` (seconds into the session), `token` (the unit token the unit was read through, e.g. `questnpc`, `npc`; spawns, `startedBy`, `finishedBy`), `extra` (JSON, anything else an observer attaches), `submission, idx` |
 
 enUS lookup observations are not stored: lookups are translations, and enUS names are in the `scalar` rows. Sessions from other flavors than Forever have a session row but no observations. Session names are not stored, as players can name sessions freely.
 

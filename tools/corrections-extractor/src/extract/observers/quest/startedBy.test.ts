@@ -22,6 +22,7 @@ describe("observeStartedBy", () => {
         value: { creatureId: 197 },
         confidence: "medium",
         provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
       },
     ]);
   });
@@ -97,6 +98,7 @@ describe("observeStartedBy", () => {
         value: { creatureId: 197 },
         confidence: "medium",
         provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
       },
     ]);
   });
@@ -118,6 +120,7 @@ describe("observeStartedBy", () => {
         value: { creatureId: 197 },
         confidence: "medium",
         provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
       },
     ]);
   });
@@ -221,6 +224,7 @@ describe("observeStartedBy", () => {
         value: { creatureId: 197 },
         confidence: "medium",
         provenance: { session: "test-session", t: 60 },
+        token: "questnpc",
       },
     ]);
   });
@@ -288,6 +292,7 @@ describe("observeStartedBy", () => {
         value: { creatureId: 276171 },
         confidence: "medium",
         provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
       },
     ]);
   });
