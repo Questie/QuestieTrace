@@ -2310,6 +2310,7 @@ globals = {
     "UseItemByName",
     "WatchFrame_Update",
     "addframetext",
+    "canaccesstable",
     "debuglocals",
     "debugprofilestart",
     "debugprofilestop",
