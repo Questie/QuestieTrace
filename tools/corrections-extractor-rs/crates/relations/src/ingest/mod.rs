@@ -11,13 +11,13 @@
 //!
 //! Nothing is cached between runs: every run decodes every submission.
 
-pub mod characters;
-pub mod distill;
-pub mod merge;
-pub mod report;
-pub mod streams;
-pub mod submission;
-pub mod titles;
+mod characters;
+mod distill;
+mod merge;
+mod report;
+mod streams;
+mod submission;
+mod titles;
 
 #[cfg(test)]
 mod test_trace;

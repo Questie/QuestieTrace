@@ -59,7 +59,8 @@ pub struct MaterializeOptions<'a> {
     /// and leave out those it has none for: QuestieDB as it loads with these modules imported,
     /// whatever the checkout holds. An empty directory leaves out every trace module.
     pub trace_modules_dir: Option<&'a Path>,
-    /// Tests only: inline base rows and correction layers instead of QuestieDB's files.
+    /// Inline base rows and correction layers instead of QuestieDB's files.
+    #[cfg(test)]
     pub fixture: Option<&'a Path>,
 }
 
@@ -105,6 +106,7 @@ pub fn materialize_forever_quests(questie_db_dir: &Path, fields: &[&str], option
         args.push("--trace-modules".into());
         args.push(std::path::absolute(dir)?.into_os_string());
     }
+    #[cfg(test)]
     if let Some(fixture) = options.fixture {
         args.push(std::path::absolute(fixture)?.into_os_string());
     }
