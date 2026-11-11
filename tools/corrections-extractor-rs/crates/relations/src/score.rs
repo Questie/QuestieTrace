@@ -38,7 +38,11 @@ impl ScoredField {
 
     fn values_of(self, set: Option<&RelationSet>) -> BTreeSet<QuestId> {
         let Some(set) = set else { return BTreeSet::new() };
-        RelationField::ALL.into_iter().filter(|&field| self.matches(field)).flat_map(|field| set.get(&field).into_iter().flatten().copied()).collect()
+        RelationField::ALL
+            .into_iter()
+            .filter(|&field| self.matches(field))
+            .flat_map(|field| set.get(&field).into_iter().flatten().copied())
+            .collect()
     }
 
     fn name(self) -> &'static str {
@@ -228,11 +232,19 @@ mod tests {
         let report = score_candidates(&file, &truth, 0.5);
         let authored = &report.tiers[0];
         assert_eq!(authored.judged_candidates, 2, "quest 99 is in no tier, quest 30's candidate is below minScore");
-        let single = authored.fields.iter().find(|f| f.field == ScoredField::Field(RelationField::PreQuestSingle)).unwrap();
+        let single = authored
+            .fields
+            .iter()
+            .find(|f| f.field == ScoredField::Field(RelationField::PreQuestSingle))
+            .unwrap();
         assert_eq!((single.true_positives, single.false_positives, single.false_negatives), (1, 1, 1));
         assert_eq!((single.precision, single.recall), (0.5, 0.5));
         let any = authored.fields.iter().find(|f| f.field == ScoredField::PrerequisiteAny).unwrap();
-        assert_eq!((any.true_positives, any.false_negatives), (1, 1), "prerequisiteAny merges both prerequisite fields");
+        assert_eq!(
+            (any.true_positives, any.false_negatives),
+            (1, 1),
+            "prerequisiteAny merges both prerequisite fields"
+        );
         assert_eq!(authored.false_positive_examples[0], "preQuestSingle: 10 -> 9");
     }
 }

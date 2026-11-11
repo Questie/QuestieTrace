@@ -16,10 +16,10 @@
 //! (P1 OR P2).
 
 use super::coflag::CoFlagged;
-use crate::text::to_fixed;
 use super::history::{lead_within_session, order, Order, Stamp, When};
 use super::population::{Character, Population};
 use crate::model::{Evidence, QuestId, RelationField, SessionTime};
+use crate::text::to_fixed;
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use serde::Serialize;

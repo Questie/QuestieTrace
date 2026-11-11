@@ -8,10 +8,10 @@
 //! relations-review.md has the full evidence for every relation.
 
 use super::edges::{Claim, EdgeKind};
-use crate::text::to_fixed;
 use super::resolve::Outcome;
 use super::views::{EdgeView, QuestView};
 use crate::model::{QuestId, RelationField};
+use crate::text::to_fixed;
 use indexmap::IndexMap;
 use rustc_hash::FxHashSet;
 use std::cmp::Ordering;

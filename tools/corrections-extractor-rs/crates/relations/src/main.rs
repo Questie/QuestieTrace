@@ -68,7 +68,10 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
         "score" => {
             let signal = args.get(1).context("usage: score <signal> [--min-score N]")?;
             let min_score = match args.iter().position(|arg| arg == "--min-score") {
-                Some(at) => args.get(at + 1).and_then(|value| value.parse::<f64>().ok()).context("--min-score needs a number")?,
+                Some(at) => args
+                    .get(at + 1)
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .context("--min-score needs a number")?,
                 None => 0.0,
             };
             let file: CandidateFile = io::read_json(&config.candidates(signal), signal)?;
@@ -78,7 +81,10 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
             println!("{}", score::format_score_report(&report));
             Ok(())
         }
-        other => match other.strip_prefix("signal:").and_then(|name| signals::registry().into_iter().find(|s| s.name() == name)) {
+        other => match other
+            .strip_prefix("signal:")
+            .and_then(|name| signals::registry().into_iter().find(|s| s.name() == name))
+        {
             Some(signal) => timed(other, || {
                 let catalog: QuestCatalog = io::read_json(&config.catalog(), "catalog")?;
                 let episodes = io::read_episodes(&config.episodes())?;
