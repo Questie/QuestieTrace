@@ -32,6 +32,7 @@ impl Inputs<'_> {
     }
 }
 
+/// Wowhead's files, by name: every source added to that channel must match here, no signal may.
 pub fn is_context_only(signal: &str) -> bool {
     signal == "wowhead" || signal.starts_with("wowhead-")
 }

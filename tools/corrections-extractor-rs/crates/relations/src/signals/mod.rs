@@ -1,11 +1,19 @@
 //! Signals: each reads every episode and the catalog and claims relationship edges with its own
 //! evidence. They never read the ground truth (that is for scoring and combine only), and they
-//! are independent of each other, so the pipeline runs them side by side.
+//! are independent of each other, so their order does not matter.
 //!
 //! Adding a signal: write a module with a type implementing [`Signal`], and list it in
 //! [`registry`]. The pipeline runs it, writes `candidates/<name>.json` and its reports, and
 //! combine picks its candidates up like any other signal's. A signal returns only what it found
 //! ([`Findings`]); [`run_one`] adds what every candidates file shares (its name, the run's time).
+//!
+//! Two places outside the module go by signal name and may need a line:
+//!
+//! - `combine/assumptions.rs` (`phrase`): how the Lua module's `-- Assumption:` comment words the
+//!   signal's evidence, per field. Without an entry the comment just says `<name> signal`.
+//! - `combine/inputs.rs` (`is_context_only`): files whose name starts with "wowhead" are context
+//!   for reviewers only and never decide anything. A new source like that needs a name it
+//!   matches; a new signal must not match it.
 
 use crate::config::Config;
 use crate::eligibility::is_forever_interface;
