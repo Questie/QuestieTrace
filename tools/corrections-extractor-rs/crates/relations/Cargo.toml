@@ -23,3 +23,4 @@ serde.workspace = true
 # Report objects built with json! keep the order they were written in, whatever else the build
 # enables (a dev-dependency of another crate turned this on in workspace builds only).
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha2.workspace = true
