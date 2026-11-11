@@ -568,6 +568,8 @@ struct Decoder<'a> {
     /// The bytes were validated before (a lazy value being decoded): nested lazy values need
     /// their shape, not another validation.
     validated: bool,
+    /// The containers `skip_rest` is inside of, kept to reuse the allocation.
+    open: Vec<Open>,
 }
 
 fn depth_error() -> CborError {
@@ -581,6 +583,7 @@ impl<'a> Decoder<'a> {
             arena,
             last_table_integer_keyed: false,
             validated,
+            open: Vec::new(),
         }
     }
 
@@ -910,30 +913,50 @@ impl<'a> Decoder<'a> {
         })
     }
 
-    /// Validates the items of a container whose header was read.
+    /// Validates the items of a container whose header was read, and everything nested in them,
+    /// reporting the first error decoding would, in the same order: a table too deep before its
+    /// length, a nil key at once, a NaN key only after its value. One loop over a stack of the
+    /// open containers, not a call per item.
     fn skip_rest(&mut self, header: Item<'a>, depth: u32) -> Result<()> {
         if depth > MAX_NESTING_DEPTH {
             return Err(depth_error());
         }
-        let mut i = 0.0;
-        match header {
-            Item::Array(length) => {
-                while i < length {
-                    i += 1.0;
-                    self.skip(depth + 1, false)?;
+        let mut open = std::mem::take(&mut self.open);
+        open.clear();
+        open.extend(Open::of(header));
+        let result = self.skip_open(&mut open, depth);
+        self.open = open;
+        result
+    }
+
+    fn skip_open(&mut self, open: &mut Vec<Open>, depth: u32) -> Result<()> {
+        while let Some(container) = open.last_mut() {
+            if container.left == 0 {
+                open.pop();
+                // The finished container was an item of the one around it.
+                match open.last_mut() {
+                    Some(parent) => parent.item_done()?,
+                    None => return Ok(()),
                 }
+                continue;
             }
-            Item::Map(length) => {
-                while i < length {
-                    i += 1.0;
-                    let key = self.skip_key(depth + 1)?;
-                    self.skip(depth + 1, false)?;
-                    if matches!(key, Some(SkippedKey::Num(n)) if n.is_nan()) {
-                        return Err(CborError("table index is NaN".into()));
-                    }
-                }
+            let at_key = container.at_key();
+            let item_depth = depth + open.len() as u32;
+            self.check_container_depth(item_depth)?;
+            let item = self.cursor.item()?;
+            let container = open.last_mut().expect("the container read from is still open");
+            if at_key {
+                container.nan_key = match item {
+                    Item::Nil => return Err(CborError("CBOR map keys that decode to nil are not supported".into())),
+                    Item::Num(n) => n.is_nan(),
+                    // Other keys are dropped, never NaN.
+                    _ => false,
+                };
             }
-            _ => {}
+            match Open::of(item) {
+                Some(nested) => open.push(nested),
+                None => container.item_done()?,
+            }
         }
         Ok(())
     }
@@ -970,6 +993,40 @@ impl SkippedKey<'_> {
                 _ => JsKey::from_str(&String::from_utf8_lossy(bytes)).is_positive_integer(),
             },
         }
+    }
+}
+
+/// A container `skip_rest` is inside of.
+struct Open {
+    /// Items still to read; a map counts its keys and values.
+    left: u64,
+    is_map: bool,
+    /// Whether the key of the pair being read was NaN: an error once its value is read.
+    nan_key: bool,
+}
+
+impl Open {
+    /// The container an item opens, if it is one. A length beyond the data fails on reading.
+    fn of(item: Item) -> Option<Open> {
+        let (left, is_map) = match item {
+            Item::Array(length) => (length as u64, false),
+            Item::Map(length) => ((length as u64).saturating_mul(2), true),
+            _ => return None,
+        };
+        Some(Open { left, is_map, nan_key: false })
+    }
+
+    fn at_key(&self) -> bool {
+        self.is_map && self.left % 2 == 0
+    }
+
+    /// One item of this container was read in full.
+    fn item_done(&mut self) -> Result<()> {
+        self.left -= 1;
+        if self.at_key() && self.nan_key {
+            return Err(CborError("table index is NaN".into()));
+        }
+        Ok(())
     }
 }
 
@@ -1280,6 +1337,17 @@ mod tests {
     }
 
     #[test]
+    fn lazy_values_stop_at_the_same_depth_as_a_full_decode() {
+        let nested = |depth: usize| -> Vec<u8> { std::iter::repeat_n(0x81, depth).chain([0x80]).collect() };
+        // In a session, event arguments sit 5 tables deeper than a value decoded on its own.
+        for depth in 90..=100 {
+            let full = decode_value(&nested(depth + 5), &Arena::new()).map(|_| ());
+            let lazy = decode_trace(&in_a_session(&nested(depth)), &Arena::new()).map(|_| ());
+            assert_eq!(lazy, full, "{depth} nested tables");
+        }
+    }
+
+    #[test]
     fn many_deleted_keys_decode_in_linear_time() {
         // {k0: 1, ..., kN: 1, k0: nil, ..., kN: nil}: quadratic before deletes left tombstones.
         let keys = 40_000u32;
@@ -1297,5 +1365,117 @@ mod tests {
         let started = std::time::Instant::now();
         decodes_to(&item, "[]");
         assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
+    }
+
+    /// Random CBOR near what the addon writes: colliding and deleted keys, holes, nested and
+    /// index-keyed tables, and now and then an item decoding rejects.
+    struct RandomItems(u64);
+
+    impl RandomItems {
+        fn next(&mut self, below: u64) -> u64 {
+            // xorshift64
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0 % below
+        }
+
+        fn header(&mut self, out: &mut Vec<u8>, major: u8, n: u64) {
+            match n {
+                0..=23 if self.next(4) > 0 => out.push(major << 5 | n as u8),
+                0..=0xff => out.extend([major << 5 | 24, n as u8]),
+                _ => {
+                    out.push(major << 5 | 25);
+                    out.extend((n as u16).to_be_bytes());
+                }
+            }
+        }
+
+        fn key(&mut self, out: &mut Vec<u8>, depth: u32) {
+            match self.next(40) {
+                0 => out.push(0xf6),                                   // nil key: rejected
+                1 => out.extend([0xfb, 0x7f, 0xf8, 0, 0, 0, 0, 0, 0]), // NaN key: rejected after its value
+                2 => out.push(0xf5),                                   // boolean key: dropped
+                3 => self.item(out, depth),                            // table key: dropped
+                4 => out.extend([0xf9, 0x3e, 0x00]),                   // 1.5
+                5 => out.push(0x20),                                   // -1
+                6..=9 => out.extend(text(["1", "2", "01", "10"][self.next(4) as usize])),
+                10..=19 => out.extend(text(["a", "b", "t", "v", "n", "_x"][self.next(6) as usize])),
+                n => self.header(out, 0, n % 20 + 1), // 1..=20, so 1..n maps occur
+            }
+        }
+
+        fn item(&mut self, out: &mut Vec<u8>, depth: u32) {
+            let leaf = depth >= 6 || self.next(3) == 0;
+            let kind = if leaf { self.next(12) } else { 12 + self.next(4) };
+            match kind {
+                0 => {
+                    let n = self.next(70_000);
+                    self.header(out, 0, n);
+                }
+                1 => {
+                    let n = self.next(300);
+                    self.header(out, 1, n);
+                }
+                2 => out.extend([0xfb, 0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18]),
+                3 => out.extend([0xfa, 0x47, 0xc3, 0x50, 0x00]),
+                4 => out.extend(text(["", "x", "é", "Ünïcode"][self.next(4) as usize])),
+                5 => out.extend([0x62, 0xff, 0xfe]), // invalid UTF-8: repaired
+                6 => out.push([0xf4, 0xf5][self.next(2) as usize]),
+                7 | 8 => out.push([0xf6, 0xf7][self.next(2) as usize]), // nil: a hole or a delete
+                9 if self.next(8) == 0 => {
+                    out.extend([[0xc1, 0x00], [0x9f, 0xff], [0xf8, 0x20], [0xff, 0x00], [0x1c, 0x00], [0xe0, 0x00]][self.next(6) as usize])
+                }
+                9..=11 => {
+                    let n = self.next(5);
+                    self.header(out, 0, n);
+                }
+                12 | 13 => {
+                    let long = self.next(10) == 0;
+                    let length = self.next(if long { 25 } else { 5 });
+                    self.header(out, 4, length);
+                    for _ in 0..length {
+                        self.item(out, depth + 1);
+                    }
+                }
+                _ => {
+                    let long = self.next(10) == 0;
+                    let length = self.next(if long { 25 } else { 5 });
+                    self.header(out, 5, length);
+                    for _ in 0..length {
+                        self.key(out, depth + 1);
+                        self.item(out, depth + 1);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lazy_values_validate_and_decode_exactly_like_a_full_decode() {
+        let mut random = RandomItems(0x2545_f491_4f6c_dd1d);
+        let (mut decoded, mut rejected) = (0, 0);
+        for case in 0..20_000 {
+            let mut item = Vec::new();
+            random.item(&mut item, 0);
+            let arena = Arena::new();
+            let full = decode_value(&item, &arena);
+            let lazy = decode_trace(&in_a_session(&item), &arena).map(|_| ());
+            match (&full, &lazy) {
+                (Err(full), Err(lazy)) => {
+                    assert_eq!(lazy, full, "case {case}: {item:02x?}");
+                    rejected += 1;
+                }
+                (Ok(Some(_)), Ok(())) => {
+                    let [full, stream, args] = decoded_three_ways(&item);
+                    assert_eq!((&stream, &args), (&full, &full), "case {case}: {item:02x?}");
+                    decoded += 1;
+                }
+                (Ok(None), Ok(())) => {}
+                _ => panic!("case {case}: full {:?}, lazy {lazy:?}: {item:02x?}", full.map(|_| ())),
+            }
+        }
+        // Both outcomes must be common, or the comparison proves little.
+        assert!(decoded > 5_000 && rejected > 1_000, "decoded {decoded}, rejected {rejected}");
     }
 }
