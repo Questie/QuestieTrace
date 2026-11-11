@@ -8,7 +8,7 @@
 //! - Object key order never matters; array order does (outputs are sorted).
 //! - Numbers are equal when they differ by at most `tolerance`, relative to the larger one (or
 //!   absolute below 1). `1` and `1.0` are equal.
-//! - `generatedAt` keys are ignored, wherever they are.
+//! - `generatedAt` keys are ignored, wherever they are; in text files, ISO 8601 timestamps are.
 //!
 //! Prints every difference (up to `--max`) with its path, and exits 1 when there are any.
 
@@ -127,7 +127,10 @@ fn main() -> ExitCode {
         let parse = |path: &str| -> Value { serde_json::from_str(&read(path)).unwrap_or_else(|error| panic!("{path}: {error}")) };
         compare.value("", &parse(expected), &parse(actual));
     } else {
-        let (a, b) = (read(expected), read(actual));
+        // Generation times are the only expected difference in text outputs.
+        let timestamp = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z").expect("a valid pattern");
+        let mask = |text: String| timestamp.replace_all(&text, "<timestamp>").into_owned();
+        let (a, b) = (mask(read(expected)), mask(read(actual)));
         let (a, b): (Vec<&str>, Vec<&str>) = (a.lines().collect(), b.lines().collect());
         if a.len() != b.len() {
             compare.report("lines", format!("{} != {}", a.len(), b.len()));
