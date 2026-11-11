@@ -42,10 +42,11 @@ Every step is also a command of its own that reads what the previous steps wrote
 | `combine` | all candidates, catalog, ground truth, episodes | `relations.json`, `reports/combine-metrics.json`, the deliverables |
 | `score <signal> [--min-score N]` | one candidates file, ground truth | `reports/score-<signal>.json` and a table |
 
-`pipeline` runs ingest, catalog, the Wowhead source, every signal (side by side on all cores) and
-combine in one process, handing each step's output straight to the next and writing every file on
-the way. There is no incremental cache: a full run decodes every submission, which is what keeps it
-simple and always consistent.
+`pipeline` runs ingest, catalog, the Wowhead source, every signal (one after another, each on all
+cores) and combine in one process, handing each step's output straight to the next and writing every
+file on the way. Combine gets exactly the candidate files the run produced; the `combine` command
+reads whatever `candidates/` holds. There is no incremental cache: a full run decodes every
+submission, which is what keeps it simple and always consistent.
 
 ## How it is built
 
