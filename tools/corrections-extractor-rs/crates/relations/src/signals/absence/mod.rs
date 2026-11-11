@@ -22,7 +22,7 @@ mod params;
 mod score;
 mod states;
 
-use super::{Findings, Signal, SignalInput};
+use super::{to_json, Findings, Signal, SignalInput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
 use crate::model::{QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
 use blocked::{Blocked, BlockedCollector, SkipReason};
@@ -55,10 +55,10 @@ impl Signal for Absence {
         } = result;
         Findings {
             input_count: index.episodes,
-            params: serde_json::to_value(params).expect("the params serialize to JSON"),
+            params: to_json(&params),
             covered_quest_ids,
             candidates,
-            reports: vec![("absence-summary", serde_json::to_value(summary).expect("the summary serializes to JSON"))],
+            reports: vec![("absence-summary", to_json(&summary))],
         }
     }
 }

@@ -30,7 +30,8 @@ pub struct SignalInput<'a> {
 pub struct Findings {
     /// Episodes the signal looked at.
     pub input_count: usize,
-    /// The tunables the signal ran with, for reproducibility.
+    /// The tunables the signal ran with, for reproducibility: its params struct (plus any notes on
+    /// what the counts mean) through [`to_json`], so a new tunable cannot go missing from the file.
     pub params: serde_json::Value,
     /// Every quest the signal could judge, with or without a candidate: recall depends on it.
     pub covered_quest_ids: Vec<QuestId>,
@@ -73,6 +74,12 @@ pub fn registry() -> Vec<&'static dyn Signal> {
         &cooccurrence::Cooccurrence,
         &breadcrumbs::Breadcrumbs,
     ]
+}
+
+/// Params and reports as JSON. They are plain data (numbers, strings, lists, maps keyed by strings
+/// or integers), which always serializes.
+pub(crate) fn to_json(value: &impl serde::Serialize) -> serde_json::Value {
+    serde_json::to_value(value).expect("signal params and reports are JSON-representable")
 }
 
 /// Runs one signal and fills in what every candidates file shares: its name and the run's time.

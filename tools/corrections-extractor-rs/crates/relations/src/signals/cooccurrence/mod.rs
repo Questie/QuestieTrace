@@ -22,7 +22,7 @@ use self::exclusion::{infer_exclusions, ExclusionEdge, ExclusionKind, ExclusionP
 use self::history::{build_histories, unstable_quests, HistoryParams};
 use self::population::Population;
 use self::prerequisites::{infer_prerequisites, PrerequisiteEdge, PrerequisiteParams};
-use super::{Findings, Signal, SignalInput};
+use super::{to_json, Findings, Signal, SignalInput};
 use crate::eligibility::{is_forever_interface, is_forever_quest_id};
 use crate::model::{Evidence, QuestCatalog, QuestEpisode, QuestId, RelationCandidate, RelationField};
 use crate::text::{to_exponential, to_fixed};
@@ -59,6 +59,15 @@ pub const PARAMS: Params = Params {
     },
 };
 
+/// candidates/cooccurrence.json `params`: the tunables and what the counts mean.
+#[derive(Serialize)]
+struct FileParams<'a> {
+    #[serde(flatten)]
+    tunables: &'a Params,
+    support: &'static str,
+    contradict: &'static str,
+}
+
 pub struct Cooccurrence;
 
 impl Signal for Cooccurrence {
@@ -82,13 +91,14 @@ impl Signal for Cooccurrence {
             mut report,
         } = analyze(&episodes, input.catalog, &PARAMS);
         report["episodesRead"] = json!(input.episodes.len());
-        let mut params = json!(PARAMS);
-        params["support"] =
-            json!("prerequisites: takers of the quest who could take the target; exclusiveTo: completers of either quest who could take the other");
-        params["contradict"] = json!("always 0 for prerequisites and never-together exclusions (one contradiction drops the edge); co-flags: 0 as well");
+        let params = FileParams {
+            tunables: &PARAMS,
+            support: "prerequisites: takers of the quest who could take the target; exclusiveTo: completers of either quest who could take the other",
+            contradict: "always 0 for prerequisites and never-together exclusions (one contradiction drops the edge); co-flags: 0 as well",
+        };
         Findings {
             input_count: episodes.len(),
-            params,
+            params: to_json(&params),
             covered_quest_ids: covered,
             candidates,
             reports: vec![("cooccurrence-summary", report)],

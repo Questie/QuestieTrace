@@ -20,7 +20,7 @@ mod observe;
 mod score;
 mod variants;
 
-use super::{Findings, Signal, SignalInput};
+use super::{to_json, Findings, Signal, SignalInput};
 use crate::model::{QuestId, RelationCandidate};
 use aggregate::{FinisherIndex, QuestAssessment, QuestFold};
 use infer::{infer_quest, to_candidate};
@@ -28,6 +28,7 @@ use observe::{group_by_character, observe_character, prerequisite_candidates, Ch
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use score::score_edge;
+use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 use variants::VariantIndex;
@@ -37,6 +38,8 @@ use variants::VariantIndex;
 const CHARACTERS_PER_CHUNK: usize = 512;
 
 /// The signal's tunables.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Params {
     /// Seconds after a sighting that a completion still counts. A turn-in counts at its event
     /// time, but co-completed copies only arrive with the completed-quest delta 0.1-0.4s later,
@@ -68,6 +71,15 @@ pub const PARAMS: Params = Params {
     min_pending_rate: 0.5,
     min_secondary_support: 5,
 };
+
+/// candidates/offer-set.json `params`: the tunables and what the numbers mean.
+#[derive(Serialize)]
+struct FileParams<'a> {
+    #[serde(flatten)]
+    tunables: &'a Params,
+    support: &'static str,
+    score: &'static str,
+}
 
 pub struct OfferSet;
 
@@ -140,18 +152,11 @@ impl Signal for OfferSet {
         });
         Findings {
             input_count: stats.usable_episodes,
-            params: json!({
-                "completionToleranceSeconds": params.completion_tolerance_seconds,
-                "freshSeconds": params.fresh_seconds,
-                "immediateSeconds": params.immediate_seconds,
-                "latestTieSeconds": params.latest_tie_seconds,
-                "maxContradictions": params.max_contradictions,
-                "minCharacters": params.min_characters,
-                "minPendingRate": params.min_pending_rate,
-                "minSecondarySupport": params.min_secondary_support,
-                "support": "independent characters",
+            params: to_json(&FileParams {
+                tunables: params,
+                support: "independent characters",
                 // The TS signal's value, kept so both files say the same.
-                "score": "calibrated lookup, see signals/offer-set/score.ts",
+                score: "calibrated lookup, see signals/offer-set/score.ts",
             }),
             covered_quest_ids: covered,
             candidates,
