@@ -11,6 +11,8 @@ use crate::io;
 use crate::model::{CandidateFile, QuestCatalog, QuestEpisode};
 use anyhow::Result;
 
+pub mod breadcrumbs;
+
 /// What every signal reads.
 pub struct SignalInput<'a> {
     pub episodes: &'a [QuestEpisode],
@@ -46,7 +48,7 @@ pub trait Signal: Sync {
 
 /// Every signal, in the order the pipeline lists them.
 pub fn registry() -> Vec<&'static dyn Signal> {
-    vec![]
+    vec![&breadcrumbs::Breadcrumbs]
 }
 
 /// Runs every signal on all cores; results in registry order.
