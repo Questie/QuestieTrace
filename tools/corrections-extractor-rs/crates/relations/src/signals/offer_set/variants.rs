@@ -8,7 +8,7 @@
 
 use crate::model::{QuestCatalog, QuestId};
 use crate::race_masks::{class_bit, race_bit};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 const MAX_CLASS_ID: i64 = 16;
 
@@ -48,6 +48,8 @@ pub struct VariantIndex<'a> {
     by_name: FxHashMap<&'a str, Vec<QuestId>>,
     race_universe: u64,
     class_universe: u64,
+    /// Quests with at least one variant.
+    with_variants: FxHashSet<QuestId>,
 }
 
 impl<'a> VariantIndex<'a> {
@@ -59,12 +61,19 @@ impl<'a> VariantIndex<'a> {
                 by_name.entry(name).or_default().push(quest.id);
             }
         }
-        VariantIndex {
+        let mut index = VariantIndex {
             catalog,
             by_name,
             race_universe: bits_in_use(quests().map(|quest| quest.required_races), known_race_bits()),
             class_universe: bits_in_use(quests().map(|quest| quest.required_classes), known_class_bits()),
-        }
+            with_variants: FxHashSet::default(),
+        };
+        index.with_variants = quests().map(|quest| quest.id).filter(|&id| !index.variants_of(id).is_empty()).collect();
+        index
+    }
+
+    pub fn has_variants(&self, quest_id: QuestId) -> bool {
+        self.with_variants.contains(&quest_id)
     }
 
     /// The quest's name, when it has a non-empty one.

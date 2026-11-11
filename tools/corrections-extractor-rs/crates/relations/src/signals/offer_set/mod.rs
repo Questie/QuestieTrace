@@ -4,9 +4,12 @@
 //! completed whenever it could take quest X contains X's prerequisites. The steps:
 //!
 //! - [`observe`]: episodes -> one view per quest and character (its sightings of the quest).
-//! - [`aggregate`]: views -> per-candidate counts for each quest.
+//! - [`aggregate`]: views, folded per quest in character order -> per-candidate counts.
 //! - [`infer`]: counts -> prerequisite edges.
 //! - [`score`]: edge features -> calibrated score.
+//!
+//! Characters are observed a chunk at a time and their views folded right away, so only one
+//! chunk's views exist at once: all views together are several times the episodes' size.
 //!
 //! The TypeScript command's `--dump` (every edge with its features, for calibration) and
 //! `--param` overrides are not ported: the pipeline runs every signal with [`PARAMS`].
@@ -19,14 +22,19 @@ mod variants;
 
 use super::{Signal, SignalInput, SignalOutput};
 use crate::model::{CandidateFile, QuestId, RelationCandidate};
-use aggregate::{aggregate_quest, FinisherIndex, QuestAssessment};
+use aggregate::{FinisherIndex, QuestAssessment, QuestFold};
 use infer::{infer_quest, to_candidate};
 use observe::{group_by_character, observe_character, prerequisite_candidates, CharacterView, ObserveStats};
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use score::score_edge;
 use serde_json::json;
 use std::collections::BTreeMap;
 use variants::VariantIndex;
+
+/// Characters observed per chunk: enough to keep every core busy, few enough that their views
+/// stay small next to the episodes.
+const CHARACTERS_PER_CHUNK: usize = 512;
 
 /// The signal's tunables.
 pub struct Params {
@@ -79,22 +87,32 @@ impl Signal for OfferSet {
         let characters: Vec<_> = group_by_character(input.episodes, &mut stats).into_values().collect();
 
         let candidates = prerequisite_candidates(catalog);
-        let views: Vec<Vec<CharacterView>> = characters
-            .par_iter()
-            .map(|episodes| observe_character(episodes, catalog, &candidates, params.completion_tolerance_seconds))
-            .collect();
-        // Per quest, the views in character order (evidence lists the first characters).
-        let mut views_by_quest: BTreeMap<QuestId, Vec<CharacterView>> = BTreeMap::new();
-        for view in views.into_iter().flatten() {
-            stats.views += 1;
-            views_by_quest.entry(view.quest_id).or_default().push(view);
-        }
-
         let variants = VariantIndex::new(catalog);
+        // Each quest's views are folded in character order (evidence lists the first characters).
+        let mut folds: BTreeMap<QuestId, QuestFold> = BTreeMap::new();
+        for chunk in characters.chunks(CHARACTERS_PER_CHUNK) {
+            let views: Vec<Vec<CharacterView>> = chunk
+                .par_iter()
+                .map(|episodes| observe_character(episodes, catalog, &candidates, params.completion_tolerance_seconds))
+                .collect();
+            let mut views_by_quest: FxHashMap<QuestId, Vec<&CharacterView>> = FxHashMap::default();
+            for view in views.iter().flatten() {
+                stats.views += 1;
+                views_by_quest.entry(view.quest_id).or_default().push(view);
+                folds.entry(view.quest_id).or_insert_with(|| QuestFold::new(view.quest_id));
+            }
+            folds.par_iter_mut().for_each(|(quest_id, fold)| {
+                for view in views_by_quest.get(quest_id).into_iter().flatten() {
+                    fold.add(view, catalog, params, &variants);
+                }
+            });
+        }
+        let quests_seen = folds.len();
+
         let finishers = FinisherIndex::new(catalog, characters.iter().flatten().copied());
-        let assessments: BTreeMap<QuestId, QuestAssessment> = views_by_quest
-            .par_iter()
-            .map(|(&quest_id, views)| (quest_id, aggregate_quest(quest_id, views, catalog, params, &finishers, &variants)))
+        let assessments: BTreeMap<QuestId, QuestAssessment> = folds
+            .into_par_iter()
+            .map(|(quest_id, fold)| (quest_id, fold.finish(catalog, params, &finishers, &variants)))
             .collect();
 
         let mut covered = Vec::new();
@@ -109,14 +127,14 @@ impl Signal for OfferSet {
         eprintln!(
             "offer-set: {} characters, {} quests seen, {} covered, {} candidates",
             stats.characters,
-            views_by_quest.len(),
+            quests_seen,
             covered.len(),
             candidates.len()
         );
         let summary = json!({
             "generatedAt": input.generated_at,
             "observe": stats,
-            "questsSeen": views_by_quest.len(),
+            "questsSeen": quests_seen,
             "covered": covered.len(),
             "candidates": candidates.len(),
         });

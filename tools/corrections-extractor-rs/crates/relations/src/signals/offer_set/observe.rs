@@ -94,13 +94,6 @@ pub struct CharacterView<'e> {
     pub last_list: Option<EarlierVisit>,
 }
 
-impl CharacterView<'_> {
-    /// Whether `target` was completed at every sighting.
-    pub fn survived(&self, target: QuestId) -> bool {
-        self.survivors.binary_search(&target).is_ok()
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObserveStats {
@@ -300,6 +293,20 @@ fn window_givers(first: &Sighting, catalog: &QuestCatalog, quest_id: QuestId) ->
 /// counts, to absorb event ordering jitter.
 pub fn observe_character<'e>(episodes: &[&'e QuestEpisode], catalog: &QuestCatalog, candidates: &FxHashSet<QuestId>, tolerance: f64) -> Vec<CharacterView<'e>> {
     let timelines: Vec<EpisodeTimeline> = episodes.iter().map(|episode| EpisodeTimeline::new(episode, true)).collect();
+    // Per episode, the candidates completed at some point of it (at capture start or later),
+    // ascending: every completed set of the episode is within them.
+    let ever_completed: Vec<Vec<QuestId>> = episodes
+        .iter()
+        .zip(&timelines)
+        .map(|(episode, timeline)| {
+            let initial = episode.completed.iter().flat_map(|completed| &completed.initial).copied();
+            let later = timeline.completions_during_session().into_iter().map(|completion| completion.v);
+            let mut ids: Vec<QuestId> = initial.chain(later).filter(|id| candidates.contains(id)).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        })
+        .collect();
     let visits = GiverVisits::new(episodes);
 
     let mut views = Vec::new();
@@ -312,13 +319,12 @@ pub fn observe_character<'e>(episodes: &[&'e QuestEpisode], catalog: &QuestCatal
 
         // Completion only grows (repeatables are not candidates), so the first sighting's set is
         // the smallest; later sightings can still remove a candidate when the data is inconsistent.
-        let mut survivors: Vec<QuestId> = first_timeline
-            .completed_at(first.at.t + tolerance)
-            .into_iter()
-            .filter(|&candidate| candidate != quest_id && candidates.contains(&candidate))
+        let survivors: Vec<QuestId> = ever_completed[first.at.episode]
+            .iter()
+            .copied()
+            .filter(|&candidate| candidate != quest_id)
             .filter(|&candidate| list.iter().all(|s| timelines[s.at.episode].is_completed_at(candidate, s.at.t + tolerance)))
             .collect();
-        survivors.sort_unstable();
 
         let completion_gaps = survivors
             .iter()
