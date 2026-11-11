@@ -11,6 +11,7 @@ use crate::io;
 use crate::model::{CandidateFile, QuestCatalog, QuestEpisode};
 use anyhow::Result;
 
+pub mod handoff;
 pub mod offer_set;
 pub mod breadcrumbs;
 
@@ -49,7 +50,7 @@ pub trait Signal: Sync {
 
 /// Every signal, in the order the pipeline lists them.
 pub fn registry() -> Vec<&'static dyn Signal> {
-    vec![&offer_set::OfferSet, &breadcrumbs::Breadcrumbs]
+    vec![&handoff::Handoff, &offer_set::OfferSet, &breadcrumbs::Breadcrumbs]
 }
 
 /// Runs every signal on all cores; results in registry order.
