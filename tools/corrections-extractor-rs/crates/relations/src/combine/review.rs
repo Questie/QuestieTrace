@@ -236,9 +236,13 @@ fn disagreement(view: &QuestView) -> f64 {
     view.edges.iter().filter(|edge| differs(edge)).map(|edge| edge.probability).fold(0.0, f64::max)
 }
 
-/// Descending by `key`, then by quest id.
+/// Descending by `key`, then by quest id. A NaN key sorts last: the sort needs a total order.
 fn by_descending(key: impl Fn(&QuestView) -> f64) -> impl Fn(&&QuestView, &&QuestView) -> Ordering {
-    move |a, b| key(b).partial_cmp(&key(a)).unwrap_or(Ordering::Equal).then(a.quest_id.cmp(&b.quest_id))
+    move |a, b| {
+        let (a_key, b_key) = (key(a), key(b));
+        let by_key = b_key.partial_cmp(&a_key).unwrap_or_else(|| a_key.is_nan().cmp(&b_key.is_nan()));
+        by_key.then(a.quest_id.cmp(&b.quest_id))
+    }
 }
 
 pub fn render_review(input: &ReviewInput) -> String {
