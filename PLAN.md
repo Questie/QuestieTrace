@@ -114,5 +114,40 @@ quest factions 4%, reputation 4%. Peak memory beyond the fold is decoded submiss
 |---|---|---|
 | F1 | Full archive, Rust, best binary so far, under the memory watchdog | 9 min 6 s, 11.0 GB peak (546.6 s elapsed, 13,681 s user, 627 s sys) |
 | F4 | Full archive, Rust, final binary (arena + iterative validation) | **7 min 22 s, 11.0 GB peak** (442.2 s elapsed, 10,698 s user, 638 s sys); outputs identical to F1 |
-| F2 | Full archive, TypeScript tool from scratch (empty store, scratch directories): time and peak memory | running (started 01:09, commit ab5f87f, the version the Rust parity is measured against) |
-| F3 | Diff the two full-archive outputs (parity on the whole archive, not only samples) | pending |
+| F2 | Full archive, TypeScript tool from scratch (empty store, scratch directories; commit ab5f87f, the version the Rust parity is measured against) | **101 min 13 s, 18.8 GB peak** (6,054 s elapsed, 94,307 s user, 4,259 s sys; default 31 worker threads); store afterwards 3.0 GB |
+| F3 | Diff the two full-archive outputs (parity on the whole archive, not only samples) | **identical**: all 42 files (41 modules + meta.json), timestamps aside |
+
+## Outcome
+
+Full archive (133,017 submissions, 655,876 sessions), same machine, idle:
+
+| | Elapsed | CPU (user) | Peak memory |
+|---|---|---|---|
+| TypeScript, from an empty store (F2) | 101 min 13 s | 94,307 s | 18.8 GB |
+| Rust, first full run | 18 min 43 s | — | 13.4 GB |
+| Rust, final (F4) | **7 min 22 s** (13.7x faster than TS) | 10,698 s (8.8x less) | **11.0 GB** (−41% vs TS) |
+
+Outputs are byte-identical to the TypeScript tool on the whole archive (F3), and on the 1% and 5%
+samples after every kept change.
+
+Kept, by gain on the 5% sample (complexity in brackets):
+
+1. Arena per worker for decoded values, with a 16 MB retention cap: −17% (medium; decoder
+   internals only)
+2. Lazy events, headers read straight from the bytes (P10): −14% (medium)
+3. Recycled inflate buffers and a borrowed export string (P6): −11% (low)
+4. Event names and times read once per session into a contiguous array (P2): −7% (low)
+5. Trusted walking of already validated bytes (P12a): −5% (low)
+6. `Object::get` fast paths (P1), tables finished in place (P3), integer CBOR arguments (P4),
+   FxHash (P5), iterative validation (P12b): −1% to −3% each (low)
+7. Memory: objectives folded as per-session slots (M2, fold −48%), one spare inflate buffer per
+   thread (M-a), parallel spawn merges in finalize (P8, finalize 48 s → 6 s at full scale)
+
+Rejected (no gain or not worth it): name hash index (P1b), loot source map (P11), fewer threads
+(M1, over the 1%-per-10% rule), inlined/ASCII-fast-path string checks (T1/T2), UTF-8 fast path for
+submission files (P13), pre-sized print decoding (P14), `target-cpu=native`.
+
+Not tried: M3 (summarize custom-merge fields in the fold). The fold is ~319 MB on the 5% sample
+and grows with sessions, so it is most of the 11 GB at full scale; shrinking it means rewriting
+each field's merge as an exact running summary — medium complexity, real parity risk, and memory
+was the secondary goal.
