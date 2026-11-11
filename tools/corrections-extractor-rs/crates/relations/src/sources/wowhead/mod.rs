@@ -11,11 +11,11 @@
 //! Progress / Unlocks / Disables appear only on Era pages the scraper inherited and never
 //! refetched, so those surfaces are Era data and are only "covered" on those pages.
 
-pub mod aggregate;
-pub mod interpret;
-pub mod pages;
-pub mod parse;
-pub mod scores;
+mod aggregate;
+mod interpret;
+mod pages;
+mod parse;
+mod scores;
 
 use crate::config::Config;
 use crate::io;

@@ -7,9 +7,9 @@
 //! `reports/breadcrumbs-pairs.json` (every judged pair with its per-kind character counts, for
 //! review and calibration).
 
-pub mod infer;
-pub mod links;
-pub mod observe;
+mod infer;
+mod links;
+mod observe;
 
 use self::infer::{judge_tally, BreadcrumbResult, Tally, MIN_COVERAGE_CHARACTERS};
 use self::links::{BreadcrumbParams, LinkCollector};
