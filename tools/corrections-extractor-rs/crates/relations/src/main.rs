@@ -9,8 +9,9 @@ use relations::{catalog, combine, ingest, io, score, sources};
 use std::process::ExitCode;
 use std::time::Instant;
 
-#[global_allocator]
-static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+// The system allocator, unlike the corrections extractor: decoding goes into a per-worker arena
+// (see ingest), so few allocations reach it. On the full archive, ingest took 385 s and 8.1 GB with
+// it against 435 s and 8.5 GB with mimalloc.
 
 const USAGE: &str = "\
 Usage: relations <command>
