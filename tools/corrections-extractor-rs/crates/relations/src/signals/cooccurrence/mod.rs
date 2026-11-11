@@ -22,8 +22,8 @@ use self::exclusion::{infer_exclusions, ExclusionEdge, ExclusionKind, ExclusionP
 use self::history::{build_histories, unstable_quests, HistoryParams};
 use self::population::Population;
 use self::prerequisites::{infer_prerequisites, PrerequisiteEdge, PrerequisiteParams};
-use super::{to_json, Findings, Signal, SignalInput};
-use crate::eligibility::{is_forever_interface, is_forever_quest_id};
+use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
+use crate::eligibility::is_forever_quest_id;
 use crate::model::{Evidence, QuestCatalog, QuestEpisode, QuestId, RelationCandidate, RelationField};
 use crate::text::{to_exponential, to_fixed};
 use rustc_hash::FxHashSet;
@@ -80,11 +80,7 @@ impl Signal for Cooccurrence {
     }
 
     fn run(&self, input: &SignalInput) -> Findings {
-        let episodes: Vec<&QuestEpisode> = input
-            .episodes
-            .iter()
-            .filter(|episode| is_forever_interface(episode.interface_version))
-            .collect();
+        let episodes = forever_episodes(input.episodes);
         let Analysis {
             candidates,
             covered,
