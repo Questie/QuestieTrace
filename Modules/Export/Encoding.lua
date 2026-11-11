@@ -43,8 +43,79 @@ end
 -- Encoding/Decoding
 ---------------------------------------------------------------------------
 
+---@param payload table
+---@return boolean ok
+---@return any encodedOrError
+local function TryEncode(payload)
+  return pcall(function()
+    local cbor = C_EncodingUtil.SerializeCBOR(payload)
+    local compressed = C_EncodingUtil.CompressString(cbor, Enum.CompressionMethod.Deflate, Enum.CompressionLevel.Default)
+    return LibDeflate:EncodeForPrint(compressed)
+  end)
+end
+
+--- Maximum number of removed secret value paths to report through Core.Debug.
+local MAX_REPORTED_SECRET_PATHS = 5
+
+--- Describe where in the payload a secret was found, from the keys leading to it.
+--- Only called for removals, where every key in `keyStack` is known not to be
+--- secret (stringifying a secret would throw).
+---@param keyStack any[]
+---@param depth integer
+---@param leaf string
+---@return string
+local function DescribePath(keyStack, depth, leaf)
+  local parts = { "payload" }
+  for i = 1, depth do
+    parts[#parts + 1] = tostring(keyStack[i])
+  end
+  parts[#parts + 1] = leaf
+  return table.concat(parts, ".")
+end
+
+--- Remove every secret value (as keys or values) from `value`, in place.
+---
+--- Why this exists: the client marks some API results and event arguments as
+--- "secret values". Tainted addon code may hold them in tables, but
+--- C_EncodingUtil.SerializeCBOR refuses to serialize them for tainted callers
+--- and throws "attempted to serialize a secret value". A single one anywhere
+--- in a payload fails the whole export.
+---
+--- Secrets are never persisted by SavedVariables, so after a /reload a session
+--- no longer contains them. Removing them (rather than substituting a marker)
+--- makes an export from a live session match what the same session looks like
+--- after a /reload.
+---
+--- Secret values are never indexed or stringified: touching their contents
+--- would raise an error too. Secret tables are removed whole.
+---@param value table
+---@param keyStack any[] Keys leading to `value`, for diagnostics.
+---@param depth integer Number of valid entries in `keyStack`.
+---@param removedPaths string[] Collects up to MAX_REPORTED_SECRET_PATHS removed locations.
+---@return integer removedCount
+local function RemoveSecretValues(value, keyStack, depth, removedPaths)
+  local removed = 0
+  for key, child in pairs(value) do
+    local keyIsSecret = issecretvalue(key)
+    if keyIsSecret or issecretvalue(child) then
+      value[key] = nil
+      removed = removed + 1
+      if #removedPaths < MAX_REPORTED_SECRET_PATHS then
+        removedPaths[#removedPaths + 1] = DescribePath(keyStack, depth, keyIsSecret and "<secret key>" or tostring(key))
+      end
+    elseif type(child) == "table" then
+      keyStack[depth + 1] = key
+      removed = removed + RemoveSecretValues(child, keyStack, depth + 1, removedPaths)
+    end
+  end
+  return removed
+end
+
 --- Encode a payload table into a compressed, print-safe string.
 --- Pipeline: Lua table -> CBOR -> Deflate compress -> EncodeForPrint
+---
+--- If encoding fails and the payload contains secret values, they are removed
+--- from `payload` in place and encoding is retried once (see RemoveSecretValues).
 ---@param payload table
 ---@return string? encodedPayload Nil if codec support is missing or encoding fails.
 ---@return string? err Failure reason when encoding was attempted but failed. Nil if codec support is missing.
@@ -53,11 +124,16 @@ function Core.EncodeExportPayload(payload)
     return nil
   end
 
-  local ok, encoded = pcall(function()
-    local cbor = C_EncodingUtil.SerializeCBOR(payload)
-    local compressed = C_EncodingUtil.CompressString(cbor, Enum.CompressionMethod.Deflate, Enum.CompressionLevel.Default)
-    return LibDeflate:EncodeForPrint(compressed)
-  end)
+  local ok, encoded = TryEncode(payload)
+
+  if (not ok) and type(issecretvalue) == "function" then
+    local removedPaths = {}
+    local removed = RemoveSecretValues(payload, {}, 0, removedPaths)
+    if removed > 0 then
+      Core.Debug("Removed", removed, "secret value(s) before encoding, e.g.", table.concat(removedPaths, ", "))
+      ok, encoded = TryEncode(payload)
+    end
+  end
 
   if ok and type(encoded) == "string" then
     return encoded
