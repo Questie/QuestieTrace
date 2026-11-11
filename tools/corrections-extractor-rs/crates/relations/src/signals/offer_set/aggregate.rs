@@ -5,9 +5,9 @@
 use super::observe::CharacterView;
 use super::variants::VariantIndex;
 use super::Params;
-use crate::text::to_fixed;
 use crate::eligibility::{class_allowed, race_allowed};
 use crate::model::{Evidence, GiverKind, GiverRef, QuestCatalog, QuestEpisode, QuestEventKind, QuestId};
+use crate::text::to_fixed;
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use std::cmp::Reverse;
