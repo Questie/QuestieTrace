@@ -65,6 +65,7 @@ impl Signal for Handoff {
 
 /// candidates/handoff.json `params`: the windows, the scores and what the counts mean.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FileParams {
     #[serde(flatten)]
     windows: HandoffParams,

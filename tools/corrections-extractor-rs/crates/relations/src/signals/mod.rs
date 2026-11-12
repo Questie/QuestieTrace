@@ -11,7 +11,7 @@
 //!
 //! - `combine/assumptions.rs` (`phrase`): how the Lua module's `-- Assumption:` comment words the
 //!   signal's evidence, per field. Without an entry the comment just says `<name> signal`.
-//! - `combine/inputs.rs` (`is_context_only`): files whose name starts with "wowhead" are context
+//! - `combine/inputs.rs` (`is_context_only`): files named `wowhead` or `wowhead-...` are context
 //!   for reviewers only and never decide anything. A new source like that needs a name it
 //!   matches; a new signal must not match it.
 
@@ -121,12 +121,12 @@ pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> SignalOutput {
 }
 
 /// Runs every signal, one after another (each uses every core itself), and hands each result to
-/// `write` as soon as it is done. Side by side, their working sets added up: on the full archive
-/// that is more memory than the episodes themselves several times over.
-pub fn run_all(input: &SignalInput, mut write: impl FnMut(SignalOutput) -> Result<()>) -> Result<()> {
+/// `on_output` as soon as it is done. Side by side, their working sets added up: on the full
+/// archive that is more memory than the episodes themselves several times over.
+pub fn run_all(input: &SignalInput, mut on_output: impl FnMut(SignalOutput) -> Result<()>) -> Result<()> {
     for signal in registry() {
         let started = std::time::Instant::now();
-        write(run_one(signal, input))?;
+        on_output(run_one(signal, input))?;
         eprintln!("== signal:{} done in {:.1}s", signal.name(), started.elapsed().as_secs_f64());
     }
     Ok(())
