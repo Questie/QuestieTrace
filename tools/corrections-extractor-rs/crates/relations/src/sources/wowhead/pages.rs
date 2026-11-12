@@ -1,4 +1,4 @@
-//! Read-only access to scraper-questie's raw page caches (data/raw/<version>.db). The scraper may
+//! Read-only access to scraper-questie's raw page caches (`data/raw/<version>.db`). The scraper may
 //! be running while we read, so connections are opened read-only and only ever SELECT; never
 //! write to these files.
 

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// TRACE_DATA_DIR: a trace-data checkout (submissions/<yyyy-mm>/<stamp>_<id>.json).
+    /// TRACE_DATA_DIR: a trace-data checkout (`submissions/<yyyy-mm>/<stamp>_<id>.json`).
     pub trace_data_dir: Option<PathBuf>,
     /// QUESTIEDB_DIR: a QuestieDB checkout (data/ and src/corrections/).
     pub questie_db_dir: Option<PathBuf>,

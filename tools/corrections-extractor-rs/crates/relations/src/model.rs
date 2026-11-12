@@ -163,7 +163,7 @@ pub enum Faction {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerContext {
-    /// Blizzard ChrRaces id (UnitRace 3rd return); its Questie bit is in [`crate::race_masks`].
+    /// Blizzard ChrRaces id (UnitRace 3rd return); its Questie bit is in `crate::race_masks`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub race_id: Option<i64>,
     /// Blizzard ChrClasses id (UnitClass 3rd return). Questie class bit = 2^(classId - 1).
@@ -534,7 +534,7 @@ impl RelationCandidate {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateFile {
-    /// Signal or source name, matching the file name: candidates/<signal>.json
+    /// Signal or source name, matching the file name: `candidates/<signal>.json`
     pub signal: String,
     pub generated_at: String,
     /// Episodes (or source records) the signal looked at.
