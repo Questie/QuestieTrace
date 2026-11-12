@@ -20,6 +20,8 @@ rusqlite.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 # Report objects built with json! keep the order they were written in, whatever else the build
-# enables (a dev-dependency of another crate turned this on in workspace builds only).
-serde_json = { workspace = true, features = ["preserve_order"] }
+# enables (a dev-dependency of another crate turned this on in workspace builds only). Floats read
+# back exactly as written, so a step run on its own sees the same scores and times as `pipeline`
+# hands over in memory.
+serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
 sha2.workspace = true
