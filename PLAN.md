@@ -1,4 +1,139 @@
-# corrections-extractor-rs: optimization plan
+# corrections-extractor-rs: plan
+
+1. **Next: the Rust extractor becomes the primary extractor** (this section).
+2. Done: the optimization night of 2026-11-10/11 (below), and the Rust relations pipeline
+   ([RELATIONS.md](RELATIONS.md), PR #137).
+
+# Next: the Rust extractor becomes the primary extractor
+
+**Decision (David, 2026-11-12):** the Rust tools in `tools/corrections-extractor-rs` become the
+primary way to turn trace-data into corrections; the TypeScript extractor
+(`tools/corrections-extractor`) is retired once the Rust one covers everything it is used for.
+
+Relations was already written as natural Rust (outputs compared by value). The field extractor
+(`crates/corrections`) was not: it was ported to be byte-identical with the TypeScript tool, down
+to error texts, so it carries a layer that imitates JavaScript. As the primary extractor it no
+longer needs to: the TypeScript tool stops being the definition of right, and becomes a reference
+for one last comparison.
+
+## Where we start
+
+- **Rust extractor:** byte-identical to the TypeScript extractor as of #129 on the full archive,
+  7 min 22 s against 101 min. Behind master by three changes (below).
+- **Rust relations:** natural Rust, same values as Exporters' TypeScript pipeline on a 5% sample;
+  11 min on the full archive. `scripts/relations.sh` checks inputs, fetches the scraper databases
+  into the gitignored `data/scraper/` and runs it.
+- **What the TypeScript extractor does that the Rust one does not** (from `docs/data-flow.md`):
+  - reads new submissions straight from the OVH bucket (rclone, batches of 500); Rust reads a
+    local trace-data checkout;
+  - keeps every observation in a store (`../trace-session-store`: Parquet plus `views.sql`) that
+    is queried with DuckDB for audits, e.g. `WHERE token = 'npc'` (ADR 0005); Rust keeps none;
+  - observes only new submissions (the store); Rust re-reads everything, which takes 7 minutes.
+- **The JavaScript-imitating layer in `crates/corrections`** (12.4k lines in all):
+  - `js.rs` (196 lines): `js::number` (JS `Number()` on strings, 16 call sites), `js::trim` and
+    `js::is_whitespace` (11), `js::round` (`Math.round`, 6), `js::to_fixed_4` (spawn dedupe keys,
+    2), V8's `hypot` (1), and `min`, `max`, `sign`, `string`, `format_number`, `is_integer`;
+  - the `Js` value model the Lua writer builds output from (`lua.rs`, 74 uses);
+  - error-message parity in `trace-data`: zlib's error texts through the C zlib (`flate2`), the
+    only reason that dependency exists; UTF-16 quoting of bad characters in print decoding.
+- **Not JavaScript imitation, and staying:** `trace-data`'s table-shape rules (when a Lua table is
+  an array, key order). They are how the data is read by both pipelines, and relations' parity
+  rests on them. The arena, lazy decoding and the other speed work stay as they are.
+
+## What "done" means
+
+1. The Rust extractor produces everything the team uses from the TypeScript one, from current
+   master's behaviour: the `forever*Traces.lua` modules, `xpDB-traces.lua`, the lookups and
+   `meta.json`.
+2. No JavaScript imitation is left except where an output depends on it, each such place named in
+   a comment (as relations does with `crate::text`).
+3. The audit workflow survives in some form (decision 2 below).
+4. CI builds, lints and tests the Rust workspace; the docs describe the Rust tools as the way to
+   run things; an ADR records the switch.
+5. The TypeScript extractor is deleted, or explicitly kept as a frozen reference.
+
+## Work, in order
+
+Every step ends with the gate and a commit of its own. An output change is allowed only when it
+is understood: the commit message says what changed and why, with counts.
+
+**0. Reference and gate (small).**
+- Freeze a reference: TypeScript master's extractor output on the 5% sample (and the full archive,
+  101 min, on an idle machine), with the master commit recorded next to it.
+- Move `scripts/parity.sh` from byte comparison to value comparison: Lua modules line by line
+  with timestamps masked, JSON by value (the relations compare tool already does both), and
+  `meta.json`'s skipped and partial files compared by file name and count, not by reason text.
+
+**1. Catch up with master, written as plain Rust from the start (small).**
+- #131: `questXp` is kept for every quest seen in Forever, not only Forever-new ids.
+- `8508e3b`: `finishedBy` gets the token rules `startedBy` already has (and the Rust port already
+  follows): `questnpc` at `QUEST_COMPLETE` and `QUEST_TURNED_IN`, `npc` only as the fallback for
+  gossip quest lists, objects only from `questnpc`.
+- `62cad93` (ADR 0005): `startedBy` and `finishedBy` observations record the unit token they came
+  from. TypeScript stores it in a store column; in Rust it feeds the audit output of step 3.
+- Gate: the same values as the step-0 reference.
+
+**2. Remove the JavaScript layer (medium), one item per commit, most valuable first.**
+- Replace the `Js` model in `lua.rs` with typed records written straight to Lua.
+- `js::number` becomes explicit parsing of what the data holds (digits, a sign, a decimal point)
+  with the cases that differ handled on purpose.
+- `js::round` becomes `f64::round`: identical for positive values, and coordinates are positive.
+- `js::to_fixed_4` spawn keys become integer keys (coordinates in ten-thousandths).
+- V8 `hypot` becomes `f64::hypot` (may move a last bit; the gate shows whether any decision flips).
+- Error texts in plain Rust words; drop `flate2` and the UTF-16 error path from `trace-data`.
+- `js::trim`: one JS-whitespace helper shared with relations (`crate::text` today) only where
+  names are compared; plain `trim` elsewhere.
+- Shared helpers between `corrections` and `relations` get one home only when they are the same
+  responsibility (AHA): number text for the TypeScript-compatible outputs, the race/class masks.
+- Gate after each item: the same values as the step-1 output, or an understood difference.
+
+**3. Daily-use parity (decisions first, then medium).**
+- Source: keep "sync the bucket, then run" (decision 1).
+- Audits: write the observations the run made, with their token, as a file DuckDB reads
+  (decision 2), and port the useful `views.sql` queries.
+- Incremental runs: not needed at 7 minutes per full run; revisit when a full run passes ~30
+  minutes.
+
+**4. Switch over (small).**
+- CI: a Rust job next to the TypeScript one (`cargo fmt --check`, `cargo clippy --all-targets -- -D
+  warnings`, `cargo test`); the TypeScript job goes with the TypeScript tool.
+- Docs: `docs/data-flow.md`, `README.md`, `AGENTS.md` and the tool READMEs; ADR 0006 "The Rust
+  extractor is the primary extractor" (superseding the store parts of ADRs 0001 and 0003).
+- One full-archive run, twice, compared (this dev machine has memory errors, see RELATIONS.md),
+  checked against the step-0 full-archive reference.
+- Retire `tools/corrections-extractor` (decision 3).
+
+## Decisions needed from David
+
+1. **Reading the bucket:** keep "rclone sync, then run on the local checkout" (simplest, works
+   today), or read the OVH bucket natively from Rust? Recommendation: keep the sync.
+2. **Audits without the TypeScript store:** (a) write observations as JSON lines, which DuckDB
+   reads directly (`read_json`), one file per run, no new dependencies; (b) write Parquet like the
+   TypeScript store (the `arrow`/`parquet` crates are large); (c) no audit output. Recommendation:
+   (a).
+3. **The TypeScript extractor:** delete it at the switch, or keep it frozen as a reference for one
+   release cycle. Recommendation: keep it frozen until the first release built from the Rust
+   output, then delete.
+4. **One home:** Exporters has its own, older copy of the TypeScript extractor and its dump spawns
+   the TypeScript relations pipeline. Point the dump at the Rust binaries (they read the same
+   environment variables), or move the Rust tools to Exporters? Either way, only one copy of the
+   extraction rules should stay alive.
+
+## Risks
+
+- **Silent output changes** hidden by the value comparison: every allowed difference is listed in
+  its commit message with counts, and the step-0 reference stays as the baseline until the switch.
+- **Losing the audit habit:** decision 2 before step 4, not after.
+- **The dev machine's memory errors** can corrupt any run: full runs are done twice and compared.
+- **Exporters drifting further** while this happens: decision 4 early.
+
+## Size
+
+Steps 0, 1 and 4 are small (a day together); step 2 is the bulk (about the size of one relations
+area per item group, gated each time); step 3 depends on decision 2 ((a) is small). Smaller than
+the relations port: the observers' logic stays, only the layer around it changes.
+
+# Optimization night (2026-11-10/11)
 
 Overnight work on the Rust prototype in `tools/corrections-extractor-rs` (local only, never pushed).
 Goal: find out which optimizations pay off, by how much, and at what complexity; then measure the
