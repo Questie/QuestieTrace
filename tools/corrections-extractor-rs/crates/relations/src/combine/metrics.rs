@@ -25,8 +25,9 @@ pub const METRIC_CAVEATS: [&str; 5] = [
      calibrated cut-offs.",
     "Cross-validated like the edge scores: which sources count as AND evidence.",
     "Chosen in-sample on all ground truth: the shape of the OR/AND rule (11 of 11 judged multi-prerequisite quests), suppressing \
-     prerequisites between same-name copies of a breadcrumb and its target (106 of the 107 edges it drops are wrong), the model form \
-     (one pooled model per kind over per-domain models, contradiction rate over count) and ridge 1.",
+     prerequisites between same-name copies of a breadcrumb and its target (106 of the 107 edges it drops are wrong), completing an \
+     accepted AND list from below the threshold (resolution rule 6b, with its 0.5 bar for probability and AND claim score), the model \
+     form (one pooled model per kind over per-domain models, contradiction rate over count) and ridge 1.",
     "Fixed up front, not tuned: the 0.9 acceptance and 0.5 review thresholds, 0.5 for completing exclusive groups, 5 folds, and at \
      least 10 judged edges with 3 of each outcome before a kind is calibrated.",
 ];

@@ -338,6 +338,7 @@ mod tests {
             &ResolveOptions {
                 min_score: 0.9,
                 clique_min_score: 0.5,
+                and_min_score: 0.5,
                 known_quest: &|_| true,
                 family_of: &|quest_id| quest_id.to_string(),
                 trusts_and: &|_, _| false,
