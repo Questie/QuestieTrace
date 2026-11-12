@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { observeFinishedBy } from "./finishedBy";
-import { mergeFinishedBy } from "../../merge/quest/finishedBy";
 import { apiSample, creatureGuid, makeSession, objectGuid, traceEvent } from "../../../test/fixtures";
 
 describe("observeFinishedBy", () => {
@@ -93,7 +92,7 @@ describe("observeFinishedBy", () => {
     );
 
     const results = observeFinishedBy(session);
-    expect(mergeFinishedBy(results)).toEqual({ creatures: [197], objects: [] });
+    expect(results.map((r) => r.value)).toEqual([{ creatureId: 197 }]);
   });
 
   it("should capture multiple creature finishers across different quest events", () => {
@@ -241,14 +240,9 @@ describe("observeFinishedBy", () => {
       ]
     );
 
-    // Both events produce observations; mergeFinishedBy unions them by type
     const results = observeFinishedBy(session);
-    const creatures = results.filter((r) => r.value.creatureId);
-    expect(creatures).toHaveLength(2); // one from QUEST_COMPLETE, one from QUEST_TURNED_IN
-    // mergeFinishedBy will deduplicate the creature IDs
-    const merged = mergeFinishedBy(results);
-    expect(merged.creatures).toEqual([197]);
-    expect(merged.creatures).toHaveLength(1);
+    // one from QUEST_COMPLETE, one from QUEST_TURNED_IN
+    expect(results.map((r) => r.value)).toEqual([{ creatureId: 197 }, { creatureId: 197 }]);
   });
 
   it("should capture a creature finisher from C_GossipInfo.GetActiveQuests snapshot", () => {
@@ -316,30 +310,6 @@ describe("observeFinishedBy", () => {
     );
 
     expect(observeFinishedBy(session)).toEqual([]);
-  });
-
-  it("should merge duplicate creature finishers via mergeFinishedBy", () => {
-    const obs = [
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 3 } },
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 10 } },
-      { entityId: 96659, value: { creatureId: 200 }, confidence: "medium" as const, provenance: { session: "s", t: 15 } },
-    ];
-
-    const result = mergeFinishedBy(obs);
-    expect(result.creatures).toEqual(expect.arrayContaining([197, 200]));
-    expect(result.creatures).toHaveLength(2);
-    expect(result.objects).toEqual([]);
-  });
-
-  it("should merge mixed finisher types via mergeFinishedBy", () => {
-    const obs = [
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 3 } },
-      { entityId: 96659, value: { objectId: 2843 }, confidence: "low" as const, provenance: { session: "s", t: 5 } },
-    ];
-
-    const result = mergeFinishedBy(obs);
-    expect(result.creatures).toEqual([197]);
-    expect(result.objects).toEqual([2843]);
   });
 
   it("should attribute correctly even when the GUID sample is much older than the quest event (long dialog read)", () => {

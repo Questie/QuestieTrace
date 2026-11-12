@@ -207,7 +207,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   const zoneOrSortFacts = aggregateScalarSummary(scalars.zoneOrSort);
   const field = <T, R>(key: ObserverKey, merge: (observations: Observation<T>[]) => R, extraKey?: string) =>
     aggregateStoredField<T, R>(store, key, merge, extraKey);
-  const finishedByFacts = field("finishedBy", mergeFinishedBy);
+  const finishedByFacts = onlyDefinedFacts(field("finishedBy", mergeFinishedBy));
   // Quest turn-in POIs are spawns of the quest's single finisher: they join its spawn observations.
   // They are kept apart from the observed spawns, so finalize can run again on the same accumulator.
   store.clear("npcTurnInSpawns");
@@ -225,7 +225,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   for (const [questId, fact] of questXpFacts) {
     if (fact.value !== undefined) questXpRows.set(questId, { level: questLevelFacts.get(questId)!.value, xp: fact.value });
   }
-  const startedByFacts = field("startedBy", mergeStartedBy);
+  const startedByFacts = onlyDefinedFacts(field("startedBy", mergeStartedBy));
   const npcReactions = field("npcFriendlyToFaction", summarizeReactions);
   const questFactions = field("questFactions", mergeQuestFactions);
   const factionsByStarter = new Map<number, Map<number, Set<Faction>>>();

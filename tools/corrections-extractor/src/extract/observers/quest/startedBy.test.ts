@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { observeStartedBy } from "./startedBy";
-import { mergeStartedBy } from "../../merge/quest/startedBy";
 import { apiSample, creatureGuid, makeSession, objectGuid, traceEvent } from "../../../test/fixtures";
 
 describe("observeStartedBy", () => {
@@ -356,45 +355,11 @@ describe("observeStartedBy", () => {
       ]
     );
 
-    // Both sources produce observations; mergeStartedBy unions them by type
     const results = observeStartedBy(session);
-    const creatures = results.filter((r) => r.value.creatureId);
-    expect(creatures).toHaveLength(2); // one from QUEST_DETAIL, one from gossip
-    // mergeStartedBy will deduplicate the creature IDs
-    const merged = mergeStartedBy(results);
-    expect(merged.creatures).toEqual([197]);
-    expect(merged.creatures).toHaveLength(1);
+    // one from QUEST_DETAIL, one from gossip
+    expect(results.map((r) => r.value)).toEqual([{ creatureId: 197 }, { creatureId: 197 }]);
   });
 
-  it("should merge duplicate creature starters via mergeStartedBy", () => {
-    const obs = [
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 3 } },
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 10 } },
-      { entityId: 96659, value: { creatureId: 200 }, confidence: "medium" as const, provenance: { session: "s", t: 15 } },
-    ];
-
-    const result = mergeStartedBy(obs);
-    expect(result.creatures).toEqual(expect.arrayContaining([197, 200]));
-    expect(result.creatures).toHaveLength(2);
-    expect(result.objects).toEqual([]);
-    expect(result.items).toEqual([]);
-  });
-
-  it("should merge mixed starter types via mergeStartedBy", () => {
-    const obs = [
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 3 } },
-      { entityId: 96659, value: { objectId: 2843 }, confidence: "low" as const, provenance: { session: "s", t: 5 } },
-      { entityId: 96659, value: { itemId: 750 }, confidence: "high" as const, provenance: { session: "s", t: 7 } },
-    ];
-
-    const result = mergeStartedBy(obs);
-    expect(result.creatures).toEqual([197]);
-    expect(result.objects).toEqual([2843]);
-    expect(result.items).toEqual([750]);
-  });
-});
-
-describe("observeStartedBy interaction correlation", () => {
   it("should prefer a questnpc object over a conflicting npc creature", () => {
     const session = makeSession(
       {
