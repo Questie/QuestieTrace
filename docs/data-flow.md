@@ -42,7 +42,7 @@ Changing any observer code empties the store, and the next run observes everythi
    - `SCALAR_OBSERVERS` when one value per entity wins by count. These are summarized in DuckDB (`ObservedStore.scalarGroups`), so a change to `addToScalarSummary` must be mirrored there.
    - `OBSERVERS` with a merge function otherwise. Add the field to `OBSERVER_ENTITIES` so Classic IDs are dropped before they are stored.
    - Translations go in `observe-lookups.ts`, and are merged in `lookups.ts` (`finalizeLookups`).
-4. Merge and emit in `src/extract/index.ts` (`finalize`) and `src/extract/emit/<entity>.ts`. Changes here don't rebuild the store. A test (`observe.test.ts`) fails when `finalize` never reads a registered field.
+4. Merge and emit in `src/extract/index.ts` (`finalize`), `src/extract/emit/<entity>.ts` and, for a custom merge, `src/extract/merge/<entity>/<field>.ts` (test next to it). Changes here don't rebuild the store. A test (`observe.test.ts`) fails when `finalize` never reads a registered field.
 5. Check on the sample: `EXTRACT_SAMPLE=5 npm run extract`, output in `output/sample-5/`.
 6. Run on all data once it's done. The changed observer code rebuilds the store automatically.
 

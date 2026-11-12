@@ -4,7 +4,7 @@
 // zoneID: pick the most frequently observed zone from spawn observations.
 
 import type { Observation } from "../../observation";
-import type { SpawnObservationValue, TaggedSpawnObservation } from "./spawns";
+import type { SpawnObservationValue, TaggedSpawnObservation } from "../../observers/npc/spawns";
 
 const TOKEN_PRIORITY: Record<string, number> = {
   questpoi: 4,

@@ -16,7 +16,7 @@
 //   - "target" is intentionally excluded: unlike questnpc/npc, it can point at anything the player
 //     happens to be targeting and is not tied to the quest interaction.
 //
-// Custom merge: set-union per starter type across all observations.
+// Merged in merge/quest/startedBy.ts.
 
 import { AMBIGUOUS_INTERACTION, questEventLookup, type InteractionLookup } from "./_interaction";
 import { parseGuid } from "../../guid";
@@ -39,31 +39,6 @@ export interface StartedByStarter {
   creatureId?: number;
   objectId?: number;
   itemId?: number;
-}
-
-export interface StartedByValue {
-  creatures: number[];
-  objects: number[];
-  items: number[];
-}
-
-export function mergeStartedBy(observations: Observation<StartedByStarter>[]): StartedByValue {
-  const creatures = new Set<number>();
-  const objects = new Set<number>();
-  const items = new Set<number>();
-
-  for (const obs of observations) {
-    const s = obs.value;
-    if (s.creatureId) creatures.add(s.creatureId);
-    if (s.objectId) objects.add(s.objectId);
-    if (s.itemId) items.add(s.itemId);
-  }
-
-  return {
-    creatures: [...creatures].sort((a, b) => a - b),
-    objects: [...objects].sort((a, b) => a - b),
-    items: [...items].sort((a, b) => a - b),
-  };
 }
 
 function pushGuidObservations(

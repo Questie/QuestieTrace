@@ -14,7 +14,7 @@
 //     with (e.g. a vendor next to the finisher), so it is never used there.
 //   - Objects are only taken from questnpc.
 //
-// Custom merge: set-union per finisher type across all observations.
+// Merged in merge/quest/finishedBy.ts.
 
 import { AMBIGUOUS_INTERACTION, questEventLookup, type InteractionLookup } from "./_interaction";
 import { parseGuid } from "../../guid";
@@ -36,27 +36,6 @@ interface GossipQuestEntry {
 export interface FinishedByFinisher {
   creatureId?: number;
   objectId?: number;
-}
-
-export interface FinishedByValue {
-  creatures: number[];
-  objects: number[];
-}
-
-export function mergeFinishedBy(observations: Observation<FinishedByFinisher>[]): FinishedByValue {
-  const creatures = new Set<number>();
-  const objects = new Set<number>();
-
-  for (const obs of observations) {
-    const f = obs.value;
-    if (f.creatureId) creatures.add(f.creatureId);
-    if (f.objectId) objects.add(f.objectId);
-  }
-
-  return {
-    creatures: [...creatures].sort((a, b) => a - b),
-    objects: [...objects].sort((a, b) => a - b),
-  };
 }
 
 function pushGuidObservations(
