@@ -22,6 +22,16 @@
 //!   6. exclusive groups: a pair below the threshold is still accepted when both quests are
 //!      already in one accepted group, the pair has evidence of its own, and rule 5 allows it;
 //!      nothing is inferred from transitivity alone.
+//!
+//!      6b, AND lists, works alike: a prerequisite below the threshold is still accepted, strongest
+//!      first, when its own preQuestGroup claim from a trusted source scores at least
+//!      `and_min_score`, rule 8 would read the quest's accepted prerequisites plus it as AND, and
+//!      it neither closes an ordering cycle nor joins a live exclusive pair by an ordering path.
+//!      The cooccurrence signal cannot tell which of two always-done prerequisites unlocks a
+//!      quest, so the second member of an AND pair scores low on its own. Chosen in-sample
+//!      (2026-11 data, ground truth before 545's authored AND list): 14 judged completions, all
+//!      in the reference AND list once 545 got its authored one; without an accepted AND partner
+//!      the same evidence was right 3 times in 8.
 //!   7. transitive reduction: X needing P2 and P1, where P2 needs P1, keeps only P2, unless the
 //!      direct edge to P1 is the stronger one.
 //!   8. OR vs AND: see [`choose_group_kind`].
@@ -50,6 +60,9 @@ pub struct ResolveOptions<'o> {
     pub min_score: f64,
     /// Lower bar for an exclusive pair inside a group whose other pairs were accepted (rule 6).
     pub clique_min_score: f64,
+    /// Lower bar for a prerequisite completing an accepted AND list (rule 6b): for its probability
+    /// and for the score of its own AND claim.
+    pub and_min_score: f64,
     /// Whether the catalog (Questie's Forever data) knows the quest.
     pub known_quest: &'o dyn Fn(QuestId) -> bool,
     /// Same-name copies share a family; a list of copies of one quest is always an OR list.
@@ -59,8 +72,8 @@ pub struct ResolveOptions<'o> {
     pub trusts_and: &'o dyn Fn(QuestId, &Claim) -> bool,
 }
 
-/// - accepted / clique / derived: written to the RelationSet (clique: rule 6; derived: implied by
-///   an accepted breadcrumb, see `because`).
+/// - accepted / clique / and-group / derived: written to the RelationSet (clique: rule 6;
+///   and-group: rule 6b; derived: implied by an accepted breadcrumb, see `because`).
 /// - below-threshold: not enough evidence.
 /// - unknown-quest: one side is missing from the catalog.
 /// - runner-up: a scalar field already took a stronger target (`because`).
@@ -71,6 +84,7 @@ pub struct ResolveOptions<'o> {
 pub enum Outcome {
     Accepted,
     Clique,
+    AndGroup,
     Derived,
     BelowThreshold,
     UnknownQuest,
@@ -84,13 +98,14 @@ pub enum Outcome {
 impl Outcome {
     /// Written to the RelationSet, so relations.json and the Lua output (applied or commented out).
     pub fn is_written(self) -> bool {
-        matches!(self, Outcome::Accepted | Outcome::Clique | Outcome::Derived)
+        matches!(self, Outcome::Accepted | Outcome::Clique | Outcome::AndGroup | Outcome::Derived)
     }
 
     pub fn name(self) -> &'static str {
         match self {
             Outcome::Accepted => "accepted",
             Outcome::Clique => "clique",
+            Outcome::AndGroup => "and-group",
             Outcome::Derived => "derived",
             Outcome::BelowThreshold => "below-threshold",
             Outcome::UnknownQuest => "unknown-quest",
@@ -465,6 +480,63 @@ pub fn resolve_relations(input: &[ResolvableEdge], options: &ResolveOptions) -> 
         }
     }
 
+    // 6b. AND lists
+    let mut listed_prerequisites: IndexMap<QuestId, Vec<Id>> = IndexMap::new();
+    for id in r.live(&[EdgeKind::Prerequisite]) {
+        listed_prerequisites.entry(r.edges[id].key.quest).or_default().push(id);
+    }
+    // Its own AND evidence must be more than a guess: low preQuestGroup scores (offer-set's
+    // play-order-only class) are right about AND a few times in ten.
+    let has_and_evidence = |edge: &ResolvableEdge| {
+        edge.claims
+            .iter()
+            .any(|claim| claim.field == RelationField::PreQuestGroup && claim.score >= options.and_min_score && (options.trusts_and)(edge.key.quest, claim))
+    };
+    let mut candidates: Vec<Id> = (0..input.len())
+        .filter(|&id| {
+            let edge = &r.edges[id];
+            edge.key.kind == EdgeKind::Prerequisite
+                && r.decisions[id].outcome == Outcome::BelowThreshold
+                && edge.probability >= options.and_min_score
+                && listed_prerequisites.contains_key(&edge.key.quest)
+                && has_and_evidence(edge)
+        })
+        .collect();
+    // Strongest first, so a weaker copy or rival never takes a stronger one's place.
+    candidates.sort_by(|&a, &b| match (r.stronger(a, b), r.stronger(b, a)) {
+        (true, _) => std::cmp::Ordering::Less,
+        (_, true) => std::cmp::Ordering::Greater,
+        _ => std::cmp::Ordering::Equal,
+    });
+    for id in candidates {
+        let quest_id = r.edges[id].key.quest;
+        // Rule 8 must read the completed list as AND, or the edge would land in an OR list.
+        let members: Vec<ResolvableEdge> = listed_prerequisites[&quest_id].iter().chain([&id]).map(|&member| r.edges[member]).collect();
+        let (kind, _) = choose_group_kind(&members, family_of, &|claim| (options.trusts_and)(quest_id, claim));
+        if kind != RelationField::PreQuestGroup {
+            continue;
+        }
+        // Tentatively written: it must not close an ordering cycle (rule 4) or join a live
+        // exclusive pair by an ordering path (rule 5).
+        r.decisions[id] = Decision {
+            outcome: Outcome::AndGroup,
+            because: None,
+        };
+        let ordering = r.ordering_graph();
+        let breaks_rules = r.find_cycle().is_some()
+            || r.live(&[EdgeKind::Exclusive])
+                .into_iter()
+                .any(|pair| r.path_between(r.edges[pair].key.quest, r.edges[pair].key.target, &ordering).is_some());
+        if breaks_rules {
+            r.decisions[id] = Decision {
+                outcome: Outcome::BelowThreshold,
+                because: None,
+            };
+        } else {
+            listed_prerequisites.entry(quest_id).or_default().push(id);
+        }
+    }
+
     // 7. transitive reduction
     let mut direct: IndexMap<QuestId, Vec<Id>> = IndexMap::new();
     for id in r.live(&[EdgeKind::Prerequisite]) {
@@ -686,6 +758,7 @@ mod tests {
         let options = ResolveOptions {
             min_score: 0.9,
             clique_min_score: 0.5,
+            and_min_score: 0.5,
             known_quest: &|quest_id| quest_id != 404,
             // Quests 1-99 are distinct; 100+ share a name with quest - 100 (same-name copies).
             family_of: &|quest_id| format!("family-{}", quest_id % 100),
@@ -779,6 +852,95 @@ mod tests {
 
         assert_eq!(copies.relations[&10], set(&[(PreQuestSingle, &[1, 101])]));
         assert_eq!(copies_and_other.relations[&10], set(&[(PreQuestSingle, &[1, 2, 101])]));
+    }
+
+    #[test]
+    fn completes_an_accepted_and_list_only_with_a_prerequisite_that_has_and_evidence_of_its_own() {
+        let weak = |quest: QuestId, target: QuestId, probability: f64| ResolvableEdge {
+            claims: &AND_CLAIM,
+            ..edge(Prerequisite, quest, target, probability)
+        };
+        let result = resolve(&[
+            // 10: Dalaran Patrols' shape: 1 accepted, 2 below the threshold, both with AND evidence.
+            and_edge(10, 1),
+            weak(10, 2, 0.84),
+            // 20: the accepted prerequisite has no AND evidence, so nothing makes the list AND.
+            edge(Prerequisite, 20, 1, 0.95),
+            weak(20, 2, 0.84),
+            // 30: too weak to complete anything.
+            and_edge(30, 1),
+            weak(30, 2, 0.4),
+            // 40: a same-name copy of the accepted prerequisite would make the list OR again.
+            and_edge(40, 1),
+            weak(40, 101, 0.84),
+            // 50: 3 comes after 50, so 50 needing 3 would be a cycle.
+            and_edge(50, 1),
+            weak(50, 3, 0.84),
+            edge(Next, 50, 3, 0.95),
+            // 60: below the threshold without AND evidence of its own.
+            and_edge(60, 1),
+            edge(Prerequisite, 60, 2, 0.84),
+        ]);
+
+        assert_eq!(result.relations[&10], set(&[(PreQuestGroup, &[1, 2])]));
+        assert_eq!(outcome(&result, Prerequisite, 10, 2), Outcome::AndGroup);
+        for quest in [20, 30, 40, 60] {
+            assert_eq!(result.relations[&quest], set(&[(PreQuestSingle, &[1])]), "quest {quest}");
+        }
+        assert_eq!(result.relations[&50], set(&[(PreQuestSingle, &[1]), (NextQuestInChain, &[3])]));
+    }
+
+    /// A preQuestGroup claim from a trusted source, scored like offer-set's play-order-only class.
+    static LOW_AND_CLAIM: [Claim<'static>; 1] = [Claim {
+        source: AND_SOURCE,
+        field: RelationField::PreQuestGroup,
+        score: 0.27,
+        support: 2,
+        contradict: 0,
+        evidence: &[],
+    }];
+
+    #[test]
+    fn never_completes_an_and_list_it_would_break_or_on_weak_evidence() {
+        let weak = |quest: QuestId, target: QuestId, probability: f64| ResolvableEdge {
+            claims: &AND_CLAIM,
+            ..edge(Prerequisite, quest, target, probability)
+        };
+        let result = resolve(&[
+            // 70: nothing accepted to complete.
+            weak(70, 3, 0.84),
+            // 80: the stronger of two copies completes the list, whichever comes first.
+            and_edge(80, 1),
+            weak(80, 104, 0.6),
+            weak(80, 4, 0.85),
+            // 90: Questie has no quest 404.
+            and_edge(90, 1),
+            weak(90, 404, 0.84),
+            // 15: 15 and 5 are exclusive, so 15 needing 5 would make 15 impossible.
+            and_edge(15, 1),
+            weak(15, 5, 0.84),
+            edge(Exclusive, 15, 5, 0.95),
+            // 25: the accepted list already holds two copies, so rule 8 writes it as OR.
+            and_edge(25, 1),
+            and_edge(25, 101),
+            weak(25, 6, 0.84),
+            // 35: its only AND claim is a low-scoring guess.
+            and_edge(35, 1),
+            ResolvableEdge {
+                claims: &LOW_AND_CLAIM,
+                ..edge(Prerequisite, 35, 7, 0.84)
+            },
+        ]);
+
+        assert!(!result.relations.contains_key(&70));
+        assert_eq!(result.relations[&80], set(&[(PreQuestGroup, &[1, 4])]));
+        assert_eq!(outcome(&result, Prerequisite, 80, 104), Outcome::BelowThreshold);
+        assert_eq!(result.relations[&90], set(&[(PreQuestSingle, &[1])]));
+        assert_eq!(outcome(&result, Prerequisite, 90, 404), Outcome::UnknownQuest);
+        assert_eq!(result.relations[&15], set(&[(PreQuestSingle, &[1]), (ExclusiveTo, &[5])]));
+        assert_eq!(result.relations[&25], set(&[(PreQuestSingle, &[1, 101])]));
+        assert_eq!(outcome(&result, Prerequisite, 25, 6), Outcome::BelowThreshold);
+        assert_eq!(result.relations[&35], set(&[(PreQuestSingle, &[1])]));
     }
 
     #[test]

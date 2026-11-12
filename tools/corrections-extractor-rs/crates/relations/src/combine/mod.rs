@@ -35,7 +35,7 @@ use indexmap::IndexMap;
 use lua::{forever_relations_lua, relation_records, LuaHeader, RecordSources};
 use meta::{authored_status_counts, count_episodes, lua_quest_count, lua_relation_count, InputSummary, LuaCounts, RelationsMeta, LEAKAGE_CAVEAT};
 use metrics::{format_comparison, format_metrics, held_out_metrics, TierMetrics, METRIC_CAVEATS};
-use pipeline::{combine, Combined, CLIQUE_MIN_SCORE, MIN_SCORE, REVIEW_SCORE};
+use pipeline::{combine, Combined, AND_MIN_SCORE, CLIQUE_MIN_SCORE, MIN_SCORE, REVIEW_SCORE};
 use resolve::{Decision, Outcome};
 use review::{render_review, ClassicMiss, ReviewInput};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -126,6 +126,7 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
             min_score,
             review_score: REVIEW_SCORE,
             clique_min_score: CLIQUE_MIN_SCORE,
+            and_min_score: AND_MIN_SCORE,
             model: DEFAULT_MODEL_PARAMS,
         },
         inputs: input_summary.clone(),
@@ -332,6 +333,7 @@ struct RunParams {
     min_score: f64,
     review_score: f64,
     clique_min_score: f64,
+    and_min_score: f64,
     #[serde(flatten)]
     model: ModelParams,
 }

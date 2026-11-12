@@ -19,6 +19,8 @@ pub const MIN_SCORE: f64 = 0.9;
 pub const REVIEW_SCORE: f64 = 0.5;
 /// Lower bar for completing an accepted exclusive group (resolution rule 6).
 pub const CLIQUE_MIN_SCORE: f64 = 0.5;
+/// Lower bar for a prerequisite completing an accepted AND list (resolution rule 6b).
+pub const AND_MIN_SCORE: f64 = 0.5;
 
 pub struct Combined<'a> {
     pub scored: Vec<ScoredEdge<'a>>,
@@ -57,6 +59,7 @@ pub fn combine<'a>(inputs: &Inputs<'a>, min_score: f64, params: &ModelParams) ->
         let options = ResolveOptions {
             min_score: threshold,
             clique_min_score: CLIQUE_MIN_SCORE,
+            and_min_score: AND_MIN_SCORE,
             known_quest: &known_quest,
             family_of: &family_of,
             trusts_and: &trusts_and,

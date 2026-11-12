@@ -98,6 +98,9 @@ fn reason(edge: &EdgeView, quest_id: QuestId, other: &str) -> String {
     if edge.outcome == Outcome::Clique {
         parts.push("kept below the min score for its accepted exclusive group".to_owned());
     }
+    if edge.outcome == Outcome::AndGroup {
+        parts.push("kept below the min score to complete its accepted AND list".to_owned());
+    }
     parts.join(", ")
 }
 
