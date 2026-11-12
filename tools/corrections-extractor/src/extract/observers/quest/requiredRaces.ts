@@ -1,38 +1,14 @@
 // questKeys.requiredRaces - Questie field 6.
 // type: bitmask, default: 0 (every race)
 //
-// A wrong mask hides a quest from players who can take it, so a restriction is only
-// exported with proof that a whole faction cannot get the quest:
-// - every starter of the quest is an NPC (items and objects give no reaction to check),
-// - each of them was hostile to that faction in at least MIN_HOSTILE_SESSIONS sessions and
-//   friendly to it in none,
-// - each of them was friendly to the other faction and never hostile to it, which rules out
-//   reputation-based reactions such as Timbermaw's (unfriendly to both factions), and
-// - no session of that faction ever saw the quest, while one of the other faction did, and
-// - no session of that faction saw another quest of the same starters. Class quests are given
-//   by a trainer of each faction; that faction seeing the trainer's other quests hints at a
-//   counterpart quest giver that was never traced.
-// Checked against Questie's Classic quest DB: with 3 sessions no quest was restricted wrongly.
-// The exported mask is Questie's ALL_ALLIANCE / ALL_HORDE for Forever, never only the races seen.
-// Remaining risk: a starter of the excluded faction that no trace has seen yet.
-// Race-level restrictions are not inferred (yet). Unfactioned characters are ignored.
+// Observes the player's faction for every quest a session saw. The race mask is merged in
+// merge/quest/requiredRaces.ts.
 
 import { getStream } from "../../../core/emulator";
 import { playerFactionAt } from "../../probes";
 import { sessionLabel, type FieldObserver, type Observation } from "../../observation";
-import type { Faction, FactionReactionValue } from "../npc/friendlyToFaction";
+import type { Faction } from "../npc/friendlyToFaction";
 import { questEncounters } from "./_encounters";
-
-const MIN_HOSTILE_SESSIONS = 3;
-
-// QuestieDB raceKeys.ALL_ALLIANCE / ALL_HORDE for Forever (src/corrections/enum/expansions.lua):
-// the Classic races plus Skyborne. Added, not OR-ed: JavaScript's bitwise operators truncate to 32 bits.
-const SKYBORNE_ALLIANCE = 4294967296;
-const SKYBORNE_HORDE = 8589934592;
-export const ALLIANCE_RACES = 1 + 4 + 8 + 64 + SKYBORNE_ALLIANCE;
-export const HORDE_RACES = 2 + 16 + 32 + 128 + SKYBORNE_HORDE;
-
-export type ReactionSummary = Record<Faction, { hostileSessions: number; friendlySessions: number }>;
 
 interface QuestListEntry {
   questID?: number;
@@ -83,46 +59,3 @@ export const observeQuestFactions: FieldObserver<Faction> = (session) => {
   }
   return observations;
 };
-
-export function mergeQuestFactions(observations: Observation<Faction>[]): Set<Faction> {
-  return new Set(observations.map((obs) => obs.value));
-}
-
-/** Per faction, how many sessions saw the NPC hostile and how many saw it friendly. */
-export function summarizeReactions(observations: Observation<FactionReactionValue>[]): ReactionSummary {
-  const sessions = { A: { hostile: new Set<unknown>(), friendly: new Set<unknown>() }, H: { hostile: new Set<unknown>(), friendly: new Set<unknown>() } };
-  for (const obs of observations) {
-    const key = obs.provenance.sessionKey ?? obs.provenance.session;
-    sessions[obs.value.faction][obs.value.friendly ? "friendly" : "hostile"].add(key);
-  }
-  return {
-    A: { hostileSessions: sessions.A.hostile.size, friendlySessions: sessions.A.friendly.size },
-    H: { hostileSessions: sessions.H.hostile.size, friendlySessions: sessions.H.friendly.size },
-  };
-}
-
-function excluded(faction: Faction, allowed: Faction, seenFactions: Set<Faction>, starters: ReactionSummary[], siblingFactions: Set<Faction>): boolean {
-  if (seenFactions.has(faction) || siblingFactions.has(faction) || !seenFactions.has(allowed)) return false;
-  return (
-    starters.length > 0 &&
-    starters.every(
-      (starter) =>
-        starter[faction].friendlySessions === 0 &&
-        starter[faction].hostileSessions >= MIN_HOSTILE_SESSIONS &&
-        starter[allowed].friendlySessions > 0 &&
-        starter[allowed].hostileSessions === 0,
-    )
-  );
-}
-
-/**
- * The race mask to export, or undefined to keep every race.
- * @param starters reaction summaries of every NPC starting the quest; pass none when the quest
- *   has item or object starters.
- * @param siblingFactions factions that saw other quests of the same starters.
- */
-export function mergeRequiredRaces(seenFactions: Set<Faction>, starters: ReactionSummary[], siblingFactions: Set<Faction> = new Set()): number | undefined {
-  if (excluded("H", "A", seenFactions, starters, siblingFactions)) return ALLIANCE_RACES;
-  if (excluded("A", "H", seenFactions, starters, siblingFactions)) return HORDE_RACES;
-  return undefined;
-}

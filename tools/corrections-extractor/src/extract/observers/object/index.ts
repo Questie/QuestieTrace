@@ -5,4 +5,3 @@ export { observeName } from "./name";
 export { observeSpawns } from "./spawns";
 export type { TaggedSpawnObservation, SpawnObservationValue } from "./spawns";
 export { observeZoneID } from "./zoneID";
-export { mergeSpawns, mergeZoneID } from "./spawnsMerge";

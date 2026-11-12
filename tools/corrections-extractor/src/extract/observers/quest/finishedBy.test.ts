@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { observeFinishedBy, mergeFinishedBy } from "./finishedBy";
+import { observeFinishedBy } from "./finishedBy";
+import { mergeFinishedBy } from "../../merge/quest/finishedBy";
 import { apiSample, creatureGuid, makeSession, objectGuid, traceEvent } from "../../../test/fixtures";
 
 describe("observeFinishedBy", () => {

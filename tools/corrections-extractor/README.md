@@ -78,7 +78,7 @@ The same run writes Questie l10n lookup modules for every non-enUS locale found 
 1. `src/store/source.ts` lists the submissions and fetches new ones, `src/core/trace-data/` decodes them.
 2. `foldSessions` (`src/extract/index.ts`) runs every observer in `src/extract/observers/` over the submission's sessions and collects their observations. Fields with the default scalar merge only keep a per-value summary; fields with a custom merge (spawns, drops, ...) keep every observation.
 3. The observations of new submissions are added to the store (`src/store/observed-store.ts`), then every stored session is replayed in fold order.
-4. After the last session, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
+4. After the last session, `finalize` aggregates the observations into one fact per entity and field (custom merges live in `src/extract/merge/`), builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
 
 ### Quest-giver correlation
 

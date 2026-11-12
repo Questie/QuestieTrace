@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { mergeSpawns, mergeZoneID } from "./spawnsMerge";
+import { mergeSpawns, mergeZoneID } from "./spawns";
 import type { Observation } from "../../observation";
-import type { SpawnObservationValue, TaggedSpawnObservation } from "./spawns";
+import type { SpawnObservationValue, TaggedSpawnObservation } from "../../observers/npc/spawns";
 
 function obs(
   entityId: number,

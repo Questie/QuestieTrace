@@ -1,10 +1,10 @@
 // Fact -> named record for the quest entity kind. See emit/npc.ts for the general shape.
 
 import type { Fact } from "../aggregate";
-import type { QuestObjectivesValue } from "../observers/quest/objectives";
+import type { QuestObjectivesValue } from "../merge/quest/objectives";
 import type { QuestObjectivesTextValue } from "../observers/quest/objectivesText";
 import type { QuestTriggerEndValue } from "../observers/quest/triggerEnd";
-import type { QuestReputationRewardValue } from "../observers/quest/reputationReward";
+import type { QuestReputationRewardValue } from "../merge/quest/reputationReward";
 import { emitRecords } from "./records";
 
 export interface QuestFacts {

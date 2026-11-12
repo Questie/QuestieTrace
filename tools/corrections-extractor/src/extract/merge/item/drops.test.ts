@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeNpcDrops, mergeObjectDrops } from "./dropsMerge";
+import { mergeNpcDrops, mergeObjectDrops } from "./drops";
 import type { Observation } from "../../observation";
 
 describe("mergeNpcDrops", () => {

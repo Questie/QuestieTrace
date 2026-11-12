@@ -1,11 +1,11 @@
 // Custom merge functions for object spawns and zoneID fields.
 //
-// Mirrors the npc/spawnsMerge.ts logic exactly.
+// Mirrors the merge/npc/spawns.ts logic exactly.
 
 import type { Observation } from "../../observation";
-import type { SpawnObservationValue, TaggedSpawnObservation } from "./spawns";
+import type { SpawnObservationValue, TaggedSpawnObservation } from "../../observers/object/spawns";
 
-export type { TaggedSpawnObservation, SpawnObservationValue } from "./spawns";
+export type { TaggedSpawnObservation, SpawnObservationValue } from "../../observers/object/spawns";
 
 const TOKEN_PRIORITY: Record<string, number> = {
   questpoi: 4,
