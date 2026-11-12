@@ -483,6 +483,15 @@ pub struct GroundTruth {
     pub generated_at: String,
     pub sources: Vec<String>,
     pub tiers: GroundTruthTiers,
+    /// Per quest (Forever-new and inherited alike), the relation fields an authored
+    /// forever*Fixes.lua provider sets, adds to or removes from, Static or Dynamic. Those load
+    /// after the generated module, so they override it field by field. Required: a ground truth
+    /// without it would make every authored field look unowned.
+    pub authored_fields: BTreeMap<QuestId, Vec<RelationField>>,
+    /// Per quest, the relation fields any Dynamic Correction (legacy faction fixes included) sets,
+    /// adds to or removes from. Dynamic Corrections overlay the Static row per faction and class,
+    /// so they override the generated module too. Required, like `authored_fields`.
+    pub dynamic_fields: BTreeMap<QuestId, Vec<RelationField>>,
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,9 @@ pub struct MaterializedQuests {
     /// Quest id -> fields (Questie names) an authored forever*Fixes.lua provider replaces, adds to
     /// or removes from.
     pub authored_fields: BTreeMap<QuestId, Vec<String>>,
+    /// Quest id -> fields (Questie names) any Dynamic Correction, legacy or authored, replaces, adds
+    /// to or removes from.
+    pub dynamic_fields: BTreeMap<QuestId, Vec<String>>,
     /// Quests from the inherited Era baseline (data/Forever rows, Forever/legacy/ providers). The
     /// rest are Forever-new.
     pub inherited_ids: Vec<QuestId>,
@@ -160,6 +163,10 @@ return function(questKeys)
         [9700] = { [questKeys.startedBy_add] = {{101}, nil, {5}} },
         [9701] = { [questKeys.name] = "Traced", [questKeys.startedBy_add] = {{200}} },
       } },
+      -- The pipeline's own output, imported: never ground truth, so 10 keeps its relations.
+      { name = "Forever/traces/foreverQuestRelationTraces.lua:Load", rows = {
+        [10] = { [questKeys.preQuestSingle] = {9}, [questKeys.exclusiveTo] = {8} },
+      } },
       { name = "Forever/foreverQuestFixes.lua:Load", rows = {
         [10] = { [questKeys.preQuestSingle_add] = {4}, [questKeys.preQuestSingle_remove] = {3} },
         [9700] = { [questKeys.preQuestSingle] = {10} },
@@ -203,7 +210,9 @@ end
     #[test]
     #[ignore = "needs a QuestieDB checkout in QUESTIEDB_DIR and Lua 5.1"]
     fn applies_replace_add_remove_deletion_and_per_faction_dynamic_corrections_in_layer_order() {
-        let truth = build_ground_truth(&materialize_fixture(None), "");
+        let materialized = materialize_fixture(None);
+        assert!(!materialized.sources.iter().any(|source| source.contains("foreverQuestRelationTraces")));
+        let truth = build_ground_truth(&materialized, "");
         use RelationField::*;
         assert_eq!(
             truth.tiers.inherited_classic,
@@ -217,6 +226,12 @@ end
         );
         // 9700 and 9701 are Forever-new; 9701 has no authored relation, so it is not ground truth.
         assert_eq!(truth.tiers.authored_forever, BTreeMap::from([(9700, relations(&[(PreQuestSingle, &[10])]))]));
+        // 10's authored _add/_remove name preQuestSingle; its legacy faction fix is a Dynamic Correction.
+        assert_eq!(
+            truth.authored_fields,
+            BTreeMap::from([(10, vec![PreQuestSingle]), (9700, vec![PreQuestSingle])])
+        );
+        assert_eq!(truth.dynamic_fields, BTreeMap::from([(10, vec![NextQuestInChain])]));
     }
 
     #[test]

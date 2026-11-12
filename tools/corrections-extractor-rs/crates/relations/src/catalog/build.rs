@@ -193,9 +193,26 @@ pub fn build_catalog(materialized: &MaterializedQuests, generated_at: &str) -> Q
     }
 }
 
+/// The relation fields among a quest's touched fields (Questie names); other fields are left out.
+fn relation_fields(touched: &BTreeMap<QuestId, Vec<String>>, id: QuestId) -> Vec<RelationField> {
+    let fields = touched.get(&id).map_or(&[][..], Vec::as_slice);
+    RelationField::ALL
+        .into_iter()
+        .filter(|field| fields.iter().any(|name| name == field.name()))
+        .collect()
+}
+
+/// Per quest, the relation fields among the touched ones; quests without any are left out.
+fn relation_fields_by_quest(touched: &BTreeMap<QuestId, Vec<String>>) -> BTreeMap<QuestId, Vec<RelationField>> {
+    touched
+        .keys()
+        .map(|&id| (id, relation_fields(touched, id)))
+        .filter(|(_, fields)| !fields.is_empty())
+        .collect()
+}
+
 fn has_authored_relation(materialized: &MaterializedQuests, id: QuestId) -> bool {
-    let fields = materialized.authored_fields.get(&id).map_or(&[][..], Vec::as_slice);
-    fields.iter().any(|name| RelationField::ALL.iter().any(|field| field.name() == name))
+    !relation_fields(&materialized.authored_fields, id).is_empty()
 }
 
 /// - authoredForever: Forever-new quests whose relations an authored provider sets, adds to or
@@ -224,6 +241,8 @@ pub fn build_ground_truth(materialized: &MaterializedQuests, generated_at: &str)
             authored_forever,
             inherited_classic,
         },
+        authored_fields: relation_fields_by_quest(&materialized.authored_fields),
+        dynamic_fields: relation_fields_by_quest(&materialized.dynamic_fields),
     }
 }
 
@@ -310,14 +329,31 @@ mod tests {
             (9668, json!({ "nextQuestInChain": 9666 })),
             (9669, json!({})),
         ];
-        let authored = [(490, "name"), (9666, "preQuestSingle"), (9667, "requiredRaces"), (9669, "exclusiveTo")];
+        // 100 is inherited, with an authored Forever fix on top.
+        let authored = [
+            (100, "exclusiveTo"),
+            (490, "name"),
+            (9666, "preQuestSingle"),
+            (9667, "requiredRaces"),
+            (9669, "exclusiveTo"),
+        ];
         let materialized = MaterializedQuests {
             quests: quests.into_iter().map(|(id, value)| (id, row(value))).collect(),
             authored_fields: authored.into_iter().map(|(id, field)| (id, vec![field.to_owned()])).collect(),
             inherited_ids: vec![100, 65593],
             ..MaterializedQuests::default()
         };
-        let tiers = build_ground_truth(&materialized, "").tiers;
+        let truth = build_ground_truth(&materialized, "");
+        // Authored relation fields whatever the tier; authored fields that are not relations are left out.
+        assert_eq!(
+            truth.authored_fields,
+            BTreeMap::from([
+                (100, vec![RelationField::ExclusiveTo]),
+                (9666, vec![RelationField::PreQuestSingle]),
+                (9669, vec![RelationField::ExclusiveTo]),
+            ])
+        );
+        let tiers = truth.tiers;
         // 100: no relations is still known. 65593: inherited from a legacy fix despite its id.
         assert_eq!(
             tiers.inherited_classic,
