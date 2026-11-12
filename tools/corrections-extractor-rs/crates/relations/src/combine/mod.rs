@@ -3,8 +3,8 @@
 //!
 //! `inputs` sets Wowhead aside as context only; `pipeline` scores and resolves the rest. This
 //! module renders the outputs. Deliverables go to the output dir (next to the field extractor's
-//! modules): foreverQuestRelationTraces.lua (Forever-new quests only), relations-review.md and
-//! relations-meta.json. Intermediates stay in the relations dir: relations.json (every quest with
+//! modules): foreverQuestRelationTraces.lua (every accepted relation; see [`lua`] for which apply),
+//! relations-review.md and relations-meta.json. Intermediates stay in the relations dir: relations.json (every quest with
 //! accepted or near-miss relations) and reports/combine-metrics.json.
 //!
 //! The acceptance threshold is `pipeline::MIN_SCORE`; the TS `--min-score` override is not
@@ -32,8 +32,8 @@ use anyhow::{Context, Result};
 use crossval::{ModelParams, ScoredEdge, DEFAULT_MODEL_PARAMS};
 use edges::{Claim, Domain, EdgeKey, EdgeKind, QuestDomains, Reference, Truth};
 use indexmap::IndexMap;
-use lua::{forever_records, forever_relations_lua, LuaHeader};
-use meta::{authored_status_counts, count_episodes, lua_relation_count, InputSummary, LuaCounts, RelationsMeta, LEAKAGE_CAVEAT};
+use lua::{forever_relations_lua, relation_records, LuaHeader, RecordSources};
+use meta::{authored_status_counts, count_episodes, lua_quest_count, lua_relation_count, InputSummary, LuaCounts, RelationsMeta, LEAKAGE_CAVEAT};
 use metrics::{format_comparison, format_metrics, held_out_metrics, TierMetrics, METRIC_CAVEATS};
 use pipeline::{combine, Combined, CLIQUE_MIN_SCORE, MIN_SCORE, REVIEW_SCORE};
 use resolve::{Decision, Outcome};
@@ -139,7 +139,13 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
             .collect(),
     };
 
-    let records = forever_records(&shipped.accepted.relations, &input.ground_truth.tiers.authored_forever, &inputs.domains);
+    let records = relation_records(&RecordSources {
+        relations: &shipped.accepted.relations,
+        truth: &inputs.truth,
+        authored_fields: &input.ground_truth.authored_fields,
+        dynamic_fields: &input.ground_truth.dynamic_fields,
+        views: &views,
+    });
     let candidate_files: Vec<&str> = inputs.files.iter().map(|file| file.signal.as_str()).collect();
     let lua = forever_relations_lua(
         &records,
@@ -170,7 +176,7 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         caveats: &METRIC_CAVEATS,
         fitted: &shipped.fitted,
         lua_file: LUA_FILE,
-        lua_quests: records.len(),
+        lua_quests: lua_quest_count(&records),
         classic_misses: &misses,
         generated_at: &config.generated_at,
     });
@@ -182,7 +188,7 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         episode_count,
         character_count,
         lua: LuaCounts {
-            quests: records.len(),
+            quests: lua_quest_count(&records),
             relations: lua_relation_count(&records),
         },
         authored: authored_status_counts(views.values()),
@@ -278,7 +284,7 @@ fn summary(
         "combine: {file_count} candidate files, {} quests with accepted relations\n  \
          Forever-new without authored relations: {} quests, {} relations\n  \
          Forever-new authored: agree {}, new {}, conflict {}\n  \
-         Classic quests disagreeing with inherited data: {classic} (review only)\n  \
+         Classic quests disagreeing with inherited data: {classic}\n  \
          -> {} ({} quests, {} relations)\n  -> {}\n  -> {}\n  -> {}\n\nHeld-out metrics:\n{metrics_markdown}",
         relations.len(),
         uncovered.len(),
