@@ -94,7 +94,7 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
                     catalog: &catalog,
                     generated_at: &config.generated_at,
                 };
-                signals::run_one(signal, &input).write(config)
+                signals::run_one(signal, &input)?.write(config)
             }),
             None => bail!("unknown command {other:?}\n\n{}", usage()),
         },

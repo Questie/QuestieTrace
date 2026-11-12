@@ -19,7 +19,7 @@ use crate::config::Config;
 use crate::eligibility::is_forever_interface;
 use crate::io;
 use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 mod absence;
 mod breadcrumbs;
@@ -99,7 +99,8 @@ pub(crate) fn to_json(value: &impl serde::Serialize) -> serde_json::Value {
 }
 
 /// Runs one signal and fills in what every candidates file shares: its name and the run's time.
-pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> SignalOutput {
+/// Fails when a candidate's score is not a number in [0, 1]: combine would take it at face value.
+pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> Result<SignalOutput> {
     let Findings {
         input_count,
         params,
@@ -107,7 +108,17 @@ pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> SignalOutput {
         candidates,
         reports,
     } = signal.run(input);
-    SignalOutput {
+    if let Some(bad) = candidates.iter().find(|candidate| !(0.0..=1.0).contains(&candidate.score)) {
+        bail!(
+            "signal {} scored {} {} {} as {}, not a number in [0, 1]",
+            signal.name(),
+            bad.quest_id,
+            bad.field,
+            bad.target,
+            bad.score
+        );
+    }
+    Ok(SignalOutput {
         candidates: CandidateFile {
             signal: signal.name().to_owned(),
             generated_at: input.generated_at.to_owned(),
@@ -117,7 +128,7 @@ pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> SignalOutput {
             candidates,
         },
         reports,
-    }
+    })
 }
 
 /// Runs every signal, one after another (each uses every core itself), and hands each result to
@@ -126,8 +137,63 @@ pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> SignalOutput {
 pub fn run_all(input: &SignalInput, mut on_output: impl FnMut(SignalOutput) -> Result<()>) -> Result<()> {
     for signal in registry() {
         let started = std::time::Instant::now();
-        on_output(run_one(signal, input))?;
+        on_output(run_one(signal, input)?)?;
         eprintln!("== signal:{} done in {:.1}s", signal.name(), started.elapsed().as_secs_f64());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::RelationField;
+    use crate::test_support::catalog;
+
+    /// Claims one edge with a fixed score.
+    struct Scoring(f64);
+
+    impl Signal for Scoring {
+        fn name(&self) -> &'static str {
+            "scoring"
+        }
+
+        fn describe(&self) -> &'static str {
+            "test signal"
+        }
+
+        fn run(&self, _: &SignalInput) -> Findings {
+            Findings {
+                input_count: 0,
+                params: serde_json::Value::Null,
+                covered_quest_ids: vec![10],
+                candidates: vec![RelationCandidate {
+                    quest_id: 10,
+                    field: RelationField::PreQuestSingle,
+                    target: 9,
+                    score: self.0,
+                    support: 1,
+                    contradict: 0,
+                    evidence: vec![],
+                    note: None,
+                }],
+                reports: vec![],
+            }
+        }
+    }
+
+    #[test]
+    fn a_candidates_file_carries_the_signal_name_and_rejects_scores_outside_0_to_1() {
+        let catalog = catalog([]);
+        let input = SignalInput {
+            episodes: &[],
+            catalog: &catalog,
+            generated_at: "2026-11-12T00:00:00.000Z",
+        };
+        let output = run_one(&Scoring(0.5), &input).expect("a score in [0, 1]");
+        assert_eq!((output.candidates.signal.as_str(), output.candidates.generated_at.as_str()), ("scoring", "2026-11-12T00:00:00.000Z"));
+        for bad in [f64::NAN, -0.1, 1.5] {
+            let error = run_one(&Scoring(bad), &input).err().expect("rejected").to_string();
+            assert!(error.contains("signal scoring scored 10 preQuestSingle 9"), "{error}");
+        }
+    }
 }
