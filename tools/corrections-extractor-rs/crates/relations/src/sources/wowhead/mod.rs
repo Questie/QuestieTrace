@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub struct WowheadOutput {
-    /// One per surface, in [`Surface::ALL`] order.
+    /// One per surface, in `Surface::ALL` order.
     pub files: Vec<CandidateFile>,
     /// reports/wowhead-inventory.json
     pub inventory: WowheadInventory,
