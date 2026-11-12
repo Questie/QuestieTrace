@@ -74,6 +74,7 @@ pub const PARAMS: Params = Params {
 
 /// candidates/offer-set.json `params`: the tunables and what the numbers mean.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FileParams<'a> {
     #[serde(flatten)]
     tunables: &'a Params,

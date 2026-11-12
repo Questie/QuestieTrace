@@ -87,7 +87,7 @@ Two places outside the module go by signal name and may need a line:
 
 - `combine/assumptions.rs` (`phrase`): how the Lua module's `-- Assumption:` comment words the
   signal's evidence, per field. Without an entry the comment just says `<name> signal`.
-- `combine/inputs.rs` (`is_context_only`): files whose name starts with "wowhead" are context for
+- `combine/inputs.rs` (`is_context_only`): files named `wowhead` or `wowhead-...` are context for
   reviewers only and never decide anything. A new source like that needs a name it matches; a new
   signal must not match it.
 

@@ -61,6 +61,7 @@ pub const PARAMS: Params = Params {
 
 /// candidates/cooccurrence.json `params`: the tunables and what the counts mean.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FileParams<'a> {
     #[serde(flatten)]
     tunables: &'a Params,
