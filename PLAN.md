@@ -24,10 +24,9 @@ for one last comparison.
   extractor, this plan's subject) and `relations` (done, natural Rust; a model for the target
   style). The workspace's `README.md` and `DESIGN.md` explain the extractor (what must match the
   TypeScript tool, and why), `crates/relations/README.md` the relations pipeline.
-- **Branch and PR:** the work so far is on `feat/relations-rs`, PR #137 to master (open when this
-  was written). If #137 is merged, start a new branch from master; if not, from
-  `feat/relations-rs`. That branch is behind master but merges cleanly. The owner works in this
-  checkout: never rebase or force-push without asking.
+- **Branch and PR:** all of this work goes on `feat/relations-rs`, PR #137 to master: the Rust
+  conversion branch. Commit there, one commit per change. The owner works in this checkout:
+  never rebase or force-push; bring master in with a merge commit, and ask before that too.
 - **Data:** `~/projects/trace-data` (about 140,000 submissions, not a git checkout, synced from the
   bucket). Both extractors take the same 5% sample (SHA-256 of the submission key), so samples
   are comparable; develop on 5% (about 25 s in Rust), run the full archive at milestones.
@@ -95,11 +94,11 @@ is understood: the commit message says what changed and why, with counts.
 Get answers to the four open decisions below before step 3; steps 0 to 2 do not depend on them.
 
 **0. Reference and gate (small).**
-- Freeze a reference: TypeScript master's extractor output on the 5% sample (and the full archive,
-  about 100 min, on an idle machine), with the master commit recorded next to it. Build it from
-  master's copy of `tools/corrections-extractor`, not from the branch's: `scripts/parity.sh`
-  archives `HEAD`, which on `feat/relations-rs` is the older copy from before #131. Give the
-  script the reference output directory, or a git ref to archive.
+- Bring master in first: merge `origin/master` into the branch (a merge commit, after asking the
+  owner). The branch's copy of `tools/corrections-extractor` is from before #131; after the merge
+  it is master's, and `scripts/parity.sh`, which archives `HEAD`, runs the right TypeScript.
+- Freeze a reference: the TypeScript extractor's output on the 5% sample (and the full archive,
+  about 100 min, on an idle machine), with the commit recorded next to it.
 - Move `scripts/parity.sh` from byte comparison to value comparison: Lua modules line by line
   with timestamps masked, JSON by value (the relations compare tool already does both), and
   `meta.json`'s skipped and partial files compared by file name and count, not by reason text.
