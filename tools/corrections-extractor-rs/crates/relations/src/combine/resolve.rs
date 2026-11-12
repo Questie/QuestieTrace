@@ -82,7 +82,7 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    /// Written to the RelationSet, so relations.json and (Forever-new quests) the Lua output.
+    /// Written to the RelationSet, so relations.json and the Lua output (applied or commented out).
     pub fn is_written(self) -> bool {
         matches!(self, Outcome::Accepted | Outcome::Clique | Outcome::Derived)
     }
