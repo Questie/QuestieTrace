@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../core/types";
 import { addStagedSessions, createAccumulator, extractAll, finalize, foldSessions, type StagedSession } from "./index";
+import { MIN_GIVER_SESSIONS } from "./merge/quest/relations";
 import { apiSample, creatureGuid, makeSession, traceEvent } from "../test/fixtures";
 
 /** Creates a session with a Forever interfaceVersion (16001) */
@@ -9,6 +10,11 @@ function makeForeverSession(functions: SessionRecord["functions"]): SessionRecor
     ...functions,
     GetBuildInfo: { player: [apiSample(0, 0, 16001)] },
   });
+}
+
+/** Copies of a session, so its quest givers reach MIN_GIVER_SESSIONS. */
+function inMinGiverSessions(session: SessionRecord): SessionRecord[] {
+  return Array.from({ length: MIN_GIVER_SESSIONS }, () => session);
 }
 
 /** Creates a session with a TBC interfaceVersion (10xxx) */
@@ -208,7 +214,7 @@ describe("extractAll (quest/item/object entities)", () => {
     const options = { sourceFileNames: ["test.lua"], maxIds: { npc: 18199, quest: 0, item: 0, object: 0 } };
 
     it("should export Alliance races for a quest whose Classic quest giver is hostile to the Horde", () => {
-      const { questFixes, npcFixes } = extractAll([allianceAccept(), ...hordeSightings], options);
+      const { questFixes, npcFixes } = extractAll([...inMinGiverSessions(allianceAccept()), ...hordeSightings], options);
 
       expect(questFixes).toContain("[questKeys.requiredRaces] = 4294967373,");
       expect(npcFixes).not.toContain("friendlyToFaction");
@@ -495,7 +501,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     });
     session.events.push(traceEvent("GOSSIP_SHOW", 2162.777, 2162.779));
 
-    const { questFixes, npcFixes } = extractAll([session], {
+    const { questFixes, npcFixes } = extractAll(inMinGiverSessions(session), {
       sourceFileNames: ["test.lua"],
       maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
     });
@@ -530,7 +536,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
       ],
     };
 
-    const { questFixes, npcFixes } = extractAll([sessionWithTurnIn], {
+    const { questFixes, npcFixes } = extractAll(inMinGiverSessions(sessionWithTurnIn), {
       sourceFileNames: ["test.lua"],
       maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
     });
@@ -565,7 +571,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     });
     session.events.push(traceEvent("QUEST_TURNED_IN", 3, 3, 99196));
 
-    const { npcFixes } = extractAll([session], {
+    const { npcFixes } = extractAll(inMinGiverSessions(session), {
       sourceFileNames: ["test.lua"],
       maxIds: { npc: 0, quest: 0, item: 0, object: 0 },
     });
@@ -589,9 +595,9 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
 
   it("should only export quest relations for an npc below MAX_IDS", () => {
     const options = { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } };
-    expect(extractAll([turnInSession(99196)], options).npcFixes).toContain("[npcKeys.name]");
+    expect(extractAll(inMinGiverSessions(turnInSession(99196)), options).npcFixes).toContain("[npcKeys.name]");
 
-    const { npcFixes } = extractAll([turnInSession(99196)], { ...options, maxIds: { ...options.maxIds, npc: 300000 } });
+    const { npcFixes } = extractAll(inMinGiverSessions(turnInSession(99196)), { ...options, maxIds: { ...options.maxIds, npc: 300000 } });
 
     expect(npcFixes).toContain("[npcKeys.questEnds_add] = {99196},");
     expect(npcFixes).not.toContain("[npcKeys.name]");
@@ -604,7 +610,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     });
     const withTurnIn = { ...session, events: [traceEvent("QUEST_TURNED_IN", 3, 3, 78261)] };
 
-    const { questFixes, objectFixes } = extractAll([withTurnIn], {
+    const { questFixes, objectFixes } = extractAll(inMinGiverSessions(withTurnIn), {
       sourceFileNames: ["test.lua"],
       maxIds: { npc: 0, quest: 0, item: 0, object: 500000 },
     });
@@ -634,7 +640,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     });
     const withTurnIn = { ...session, events: [traceEvent("QUEST_TURNED_IN", 3, 3, 940)] };
 
-    const { questFixes, npcFixes } = extractAll([withTurnIn], {
+    const { questFixes, npcFixes } = extractAll(inMinGiverSessions(withTurnIn), {
       sourceFileNames: ["test.lua"],
       maxIds: { npc: 18199, quest: 9665, item: 0, object: 0 },
     });
@@ -652,7 +658,7 @@ describe("extractAll (integration: no-log 'donation' style quest via gossip)", (
     });
     const withDetail = { ...session, events: [traceEvent("QUEST_ACCEPTED", 3, 3, 940)] };
 
-    const { questFixes, objectFixes } = extractAll([withDetail], {
+    const { questFixes, objectFixes } = extractAll(inMinGiverSessions(withDetail), {
       sourceFileNames: ["test.lua"],
       maxIds: { npc: 0, quest: 9665, item: 0, object: 300142 },
     });
@@ -808,7 +814,7 @@ describe("extractAll (quest-giver correlation)", () => {
     });
     session.events.push(traceEvent(action, 3, 3.001, 99196));
 
-    const output = extractAll([session], { sourceFileNames: [], now: new Date(0) });
+    const output = extractAll(inMinGiverSessions(session), { sourceFileNames: [], now: new Date(0) });
     expect(output.questFixes).toContain(`[questKeys.${questField}] = {{276171}}`);
     expect(output.npcFixes).toContain(`[npcKeys.${npcField}] = {99196}`);
     expect(output.questFixes).not.toContain("276172");
@@ -830,7 +836,7 @@ describe("extractAll (quest-giver correlation)", () => {
       traceEvent("GOSSIP_SHOW", 3, 3.011),
     );
 
-    const output = extractAll([session], { sourceFileNames: [], now: new Date(0) });
+    const output = extractAll(inMinGiverSessions(session), { sourceFileNames: [], now: new Date(0) });
     expect(output.questFixes).toContain(`[questKeys.${questField}] = {{276171,276172}}`);
     expect(output.npcFixes).toMatch(new RegExp(`\\[276171\\] = \\{[^}]*\\[npcKeys\\.${npcField}\\] = \\{99196\\}`));
     expect(output.npcFixes).toMatch(new RegExp(`\\[276172\\] = \\{[^}]*\\[npcKeys\\.${npcField}\\] = \\{99196\\}`));

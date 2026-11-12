@@ -82,7 +82,7 @@ The same run writes Questie l10n lookup modules for every non-enUS locale found 
 
 ### Quest-giver correlation
 
-`startedBy` and `finishedBy` prefer a valid `questnpc` giver, using `npc` only as a fallback. NPC/object `questStarts` and `questEnds` are derived from those exported quest records so both sides agree.
+`startedBy` and `finishedBy` take the giver from `questnpc`, using `npc` only as a fallback for gossip quest lists. A giver is only exported once at least 5 sessions saw it (`MIN_GIVER_SESSIONS` in `src/extract/merge/quest/relations.ts`), since a wrong giver does more harm than a missing one. NPC/object `questStarts` and `questEnds` are derived from those exported quest records so both sides agree.
 
 Quest and `GOSSIP_SHOW` lookups include synchronous API samples recorded after the raw event, but stop before the next raw event in the same frame. Ambiguous clock ties are skipped rather than resolved to an arbitrary giver. Recorded nil transitions clear earlier GUIDs; unchanged GUIDs remain usable during long dialogs.
 
