@@ -98,6 +98,7 @@ fn outcome_text(edge: &EdgeView) -> String {
     match edge.outcome {
         Outcome::Accepted => status_name(edge.status).to_owned(),
         Outcome::Clique => format!("{} · completes an accepted exclusive group", status_name(edge.status)),
+        Outcome::AndGroup => format!("{} · completes an accepted AND list", status_name(edge.status)),
         Outcome::Derived => {
             let because = edge.because.map(describe_key).unwrap_or_default();
             format!("{} · implied by {because}", status_name(edge.status))
