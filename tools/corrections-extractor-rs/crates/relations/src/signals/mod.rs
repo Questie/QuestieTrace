@@ -190,7 +190,10 @@ mod tests {
             generated_at: "2026-11-12T00:00:00.000Z",
         };
         let output = run_one(&Scoring(0.5), &input).expect("a score in [0, 1]");
-        assert_eq!((output.candidates.signal.as_str(), output.candidates.generated_at.as_str()), ("scoring", "2026-11-12T00:00:00.000Z"));
+        assert_eq!(
+            (output.candidates.signal.as_str(), output.candidates.generated_at.as_str()),
+            ("scoring", "2026-11-12T00:00:00.000Z")
+        );
         for bad in [f64::NAN, -0.1, 1.5] {
             let error = run_one(&Scoring(bad), &input).err().expect("rejected").to_string();
             assert!(error.contains("signal scoring scored 10 preQuestSingle 9"), "{error}");
