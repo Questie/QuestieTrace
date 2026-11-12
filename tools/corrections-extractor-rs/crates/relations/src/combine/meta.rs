@@ -4,7 +4,7 @@
 //! pipelines, which share output/, never overwrite each other's summary.
 
 use super::edges::{Domain, Reference};
-use super::lua::LuaRecords;
+use super::lua::{LuaRecords, Written};
 use super::views::{QuestView, Status};
 use crate::model::{CandidateFile, QuestEpisode};
 use crate::signals::forever_episodes;
@@ -39,8 +39,9 @@ impl InputSummary {
     }
 }
 
-/// What foreverQuestRelationTraces.lua holds. A breadcrumb or exclusive pair counts once per quest
-/// it is written to.
+/// What foreverQuestRelationTraces.lua changes: quests with a code line, and applied relation values
+/// (QuestieDB targets kept in a merged list included). A breadcrumb or exclusive pair counts once
+/// per quest it is written to. Commented-out relations are not counted.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct LuaCounts {
     pub quests: usize,
@@ -83,13 +84,20 @@ pub fn count_episodes(episodes: &[QuestEpisode]) -> (usize, usize) {
     (read.len(), characters.len())
 }
 
-/// Relation values in the Lua records: each id of a list field, one per scalar field.
+/// Relation values the Lua module applies: each id of an applied list field, one per applied
+/// scalar field. Cleared and commented-out fields are not counted.
 pub fn lua_relation_count(records: &LuaRecords) -> usize {
     records
         .values()
         .flatten()
-        .map(|(field, values)| if field.is_scalar() { 1 } else { values.len() })
+        .filter(|written| written.written == Written::Applied)
+        .map(|written| if written.field.is_scalar() { 1 } else { written.values.len() })
         .sum()
+}
+
+/// Quests the Lua module writes at least one code line for (applied or cleared).
+pub fn lua_quest_count(records: &LuaRecords) -> usize {
+    records.values().filter(|fields| fields.iter().any(|written| written.written.is_code())).count()
 }
 
 pub fn authored_status_counts<'v>(views: impl IntoIterator<Item = &'v QuestView<'v>>) -> StatusCounts {
@@ -137,16 +145,29 @@ mod tests {
     }
 
     #[test]
-    fn counts_every_id_of_a_list_field_and_one_per_scalar_field() {
+    fn counts_every_id_of_an_applied_list_field_and_one_per_applied_scalar_field() {
+        use super::super::lua::{LuaField, NotApplied};
+        let field = |field: RelationField, values: Vec<QuestId>, written: Written| LuaField { field, values, written };
         let records = LuaRecords::from([
             (
                 92000,
-                vec![(RelationField::PreQuestSingle, vec![1]), (RelationField::ExclusiveTo, vec![92001, 92002])],
+                vec![
+                    field(RelationField::PreQuestSingle, vec![], Written::Cleared),
+                    field(RelationField::PreQuestGroup, vec![1, 2], Written::Applied),
+                    field(RelationField::ExclusiveTo, vec![92001, 92002], Written::Shown(NotApplied::AlreadyInQuestieDb)),
+                ],
             ),
-            (92001, vec![(RelationField::NextQuestInChain, vec![92003])]),
+            (92001, vec![field(RelationField::NextQuestInChain, vec![92003], Written::Applied)]),
+            (
+                92002,
+                vec![field(RelationField::NextQuestInChain, vec![92004], Written::Shown(NotApplied::AuthoredFix))],
+            ),
         ]);
 
-        assert_eq!(lua_relation_count(&records), 4);
+        // preQuestGroup's two ids and the chain; the cleared and the commented-out fields change nothing.
+        assert_eq!(lua_relation_count(&records), 3);
+        // 92002 is commented out as a whole.
+        assert_eq!(lua_quest_count(&records), 2);
     }
 
     #[test]

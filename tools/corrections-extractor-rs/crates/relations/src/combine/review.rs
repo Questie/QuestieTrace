@@ -344,11 +344,11 @@ pub fn render_review(input: &ReviewInput) -> String {
             count(&authored, Status::Conflict)
         ),
         format!(
-            "- Classic quests whose accepted relations disagree with inherited data: {} (review only, never in the Lua output).",
+            "- Classic quests whose accepted relations disagree with inherited data: {} (in the Lua output; authored fixes still override it).",
             classic_disagreeing.len()
         ),
         format!(
-            "- Lua: `{}` (next to this report; `npm run dump --relation` merges its fields into `foreverQuestTraces.lua`), {} Forever-new quests.",
+            "- Lua: `{}` (next to this report) changes {} quests; accepted relations it does not apply are commented out with why.",
             input.lua_file, input.lua_quests
         ),
         format!("- Inputs: {}.", inputs.join(", ")),
@@ -376,8 +376,9 @@ pub fn render_review(input: &ReviewInput) -> String {
         "## 2. Forever-new quests with authored relations".into(),
         String::new(),
         "Quests where an accepted relation is new or conflicts with the authored data. Authored corrections load after the generated module \
-         and override per field, so a conflict here changes nothing in game until someone acts on it. Prerequisites are one slot: Questie \
-         ignores preQuestGroup when preQuestSingle is set, so quests with authored prerequisites get no prerequisites from the Lua output."
+         and override per field, so a conflict here changes nothing in game until someone acts on it. The Lua output carries accepted \
+         relations on authored fields commented out; prerequisites are one slot (Questie ignores preQuestGroup when preQuestSingle is set), \
+         so an authored field of either kind covers both."
             .into(),
         String::new(),
     ]);
@@ -391,9 +392,10 @@ pub fn render_review(input: &ReviewInput) -> String {
         String::new(),
         "## 3. Classic quests that disagree with inherited data".into(),
         String::new(),
-        "Review only. Forever may have re-wired these (often into Forever-new content), or the inherited data may be wrong; either way a person decides. \
-         This includes the Classic side of exclusive pairs and breadcrumbs with a Forever-new quest: the Lua output carries only the Forever side. \
-         Sorted by the strongest disagreeing relation."
+        "Forever may have re-wired these (often into Forever-new content), or the inherited data may be wrong. The Lua output applies what \
+         it can add without deleting inherited data (it keeps list targets the traces did not see, and never turns an inherited AND list into \
+         OR); the rest is commented out there with why. An authored fix overrides any of them. This includes the Classic side of exclusive \
+         pairs and breadcrumbs with a Forever-new quest. Sorted by the strongest disagreeing relation."
             .into(),
         String::new(),
     ]);

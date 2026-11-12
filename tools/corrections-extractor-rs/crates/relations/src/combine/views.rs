@@ -60,7 +60,7 @@ impl EdgeView<'_> {
         self.key.kind
     }
 
-    /// Written by the resolution, so in relations.json and (Forever-new quests) the Lua output.
+    /// Written by the resolution, so in relations.json and the Lua output (applied or commented out).
     pub fn is_written(&self) -> bool {
         self.outcome.is_written()
     }

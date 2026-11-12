@@ -236,7 +236,7 @@ pub enum Reference {
 
 /// Which reference data judges a quest, and whether it is Forever-new. Ground-truth tier
 /// membership decides, not the id alone: legacy Classic-Era quests can carry Forever-range ids
-/// (65593-65610) and still be inherited data, review-only like any Classic quest.
+/// (65593-65610) and still be inherited data, judged like any Classic quest.
 pub struct QuestDomains {
     authored: FxHashSet<QuestId>,
     inherited: FxHashSet<QuestId>,
