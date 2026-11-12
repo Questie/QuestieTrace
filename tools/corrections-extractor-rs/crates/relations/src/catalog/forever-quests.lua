@@ -1,10 +1,13 @@
 -- Prints Forever's effective quest rows as JSON for catalog/materialize.rs (which feeds it to Lua on
--- stdin, as `lua - <arguments>`; a copy of the Exporters catalog/forever-quests.lua).
+-- stdin, as `lua - <arguments>`; started as a copy of the Exporters catalog/forever-quests.lua).
 --
 -- Layering is QuestieDB's own, not a re-implementation: generator/flavor.lua loads
 -- data/Forever and applies every Static Correction through the shipped registry
 -- (legacy -> generated -> traces -> authored, replace / _add / _remove / `{}` deletion),
 -- then runs the Derived Passes. Dynamic Corrections are evaluated per faction x class on top.
+--
+-- The relations pipeline's own output (Forever/traces/foreverQuestRelationTraces.lua) is always
+-- left out, so a run never treats an imported copy of its own output as ground truth.
 --
 -- Run from a QuestieDB checkout with Lua 5.1:
 --   lua <this file> <field,field,...> [--without-traces | --trace-modules <dir>] [fixture.lua]
@@ -21,6 +24,7 @@
 --   dynamicViews   id -> distinct rows the faction x class views see, only for quests a Dynamic
 --                  Correction touches. Every real character sees one of these, never the static row.
 --   authoredFields id -> fields an authored forever*Fixes.lua provider replaces, adds to or removes from
+--   dynamicFields  id -> fields any Dynamic Correction (legacy or authored) replaces, adds to or removes from
 --   inheritedIds   quests from the inherited Era baseline: data/Forever rows plus quests a
 --                  Forever/legacy/ provider touches. Everything else is Forever-new.
 -- Values are raw (null holes, empty tables and zeroes kept); catalog/build.ts normalizes them.
@@ -60,6 +64,9 @@ local AUTHORED_PATTERN = "^Forever/forever[^/]+Fixes%.lua:"
 local INHERITED_PATTERN = "^Forever/legacy/"
 -- Exporters' generated trace modules (forever*Traces.lua).
 local TRACES_PATTERN = "^Forever/traces/"
+-- The relations pipeline's own output. It is always left out, imported or not: as ground truth
+-- it would make the next run partly learn from itself.
+local OWN_OUTPUT_PATTERN = "^Forever/traces/foreverQuestRelationTraces%.lua:"
 -- What Dynamic Corrections branch on (UnitFactionGroup / UnitClassBase tokens).
 local FACTIONS = { "Alliance", "Horde" }
 local CLASSES = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
@@ -184,15 +191,21 @@ local function loadForever()
   local raw = flavorLoader.load(flavor, { Quest = true }, false)
   -- flavor.lua keeps its prepared registry private; this one is built from the same files.
   local lib = dofile("generator/corrections.lua").prepare(flavor).lib
+  local registry = lib.Corrections
+  local hasOwnOutput = false
+  for _, entry in ipairs(registry.Select({ owner = registry.OWNER })) do
+    if entry.name:match(OWN_OUTPUT_PATTERN) then hasOwnOutput = true end
+  end
   local loaded
-  if withoutTraces then
-    -- flavor.lua cannot skip providers, so apply what it would, minus the trace modules, through
+  if withoutTraces or hasOwnOutput then
+    -- flavor.lua cannot skip providers, so apply what it would, minus the skipped modules, through
     -- this registry: Static Corrections on every working-set type, then the same Derived Passes.
     local derived = dofile("generator/derived.lua")
-    local registry = lib.Corrections
     local loadedModules = {}
     for _, entry in ipairs(registry.Select({ owner = registry.OWNER })) do
-      if entry.name:match(TRACES_PATTERN) then
+      if entry.name:match(OWN_OUTPUT_PATTERN) then
+        registry.UnregisterCorrection(registry.OWNER, entry.datatype, entry.name)
+      elseif withoutTraces and entry.name:match(TRACES_PATTERN) then
         local file = entry.name:match("([^/]+%.lua):")
         local path = traceModulesDir and traceModulesDir .. "/" .. file
         if path and fileExists(path) then
@@ -224,7 +237,7 @@ local function loadFixture(path)
   local registry = lib.Corrections
   local fixture = dofile(path)(lib.Enum.questKeys)
   for order, layer in ipairs(fixture.layers) do
-    if not (withoutTraces and layer.name:match(TRACES_PATTERN)) then
+    if not (withoutTraces and layer.name:match(TRACES_PATTERN)) and not layer.name:match(OWN_OUTPUT_PATTERN) then
       local register = layer.dynamic and registry.RegisterRuntimeCorrection or registry.RegisterCorrection
       local rows = layer.rows
       register(registry.OWNER, "Quest", layer.name, type(rows) == "function" and rows or function() return rows end, order)
@@ -255,22 +268,25 @@ local function selectEntries(dynamic)
 end
 
 -- Provenance from one provider's correction table: quests a legacy provider touches are
--- inherited, and authored providers record which fields they touch (_add/_remove keys included).
-local authoredFields = {}
+-- inherited; authored providers and Dynamic Corrections record which fields they touch
+-- (_add/_remove keys included), since both override the Static row.
+local authoredFields, dynamicFields = {}, {}
+local function noteFields(fieldsById, id, row)
+  for key in pairs(row) do
+    if type(key) == "number" then
+      local index = key >= OPERATION_OFFSET and key - OPERATION_OFFSET or (key <= 0 and key + OPERATION_OFFSET or key)
+      fieldsById[id] = fieldsById[id] or {}
+      fieldsById[id][assert(meta.names[index], "unknown quest field index " .. key)] = true
+    end
+  end
+end
 local function noteProvenance(entry, rows)
   local inherited = entry.name:match(INHERITED_PATTERN)
   local authored = entry.name:match(AUTHORED_PATTERN)
   for id, row in pairs(rows) do
     if inherited then inheritedIds[id] = true end
-    if authored then
-      for key in pairs(row) do
-        if type(key) == "number" then
-          local index = key >= OPERATION_OFFSET and key - OPERATION_OFFSET or (key <= 0 and key + OPERATION_OFFSET or key)
-          authoredFields[id] = authoredFields[id] or {}
-          authoredFields[id][assert(meta.names[index], "unknown quest field index " .. key)] = true
-        end
-      end
-    end
+    if authored then noteFields(authoredFields, id, row) end
+    if entry.dynamic then noteFields(dynamicFields, id, row) end
   end
 end
 
@@ -333,5 +349,6 @@ io.write("{",
   '"quests":', encodeIdMap(entities, encodeRow), ",",
   '"dynamicViews":', encodeIdMap(dynamicViews, function(rows) return "[" .. table.concat(rows, ",") .. "]" end), ",",
   '"authoredFields":', encodeIdMap(authoredFields, function(set) return encodeValue(sortedKeys(set)) end), ",",
+  '"dynamicFields":', encodeIdMap(dynamicFields, function(set) return encodeValue(sortedKeys(set)) end), ",",
   '"inheritedIds":', encodeValue(sortedKeys(inheritedIds)),
   "}\n")

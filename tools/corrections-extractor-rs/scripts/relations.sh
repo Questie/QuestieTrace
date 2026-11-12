@@ -59,8 +59,9 @@ else
   fail "no Lua 5.1: QuestieDB's tools/lua-binary/linux-x64/lua is missing and lua5.1 is not on PATH"
 fi
 
-# The catalog reads either a dump's own trace modules or the ones imported into QuestieDB. If an
-# earlier relations output was imported there, this run would partly build on its own output.
+# The catalog reads either a dump's own trace modules or the ones imported into QuestieDB. It
+# always leaves out this pipeline's own foreverQuestRelationTraces.lua; relation fields merged into
+# another module would still make this run partly build on its own output.
 relation_fields='questKeys\.(preQuestSingle|preQuestGroup|exclusiveTo|nextQuestInChain|parentQuest|breadcrumbForQuestId|breadcrumbs|availableUntilCompleted|availableStartingWith|disabledByQuest)\]'
 if [ -n "${RELATIONS_TRACE_MODULES_DIR:-}" ]; then
   modules="$(realpath -m "$RELATIONS_TRACE_MODULES_DIR")"
@@ -70,7 +71,7 @@ else
   modules="$questie_db/src/corrections/Forever/traces"
   note "trace modules: the ones imported into QuestieDB"
 fi
-if grep -qE "$relation_fields" "$modules"/forever*Traces.lua 2>/dev/null; then
+if grep -qE "$relation_fields" --exclude=foreverQuestRelationTraces.lua "$modules"/forever*Traces.lua 2>/dev/null; then
   note "WARNING: $modules already holds relation fields (an imported relations output?); the catalog will treat them as known"
 fi
 
