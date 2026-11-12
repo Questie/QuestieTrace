@@ -1,12 +1,13 @@
 # corrections-extractor-rs: plan
 
-1. **Next: the Rust extractor becomes the primary extractor** (this section).
-2. Done: the optimization night of 2026-11-10/11 (below), and the Rust relations pipeline
-   ([RELATIONS.md](RELATIONS.md), PR #137).
+**How to use this file.** The first part, "Next: the Rust extractor becomes the primary
+extractor", is the work to do, in order. Everything under "History" further down is done: it
+explains how the Rust tools got their speed (2026-11-10/11) and must not be redone. The relations
+port is done too ([RELATIONS.md](RELATIONS.md), PR #137).
 
 # Next: the Rust extractor becomes the primary extractor
 
-**Decision (David, 2026-11-12):** the Rust tools in `tools/corrections-extractor-rs` become the
+**Decision (2026-11-12):** the Rust tools in `tools/corrections-extractor-rs` become the
 primary way to turn trace-data into corrections; the TypeScript extractor
 (`tools/corrections-extractor`) is retired once the Rust one covers everything it is used for.
 
@@ -15,6 +16,40 @@ Relations was already written as natural Rust (outputs compared by value). The f
 to error texts, so it carries a layer that imitates JavaScript. As the primary extractor it no
 longer needs to: the TypeScript tool stops being the definition of right, and becomes a reference
 for one last comparison.
+
+## Context for a fresh session
+
+- **Code:** `tools/corrections-extractor-rs`, a Cargo workspace with three crates: `trace-data`
+  (reads submissions and decodes them; shared, fast, keep as it is), `corrections` (the field
+  extractor, this plan's subject) and `relations` (done, natural Rust; a model for the target
+  style). The workspace's `README.md` and `DESIGN.md` explain the extractor (what must match the
+  TypeScript tool, and why), `crates/relations/README.md` the relations pipeline.
+- **Branch and PR:** the work so far is on `feat/relations-rs`, PR #137 to master (open when this
+  was written). If #137 is merged, start a new branch from master; if not, from
+  `feat/relations-rs`. That branch is behind master but merges cleanly. The owner works in this
+  checkout: never rebase or force-push without asking.
+- **Data:** `~/projects/trace-data` (about 140,000 submissions, not a git checkout, synced from the
+  bucket). Both extractors take the same 5% sample (SHA-256 of the submission key), so samples
+  are comparable; develop on 5% (about 25 s in Rust), run the full archive at milestones.
+- **Commands:**
+  - Rust checks: `cd tools/corrections-extractor-rs && cargo fmt --check && cargo clippy
+    --all-targets -- -D warnings && cargo test`.
+  - Rust extractor: `cargo run --release -p corrections -- --trace-data ~/projects/trace-data
+    --sample 5 --output <dir>` (full archive: drop `--sample`; about 7 min, 11 GB).
+  - TypeScript extractor (the reference): run a copy of master's
+    `tools/corrections-extractor` (`git archive origin/master tools/corrections-extractor`,
+    `node_modules` symlinked from the checkout) with `TRACE_DATA_DIR=~/projects/trace-data
+    EXTRACT_SAMPLE=5 TRACE_STORE_DIR=<a scratch dir> npm run extract`. Always set
+    `TRACE_STORE_DIR` to a scratch directory: its default, `../trace-session-store` next to the
+    checkout, is the real store. A full archive run takes about 100 min and 19 GB.
+  - Comparing: `scripts/parity.sh` (extractor, byte comparison today; step 0 changes it),
+    `scripts/relations-compare.sh` and `crates/relations/examples/compare.rs` (value comparison).
+- **This machine has memory errors** (RELATIONS.md): a run can crash or carry a flipped bit. Run
+  full-archive jobs one at a time, do them twice and compare when the result matters, and do not
+  hold several GB in comparison tools (Claude Code stops background jobs under memory pressure).
+- **Working style that worked:** a gate after every change, one commit per change, subagents in
+  worktrees for independent parts with a shared brief, fresh reviewer subagents before calling a
+  step done (see CLAUDE.md).
 
 ## Where we start
 
@@ -57,14 +92,21 @@ for one last comparison.
 Every step ends with the gate and a commit of its own. An output change is allowed only when it
 is understood: the commit message says what changed and why, with counts.
 
+Get answers to the four open decisions below before step 3; steps 0 to 2 do not depend on them.
+
 **0. Reference and gate (small).**
 - Freeze a reference: TypeScript master's extractor output on the 5% sample (and the full archive,
-  101 min, on an idle machine), with the master commit recorded next to it.
+  about 100 min, on an idle machine), with the master commit recorded next to it. Build it from
+  master's copy of `tools/corrections-extractor`, not from the branch's: `scripts/parity.sh`
+  archives `HEAD`, which on `feat/relations-rs` is the older copy from before #131. Give the
+  script the reference output directory, or a git ref to archive.
 - Move `scripts/parity.sh` from byte comparison to value comparison: Lua modules line by line
   with timestamps masked, JSON by value (the relations compare tool already does both), and
   `meta.json`'s skipped and partial files compared by file name and count, not by reason text.
 
-**1. Catch up with master, written as plain Rust from the start (small).**
+**1. Catch up with master, written as plain Rust from the start (small).** Do this before
+anything else changes output: until then the Rust extractor knowingly differs from master's
+TypeScript in quest XP and quest finishers, and every later comparison would show these first.
 - #131: `questXp` is kept for every quest seen in Forever, not only Forever-new ids.
 - `8508e3b`: `finishedBy` gets the token rules `startedBy` already has (and the Rust port already
   follows): `questnpc` at `QUEST_COMPLETE` and `QUEST_TURNED_IN`, `npc` only as the fallback for
@@ -103,7 +145,7 @@ is understood: the commit message says what changed and why, with counts.
   checked against the step-0 full-archive reference.
 - Retire `tools/corrections-extractor` (decision 3).
 
-## Decisions needed from David
+## Open decisions
 
 1. **Reading the bucket:** keep "rclone sync, then run on the local checkout" (simplest, works
    today), or read the OVH bucket natively from Rust? Recommendation: keep the sync.
@@ -133,13 +175,17 @@ Steps 0, 1 and 4 are small (a day together); step 2 is the bulk (about the size 
 area per item group, gated each time); step 3 depends on decision 2 ((a) is small). Smaller than
 the relations port: the observers' logic stays, only the layer around it changes.
 
-# Optimization night (2026-11-10/11)
+# History: optimization night (2026-11-10/11), done
+
+**Done, not tasks.** This is the log of how the Rust extractor got from 18 min 43 s to 7 min 22 s
+on the full archive; every change it lists is already in the code. Read it to know why the code
+is shaped as it is (arena, lazy events, trusted CBOR walks, ...), not as work to do.
 
 Overnight work on the Rust prototype in `tools/corrections-extractor-rs` (local only, never pushed).
 Goal: find out which optimizations pay off, by how much, and at what complexity; then measure the
 full archive with both tools.
 
-## Decisions (from David, 2026-11-10)
+## Decisions (2026-11-10)
 
 - **Speed is the priority.** A memory saving is worth it when it costs at most ~1% speed per 10%
   memory saved.
