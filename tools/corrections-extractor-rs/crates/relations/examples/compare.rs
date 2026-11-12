@@ -9,7 +9,8 @@
 //! - Object key order never matters; array order does (outputs are sorted).
 //! - Numbers are equal when they differ by at most `tolerance`, relative to the larger one (or
 //!   absolute below 1). `1` and `1.0` are equal.
-//! - `generatedAt` keys are ignored, wherever they are; in text files, ISO 8601 timestamps are.
+//! - Run-dependent values are ignored: `generatedAt` keys wherever they are, a document's
+//!   top-level `seconds` (the run time in reports/ingest.json), and ISO 8601 timestamps in text.
 //!
 //! Prints every difference (up to `--max`) with its path, and exits 1 when there are any.
 
@@ -46,8 +47,9 @@ impl Compare {
                 }
             }
             (Value::Object(a), Value::Object(b)) => {
+                let ignored = |key: &str| key == "generatedAt" || (path.is_empty() && key == "seconds");
                 for (key, value) in a {
-                    if key == "generatedAt" {
+                    if ignored(key) {
                         continue;
                     }
                     match b.get(key) {
@@ -56,7 +58,7 @@ impl Compare {
                     }
                 }
                 for (key, value) in b {
-                    if key != "generatedAt" && !a.contains_key(key) {
+                    if !ignored(key) && !a.contains_key(key) {
                         self.report(path, format!("extra key {key:?} = {}", short(value)));
                     }
                 }

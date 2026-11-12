@@ -14,9 +14,24 @@ automatic import.
 
 ```sh
 cd tools/corrections-extractor-rs
+QUESTIEDB_DIR=~/path/to/QuestieDB scripts/relations.sh            # deliverables in relations-output/output/
+QUESTIEDB_DIR=~/path/to/QuestieDB scripts/relations.sh --twice    # two runs, compared (catches bit flips)
+```
+
+`scripts/relations.sh` checks every input before it starts (trace-data, a QuestieDB checkout with
+master's layout and its Lua, whether its imported trace modules already hold relations, the scraper
+databases, free memory), fetches the latest scraper release into the gitignored `data/scraper/`
+(`scripts/fetch-scraper.sh`: the raw Forever and Era page caches, checked against the release
+manifest, kept between runs), builds and runs the pipeline. Trace-data defaults to the checkout next
+to QuestieTrace (`TRACE_DATA_DIR`), the scraper release to the latest (`SCRAPER_TAG`, or
+`SCRAPER_DIR` for a folder of your own); the full archive takes about 11 minutes and 15 GB of memory.
+
+The binary itself takes everything from the environment:
+
+```sh
 export TRACE_DATA_DIR=...                # trace-data checkout (submissions/<yyyy-mm>/*.json)
 export QUESTIEDB_DIR=...                 # QuestieDB checkout (its Lua loader builds the catalog)
-export SCRAPER_DIR=.../v2026.11.10       # scraper release folder (data/raw, data/parsed)
+export SCRAPER_DIR=data/scraper/<tag>    # scraper release folder (data/raw/{forever,classic}.db)
 export RELATIONS_TRACE_MODULES_DIR=...   # optional: a dump's own forever*Traces.lua
 export RELATIONS_REQUIRE_FOREVER_VERSION=1
 export RELATIONS_DIR=.relations          # working files (default .relations)
