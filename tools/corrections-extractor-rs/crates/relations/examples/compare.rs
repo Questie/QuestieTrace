@@ -4,7 +4,8 @@
 //! cargo run --release -p relations --example compare -- EXPECTED ACTUAL [--tolerance 1e-9] [--max 20]
 //!
 //! - `.json`: one document. `.jsonl`: one record per line, matched by their `key` field when they
-//!   have one (else by line). Anything else is compared as text, line by line.
+//!   have one (else by line), read one record at a time, so even the full archive's 5 GB
+//!   episodes.jsonl compares in little memory. Anything else is compared as text, line by line.
 //! - Object key order never matters; array order does (outputs are sorted).
 //! - Numbers are equal when they differ by at most `tolerance`, relative to the larger one (or
 //!   absolute below 1). `1` and `1.0` are equal.
@@ -14,6 +15,8 @@
 
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::process::ExitCode;
 
 struct Compare {
@@ -85,13 +88,64 @@ fn read(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|error| panic!("reading {path}: {error}"))
 }
 
-fn jsonl(path: &str) -> Vec<Value> {
-    read(path)
-        .lines()
-        .filter(|line| !line.is_empty())
-        .enumerate()
-        .map(|(i, line)| serde_json::from_str(line).unwrap_or_else(|error| panic!("{path} line {}: {error}", i + 1)))
-        .collect()
+/// Byte offset and key of every record of a JSONL file, without keeping the records.
+fn jsonl_index(path: &str) -> Vec<(u64, Option<String>)> {
+    #[derive(serde::Deserialize)]
+    struct Keyed {
+        key: Option<String>,
+    }
+    let mut reader = BufReader::new(File::open(path).unwrap_or_else(|error| panic!("reading {path}: {error}")));
+    let (mut index, mut offset, mut line) = (Vec::new(), 0u64, String::new());
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line).unwrap_or_else(|error| panic!("reading {path}: {error}"));
+        if read == 0 {
+            return index;
+        }
+        if !line.trim().is_empty() {
+            let keyed: Keyed = serde_json::from_str(&line).unwrap_or_else(|error| panic!("{path} at byte {offset}: {error}"));
+            index.push((offset, keyed.key));
+        }
+        offset += read as u64;
+    }
+}
+
+/// The record at `offset`.
+fn jsonl_record(file: &mut BufReader<File>, offset: u64) -> Value {
+    file.seek(SeekFrom::Start(offset)).expect("seekable file");
+    let mut line = String::new();
+    file.read_line(&mut line).expect("a readable line");
+    serde_json::from_str(&line).expect("a record read once already")
+}
+
+/// Compares two JSONL files record by record, matched by `key` when every record has one.
+fn compare_jsonl(compare: &mut Compare, expected: &str, actual: &str) {
+    let (a, b) = (jsonl_index(expected), jsonl_index(actual));
+    let open = |path: &str| BufReader::new(File::open(path).expect("opened once already"));
+    let (mut a_file, mut b_file) = (open(expected), open(actual));
+    let keyed = |index: &[(u64, Option<String>)]| -> Option<BTreeMap<String, u64>> { index.iter().map(|(offset, key)| Some((key.clone()?, *offset))).collect() };
+    match (keyed(&a), keyed(&b)) {
+        (Some(a_keys), Some(b_keys)) => {
+            println!("{} vs {} records, matched by key", a_keys.len(), b_keys.len());
+            for (key, offset) in &a_keys {
+                match b_keys.get(key) {
+                    Some(other) => compare.value(&format!("[{key}]"), &jsonl_record(&mut a_file, *offset), &jsonl_record(&mut b_file, *other)),
+                    None => compare.report(&format!("[{key}]"), "missing record".into()),
+                }
+            }
+            for key in b_keys.keys().filter(|key| !a_keys.contains_key(*key)) {
+                compare.report(&format!("[{key}]"), "extra record".into());
+            }
+        }
+        _ => {
+            if a.len() != b.len() {
+                compare.report("", format!("{} != {} records", a.len(), b.len()));
+            }
+            for (line, ((a_offset, _), (b_offset, _))) in a.iter().zip(&b).enumerate() {
+                compare.value(&format!("[line {}]", line + 1), &jsonl_record(&mut a_file, *a_offset), &jsonl_record(&mut b_file, *b_offset));
+            }
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -109,24 +163,7 @@ fn main() -> ExitCode {
         differences: 0,
     };
     if expected.ends_with(".jsonl") {
-        let (a, b) = (jsonl(expected), jsonl(actual));
-        let keyed =
-            |records: &[Value]| -> Option<BTreeMap<String, Value>> { records.iter().map(|r| Some((r.get("key")?.as_str()?.to_owned(), r.clone()))).collect() };
-        match (keyed(&a), keyed(&b)) {
-            (Some(a), Some(b)) => {
-                println!("{} vs {} records, matched by key", a.len(), b.len());
-                for (key, record) in &a {
-                    match b.get(key) {
-                        Some(other) => compare.value(&format!("[{key}]"), record, other),
-                        None => compare.report(&format!("[{key}]"), "missing record".into()),
-                    }
-                }
-                for key in b.keys().filter(|key| !a.contains_key(*key)) {
-                    compare.report(&format!("[{key}]"), "extra record".into());
-                }
-            }
-            _ => compare.value("", &Value::Array(a), &Value::Array(b)),
-        }
+        compare_jsonl(&mut compare, expected, actual);
     } else if expected.ends_with(".json") {
         let parse = |path: &str| -> Value { serde_json::from_str(&read(path)).unwrap_or_else(|error| panic!("{path}: {error}")) };
         compare.value("", &parse(expected), &parse(actual));
