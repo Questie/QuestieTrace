@@ -123,7 +123,8 @@ fn compare_jsonl(compare: &mut Compare, expected: &str, actual: &str) {
     let (a, b) = (jsonl_index(expected), jsonl_index(actual));
     let open = |path: &str| BufReader::new(File::open(path).expect("opened once already"));
     let (mut a_file, mut b_file) = (open(expected), open(actual));
-    let keyed = |index: &[(u64, Option<String>)]| -> Option<BTreeMap<String, u64>> { index.iter().map(|(offset, key)| Some((key.clone()?, *offset))).collect() };
+    let keyed =
+        |index: &[(u64, Option<String>)]| -> Option<BTreeMap<String, u64>> { index.iter().map(|(offset, key)| Some((key.clone()?, *offset))).collect() };
     match (keyed(&a), keyed(&b)) {
         (Some(a_keys), Some(b_keys)) => {
             println!("{} vs {} records, matched by key", a_keys.len(), b_keys.len());
@@ -142,7 +143,11 @@ fn compare_jsonl(compare: &mut Compare, expected: &str, actual: &str) {
                 compare.report("", format!("{} != {} records", a.len(), b.len()));
             }
             for (line, ((a_offset, _), (b_offset, _))) in a.iter().zip(&b).enumerate() {
-                compare.value(&format!("[line {}]", line + 1), &jsonl_record(&mut a_file, *a_offset), &jsonl_record(&mut b_file, *b_offset));
+                compare.value(
+                    &format!("[line {}]", line + 1),
+                    &jsonl_record(&mut a_file, *a_offset),
+                    &jsonl_record(&mut b_file, *b_offset),
+                );
             }
         }
     }
