@@ -29,7 +29,7 @@ mod offer_set;
 
 /// What every signal reads.
 pub struct SignalInput<'a> {
-    /// Every episode; signals look at the [`forever_episodes`] only.
+    /// Every episode; signals look at the `forever_episodes` only.
     pub episodes: &'a [QuestEpisode],
     pub catalog: &'a QuestCatalog,
     /// The run's start time, for `generatedAt`.
@@ -41,7 +41,7 @@ pub struct Findings {
     /// Episodes the signal looked at.
     pub input_count: usize,
     /// The tunables the signal ran with, for reproducibility: its params struct (plus any notes on
-    /// what the counts mean) through [`to_json`], so a new tunable cannot go missing from the file.
+    /// what the counts mean) through `to_json`, so a new tunable cannot go missing from the file.
     pub params: serde_json::Value,
     /// Every quest the signal could judge, with or without a candidate: recall depends on it.
     pub covered_quest_ids: Vec<QuestId>,

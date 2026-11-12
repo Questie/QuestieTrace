@@ -1,13 +1,13 @@
 //! Ingest: trace-data submissions -> one [`QuestEpisode`] per recording session, its copies across
 //! submissions merged, its character worked out.
 //!
-//! 1. Every submission is decoded and its sessions distilled on all cores ([`submission`],
-//!    [`distill`]); only the small distilled values leave a worker, so decoded trees never pile up.
-//! 2. On one thread, as results arrive: the copies of each session are merged ([`merge`]) and every
-//!    title pairing is indexed ([`titles`]).
+//! 1. Every submission is decoded and its sessions distilled on all cores (`submission`,
+//!    `distill`); only the small distilled values leave a worker, so decoded trees never pile up.
+//! 2. On one thread, as results arrive: the copies of each session are merged (`merge`) and every
+//!    title pairing is indexed (`titles`).
 //! 3. Legacy greeting titles are resolved, sessions without quest data dropped, sessions grouped
-//!    into characters and ordered ([`characters`]), and the episodes written with
-//!    reports/ingest.json ([`report`]).
+//!    into characters and ordered (`characters`), and the episodes written with
+//!    reports/ingest.json (`report`).
 //!
 //! Nothing is cached between runs: every run decodes every submission.
 

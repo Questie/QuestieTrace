@@ -1,13 +1,13 @@
 //! Combine: every signal's candidates -> one resolved set of relations, and the deliverables:
 //! `foreverQuestRelationTraces.lua`, `relations-review.md` and `relations-meta.json`.
 //!
-//! [`inputs`] sets Wowhead aside as context only; [`pipeline`] scores and resolves the rest. This
+//! `inputs` sets Wowhead aside as context only; `pipeline` scores and resolves the rest. This
 //! module renders the outputs. Deliverables go to the output dir (next to the field extractor's
 //! modules): foreverQuestRelationTraces.lua (Forever-new quests only), relations-review.md and
 //! relations-meta.json. Intermediates stay in the relations dir: relations.json (every quest with
 //! accepted or near-miss relations) and reports/combine-metrics.json.
 //!
-//! The acceptance threshold is [`pipeline::MIN_SCORE`]; the TS `--min-score` override is not
+//! The acceptance threshold is `pipeline::MIN_SCORE`; the TS `--min-score` override is not
 //! ported (the pipeline never passes it).
 
 mod assumptions;
