@@ -199,6 +199,7 @@ local function NewRuntime(trackerFiles)
   env.QuestieTraceCore.OnConsentFrameLoad(runtime.consentFrame)
   for _, path in ipairs(trackerFiles) do LoadAddonFile(runtime, path) end
   LoadRoundTripEncoding(runtime)
+  LoadAddonFile(runtime, "Modules/API.lua")
   LoadAddonFile(runtime, "QuestieTrace.lua")
   -- QuestieTrace.lua creates the main event frame last.
   runtime.frame = runtime.frames[#runtime.frames]
@@ -878,6 +879,21 @@ local function TestSaveCaptureClearsCurrentSession()
   runtime.core.SaveCapture()
   assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "SaveCapture must clear currentSession")
   assert(runtime.env.QuestieTraceCharacter.sessions[1] ~= nil, "Session must be moved to sessions array")
+end
+
+local function TestApiStartCaptureBeforeLoginDoesNotBlockAutoStart()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  runtime.env.QuestieTraceCharacter = nil
+
+  local ok, isRunning = pcall(runtime.env.QuestieTraceAPI.v1.StartCapture)
+  assert(ok, "StartCapture before PLAYER_LOGIN must not raise: " .. tostring(isRunning))
+  assert(isRunning == false, "StartCapture before PLAYER_LOGIN must report that no capture is running")
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  assert(runtime.core.GetCaptureState() == "running", "Login must still auto-start after an early API StartCapture")
+  assert(runtime.env.QuestieTraceCharacter.currentSession ~= nil, "Login must link the auto-started session")
 end
 
 local function TestLoginInitializesFreshCharacter()
@@ -3344,6 +3360,7 @@ local tests = {
   { name = "SaveCapture skips a session that cannot be encoded", run = TestSaveCaptureSkipsSessionThatCannotBeEncoded },
   { name = "currentSession linked on StartCapture", run = TestCurrentSessionLinkedOnStartCapture },
   { name = "SaveCapture clears currentSession", run = TestSaveCaptureClearsCurrentSession },
+  { name = "API StartCapture before login does not block auto-start", run = TestApiStartCaptureBeforeLoginDoesNotBlockAutoStart },
   { name = "fresh character login initializes SavedVariables", run = TestLoginInitializesFreshCharacter },
   { name = "recover currentSession on login before auto-start", run = TestRecoverCurrentSessionOnLogin },
   { name = "recover currentSession discarded when consent declined", run = TestRecoverCurrentSessionDiscardedWhenConsentDeclined },
