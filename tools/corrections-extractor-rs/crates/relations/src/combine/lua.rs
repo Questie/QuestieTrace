@@ -412,7 +412,7 @@ pub fn forever_relations_lua(records: &LuaRecords, header: &LuaHeader, views: &I
             header.min_score, header.review_file
         ),
         format!("-- Candidate files: {}", header.candidate_files.join(", ")),
-        "-- Each Assumption says what the traces saw, which signals agree and how certain the relation is: very high (score 0.99+), high (0.95+), medium (0.9+) or low; relations-review.md has the exact evidence".to_owned(),
+        "-- Each Assumption says what the traces saw, which signals agree, how certain the relation is (very high: score 0.99+, high: 0.95+, medium: 0.9+, low) and how many characters back it (<10, 10+, 100+); relations-review.md has the exact evidence".to_owned(),
         "-- Commented-out fields are accepted relations this module does not apply; the comment above each says why".to_owned(),
         format!("-- Sessions aggregated: {}", header.session_count),
         format!("-- Generated at: {}", header.generated_at),
@@ -777,11 +777,11 @@ mod tests {
             "            [questKeys.preQuestSingle] = {},\n",
             "            -- 1532 https://wowhead.com/forever/quest=1532\n",
             "            -- 96136 https://wowhead.com/forever/quest=96136\n",
-            "            -- Assumption: the server completes it and 96136 together (cooccurrence; high); 1532 kept from QuestieDB\n",
+            "            -- Assumption: the server completes it and 96136 together (cooccurrence; high; 100+ characters); 1532 kept from QuestieDB\n",
             "            [questKeys.exclusiveTo] = {1532,96136},\n",
             "            -- 92001 \"Rascally Rodents\" https://wowhead.com/forever/quest=92001\n",
             "            -- not applied: 92001 requires 99, not this quest, and Questie hides a quest once its next quest is done or in the log; \
-             Assumption: turning it in led straight to 92001 (handoff; high)\n",
+             Assumption: turning it in led straight to 92001 (handoff; high; 10+ characters)\n",
             "            -- [questKeys.nextQuestInChain] = 92001,\n",
             "        },\n",
         )));

@@ -2,10 +2,10 @@
 //! relation is believed, in one line a QuestieDB maintainer can read without the review report.
 //!
 //! Per target it says what the traces saw (the phrase of the first agreeing signal in
-//! [`SIGNAL_ORDER`]), which trace signals agree, and how certain the combined score is, as a band.
-//! It carries no counts or exact scores: those move with every export, and the module is committed,
-//! so they would make every comment change; relations-review.md has the full evidence for every
-//! relation. Targets whose reasons differ only by id share one, so a large exclusive group stays one
+//! [`SIGNAL_ORDER`]), which trace signals agree, how certain the combined score is, and how many
+//! characters back it, both as ranges. It carries no exact counts or scores: those move with every
+//! export, and the module is committed, so they would make every comment change;
+//! relations-review.md has the full evidence for every relation. Targets whose reasons differ only by id share one, so a large exclusive group stays one
 //! readable line. Wowhead never appears: it is context only (see [`super::inputs`]).
 
 use super::edges::{Claim, EdgeKind};
@@ -28,6 +28,18 @@ fn certainty(probability: f64) -> &'static str {
         "medium"
     } else {
         "low"
+    }
+}
+
+/// The most independent characters any agreeing signal saw it in, as a range. Support only grows
+/// as traces accumulate, and above 100 more characters tell a reviewer nothing, so three ranges:
+/// between two real exports 4.8% of relations changed range, against 12.2% with a 1000+ range.
+fn characters(edge: &EdgeView) -> &'static str {
+    // Support 0: only observations a signal could not pin to one independent character.
+    match edge.claims.iter().map(|claim| claim.support).max().unwrap_or(0) {
+        0..=9 => "<10 characters",
+        10..=99 => "10+ characters",
+        _ => "100+ characters",
     }
 }
 
@@ -100,7 +112,12 @@ fn reason(edge: &EdgeView, quest_id: QuestId, other: &str) -> String {
     let Some(claim) = leading_claim(edge, &signals) else {
         return certainty.to_owned();
     };
-    let mut text = format!("{} ({}; {certainty})", observation(claim, edge, quest_id, other), signals.join(", "));
+    let mut text = format!(
+        "{} ({}; {certainty}; {})",
+        observation(claim, edge, quest_id, other),
+        signals.join(", "),
+        characters(edge)
+    );
     if edge.outcome == Outcome::Clique {
         text.push_str(", kept below the min score for its accepted exclusive group");
     }
@@ -214,7 +231,7 @@ mod tests {
 
         assert_eq!(
             assumption(&view(76160, &relations, vec![prerequisite]), PreQuestSingle).as_deref(),
-            Some("Assumption: offered right after 76156 was turned in (handoff, offer-set, absence; very high)")
+            Some("Assumption: offered right after 76156 was turned in (handoff, offer-set, absence; very high; 10+ characters)")
         );
     }
 
@@ -223,6 +240,23 @@ mod tests {
         let bands: Vec<&str> = [0.99, 0.989, 0.95, 0.949, 0.9, 0.899].into_iter().map(certainty).collect();
 
         assert_eq!(bands, ["very high", "high", "high", "medium", "medium", "low"]);
+    }
+
+    #[test]
+    fn ranges_characters_by_the_best_supported_agreeing_signal_at_10_and_100() {
+        let ranges: Vec<&str> = [0, 9, 10, 99, 100]
+            .into_iter()
+            .map(|support| {
+                // A weak second signal never lowers the range the best-supported one sets.
+                let claims = [claim("absence", PreQuestSingle, 0.9, 1), claim("handoff", PreQuestSingle, 0.9, support)];
+                characters(&edge(EdgeKind::Prerequisite, PreQuestSingle, 1, 0.95, &claims))
+            })
+            .collect();
+
+        assert_eq!(
+            ranges,
+            ["<10 characters", "<10 characters", "10+ characters", "10+ characters", "100+ characters"]
+        );
     }
 
     #[test]
@@ -243,8 +277,8 @@ mod tests {
         assert_eq!(
             assumption(&view, PreQuestSingle).as_deref(),
             Some(
-                "Assumption: everyone who took it had done 79007 (cooccurrence; medium); \
-                 everyone who took it had done 79008 (cooccurrence; high)"
+                "Assumption: everyone who took it had done 79007 (cooccurrence; medium; <10 characters); \
+                 everyone who took it had done 79008 (cooccurrence; high; <10 characters)"
             )
         );
         assert_eq!(assumption(&view, NextQuestInChain), None);
@@ -252,21 +286,24 @@ mod tests {
 
     #[test]
     fn merges_targets_whose_reasons_differ_only_by_id() {
-        // Different character counts no longer split a group; a different band still does.
+        // Counts in one range merge; a different band or range splits.
         let busy = [claim("cooccurrence", ExclusiveTo, 0.9, 171)];
+        let busier = [claim("cooccurrence", ExclusiveTo, 0.9, 4210)];
         let unpinned = [claim("cooccurrence", ExclusiveTo, 0.9, 0)];
         let edges = vec![
             edge(EdgeKind::Exclusive, ExclusiveTo, 96102, 0.993, &busy),
-            edge(EdgeKind::Exclusive, ExclusiveTo, 97925, 0.991, &unpinned),
+            edge(EdgeKind::Exclusive, ExclusiveTo, 97925, 0.991, &busier),
             edge(EdgeKind::Exclusive, ExclusiveTo, 97937, 0.93, &busy),
+            edge(EdgeKind::Exclusive, ExclusiveTo, 97940, 0.995, &unpinned),
         ];
-        let relations = RelationSet::from([(ExclusiveTo, vec![96102, 97925, 97937])]);
+        let relations = RelationSet::from([(ExclusiveTo, vec![96102, 97925, 97937, 97940])]);
 
         assert_eq!(
             assumption(&view(96101, &relations, edges), ExclusiveTo).as_deref(),
             Some(
-                "Assumption: the server completes it and 96102, 97925 together (cooccurrence; very high); \
-                 the server completes it and 97937 together (cooccurrence; medium)"
+                "Assumption: the server completes it and 96102, 97925 together (cooccurrence; very high; 100+ characters); \
+                 the server completes it and 97937 together (cooccurrence; medium; 100+ characters); \
+                 the server completes it and 97940 together (cooccurrence; very high; <10 characters)"
             )
         );
     }
@@ -301,19 +338,19 @@ mod tests {
 
         assert_eq!(
             said(&both, 463, BreadcrumbForQuestId, 276, &on_breadcrumb).as_deref(),
-            Some("Assumption: optional lead-in to 276 (breadcrumbs, absence; very high)")
+            Some("Assumption: optional lead-in to 276 (breadcrumbs, absence; very high; 10+ characters)")
         );
         assert_eq!(
             said(&both, 276, Breadcrumbs, 463, &on_target).as_deref(),
-            Some("Assumption: 463 is an optional lead-in to it (breadcrumbs, absence; very high)")
+            Some("Assumption: 463 is an optional lead-in to it (breadcrumbs, absence; very high; 10+ characters)")
         );
         assert_eq!(
             said(&absence, 463, BreadcrumbForQuestId, 276, &on_breadcrumb).as_deref(),
-            Some("Assumption: 276 left off offer lists while 463 was in the log (absence; very high)")
+            Some("Assumption: 276 left off offer lists while 463 was in the log (absence; very high; <10 characters)")
         );
         assert_eq!(
             said(&absence, 276, Breadcrumbs, 463, &on_target).as_deref(),
-            Some("Assumption: 276 left off offer lists while 463 was in the log (absence; very high)")
+            Some("Assumption: 276 left off offer lists while 463 was in the log (absence; very high; <10 characters)")
         );
     }
 }
