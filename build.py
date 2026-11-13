@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -81,6 +83,21 @@ def main():
 
     metadata_str = ",\n".join(metadata_list)
 
+    # Questie bundles the latest release and verifies its download against this section.
+    zip_path = "%s/%s.zip" % (release_folder_path, zip_name)
+    with open(zip_path, "rb") as archive:
+        sha256 = hashlib.sha256(archive.read()).hexdigest()
+    with open(release_addon_folder_path + "/QuestieTrace-Classic.toc", encoding="utf-8") as toc:
+        version = re.search(r"^## Version: (.*?)$", toc.read(), re.MULTILINE).group(1)
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    questietrace = {
+        "repository": "https://github.com/Questie/QuestieTrace",
+        "version": version,
+        "producerCommit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=script_dir, text=True).strip(),
+        "artifacts": [{"file": "%s.zip" % zip_name, "sha256": sha256, "bytes": os.path.getsize(zip_path)}],
+    }
+    questietrace_str = "\n".join("    " + line for line in json.dumps(questietrace, indent=4).splitlines()).lstrip()
+
     with open(release_folder_path + "/release.json", "w") as rf:
         rf.write(
             f"""{{
@@ -92,7 +109,8 @@ def main():
 {metadata_str}
             ]
         }}
-    ]
+    ],
+    "questietrace": {questietrace_str}
 }}"""
         )
 
