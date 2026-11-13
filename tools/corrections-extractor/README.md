@@ -2,7 +2,7 @@
 
 Extracts Questie DB corrections and translations from every submission in the OVH archive bucket (or a local [trace-data](https://github.com/Questie/trace-data) checkout) and writes them as paste-ready `forever*Traces.lua` and lookup modules.
 
-The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported (except quest XP, which is exported for every quest).
+The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported (except quest XP, which is exported for every quest, and the translations, which cover every observed ID).
 
 ## Requirements
 
@@ -71,7 +71,7 @@ The trace-analyzer's Extract tab shows these files for copy/download.
 
 ### Translations
 
-The same run writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Like the corrections, only IDs above the known Classic maximum are exported. NPC subnames are not traced and are always `nil`.
+The same run writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Unlike the corrections, every observed ID is exported, Classic ones included. NPC subnames are not traced and are always `nil`.
 
 ## How it works
 

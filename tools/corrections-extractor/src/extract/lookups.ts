@@ -1,12 +1,12 @@
 // Sessions -> per-locale Questie l10n lookup modules (lookup<Entity>/<locale>.lua).
 //
-// Uses the same Forever-session and new-ID filtering as the corrections export
-// (see observe.ts). enUS is skipped: its names already go into forever*Traces.lua.
+// Uses the same Forever-session filtering as the corrections export (see observe.ts), but
+// exports every observed ID, Classic ones included. enUS is skipped: its names already go
+// into forever*Traces.lua.
 
 import type { SessionRecord } from "../core/types";
 import { addScalarGroup, addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarGroup, type ScalarSummary } from "./aggregate";
 import type { Localized, Observation } from "./observation";
-import { MAX_IDS } from "./observe";
 import { LOOKUP_OBSERVERS as OBSERVERS, observeLookupSession, SKIPPED_LOCALE, type LookupObserverKey as ObserverKey, type StagedLookupSession } from "./observe-lookups";
 import { writeLookupLua } from "./schema/lookup-writer";
 
@@ -81,15 +81,13 @@ export function addStagedLookupSessions(acc: LookupAccumulator, staged: StagedLo
 }
 
 export function finalizeLookups(acc: LookupAccumulator): LookupBundle {
-  const maxIds = MAX_IDS;
-
-  function valuesFor(key: ObserverKey, locale: string, maxId: number): Map<number, unknown> {
+  function valuesFor(key: ObserverKey, locale: string): Map<number, unknown> {
     const values = new Map<number, unknown>();
     const summary = acc.summaries[key].get(locale);
     if (!summary) return values;
     const aggregate = NEWEST_WINS.has(key) ? aggregateNewestScalarSummary : aggregateScalarSummary;
     for (const [id, fact] of aggregate(summary)) {
-      if (id > maxId) values.set(id, fact.value);
+      values.set(id, fact.value);
     }
     return values;
   }
@@ -101,27 +99,27 @@ export function finalizeLookups(acc: LookupAccumulator): LookupBundle {
   const bundle: LookupBundle = { lookupNpcs: {}, lookupQuests: {}, lookupItems: {}, lookupObjects: {} };
 
   for (const locale of locales("npcName")) {
-    const names = valuesFor("npcName", locale, maxIds.npc);
+    const names = valuesFor("npcName", locale);
     // Subnames are not traced, so they are always nil.
     const entries = new Map([...names].map(([id, name]) => [id, [name, null]]));
     if (entries.size > 0) bundle.lookupNpcs[locale] = writeLookupLua("npcNameLookup", locale, entries);
   }
 
   for (const locale of locales("questName")) {
-    const names = valuesFor("questName", locale, maxIds.quest);
-    const objectives = valuesFor("objectivesText", locale, maxIds.quest);
+    const names = valuesFor("questName", locale);
+    const objectives = valuesFor("objectivesText", locale);
     // Quests without an observed title are left out: Questie needs the title.
     const entries = new Map([...names].map(([id, name]) => [id, [name, objectives.get(id) ?? null]]));
     if (entries.size > 0) bundle.lookupQuests[locale] = writeLookupLua("questLookup", locale, entries);
   }
 
   for (const locale of locales("itemName")) {
-    const entries = valuesFor("itemName", locale, maxIds.item);
+    const entries = valuesFor("itemName", locale);
     if (entries.size > 0) bundle.lookupItems[locale] = writeLookupLua("itemLookup", locale, entries);
   }
 
   for (const locale of locales("objectName")) {
-    const entries = valuesFor("objectName", locale, maxIds.object);
+    const entries = valuesFor("objectName", locale);
     if (entries.size > 0) bundle.lookupObjects[locale] = writeLookupLua("objectLookup", locale, entries);
   }
 
