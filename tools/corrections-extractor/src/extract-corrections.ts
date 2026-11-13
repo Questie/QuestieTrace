@@ -198,10 +198,12 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
     }
   }
 
-  async function fetchBatch(batch: string[]): Promise<{ dir: string; downloadMs: number }> {
+  function fetchBatch(batch: string[]): Promise<{ dir: string; downloadMs: number }> {
     const startedAt = performance.now();
-    const dir = await source.fetch(batch);
-    return { dir, downloadMs: performance.now() - startedAt };
+    const fetched = source.fetch(batch).then((dir) => ({ dir, downloadMs: performance.now() - startedAt }));
+    // Awaited only after the current batch: until then a failure must not count as unhandled.
+    fetched.catch(() => undefined);
+    return fetched;
   }
 }
 

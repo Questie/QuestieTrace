@@ -367,6 +367,37 @@ describe("extractCorrections (incremental)", () => {
 
     expect(released).toBe(fetched);
   });
+
+  it("should fail cleanly when fetching the prefetched batch fails", async () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-10/2026-10-01_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-02_000000Z_b.json": submission("b"),
+    });
+    const local = localSource(traceDataDir);
+    let fetches = 0;
+    let released = 0;
+    const source = {
+      list: () => local.list(),
+      fetch: async (keys: string[]) => {
+        if (++fetches === 2) throw new Error("rclone failed");
+        return local.fetch(keys);
+      },
+      release: (dir: string) => {
+        released++;
+        local.release(dir);
+      },
+    };
+    // Observing waits long enough for the prefetch to fail first.
+    const add = ObservedStore.prototype.add;
+    vi.spyOn(ObservedStore.prototype, "add").mockImplementation(async function (this: ObservedStore, ...args) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return add.apply(this, args);
+    });
+
+    await expect(extract(source, join(traceDataDir, "..", "store"), outputDir, { ...options, batchSize: 1 })).rejects.toThrow("rclone failed");
+
+    expect(released).toBe(1);
+  });
 });
 
 describe("workersFromEnv", () => {
