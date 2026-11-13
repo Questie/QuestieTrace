@@ -2,6 +2,7 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { extractCorrections, workersFromEnv, type ExtractMeta } from "./extract-corrections";
 import { sampledSource, samplePercentFromEnv, sourceFromEnv } from "./store/source";
+import { formatDuration } from "./timing";
 
 const toolDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** TRACE_STORE_DIR, else trace-session-store next to the QuestieTrace checkout. */
@@ -38,9 +39,4 @@ for (const partial of meta.partialFiles) {
 if (meta.duplicateSessionsSkipped > 0) {
   // Exports contain every saved session, so later submissions repeat earlier sessions.
   console.log(`Ignored ${meta.duplicateSessionsSkipped} older copies of sessions that later submissions exported again (the newest copy is used)`);
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.round(ms / 1000);
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }

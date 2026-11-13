@@ -2,6 +2,7 @@
 // run in a worker thread; the main thread decides which sessions to keep (see
 // extract-corrections.ts).
 
+import { statSync } from "fs";
 import { sessionKey } from "./core/trace-data/session-key";
 import { readSubmission } from "./core/trace-data/submissions";
 import { observeSession, sessionClient, type MAX_IDS, type SessionClient, type StagedSession } from "./extract/observe";
@@ -31,6 +32,14 @@ export interface ObservedSubmission {
   droppedExports: string[];
   sessions: ObservedSession[];
   error?: string;
+  timings: SubmissionTimings;
+}
+
+/** Work spent on one submission, for the run's timing logs. */
+export interface SubmissionTimings {
+  bytes: number;
+  decodeMs: number;
+  observeMs: number;
 }
 
 /**
@@ -38,7 +47,9 @@ export interface ObservedSubmission {
  * duplicates, so they are not observed.
  */
 export function observeSubmission({ path, maxIds }: ObserveRequest, usedKeys: ReadonlySet<string> = new Set()): ObservedSubmission {
+  const decodeStartedAt = performance.now();
   const submission = readSubmission(path);
+  const observeStartedAt = performance.now();
   // Only the first copy of a session in a submission is used, so later ones are not observed.
   const seen = new Set<string>();
   const sessions = submission.traces.flatMap((trace) => trace.sessions).map((session): ObservedSession => {
@@ -62,5 +73,14 @@ export function observeSubmission({ path, maxIds }: ObserveRequest, usedKeys: Re
     droppedExports: submission.droppedExports,
     sessions,
     error: submission.error,
+    timings: { bytes: fileSize(path), decodeMs: observeStartedAt - decodeStartedAt, observeMs: performance.now() - observeStartedAt },
   };
+}
+
+function fileSize(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
 }
