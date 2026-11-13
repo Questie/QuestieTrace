@@ -42,7 +42,7 @@ export function rcloneSource(remote: string, rclone = "rclone"): SubmissionSourc
     list: async () => {
       let stdout: string;
       try {
-        ({ stdout } = await run(rclone, ["lsf", "--recursive", "--files-only", submissions], { maxBuffer: 1024 * 1024 * 1024 }));
+        ({ stdout } = await run(rclone, ["lsf", "--recursive", "--files-only", "--fast-list", submissions], { maxBuffer: 1024 * 1024 * 1024 }));
       } catch (e) {
         const reason = e instanceof Error ? e.message.trim() : String(e);
         throw new Error(`Listing ${submissions} with rclone failed. Set TRACE_REMOTE to your rclone remote, or TRACE_DATA_DIR to a local trace-data checkout.\n${reason}`);
@@ -54,7 +54,7 @@ export function rcloneSource(remote: string, rclone = "rclone"): SubmissionSourc
       try {
         const list = join(dir, ".files");
         writeFileSync(list, keys.join("\n") + "\n");
-        await run(rclone, ["copy", "--files-from-raw", list, "--transfers", "16", "--checkers", "16", submissions, dir], { maxBuffer: 64 * 1024 * 1024 });
+        await run(rclone, ["copy", "--files-from-raw", list, "--transfers", "64", "--checkers", "64", submissions, dir], { maxBuffer: 64 * 1024 * 1024 });
         return dir;
       } catch (e) {
         rmSync(dir, { recursive: true, force: true });
