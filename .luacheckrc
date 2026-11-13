@@ -2859,6 +2859,7 @@ globals = {
     "RESET",
     -----------------------------------------------------> Project Specific
     "QuestieTrace",
+    "QuestieTraceAPI",
     "QuestieTraceCore",
     "QuestieTraceCharacter",
     "QuestieTraceDumps",
