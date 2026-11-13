@@ -15,14 +15,6 @@ on:
         description: (--dry_run) Preview release notes and metadata without publishing
         type: boolean
         default: false
-      publish_curseforge:
-        description: Upload to CurseForge
-        type: boolean
-        default: false
-      publish_wago:
-        description: Upload to Wago
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -185,27 +177,3 @@ jobs:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
           status: ${{ job.status }}
         if: ${{ failure() }}
-
-  curseforge:
-    name: "CurseForge: ${{ needs.build.outputs.release_tag }}"
-    needs: [ build, github ]
-    if: ${{ inputs.publish_curseforge && !inputs.dry_run }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/publish-curseforge.yml
-    with:
-      release_tag: ${{ needs.build.outputs.release_tag }}
-    secrets:
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-
-  wago:
-    name: "Wago: ${{ needs.build.outputs.release_tag }}"
-    needs: [ build, github ]
-    if: ${{ inputs.publish_wago && !inputs.dry_run }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/publish-wago.yml
-    with:
-      release_tag: ${{ needs.build.outputs.release_tag }}
-    secrets:
-      WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}

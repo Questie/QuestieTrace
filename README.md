@@ -8,7 +8,9 @@ QuestieTrace records a WoW Classic play session to disk — every tracked game e
 
 **Requirements:** WoW Classic (all flavors: Classic Era, TBC, Wrath, Cata, MoP). Not compatible with Retail.
 
-Copy or symlink this repo into your Classic client's AddOns folder, named exactly `QuestieTrace`:
+QuestieTrace ships with Questie on CurseForge and Wago. Each QuestieTrace release is published on GitHub only; the next Questie release bundles the latest one.
+
+For development, copy or symlink this repo into your Classic client's AddOns folder, named exactly `QuestieTrace`:
 
 ```
 World of Warcraft/<client folder>/Interface/AddOns/QuestieTrace/
