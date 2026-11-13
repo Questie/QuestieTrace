@@ -27,8 +27,11 @@
 //! an empty row for it.
 //!
 //! Like authored corrections, each quest's opening line carries its name, here with its Wowhead
-//! page. Each field is preceded by the name and page of every quest it names, and ends with an
-//! `-- Assumption:` saying why it is believed (see [`super::assumptions`]).
+//! page. Each field is preceded by the name and page of every quest it names, then by its comment:
+//! why it is (not) applied and an `Assumption:` saying why it is believed and how certain (see
+//! [`super::assumptions`]). Comments sit above the data row and carry no exact counts or scores
+//! (relations-review.md has those), so a new export only changes a data row when the data changes,
+//! and a comment only when a relation crosses a certainty band or its agreeing signals change.
 
 use super::assumptions::assumption;
 use super::edges::Truth;
@@ -56,7 +59,7 @@ pub enum NotApplied {
     /// A new chain to `next`, whose prerequisites as QuestieDB loads them (`required`) leave this quest out.
     NextDoesNotRequire { next: QuestId, required: Vec<QuestId> },
     /// A new chain one signal saw contradicted more often than supported.
-    Contradicted { signal: String, support: u32, contradict: u32 },
+    Contradicted { signal: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -285,8 +288,6 @@ fn chain_problem(quest_id: QuestId, next: QuestId, records: &LuaRecords, sources
     {
         return Some(NotApplied::Contradicted {
             signal: claim.signal().to_owned(),
-            support: claim.support,
-            contradict: claim.contradict,
         });
     }
     let required = loaded_prerequisites(next, records, sources);
@@ -368,13 +369,11 @@ fn not_applied_reason(field: RelationField, why: &NotApplied) -> String {
             "not applied: {next} requires {}, not this quest, and Questie hides a quest once its next quest is done or in the log",
             joined(required)
         ),
-        NotApplied::Contradicted { signal, support, contradict } => {
-            format!("not applied: {signal} saw it contradicted by {contradict} characters against {support}")
-        }
+        NotApplied::Contradicted { signal } => format!("not applied: {signal} saw it contradicted more often than supported"),
     }
 }
 
-/// The comment after a written field.
+/// The comment above a written field.
 fn field_comment(written: &LuaField, view: Option<&QuestView>) -> Option<String> {
     let because = view.and_then(|view| assumption(view, written.field));
     match &written.written {
@@ -413,8 +412,8 @@ pub fn forever_relations_lua(records: &LuaRecords, header: &LuaHeader, views: &I
             header.min_score, header.review_file
         ),
         format!("-- Candidate files: {}", header.candidate_files.join(", ")),
-        "-- Each Assumption names the strongest trace observation (independent characters), how many signals agree and the combined score".to_owned(),
-        "-- Commented-out fields are accepted relations this module does not apply; each says why".to_owned(),
+        "-- Each Assumption says what the traces saw, which signals agree and how certain the relation is: very high (score 0.99+), high (0.95+), medium (0.9+) or low; relations-review.md has the exact evidence".to_owned(),
+        "-- Commented-out fields are accepted relations this module does not apply; the comment above each says why".to_owned(),
         format!("-- Sessions aggregated: {}", header.session_count),
         format!("-- Generated at: {}", header.generated_at),
         format!("function {module}:Load()"),
@@ -448,10 +447,12 @@ pub fn forever_relations_lua(records: &LuaRecords, header: &LuaHeader, views: &I
             } else {
                 lua_value(written.field, &written.values)
             };
-            let code = format!("[questKeys.{}] = {value},", written.field);
-            let comment = trailing_comment(field_comment(written, view).as_deref());
+            // The comment goes above, so the data row stays the same while only the comment changes.
+            if let Some(comment) = field_comment(written, view).as_deref().and_then(flat_comment) {
+                lines.push(format!("            -- {comment}"));
+            }
             let prefix = if written.written.is_code() { "" } else { "-- " };
-            lines.push(format!("            {prefix}{code}{comment}"));
+            lines.push(format!("            {prefix}[questKeys.{}] = {value},", written.field));
         }
         lines.push(format!("        {quest_prefix}}},"));
     }
@@ -710,15 +711,7 @@ mod tests {
 
         assert_eq!(
             records[&10],
-            [shown(
-                NextQuestInChain,
-                &[11],
-                NotApplied::Contradicted {
-                    signal: "handoff".into(),
-                    support: 5,
-                    contradict: 13
-                }
-            )]
+            [shown(NextQuestInChain, &[11], NotApplied::Contradicted { signal: "handoff".into() })]
         );
         assert_eq!(records[&20], [applied(NextQuestInChain, &[21])]);
     }
@@ -777,16 +770,19 @@ mod tests {
         assert!(lua
             .contains("-- Quest relations from `npm run relations -- combine` (min score 0.9); review: relations-review.md, published next to this module\n"));
         assert!(lua.contains("-- Candidate files: handoff, offer-set\n"));
+        // Every comment sits above its data row, which carries nothing but the data.
         assert!(lua.contains(concat!(
             "        [92000] = { -- Book Inventory https://wowhead.com/forever/quest=92000\n",
-            "            [questKeys.preQuestSingle] = {}, -- cleared so the accepted preQuestGroup applies: Questie ignores preQuestGroup while \
-             preQuestSingle is set\n",
+            "            -- cleared so the accepted preQuestGroup applies: Questie ignores preQuestGroup while preQuestSingle is set\n",
+            "            [questKeys.preQuestSingle] = {},\n",
             "            -- 1532 https://wowhead.com/forever/quest=1532\n",
             "            -- 96136 https://wowhead.com/forever/quest=96136\n",
-            "            [questKeys.exclusiveTo] = {1532,96136}, -- Assumption: the server completes it and 96136 together (407 characters), score 0.969; 1532 kept from QuestieDB\n",
+            "            -- Assumption: the server completes it and 96136 together (cooccurrence; high); 1532 kept from QuestieDB\n",
+            "            [questKeys.exclusiveTo] = {1532,96136},\n",
             "            -- 92001 \"Rascally Rodents\" https://wowhead.com/forever/quest=92001\n",
-            "            -- [questKeys.nextQuestInChain] = 92001, -- not applied: 92001 requires 99, not this quest, and Questie hides a quest once its next \
-             quest is done or in the log; Assumption: turning it in led straight to 92001 (31 characters), score 0.970\n",
+            "            -- not applied: 92001 requires 99, not this quest, and Questie hides a quest once its next quest is done or in the log; \
+             Assumption: turning it in led straight to 92001 (handoff; high)\n",
+            "            -- [questKeys.nextQuestInChain] = 92001,\n",
             "        },\n",
         )));
         assert!(lua.ends_with("    }\nend"));
@@ -801,7 +797,8 @@ mod tests {
         assert!(lua.contains(concat!(
             "        -- [91745] = { -- https://wowhead.com/forever/quest=91745\n",
             "            -- 91743 https://wowhead.com/forever/quest=91743\n",
-            "            -- [questKeys.preQuestSingle] = {91743}, -- already in QuestieDB\n",
+            "            -- already in QuestieDB\n",
+            "            -- [questKeys.preQuestSingle] = {91743},\n",
             "        -- },\n",
         )));
     }
