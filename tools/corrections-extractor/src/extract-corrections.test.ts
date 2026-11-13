@@ -63,6 +63,27 @@ describe("extractCorrections", () => {
     expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1, exportCount: 1, skippedFiles: [], partialFiles: [], duplicateSessionsSkipped: 0 });
   });
 
+  it("should log how long each section of the run took", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
+    const lines: string[] = [];
+
+    await extractCorrections(traceDataDir, outputDir, { log: (line) => lines.push(line), workers: 0 });
+
+    for (const section of [
+      /^Opened the observation store in /,
+      /^Listed the source's submissions in /,
+      /^\[1\/1\] new submissions observed in .+: download .+, decode\+observe .+ \(CPU decode .+, observe .+\), store .+; about .+ left$/,
+      /^Observed 1 new submission\(s\) \(.+\) in .+: download .+, decode\+observe .+, store .+; CPU time decode .+, observe .+ on 1 thread\(s\)$/,
+      /^Summed scalar and lookup observations in /,
+      /^Replayed custom observations in /,
+      /^Wrote the query views in /,
+      /^Merged and rendered the corrections in /,
+      /^Rendered the lookups and wrote the output files in /,
+    ]) {
+      expect(lines).toContainEqual(expect.stringMatching(section));
+    }
+  });
+
   it("should replace previous lookups, dropping stale locales, and leave no staging directory", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
     const stale = writePreviousLookup(outputDir);
