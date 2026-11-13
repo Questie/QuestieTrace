@@ -163,6 +163,30 @@ describe("observeFinishedBy", () => {
     expect(observeFinishedBy(session)).toEqual([]);
   });
 
+  it("should capture an object finisher at QUEST_COMPLETE", () => {
+    const session = makeSession(
+      {
+        GetQuestID: [apiSample(3, 3, 99196)],
+        UnitGUID: {
+          questnpc: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
+        },
+      },
+      [
+        traceEvent("QUEST_COMPLETE", 3, 3),
+      ]
+    );
+
+    expect(observeFinishedBy(session)).toEqual([
+      {
+        entityId: 99196,
+        value: { objectId: 2843 },
+        confidence: "low",
+        provenance: { session: "test-session", t: 3 },
+        token: "questnpc",
+      },
+    ]);
+  });
+
   it("should capture a creature finisher from QUEST_TURNED_IN event (questID from arg 1)", () => {
     const session = makeSession(
       {
@@ -186,29 +210,6 @@ describe("observeFinishedBy", () => {
     ]);
   });
 
-  it("should capture an object finisher from QUEST_TURNED_IN event", () => {
-    const session = makeSession(
-      {
-        UnitGUID: {
-          questnpc: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")],
-        },
-      },
-      [
-        traceEvent("QUEST_TURNED_IN", 3, 3, 99196),
-      ]
-    );
-
-    expect(observeFinishedBy(session)).toEqual([
-      {
-        entityId: 99196,
-        value: { objectId: 2843 },
-        confidence: "low",
-        provenance: { session: "test-session", t: 3 },
-        token: "questnpc",
-      },
-    ]);
-  });
-
   it("should ignore QUEST_TURNED_IN with invalid questID", () => {
     const session = makeSession(
       {
@@ -226,23 +227,30 @@ describe("observeFinishedBy", () => {
     expect(observeFinishedBy(session)).toEqual([]);
   });
 
-  it("should produce observations from both QUEST_COMPLETE and QUEST_TURNED_IN for the same quest", () => {
+  it("should not take a finisher at QUEST_TURNED_IN when the quest was already shown in a dialog", () => {
     const session = makeSession(
       {
-        GetQuestID: [apiSample(3, 3, 96659)],
+        GetQuestID: [apiSample(1, 1.001, 1104), apiSample(2, 2.002, 0), apiSample(3, 3.001, 1105)],
         UnitGUID: {
-          questnpc: [apiSample(3, 3, creatureGuid(197))],
+          questnpc: [
+            apiSample(1, 1.001, creatureGuid(4453)),
+            apiSample(2, 2.001),
+            apiSample(3, 3.001, creatureGuid(4454)),
+          ],
         },
       },
       [
+        traceEvent("QUEST_COMPLETE", 1, 1),
+        traceEvent("QUEST_FINISHED", 2, 2),
         traceEvent("QUEST_COMPLETE", 3, 3),
-        traceEvent("QUEST_TURNED_IN", 4, 4, 96659),
+        traceEvent("QUEST_TURNED_IN", 4, 4, 1104),
       ]
     );
 
-    const results = observeFinishedBy(session);
-    // one from QUEST_COMPLETE, one from QUEST_TURNED_IN
-    expect(results.map((r) => r.value)).toEqual([{ creatureId: 197 }, { creatureId: 197 }]);
+    expect(observeFinishedBy(session).map((o) => [o.entityId, o.value])).toEqual([
+      [1104, { creatureId: 4453 }],
+      [1105, { creatureId: 4454 }],
+    ]);
   });
 
   it("should capture a creature finisher from C_GossipInfo.GetActiveQuests snapshot", () => {
@@ -344,22 +352,24 @@ describe("observeFinishedBy interaction correlation", () => {
   it("should prefer a questnpc object over a conflicting npc creature", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [apiSample(3, 3.002, objectGuid(410369))],
           npc: [apiSample(3, 3.002, creatureGuid(276172))],
         },
       },
       [
-        traceEvent("QUEST_TURNED_IN", 3, 3.001, 99196),
+        traceEvent("QUEST_COMPLETE", 3, 3.001),
       ]
     );
 
     expect(observeFinishedBy(session).map((o) => o.value)).toEqual([{ objectId: 410369 }]);
   });
 
-  it("should not fall back to npc at QUEST_TURNED_IN when questnpc is explicitly nil", () => {
+  it("should not fall back to npc at QUEST_COMPLETE when questnpc is explicitly nil", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -369,7 +379,7 @@ describe("observeFinishedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_TURNED_IN", 3, 3.001, 99196),
+        traceEvent("QUEST_COMPLETE", 3, 3.001),
       ]
     );
 
@@ -405,6 +415,7 @@ describe("observeFinishedBy interaction correlation", () => {
   it("should use the next raw event as the boundary, even when it is not a quest event", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -413,7 +424,7 @@ describe("observeFinishedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_TURNED_IN", 3, 3.001, 99196),
+        traceEvent("QUEST_COMPLETE", 3, 3.001),
         traceEvent("MERCHANT_SHOW", 3, 3.011),
       ]
     );
@@ -424,6 +435,7 @@ describe("observeFinishedBy interaction correlation", () => {
   it("should not let a later same-frame close erase the current giver or reuse it after close", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, objectGuid(410369)),
@@ -432,9 +444,9 @@ describe("observeFinishedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_TURNED_IN", 3, 3.001, 99196),
+        traceEvent("QUEST_COMPLETE", 3, 3.001),
         traceEvent("QUEST_FINISHED", 3, 3.011),
-        traceEvent("QUEST_TURNED_IN", 3, 3.021, 99197),
+        traceEvent("QUEST_COMPLETE", 3, 3.021),
       ]
     );
 
@@ -444,13 +456,14 @@ describe("observeFinishedBy interaction correlation", () => {
   it("should keep an unchanged object giver during a long dialog", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [apiSample(1, 1, objectGuid(410369))],
         },
       },
       [
         traceEvent("QUEST_PROGRESS", 1, 1),
-        traceEvent("QUEST_TURNED_IN", 60, 60, 99196),
+        traceEvent("QUEST_COMPLETE", 60, 60),
       ]
     );
 
@@ -460,6 +473,7 @@ describe("observeFinishedBy interaction correlation", () => {
   it("should skip events with indistinguishable timestamps rather than guessing their giver", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(3, 3, creatureGuid(276171)),
@@ -468,8 +482,8 @@ describe("observeFinishedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_TURNED_IN", 3, 3, 99196),
-        traceEvent("QUEST_TURNED_IN", 3, 3, 99197),
+        traceEvent("QUEST_COMPLETE", 3, 3),
+        traceEvent("QUEST_COMPLETE", 3, 3),
       ]
     );
 
@@ -479,6 +493,7 @@ describe("observeFinishedBy interaction correlation", () => {
   it.each<string | undefined>([undefined, creatureGuid(276172)])("should not resurrect an older giver when a probe ties with the next event (%s)", (tiedGuid) => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -488,7 +503,7 @@ describe("observeFinishedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_TURNED_IN", 3, 3.001, 99196),
+        traceEvent("QUEST_COMPLETE", 3, 3.001),
         traceEvent("MERCHANT_SHOW", 3, 3.002),
       ]
     );
