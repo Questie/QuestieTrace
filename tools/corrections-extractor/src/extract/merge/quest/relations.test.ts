@@ -57,3 +57,29 @@ describe("mergeStartedBy session support", () => {
     expect(mergeStartedBy(seen<StartedByStarter>({ itemId: 750 }, 4))).toBeUndefined();
   });
 });
+
+describe("quest giver share of the strongest giver", () => {
+  it("should drop a starter seen in under 0.5% of the strongest starter's sessions", () => {
+    const observations = [...seen<StartedByStarter>({ creatureId: 265813 }, 1001), ...seen<StartedByStarter>({ creatureId: 1252 }, 5)];
+
+    expect(mergeStartedBy(observations)).toEqual({ creatures: [265813], objects: [], items: [] });
+  });
+
+  it("should keep a starter seen in 0.5% of the strongest starter's sessions", () => {
+    const observations = [...seen<StartedByStarter>({ creatureId: 265813 }, 1000), ...seen<StartedByStarter>({ objectId: 2843 }, 5)];
+
+    expect(mergeStartedBy(observations)).toEqual({ creatures: [265813], objects: [2843], items: [] });
+  });
+
+  it("should drop a finisher seen in under 0.5% of the strongest finisher's sessions", () => {
+    const observations = [...seen<FinishedByFinisher>({ creatureId: 4453 }, 1001), ...seen<FinishedByFinisher>({ objectId: 2843 }, 5)];
+
+    expect(mergeFinishedBy(observations)).toEqual({ creatures: [4453], objects: [] });
+  });
+
+  it("should compare a starter with the strongest starter of any type", () => {
+    const observations = [...seen<StartedByStarter>({ itemId: 750 }, 1001), ...seen<StartedByStarter>({ creatureId: 1252 }, 5)];
+
+    expect(mergeStartedBy(observations)).toEqual({ creatures: [], objects: [], items: [750] });
+  });
+});
