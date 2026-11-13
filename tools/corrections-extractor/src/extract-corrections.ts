@@ -26,7 +26,7 @@ import type { SubmissionSource } from "./store/source";
 import { formatBytes, formatDuration, timed } from "./timing";
 
 /** Submissions fetched and stored at a time. */
-const BATCH_SIZE = 500;
+const BATCH_SIZE = 1000;
 
 const OUTPUT_FILES = {
   npcFixes: "foreverNpcTraces.lua",
@@ -116,7 +116,7 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
 
   const usedKeys = new Set<string>();
   const pool: Worker[] = [];
-  const total = { downloadMs: 0, observeMs: 0, storeMs: 0, bytes: 0, decodeCpuMs: 0, observeCpuMs: 0 };
+  const total = { downloadMs: 0, waitMs: 0, observeMs: 0, storeMs: 0, bytes: 0, decodeCpuMs: 0, observeCpuMs: 0 };
   const observingStartedAt = performance.now();
   // A worker failing between batches has no batch to reject: the next batch reports it.
   let poolFailure: Error | undefined;
@@ -131,7 +131,7 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
     if (added.length > 0) {
       log(
         `Observed ${added.length} new submission(s) (${formatBytes(total.bytes)}) in ${formatDuration(performance.now() - observingStartedAt)}: ` +
-          `download ${formatDuration(total.downloadMs)}, decode+observe ${formatDuration(total.observeMs)}, store ${formatDuration(total.storeMs)}; ` +
+          `download ${formatDuration(total.downloadMs)} (waited ${formatDuration(total.waitMs)}), decode+observe ${formatDuration(total.observeMs)}, store ${formatDuration(total.storeMs)}; ` +
           `CPU time decode ${formatDuration(total.decodeCpuMs)}, observe ${formatDuration(total.observeCpuMs)} on ${Math.max(1, pool.length)} thread(s)`,
       );
     }
@@ -140,53 +140,68 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
   }
 
   async function observeBatches(): Promise<void> {
-    for (let start = 0; start < added.length; start += batchSize) {
-      if (poolFailure) throw poolFailure;
-      const batch = added.slice(start, start + batchSize);
-      const batchStartedAt = performance.now();
-      const dir = await source.fetch(batch);
-      const downloadMs = performance.now() - batchStartedAt;
-      let observeMs = 0;
-      let storeMs = 0;
-      try {
-        // A worker that failed during the download would never answer.
-        if (poolFailure) throw poolFailure;
-        const observed: StoredSubmission[] = [];
-        const observeStartedAt = performance.now();
-        await observeInOrder(batch.map((key) => join(dir, key)), MAX_IDS, pool, usedKeys, (_file, submission, index) => {
-          observed.push({ key: batch[index], submission });
-          const keys = new Set<string>();
-          for (const session of submission.sessions) if (session.key !== undefined && !session.duplicate) keys.add(session.key);
-          for (const key of keys) usedKeys.add(key);
-          return keys;
-        });
-        observeMs = performance.now() - observeStartedAt;
-        const storeStartedAt = performance.now();
-        await store.add(observed);
-        storeMs = performance.now() - storeStartedAt;
-        const bytes = observed.reduce((sum, { submission }) => sum + submission.timings.bytes, 0);
-        const decodeCpuMs = observed.reduce((sum, { submission }) => sum + submission.timings.decodeMs, 0);
-        const observeCpuMs = observed.reduce((sum, { submission }) => sum + submission.timings.observeMs, 0);
-        Object.assign(total, {
-          downloadMs: total.downloadMs + downloadMs,
-          observeMs: total.observeMs + observeMs,
-          storeMs: total.storeMs + storeMs,
-          bytes: total.bytes + bytes,
-          decodeCpuMs: total.decodeCpuMs + decodeCpuMs,
-          observeCpuMs: total.observeCpuMs + observeCpuMs,
-        });
-        const done = Math.min(start + batchSize, added.length);
-        const elapsedMs = performance.now() - observingStartedAt;
-        log(
-          `[${done}/${added.length}] new submissions observed in ${formatDuration(performance.now() - batchStartedAt)}: ` +
-            `download ${formatDuration(downloadMs)} (${formatBytes(bytes)}, ${formatBytes(bytes / Math.max(downloadMs / 1000, 0.001))}/s), ` +
-            `decode+observe ${formatDuration(observeMs)} (CPU decode ${formatDuration(decodeCpuMs)}, observe ${formatDuration(observeCpuMs)}), ` +
-            `store ${formatDuration(storeMs)}; about ${formatDuration((elapsedMs / done) * (added.length - done))} left`,
-        );
-      } finally {
-        source.release(dir);
+    const batches: string[][] = [];
+    for (let start = 0; start < added.length; start += batchSize) batches.push(added.slice(start, start + batchSize));
+    // The next batch downloads while the current one is observed.
+    let next = batches.length > 0 ? fetchBatch(batches[0]) : undefined;
+    let done = 0;
+    try {
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        const batchStartedAt = performance.now();
+        const fetched = await next!;
+        next = undefined;
+        const waitMs = performance.now() - batchStartedAt;
+        try {
+          if (poolFailure) throw poolFailure;
+          if (i + 1 < batches.length) next = fetchBatch(batches[i + 1]);
+          const observed: StoredSubmission[] = [];
+          const observeStartedAt = performance.now();
+          await observeInOrder(batch.map((key) => join(fetched.dir, key)), MAX_IDS, pool, usedKeys, (_file, submission, index) => {
+            observed.push({ key: batch[index], submission });
+            const keys = new Set<string>();
+            for (const session of submission.sessions) if (session.key !== undefined && !session.duplicate) keys.add(session.key);
+            for (const key of keys) usedKeys.add(key);
+            return keys;
+          });
+          const observeMs = performance.now() - observeStartedAt;
+          const storeStartedAt = performance.now();
+          await store.add(observed);
+          const storeMs = performance.now() - storeStartedAt;
+          const bytes = observed.reduce((sum, { submission }) => sum + submission.timings.bytes, 0);
+          const decodeCpuMs = observed.reduce((sum, { submission }) => sum + submission.timings.decodeMs, 0);
+          const observeCpuMs = observed.reduce((sum, { submission }) => sum + submission.timings.observeMs, 0);
+          Object.assign(total, {
+            downloadMs: total.downloadMs + fetched.downloadMs,
+            waitMs: total.waitMs + waitMs,
+            observeMs: total.observeMs + observeMs,
+            storeMs: total.storeMs + storeMs,
+            bytes: total.bytes + bytes,
+            decodeCpuMs: total.decodeCpuMs + decodeCpuMs,
+            observeCpuMs: total.observeCpuMs + observeCpuMs,
+          });
+          done += batch.length;
+          const elapsedMs = performance.now() - observingStartedAt;
+          log(
+            `[${done}/${added.length}] new submissions observed in ${formatDuration(performance.now() - batchStartedAt)}: ` +
+              `download ${formatDuration(fetched.downloadMs)} (${formatBytes(bytes)}, ${formatBytes(bytes / Math.max(fetched.downloadMs / 1000, 0.001))}/s, waited ${formatDuration(waitMs)}), ` +
+              `decode+observe ${formatDuration(observeMs)} (CPU decode ${formatDuration(decodeCpuMs)}, observe ${formatDuration(observeCpuMs)}), ` +
+              `store ${formatDuration(storeMs)}; about ${formatDuration((elapsedMs / done) * (added.length - done))} left`,
+          );
+        } finally {
+          source.release(fetched.dir);
+        }
       }
+    } finally {
+      // A failed run must not leave the prefetched batch behind.
+      if (next) await next.then((fetched) => source.release(fetched.dir), () => undefined);
     }
+  }
+
+  async function fetchBatch(batch: string[]): Promise<{ dir: string; downloadMs: number }> {
+    const startedAt = performance.now();
+    const dir = await source.fetch(batch);
+    return { dir, downloadMs: performance.now() - startedAt };
   }
 }
 

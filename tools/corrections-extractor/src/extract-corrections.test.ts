@@ -5,6 +5,7 @@ import { join } from "path";
 import { TINY_EXPORT } from "./core/trace-data/fixtures";
 import { extractCorrections as extract, workersFromEnv, type ExtractOptions } from "./extract-corrections";
 import { localSource } from "./store/source";
+import { ObservedStore } from "./store/observed-store";
 import * as lookups from "./extract/lookups";
 import * as observeLookups from "./extract/observe-lookups";
 
@@ -72,8 +73,8 @@ describe("extractCorrections", () => {
     for (const section of [
       /^Opened the observation store in /,
       /^Listed the source's submissions in /,
-      /^\[1\/1\] new submissions observed in .+: download .+, decode\+observe .+ \(CPU decode .+, observe .+\), store .+; about .+ left$/,
-      /^Observed 1 new submission\(s\) \(.+\) in .+: download .+, decode\+observe .+, store .+; CPU time decode .+, observe .+ on 1 thread\(s\)$/,
+      /^\[1\/1\] new submissions observed in .+: download .+ \(.+, waited .+\), decode\+observe .+ \(CPU decode .+, observe .+\), store .+; about .+ left$/,
+      /^Observed 1 new submission\(s\) \(.+\) in .+: download .+ \(waited .+\), decode\+observe .+, store .+; CPU time decode .+, observe .+ on 1 thread\(s\)$/,
       /^Summed scalar and lookup observations in /,
       /^Replayed custom observations in /,
       /^Wrote the query views in /,
@@ -315,6 +316,56 @@ describe("extractCorrections (incremental)", () => {
         readFileSync(join(outputDir, file), "utf8").replace(/-- Generated at: .*/, ""),
       );
     expect(modules(stepwise.outputDir)).toEqual(modules(once.outputDir));
+  });
+
+  it("should fetch the next batch while the current one is observed", async () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-10/2026-10-01_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-02_000000Z_b.json": submission("b"),
+    });
+    const local = localSource(traceDataDir);
+    const calls: string[] = [];
+    const source = {
+      list: () => local.list(),
+      fetch: (keys: string[]) => {
+        calls.push(`fetch ${keys.join()}`);
+        return local.fetch(keys);
+      },
+      release: (dir: string) => {
+        calls.push("release");
+        local.release(dir);
+      },
+    };
+
+    await extract(source, join(traceDataDir, "..", "store"), outputDir, { ...options, batchSize: 1 });
+
+    expect(calls).toEqual(["fetch 2026-10/2026-10-02_000000Z_b.json", "fetch 2026-10/2026-10-01_000000Z_a.json", "release", "release"]);
+  });
+
+  it("should release a prefetched batch when observing fails", async () => {
+    const { traceDataDir, outputDir } = setupDirs({
+      "2026-10/2026-10-01_000000Z_a.json": submission("a"),
+      "2026-10/2026-10-02_000000Z_b.json": submission("b"),
+    });
+    const local = localSource(traceDataDir);
+    let fetched = 0;
+    let released = 0;
+    const source = {
+      list: () => local.list(),
+      fetch: (keys: string[]) => {
+        fetched++;
+        return local.fetch(keys);
+      },
+      release: (dir: string) => {
+        released++;
+        local.release(dir);
+      },
+    };
+    vi.spyOn(ObservedStore.prototype, "add").mockRejectedValue(new Error("disk full"));
+
+    await expect(extract(source, join(traceDataDir, "..", "store"), outputDir, { ...options, batchSize: 1 })).rejects.toThrow("disk full");
+
+    expect(released).toBe(fetched);
   });
 });
 
