@@ -26,6 +26,7 @@ local function LoadExportUIModules(env, l10n)
   env.QuestieTrace = { settings = { dataCollectionConsent = true } }
   env.QuestieTraceCore.DiscardCapture = function() end
   env.QuestieTraceCore.StartCapture = function() end
+  env.QuestieTraceCore.GetCaptureState = function() return "running" end
   env.QuestieTraceCore.MarkExportOpened = function() end
   env.QuestieTraceCore.DecodeExportPayload = function() return { functions = {} } end
 
@@ -165,6 +166,25 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     assert.equal(0, #env.QuestieTraceCharacter.sessions)
     assert.equal(0, discardCalls)
     assert.equal(1, startCalls)
+  end)
+
+  it("should not start a new capture when the exported session was stopped", function()
+    env.QuestieTraceCharacter = {
+      sessions = {},
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+    local startCalls = 0
+    Core.GetCaptureState = function() return "stopped_unsaved" end
+    Core.SaveCapture = function()
+      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function() startCalls = startCalls + 1 end
+
+    Core.ShowExportWindow()
+
+    assert.equal(1, #env.QuestieTraceCharacter.sessions)
+    assert.equal(0, startCalls)
   end)
 
   it("should delete the saved live session once reported when saving pruned the oldest session", function()

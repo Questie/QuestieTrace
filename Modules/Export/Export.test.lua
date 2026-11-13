@@ -309,10 +309,11 @@ describe("Export.DeleteReportedSessions", function()
     assert.equal("kept", env.QuestieTraceCharacter.sessions[1].name)
   end)
 
-  it("should discard and restart the live session when it was reported", function()
+  it("should discard and restart the live session when it was reported while running", function()
     local live = { name = "live", functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
     env.QuestieTraceCharacter = { sessions = {}, currentSession = live }
     local discardCalls, startCalls = 0, 0
+    Core.GetCaptureState = function() return "running" end
     Core.DiscardCapture = function()
       discardCalls = discardCalls + 1
       env.QuestieTraceCharacter.currentSession = nil
@@ -323,6 +324,23 @@ describe("Export.DeleteReportedSessions", function()
 
     assert.equal(1, discardCalls)
     assert.equal(1, startCalls)
+  end)
+
+  it("should discard but not restart the live session when it was reported while stopped", function()
+    local live = { name = "live", functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
+    env.QuestieTraceCharacter = { sessions = {}, currentSession = live }
+    local discardCalls, startCalls = 0, 0
+    Core.GetCaptureState = function() return "stopped_unsaved" end
+    Core.DiscardCapture = function()
+      discardCalls = discardCalls + 1
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function() startCalls = startCalls + 1 end
+
+    Core.DeleteReportedSessions({ live })
+
+    assert.equal(1, discardCalls)
+    assert.equal(0, startCalls)
   end)
 
   it("should do nothing when sourceSessions is not a table", function()
