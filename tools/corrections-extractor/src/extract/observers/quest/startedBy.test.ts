@@ -142,6 +142,34 @@ describe("observeStartedBy", () => {
     }
   );
 
+  it("should not take a starter at QUEST_ACCEPTED when the quest was already shown in a dialog", () => {
+    // Quest 928 is shown by Tenaron Stormgrip, but the server confirms the accept only after the
+    // player opened the Lost Journal's own quest.
+    const session = makeSession(
+      {
+        GetQuestID: [apiSample(1, 1.001, 928), apiSample(2, 2.002, 0), apiSample(3, 3.001, 96630)],
+        UnitGUID: {
+          questnpc: [
+            apiSample(1, 1.001, creatureGuid(3514)),
+            apiSample(2, 2.001),
+            apiSample(3, 3.001, objectGuid(654846)),
+          ],
+        },
+      },
+      [
+        traceEvent("QUEST_DETAIL", 1, 1, 0),
+        traceEvent("QUEST_FINISHED", 2, 2),
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
+        traceEvent("QUEST_ACCEPTED", 4, 4, 928),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => [o.entityId, o.value])).toEqual([
+      [928, { creatureId: 3514 }],
+      [96630, { objectId: 654846 }],
+    ]);
+  });
+
   it("should capture multiple creature starters across different quest events", () => {
     const session = makeSession(
       {
@@ -363,22 +391,24 @@ describe("observeStartedBy", () => {
   it("should prefer a questnpc object over a conflicting npc creature", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [apiSample(3, 3.002, objectGuid(410369))],
           npc: [apiSample(3, 3.002, creatureGuid(276172))],
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
       ]
     );
 
     expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ objectId: 410369 }]);
   });
 
-  it("should not fall back to an npc creature at QUEST_ACCEPTED when questnpc is explicitly nil", () => {
+  it("should not fall back to an npc creature at QUEST_DETAIL when questnpc is explicitly nil", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -388,7 +418,7 @@ describe("observeStartedBy", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
       ]
     );
 
@@ -458,6 +488,7 @@ describe("observeStartedBy", () => {
   it("should use the next raw event as the boundary, even when it is not a quest event", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -466,7 +497,7 @@ describe("observeStartedBy", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
         traceEvent("MERCHANT_SHOW", 3, 3.011),
       ]
     );
@@ -477,6 +508,7 @@ describe("observeStartedBy", () => {
   it("should not let a later same-frame close erase the current giver or reuse it after close", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, objectGuid(410369)),
@@ -485,9 +517,9 @@ describe("observeStartedBy", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
         traceEvent("QUEST_FINISHED", 3, 3.011),
-        traceEvent("QUEST_ACCEPTED", 3, 3.021, 99197),
+        traceEvent("QUEST_DETAIL", 3, 3.021, 0),
       ]
     );
 
@@ -497,13 +529,14 @@ describe("observeStartedBy", () => {
   it("should keep an unchanged object giver during a long dialog", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [apiSample(1, 1, objectGuid(410369))],
         },
       },
       [
         traceEvent("QUEST_PROGRESS", 1, 1),
-        traceEvent("QUEST_ACCEPTED", 60, 60, 99196),
+        traceEvent("QUEST_DETAIL", 60, 60, 0),
       ]
     );
 
@@ -513,6 +546,7 @@ describe("observeStartedBy", () => {
   it("should skip events with indistinguishable timestamps rather than guessing their giver", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(3, 3, creatureGuid(276171)),
@@ -521,8 +555,8 @@ describe("observeStartedBy", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3, 99196),
-        traceEvent("QUEST_ACCEPTED", 3, 3, 99197),
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
@@ -532,6 +566,7 @@ describe("observeStartedBy", () => {
   it.each<string | undefined>([undefined, creatureGuid(276172)])("should not resurrect an older giver when a probe ties with the next event (%s)", (tiedGuid) => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -541,7 +576,7 @@ describe("observeStartedBy", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
         traceEvent("MERCHANT_SHOW", 3, 3.002),
       ]
     );
