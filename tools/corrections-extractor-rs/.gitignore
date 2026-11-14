@@ -1,0 +1,4 @@
+target/
+# Scraper databases fetched by scripts/fetch-scraper.sh, and relations runs (scripts/relations.sh).
+/data/
+/relations-output*/

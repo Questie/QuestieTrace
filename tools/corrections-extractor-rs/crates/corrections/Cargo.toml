@@ -1,0 +1,26 @@
+[package]
+name = "corrections"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Extracts Questie DB corrections and translations from QuestieTrace submissions"
+
+[[bin]]
+name = "corrections-extractor-rs"
+path = "src/main.rs"
+
+[dependencies]
+trace-data.workspace = true
+indexmap.workspace = true
+mimalloc.workspace = true
+libmimalloc-sys.workspace = true
+rustc-hash.workspace = true
+ryu-js.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+# Tests write sessions as JSON literals; their key order must survive into the encoded CBOR.
+serde_json = { workspace = true, features = ["preserve_order"] }
+libdeflater.workspace = true
