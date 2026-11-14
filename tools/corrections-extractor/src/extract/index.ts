@@ -13,27 +13,29 @@
 
 import type { SessionRecord } from "../core/types";
 import { aggregateNewestScalarSummary, highestConfidence, aggregateScalarSummary, addScalarGroup, addToScalarSummary, type Fact, type ScalarGroup, type ScalarSummary } from "./aggregate";
-import type { QuestObjectivesValue } from "./observers/quest/objectives";
+import type { QuestObjectivesValue } from "./merge/quest/objectives";
 import type { Observation } from "./observation";
 import { ObservationStore } from "./observation-store";
 import { emitItemRecords } from "./emit/item";
 import { emitNpcRecords } from "./emit/npc";
 import { emitObjectRecords } from "./emit/object";
 import { emitQuestRecords } from "./emit/quest";
-import { mergeNpcDrops, mergeObjectDrops } from "./observers/item/dropsMerge";
-import { mergeLevelRange as mergeNpcLevelRange, mergeSpawns as mergeNpcSpawns, mergeZoneID as mergeNpcZoneID, mergeFriendlyToFaction, mergeRank as mergeNpcRank } from './observers/npc';
+import { mergeNpcDrops, mergeObjectDrops } from "./merge/item/drops";
+import { mergeLevelRange as mergeNpcLevelRange, mergeSpawns as mergeNpcSpawns, mergeZoneID as mergeNpcZoneID, mergeFriendlyToFaction, mergeRank as mergeNpcRank } from './merge/npc';
 import { invertQuestRelations, type QuestRelations } from "./questRelations";
-import { mergeSpawns as mergeObjectSpawns, mergeZoneID as mergeObjectZoneID } from "./observers/object";
-import { mergeStartedBy, mergeFinishedBy, turnInPoiSpawns } from "./observers/quest";
+import { mergeSpawns as mergeObjectSpawns, mergeZoneID as mergeObjectZoneID } from "./merge/object";
+import { mergeStartedBy, mergeFinishedBy, turnInPoiSpawns } from "./merge/quest";
 import type { TurnInPoiValue } from "./observers/quest/turnInPoi";
 import type { SpawnObservationValue } from "./observers/npc/spawns";
-import { mergeQuestObjectives, mergeQuestTriggerEnds, type QuestTriggerEndValue } from "./observers/quest";
-import { mergeReputationReward } from './observers/quest';
-import { mergeQuestXp, type QuestXpValue } from "./observers/quest/questXp";
+import { mergeQuestObjectives, mergeQuestTriggerEnds } from "./merge/quest";
+import type { QuestTriggerEndValue } from "./observers/quest";
+import { mergeReputationReward } from './merge/quest';
+import { mergeQuestXp } from "./merge/quest/questXp";
+import type { QuestXpValue } from "./observers/quest/questXp";
 import { writeQuestieCorrectionsLua } from "./schema/corrections-writer";
 import { writeQuestXpLua } from "./schema/quest-xp-writer";
-import {mergeRequiredLevel} from './observers/quest/requiredLevel';
-import { mergeQuestFactions, mergeRequiredRaces, summarizeReactions, type ReactionSummary } from "./observers/quest/requiredRaces";
+import {mergeRequiredLevel} from './merge/quest/requiredLevel';
+import { mergeQuestFactions, mergeRequiredRaces, summarizeReactions, type ReactionSummary } from "./merge/quest/requiredRaces";
 import type { Faction } from "./observers/npc/friendlyToFaction";
 import { MAX_IDS, observeSession, SCALAR_OBSERVERS, type ObservedValue, type ObserverKey, type ScalarObserverKey, type StagedSession } from "./observe";
 
@@ -205,7 +207,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   const zoneOrSortFacts = aggregateScalarSummary(scalars.zoneOrSort);
   const field = <T, R>(key: ObserverKey, merge: (observations: Observation<T>[]) => R, extraKey?: string) =>
     aggregateStoredField<T, R>(store, key, merge, extraKey);
-  const finishedByFacts = field("finishedBy", mergeFinishedBy);
+  const finishedByFacts = onlyDefinedFacts(field("finishedBy", mergeFinishedBy));
   // Quest turn-in POIs are spawns of the quest's single finisher: they join its spawn observations.
   // They are kept apart from the observed spawns, so finalize can run again on the same accumulator.
   store.clear("npcTurnInSpawns");
@@ -223,7 +225,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   for (const [questId, fact] of questXpFacts) {
     if (fact.value !== undefined) questXpRows.set(questId, { level: questLevelFacts.get(questId)!.value, xp: fact.value });
   }
-  const startedByFacts = field("startedBy", mergeStartedBy);
+  const startedByFacts = onlyDefinedFacts(field("startedBy", mergeStartedBy));
   const npcReactions = field("npcFriendlyToFaction", summarizeReactions);
   const questFactions = field("questFactions", mergeQuestFactions);
   const factionsByStarter = new Map<number, Map<number, Set<Faction>>>();

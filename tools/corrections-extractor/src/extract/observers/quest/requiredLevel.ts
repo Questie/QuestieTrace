@@ -42,14 +42,6 @@ function findPlayerLevelAtTime(session: SessionRecord, targetT: number): number 
   return typeof level === "number" && Number.isFinite(level) ? level : null;
 }
 
-export function mergeRequiredLevel(observations: Observation<number>[]): number {
-  let min = Infinity;
-  for (const obs of observations) {
-    if (obs.value < min) min = obs.value;
-  }
-  return min;
-}
-
 export const observeRequiredLevel: FieldObserver<number> = (session) => {
   const acceptedQuests = new Map<number, { level: number; t: number }>();
   let levelUpLevel: number | null = null; // announced by the newest PLAYER_LEVEL_UP so far

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { observeStartedBy, mergeStartedBy } from "./startedBy";
+import { observeStartedBy } from "./startedBy";
 import { apiSample, creatureGuid, makeSession, objectGuid, traceEvent } from "../../../test/fixtures";
 
 describe("observeStartedBy", () => {
@@ -141,6 +141,34 @@ describe("observeStartedBy", () => {
       expect(observeStartedBy(session)).toEqual([]);
     }
   );
+
+  it("should not take a starter at QUEST_ACCEPTED when the quest was already shown in a dialog", () => {
+    // Quest 928 is shown by Tenaron Stormgrip, but the server confirms the accept only after the
+    // player opened the Lost Journal's own quest.
+    const session = makeSession(
+      {
+        GetQuestID: [apiSample(1, 1.001, 928), apiSample(2, 2.002, 0), apiSample(3, 3.001, 96630)],
+        UnitGUID: {
+          questnpc: [
+            apiSample(1, 1.001, creatureGuid(3514)),
+            apiSample(2, 2.001),
+            apiSample(3, 3.001, objectGuid(654846)),
+          ],
+        },
+      },
+      [
+        traceEvent("QUEST_DETAIL", 1, 1, 0),
+        traceEvent("QUEST_FINISHED", 2, 2),
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
+        traceEvent("QUEST_ACCEPTED", 4, 4, 928),
+      ]
+    );
+
+    expect(observeStartedBy(session).map((o) => [o.entityId, o.value])).toEqual([
+      [928, { creatureId: 3514 }],
+      [96630, { objectId: 654846 }],
+    ]);
+  });
 
   it("should capture multiple creature starters across different quest events", () => {
     const session = makeSession(
@@ -355,64 +383,32 @@ describe("observeStartedBy", () => {
       ]
     );
 
-    // Both sources produce observations; mergeStartedBy unions them by type
     const results = observeStartedBy(session);
-    const creatures = results.filter((r) => r.value.creatureId);
-    expect(creatures).toHaveLength(2); // one from QUEST_DETAIL, one from gossip
-    // mergeStartedBy will deduplicate the creature IDs
-    const merged = mergeStartedBy(results);
-    expect(merged.creatures).toEqual([197]);
-    expect(merged.creatures).toHaveLength(1);
+    // one from QUEST_DETAIL, one from gossip
+    expect(results.map((r) => r.value)).toEqual([{ creatureId: 197 }, { creatureId: 197 }]);
   });
 
-  it("should merge duplicate creature starters via mergeStartedBy", () => {
-    const obs = [
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 3 } },
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 10 } },
-      { entityId: 96659, value: { creatureId: 200 }, confidence: "medium" as const, provenance: { session: "s", t: 15 } },
-    ];
-
-    const result = mergeStartedBy(obs);
-    expect(result.creatures).toEqual(expect.arrayContaining([197, 200]));
-    expect(result.creatures).toHaveLength(2);
-    expect(result.objects).toEqual([]);
-    expect(result.items).toEqual([]);
-  });
-
-  it("should merge mixed starter types via mergeStartedBy", () => {
-    const obs = [
-      { entityId: 96659, value: { creatureId: 197 }, confidence: "medium" as const, provenance: { session: "s", t: 3 } },
-      { entityId: 96659, value: { objectId: 2843 }, confidence: "low" as const, provenance: { session: "s", t: 5 } },
-      { entityId: 96659, value: { itemId: 750 }, confidence: "high" as const, provenance: { session: "s", t: 7 } },
-    ];
-
-    const result = mergeStartedBy(obs);
-    expect(result.creatures).toEqual([197]);
-    expect(result.objects).toEqual([2843]);
-    expect(result.items).toEqual([750]);
-  });
-});
-
-describe("observeStartedBy interaction correlation", () => {
   it("should prefer a questnpc object over a conflicting npc creature", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [apiSample(3, 3.002, objectGuid(410369))],
           npc: [apiSample(3, 3.002, creatureGuid(276172))],
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
       ]
     );
 
     expect(observeStartedBy(session).map((o) => o.value)).toEqual([{ objectId: 410369 }]);
   });
 
-  it("should not fall back to an npc creature at QUEST_ACCEPTED when questnpc is explicitly nil", () => {
+  it("should not fall back to an npc creature at QUEST_DETAIL when questnpc is explicitly nil", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -422,7 +418,7 @@ describe("observeStartedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
       ]
     );
 
@@ -492,6 +488,7 @@ describe("observeStartedBy interaction correlation", () => {
   it("should use the next raw event as the boundary, even when it is not a quest event", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -500,7 +497,7 @@ describe("observeStartedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
         traceEvent("MERCHANT_SHOW", 3, 3.011),
       ]
     );
@@ -511,6 +508,7 @@ describe("observeStartedBy interaction correlation", () => {
   it("should not let a later same-frame close erase the current giver or reuse it after close", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, objectGuid(410369)),
@@ -519,9 +517,9 @@ describe("observeStartedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
         traceEvent("QUEST_FINISHED", 3, 3.011),
-        traceEvent("QUEST_ACCEPTED", 3, 3.021, 99197),
+        traceEvent("QUEST_DETAIL", 3, 3.021, 0),
       ]
     );
 
@@ -531,13 +529,14 @@ describe("observeStartedBy interaction correlation", () => {
   it("should keep an unchanged object giver during a long dialog", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [apiSample(1, 1, objectGuid(410369))],
         },
       },
       [
         traceEvent("QUEST_PROGRESS", 1, 1),
-        traceEvent("QUEST_ACCEPTED", 60, 60, 99196),
+        traceEvent("QUEST_DETAIL", 60, 60, 0),
       ]
     );
 
@@ -547,6 +546,7 @@ describe("observeStartedBy interaction correlation", () => {
   it("should skip events with indistinguishable timestamps rather than guessing their giver", () => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(3, 3, creatureGuid(276171)),
@@ -555,8 +555,8 @@ describe("observeStartedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3, 99196),
-        traceEvent("QUEST_ACCEPTED", 3, 3, 99197),
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
+        traceEvent("QUEST_DETAIL", 3, 3, 0),
       ]
     );
 
@@ -566,6 +566,7 @@ describe("observeStartedBy interaction correlation", () => {
   it.each<string | undefined>([undefined, creatureGuid(276172)])("should not resurrect an older giver when a probe ties with the next event (%s)", (tiedGuid) => {
     const session = makeSession(
       {
+        GetQuestID: [apiSample(0, 0, 99196)],
         UnitGUID: {
           questnpc: [
             apiSample(1, 1, creatureGuid(276171)),
@@ -575,7 +576,7 @@ describe("observeStartedBy interaction correlation", () => {
         },
       },
       [
-        traceEvent("QUEST_ACCEPTED", 3, 3.001, 99196),
+        traceEvent("QUEST_DETAIL", 3, 3.001, 0),
         traceEvent("MERCHANT_SHOW", 3, 3.002),
       ]
     );

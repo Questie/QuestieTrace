@@ -23,9 +23,10 @@ import { observeSubmission, type ObservedSubmission, type ObserveRequest } from 
 import { observerVersion } from "./store/observer-version";
 import { ObservedStore, type StoredSubmission } from "./store/observed-store";
 import type { SubmissionSource } from "./store/source";
+import { formatBytes, formatDuration, timed } from "./timing";
 
 /** Submissions fetched and stored at a time. */
-const BATCH_SIZE = 500;
+const BATCH_SIZE = 1000;
 
 const OUTPUT_FILES = {
   npcFixes: "foreverNpcTraces.lua",
@@ -77,7 +78,7 @@ export async function extractCorrections(
   outputDir: string,
   { log = console.log, workers = Math.max(1, availableParallelism() - 1), batchSize = BATCH_SIZE }: ExtractOptions = {},
 ): Promise<ExtractMeta> {
-  const store = await ObservedStore.open(storeDir, observerVersion(), log);
+  const store = await timed(log, "Opened the observation store", () => ObservedStore.open(storeDir, observerVersion(), log));
   try {
     await updateStore(store, source, { log, workers, batchSize });
     return await writeOutputs(store, outputDir, log);
@@ -91,7 +92,7 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
   // NaN would create no workers and never finish.
   if (!Number.isInteger(workers)) throw new Error(`workers must be a whole number (got ${workers})`);
   if (!Number.isInteger(batchSize) || batchSize < 1) throw new Error(`batchSize must be a whole number of at least 1 (got ${batchSize})`);
-  const keys = await source.list();
+  const keys = await timed(log, "Listed the source's submissions", () => source.list());
   // An empty listing is far likelier a broken source than an emptied archive: never drop everything for it.
   if (keys.length === 0 && store.keys().size > 0) throw new Error("The source lists no submissions; keeping the store and the previous output");
   const listed = new Set(keys);
@@ -99,7 +100,7 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
   if (gone.length > 0) {
     // Other submissions may hold copies of the dropped ones' sessions that were not observed
     // (see ObservedSession.duplicate): observe them again.
-    const redo = (await store.holdingCopiesOf(gone)).filter((key) => listed.has(key));
+    const redo = (await timed(log, "Found submissions holding copies of dropped ones", () => store.holdingCopiesOf(gone))).filter((key) => listed.has(key));
     store.forget([...gone, ...redo]);
     log(`Dropped ${gone.length} submission(s) no longer in the source; observing ${redo.length} older one(s) again`);
   }
@@ -115,6 +116,8 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
 
   const usedKeys = new Set<string>();
   const pool: Worker[] = [];
+  const total = { downloadMs: 0, waitMs: 0, observeMs: 0, storeMs: 0, bytes: 0, decodeCpuMs: 0, observeCpuMs: 0 };
+  const observingStartedAt = performance.now();
   // A worker failing between batches has no batch to reject: the next batch reports it.
   let poolFailure: Error | undefined;
   try {
@@ -125,32 +128,82 @@ async function updateStore(store: ObservedStore, source: SubmissionSource, { log
       worker.once("exit", (code) => (poolFailure ??= new Error(`An observe worker exited early (code ${code})`)));
     }
     await observeBatches();
+    if (added.length > 0) {
+      log(
+        `Observed ${added.length} new submission(s) (${formatBytes(total.bytes)}) in ${formatDuration(performance.now() - observingStartedAt)}: ` +
+          `download ${formatDuration(total.downloadMs)} (waited ${formatDuration(total.waitMs)}), decode+observe ${formatDuration(total.observeMs)}, store ${formatDuration(total.storeMs)}; ` +
+          `CPU time decode ${formatDuration(total.decodeCpuMs)}, observe ${formatDuration(total.observeCpuMs)} on ${Math.max(1, pool.length)} thread(s)`,
+      );
+    }
   } finally {
     await Promise.all(pool.map((worker) => worker.terminate()));
   }
 
   async function observeBatches(): Promise<void> {
-    for (let start = 0; start < added.length; start += batchSize) {
-      if (poolFailure) throw poolFailure;
-      const batch = added.slice(start, start + batchSize);
-      const dir = await source.fetch(batch);
-      try {
-        // A worker that failed during the download would never answer.
-        if (poolFailure) throw poolFailure;
-        const observed: StoredSubmission[] = [];
-        await observeInOrder(batch.map((key) => join(dir, key)), MAX_IDS, pool, usedKeys, (_file, submission, index) => {
-          observed.push({ key: batch[index], submission });
-          const keys = new Set<string>();
-          for (const session of submission.sessions) if (session.key !== undefined && !session.duplicate) keys.add(session.key);
-          for (const key of keys) usedKeys.add(key);
-          return keys;
-        });
-        await store.add(observed);
-      } finally {
-        source.release(dir);
+    const batches: string[][] = [];
+    for (let start = 0; start < added.length; start += batchSize) batches.push(added.slice(start, start + batchSize));
+    // The next batch downloads while the current one is observed.
+    let next = batches.length > 0 ? fetchBatch(batches[0]) : undefined;
+    let done = 0;
+    try {
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        const batchStartedAt = performance.now();
+        const fetched = await next!;
+        next = undefined;
+        const waitMs = performance.now() - batchStartedAt;
+        try {
+          if (poolFailure) throw poolFailure;
+          if (i + 1 < batches.length) next = fetchBatch(batches[i + 1]);
+          const observed: StoredSubmission[] = [];
+          const observeStartedAt = performance.now();
+          await observeInOrder(batch.map((key) => join(fetched.dir, key)), MAX_IDS, pool, usedKeys, (_file, submission, index) => {
+            observed.push({ key: batch[index], submission });
+            const keys = new Set<string>();
+            for (const session of submission.sessions) if (session.key !== undefined && !session.duplicate) keys.add(session.key);
+            for (const key of keys) usedKeys.add(key);
+            return keys;
+          });
+          const observeMs = performance.now() - observeStartedAt;
+          const storeStartedAt = performance.now();
+          await store.add(observed);
+          const storeMs = performance.now() - storeStartedAt;
+          const bytes = observed.reduce((sum, { submission }) => sum + submission.timings.bytes, 0);
+          const decodeCpuMs = observed.reduce((sum, { submission }) => sum + submission.timings.decodeMs, 0);
+          const observeCpuMs = observed.reduce((sum, { submission }) => sum + submission.timings.observeMs, 0);
+          Object.assign(total, {
+            downloadMs: total.downloadMs + fetched.downloadMs,
+            waitMs: total.waitMs + waitMs,
+            observeMs: total.observeMs + observeMs,
+            storeMs: total.storeMs + storeMs,
+            bytes: total.bytes + bytes,
+            decodeCpuMs: total.decodeCpuMs + decodeCpuMs,
+            observeCpuMs: total.observeCpuMs + observeCpuMs,
+          });
+          done += batch.length;
+          const elapsedMs = performance.now() - observingStartedAt;
+          log(
+            `[${done}/${added.length}] new submissions observed in ${formatDuration(performance.now() - batchStartedAt)}: ` +
+              `download ${formatDuration(fetched.downloadMs)} (${formatBytes(bytes)}, ${formatBytes(bytes / Math.max(fetched.downloadMs / 1000, 0.001))}/s, waited ${formatDuration(waitMs)}), ` +
+              `decode+observe ${formatDuration(observeMs)} (CPU decode ${formatDuration(decodeCpuMs)}, observe ${formatDuration(observeCpuMs)}), ` +
+              `store ${formatDuration(storeMs)}; about ${formatDuration((elapsedMs / done) * (added.length - done))} left`,
+          );
+        } finally {
+          source.release(fetched.dir);
+        }
       }
-      log(`[${Math.min(start + batchSize, added.length)}/${added.length}] new submissions observed`);
+    } finally {
+      // A failed run must not leave the prefetched batch behind.
+      if (next) await next.then((fetched) => source.release(fetched.dir), () => undefined);
     }
+  }
+
+  function fetchBatch(batch: string[]): Promise<{ dir: string; downloadMs: number }> {
+    const startedAt = performance.now();
+    const fetched = source.fetch(batch).then((dir) => ({ dir, downloadMs: performance.now() - startedAt }));
+    // Awaited only after the current batch: until then a failure must not count as unhandled.
+    fetched.catch(() => undefined);
+    return fetched;
   }
 }
 
@@ -165,11 +218,13 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
   try {
     log("Folding stored observations");
     // Scalar and lookup fields only need per-value counts: DuckDB sums them up, the rest is replayed.
-    await store.scalarGroups(({ lookup, field, locale, entityId, group }) => {
-      if (lookup) addLookupScalarGroup(lookupAcc, field, locale, entityId, group);
-      else addStagedScalarGroup(acc, field, entityId, group);
-    });
-    const { duplicateCopies } = await store.replay(
+    await timed(log, "Summed scalar and lookup observations", () =>
+      store.scalarGroups(({ lookup, field, locale, entityId, group }) => {
+        if (lookup) addLookupScalarGroup(lookupAcc, field, locale, entityId, group);
+        else addStagedScalarGroup(acc, field, entityId, group);
+      }),
+    );
+    const { duplicateCopies } = await timed(log, "Replayed custom observations", () => store.replay(
       (session) => {
         // Observer errors abort the run, keeping the previous output.
         if (session.error !== undefined) throw new Error(`Observing a session of ${session.submissionKey} failed (${session.error})`);
@@ -177,12 +232,15 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
         if (session.lookup) addStagedLookupSessions(lookupAcc, [session.lookup]);
       },
       { customOnly: true, onProgress: (done, total) => log(`[${done}/${total}] submissions folded`) },
-    );
+    ));
 
-    await store.writeQueryViews();
+    await timed(log, "Wrote the query views", () => store.writeQueryViews());
 
     const now = new Date();
-    const bundle = finalize(acc, { sourceFileNames: loaded.map(([, entry]) => entry.submissionId), now });
+    const bundle = await timed(log, "Merged and rendered the corrections", () =>
+      finalize(acc, { sourceFileNames: loaded.map(([, entry]) => entry.submissionId), now }),
+    );
+    const writeStartedAt = performance.now();
 
     mkdirSync(outputDir, { recursive: true });
     // meta.json marks a complete run: remove it until all modules are written.
@@ -202,6 +260,7 @@ async function writeOutputs(store: ObservedStore, outputDir: string, log: (messa
       generatedAt: now.toISOString(),
     };
     writeFileSync(join(outputDir, "meta.json"), JSON.stringify(meta, null, 2));
+    log(`Rendered the lookups and wrote the output files in ${formatDuration(performance.now() - writeStartedAt)}`);
     return meta;
   } finally {
     acc.observations.dispose();

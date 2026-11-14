@@ -5,7 +5,9 @@
 //
 // Sources:
 //   - QUEST_COMPLETE event: questId + GetQuestID() at same t (quest)
-//   - QUEST_TURNED_IN event: questId from event payload (arg 1)
+//   - QUEST_TURNED_IN event: questId from event payload (arg 1). Only a fallback for quests without a
+//     QUEST_COMPLETE earlier in the session: the server confirms the turn-in asynchronously, so by
+//     then questnpc can be the next giver the player opened.
 //   - GOSSIP_SHOW: replay the last observed C_GossipInfo.GetActiveQuests() list
 //     against the current questnpc/npc (Active = in log, can be turned in here).
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → finisher
@@ -14,7 +16,7 @@
 //     with (e.g. a vendor next to the finisher), so it is never used there.
 //   - Objects are only taken from questnpc.
 //
-// Custom merge: set-union per finisher type across all observations.
+// Merged in merge/quest/finishedBy.ts.
 
 import { AMBIGUOUS_INTERACTION, questEventLookup, type InteractionLookup } from "./_interaction";
 import { parseGuid } from "../../guid";
@@ -36,27 +38,6 @@ interface GossipQuestEntry {
 export interface FinishedByFinisher {
   creatureId?: number;
   objectId?: number;
-}
-
-export interface FinishedByValue {
-  creatures: number[];
-  objects: number[];
-}
-
-export function mergeFinishedBy(observations: Observation<FinishedByFinisher>[]): FinishedByValue {
-  const creatures = new Set<number>();
-  const objects = new Set<number>();
-
-  for (const obs of observations) {
-    const f = obs.value;
-    if (f.creatureId) creatures.add(f.creatureId);
-    if (f.objectId) objects.add(f.objectId);
-  }
-
-  return {
-    creatures: [...creatures].sort((a, b) => a - b),
-    objects: [...objects].sort((a, b) => a - b),
-  };
 }
 
 function pushGuidObservations(
@@ -99,6 +80,7 @@ function pushGuidObservations(
 
 export const observeFinishedBy: FieldObserver<FinishedByFinisher> = (session) => {
   const observations: Observation<FinishedByFinisher>[] = [];
+  const shownInDialog = new Set<number>();
 
   for (let i = 0; i < session.events.length; i++) {
     const ev = session.events[i];
@@ -124,11 +106,12 @@ export const observeFinishedBy: FieldObserver<FinishedByFinisher> = (session) =>
 
     if (ev.e === "QUEST_COMPLETE") {
       questID = questIdAt(lookup);
+      if (questID !== null) shownInDialog.add(questID);
     } else if (ev.e === "QUEST_TURNED_IN") {
       const args = ev.a;
       if (args && typeof args.n === "number" && args.n >= 1) {
         const v = args[1];
-        questID = typeof v === "number" && v !== 0 ? v : null;
+        questID = typeof v === "number" && v !== 0 && !shownInDialog.has(v) ? v : null;
       }
     } else {
       continue;

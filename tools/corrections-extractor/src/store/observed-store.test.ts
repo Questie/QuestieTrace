@@ -25,7 +25,7 @@ function tempDir(): string {
 }
 
 function observed(sessions: ObservedSubmission["sessions"]): ObservedSubmission {
-  return { submissionId: "id", exportCount: 1, droppedExports: [], sessions };
+  return { submissionId: "id", exportCount: 1, droppedExports: [], sessions, timings: { bytes: 0, decodeMs: 0, observeMs: 0 } };
 }
 
 // Stored observations come back with the session key as their session label (names are not stored).

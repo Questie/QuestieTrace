@@ -2,7 +2,7 @@
 
 Extracts Questie DB corrections and translations from every submission in the OVH archive bucket (or a local [trace-data](https://github.com/Questie/trace-data) checkout) and writes them as paste-ready `forever*Traces.lua` and lookup modules.
 
-The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported (except quest XP, which is exported for every quest).
+The output is a set of CORRECTIONS modules (only fields we actually observed), meant to be layered on top of Questie's base DB, not a full DB dump. Only sessions from WoW Forever builds (interfaceVersion `16xxx`) are used, and only IDs above the known Classic maximum per entity are exported (except quest XP, which is exported for every quest, and the translations, which cover every observed ID).
 
 ## Requirements
 
@@ -24,7 +24,7 @@ npm run extract
 
 Submissions come from one of two sources:
 
-- By default the archive bucket, through [rclone](https://rclone.org) and the team's remote `ovhcloud-de:trace-intake-ovh`. Set `TRACE_REMOTE` to use another remote. Only the submissions not observed yet are downloaded, 500 at a time, into a temporary directory that is removed after each batch.
+- By default the archive bucket, through [rclone](https://rclone.org) and the team's remote `ovhcloud-de:trace-intake-ovh`. Set `TRACE_REMOTE` to use another remote. Only the submissions not observed yet are downloaded, 1000 at a time, into a temporary directory that is removed after each batch. The next batch downloads while the current one is observed.
 - A local `trace-data` checkout when `TRACE_DATA_DIR` is set, e.g. `TRACE_DATA_DIR=../../../trace-data npm run extract`.
 
 Every new `submissions/<yyyy-mm>/*.json` file is decoded natively (print encoding, raw deflate, CBOR) and observed in worker threads (one per CPU core but one). Set `EXTRACT_WORKERS` to use fewer threads, e.g. `EXTRACT_WORKERS=4 npm run extract` (`0` observes on the main thread). Submissions that fail to load are reported and skipped; the rest still runs.
@@ -71,18 +71,18 @@ The trace-analyzer's Extract tab shows these files for copy/download.
 
 ### Translations
 
-The same run writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Like the corrections, only IDs above the known Classic maximum are exported. NPC subnames are not traced and are always `nil`.
+The same run writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Unlike the corrections, every observed ID is exported, Classic ones included. NPC subnames are not traced and are always `nil`.
 
 ## How it works
 
 1. `src/store/source.ts` lists the submissions and fetches new ones, `src/core/trace-data/` decodes them.
 2. `foldSessions` (`src/extract/index.ts`) runs every observer in `src/extract/observers/` over the submission's sessions and collects their observations. Fields with the default scalar merge only keep a per-value summary; fields with a custom merge (spawns, drops, ...) keep every observation.
 3. The observations of new submissions are added to the store (`src/store/observed-store.ts`), then every stored session is replayed in fold order.
-4. After the last session, `finalize` aggregates the observations into one fact per entity and field, builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
+4. After the last session, `finalize` aggregates the observations into one fact per entity and field (custom merges live in `src/extract/merge/`), builds the per-entity records (`src/extract/emit/`) and writes the Lua modules (`src/extract/schema/corrections-writer.ts`).
 
 ### Quest-giver correlation
 
-`startedBy` and `finishedBy` prefer a valid `questnpc` giver, using `npc` only as a fallback. NPC/object `questStarts` and `questEnds` are derived from those exported quest records so both sides agree.
+`startedBy` and `finishedBy` take the giver from `questnpc`, using `npc` only as a fallback for gossip quest lists. A giver is only exported once at least 5 sessions saw it (`MIN_GIVER_SESSIONS` in `src/extract/merge/quest/relations.ts`), since a wrong giver does more harm than a missing one. NPC/object `questStarts` and `questEnds` are derived from those exported quest records so both sides agree.
 
 Quest and `GOSSIP_SHOW` lookups include synchronous API samples recorded after the raw event, but stop before the next raw event in the same frame. Ambiguous clock ties are skipped rather than resolved to an arbitrary giver. Recorded nil transitions clear earlier GUIDs; unchanged GUIDs remain usable during long dialogs.
 

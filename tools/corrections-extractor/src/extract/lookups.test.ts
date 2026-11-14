@@ -68,14 +68,19 @@ describe("finalizeLookups", () => {
     expect(bundle.lookupItems.frFR).toContain('[30000] = "Épée",');
   });
 
-  it("should skip enUS, non-Forever sessions and known classic IDs", () => {
+  it("should skip enUS and non-Forever sessions", () => {
     const bundle = run([
       itemSession("enUS", ITEM_LINK_DE),
       itemSession("frFR", ITEM_LINK_FR, 11507),
-      itemSession("deDE", "|cffffffff|Hitem:25::::::::1:::::::|h[Kurzschwert]|h|r"),
     ]);
 
     expect(bundle.lookupItems).toEqual({});
+  });
+
+  it("should write lookups for IDs known from Classic too", () => {
+    const bundle = run([itemSession("deDE", "|cffffffff|Hitem:25::::::::1:::::::|h[Kurzschwert]|h|r")]);
+
+    expect(bundle.lookupItems.deDE).toContain('[25] = "Kurzschwert",');
   });
 
   it("should write quest titles together with their objectives text", () => {

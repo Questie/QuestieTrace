@@ -4,7 +4,9 @@
 //
 // Sources:
 //   - QUEST_DETAIL event: questStartItemID (item starter) + GetQuestID() at same t (quest)
-//   - QUEST_ACCEPTED event: questId from the event payload
+//   - QUEST_ACCEPTED event: questId from the event payload. Only a fallback for quests without a
+//     QUEST_DETAIL earlier in the session: the server confirms the accept asynchronously, so by then
+//     questnpc can be the next giver the player opened (e.g. quest 928 attributed to a Lost Journal).
 //   - GOSSIP_SHOW: replay the last observed C_GossipInfo.GetAvailableQuests() list
 //     against the current questnpc/npc (Available = can be accepted/started here).
 //   - At those times, UnitGUID("questnpc") / UnitGUID("npc") → creature starter
@@ -16,7 +18,7 @@
 //   - "target" is intentionally excluded: unlike questnpc/npc, it can point at anything the player
 //     happens to be targeting and is not tied to the quest interaction.
 //
-// Custom merge: set-union per starter type across all observations.
+// Merged in merge/quest/startedBy.ts.
 
 import { AMBIGUOUS_INTERACTION, questEventLookup, type InteractionLookup } from "./_interaction";
 import { parseGuid } from "../../guid";
@@ -39,31 +41,6 @@ export interface StartedByStarter {
   creatureId?: number;
   objectId?: number;
   itemId?: number;
-}
-
-export interface StartedByValue {
-  creatures: number[];
-  objects: number[];
-  items: number[];
-}
-
-export function mergeStartedBy(observations: Observation<StartedByStarter>[]): StartedByValue {
-  const creatures = new Set<number>();
-  const objects = new Set<number>();
-  const items = new Set<number>();
-
-  for (const obs of observations) {
-    const s = obs.value;
-    if (s.creatureId) creatures.add(s.creatureId);
-    if (s.objectId) objects.add(s.objectId);
-    if (s.itemId) items.add(s.itemId);
-  }
-
-  return {
-    creatures: [...creatures].sort((a, b) => a - b),
-    objects: [...objects].sort((a, b) => a - b),
-    items: [...items].sort((a, b) => a - b),
-  };
 }
 
 function pushGuidObservations(
@@ -106,6 +83,7 @@ function pushGuidObservations(
 
 export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
   const observations: Observation<StartedByStarter>[] = [];
+  const shownInDialog = new Set<number>();
 
   for (let i = 0; i < session.events.length; i++) {
     const ev = session.events[i];
@@ -136,9 +114,10 @@ export const observeStartedBy: FieldObserver<StartedByStarter> = (session) => {
         starterItemID = typeof args[1] === "number" ? args[1] : null;
       }
       questID = questIdAt(lookup);
+      if (questID !== null) shownInDialog.add(questID);
     } else if (ev.e === "QUEST_ACCEPTED") {
       const v = ev.a.n === 1 ? ev.a[1] : ev.a[2];
-      questID = typeof v === "number" && v !== 0 ? v : null;
+      questID = typeof v === "number" && v !== 0 && !shownInDialog.has(v) ? v : null;
     }
 
     if (questID === null) continue;
