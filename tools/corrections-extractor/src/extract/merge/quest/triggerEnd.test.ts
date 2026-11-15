@@ -19,8 +19,9 @@ describe("mergeQuestTriggerEnds", () => {
     expect(
       mergeQuestTriggerEnds(
         [
-          { ...base, value: ["Light the campfire", { 40: [[56.11, 61.64]] }], provenance: { session: "test", t: 10 } },
-          { ...base, value: ["Light the campfire", { 12: [[47.46, 62.18]] }], provenance: { session: "test", t: 20 } },
+          { ...base, value: ["Light the campfire", { 12: [[47.46, 62.18]] }], provenance: { session: "test", t: 10 } },
+          { ...base, value: ["Light the campfire", { 40: [[56.11, 61.64]] }], provenance: { session: "test", t: 20 } },
+          { ...base, value: ["Light the campfire", { 40: [[56.11, 61.64]] }], provenance: { session: "test", t: 30 } },
         ],
         12, // zoneOrSort resolved Elwynn Forest for this quest
       ),
@@ -55,15 +56,16 @@ describe("mergeQuestTriggerEnds", () => {
     // Equal counts: the more recent sample (zone 40) wins.
     expect(mergeQuestTriggerEnds([earlier, later])).toEqual(["Light the campfire", { 40: [[56.11, 61.64]] }]);
     // Equal counts and equal recency: the lowest zone id wins deterministically.
-    expect(mergeQuestTriggerEnds([earlier, { ...earlier }])).toEqual(["Light the campfire", { 12: [[30, 40]] }]);
+    const sameTime: Observation<QuestTriggerEndValue> = { ...later, provenance: { session: "test", t: 10 } };
+    expect(mergeQuestTriggerEnds([sameTime, earlier])).toEqual(["Light the campfire", { 12: [[30, 40]] }]);
   });
 
   it("should pick the most frequently observed coordinate pair within the winning zone", () => {
     expect(
       mergeQuestTriggerEnds([
-        { ...base, value: ["Light the campfire", { 40: [[57, 62]] }], provenance: { session: "test", t: 10 } },
+        { ...base, value: ["Light the campfire", { 40: [[56.11, 61.64]] }], provenance: { session: "test", t: 10 } },
         { ...base, value: ["Light the campfire", { 40: [[56.11, 61.64]] }], provenance: { session: "test", t: 20 } },
-        { ...base, value: ["Light the campfire", { 40: [[56.11, 61.64]] }], provenance: { session: "test", t: 30 } },
+        { ...base, value: ["Light the campfire", { 40: [[57, 62]] }], provenance: { session: "test", t: 30 } },
       ]),
     ).toEqual(["Light the campfire", { 40: [[56.11, 61.64]] }]);
   });
