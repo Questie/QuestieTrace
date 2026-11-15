@@ -45,6 +45,29 @@ local function SafeScalarCall(fn, ...)
   return true, value
 end
 
+---Whether a token is an NPC: not a player and not player-controlled (pets, minions).
+---Pet GUIDs are rejected first, so the check does not rely on UnitPlayerControlled alone.
+---A restricted (secret) answer cannot be compared, so such units are treated as player-controlled.
+---@param token string
+---@return boolean
+local function IsNpc(token)
+  if (not UnitExists(token)) or UnitIsPlayer(token) then
+    return false
+  end
+  local _, guid = SafeScalarCall(UnitGUID, token)
+  if type(guid) == "string" and guid:sub(1, 4) == "Pet-" then
+    return false
+  end
+  local ok, controlled = SafeScalarCall(UnitPlayerControlled, token)
+  if (not ok) then
+    return false
+  end
+  if issecretvalue and issecretvalue(controlled) then
+    return false
+  end
+  return controlled ~= true
+end
+
 ---Sample UnitLevel, UnitClassification, UnitReaction, and UnitAffectingCombat for all tokens.
 ---@param t number Session-relative GetTime()
 ---@param tp number Session-relative GetTimePreciseSec()
@@ -52,8 +75,8 @@ local function SampleAll(t, tp)
   if not levelStreams or not classificationStreams or not reactionStreams or not combatStreams then return end
 
   for _, token in ipairs(TOKENS) do
-    -- Guard: only sample non-player creatures
-    if UnitExists(token) and not UnitIsPlayer(token) then
+    -- Guard: only sample NPCs, never players or their pets
+    if IsNpc(token) then
       -- UnitLevel (scalar number). -1 indicates "??" (unknown/skull).
       local levelOk, level = SafeScalarCall(UnitLevel, token)
       if levelOk and level ~= nil then
@@ -92,7 +115,7 @@ local function SampleAll(t, tp)
 
       -- UnitAffectingCombat (scalar boolean). Restricted (secret) answers are skipped.
       local combatOk, inCombat = SafeScalarCall(UnitAffectingCombat, token)
-      if combatOk and type(inCombat) == "boolean" and not (issecretvalue and issecretvalue(inCombat)) then
+      if combatOk and type(inCombat) == "boolean" and (not (issecretvalue and issecretvalue(inCombat))) then
         ---@type FunctionStreamEntry[]
         local combatStream = combatStreams[token]
         ---@type FunctionStreamEntry?

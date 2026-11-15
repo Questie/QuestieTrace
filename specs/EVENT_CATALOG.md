@@ -201,8 +201,9 @@ sampling for the `"target"` and `"mouseover"` tokens. Streams are keyed by
 API name and literal token; `UnitReaction` is nested in native argument
 order: `functions["UnitReaction"]["player"][token]`.
 
-Privacy: sampling is guarded with `UnitExists(token) and not
-UnitIsPlayer(token)`, so only non-player creatures are sampled. No names,
+Privacy: sampling is guarded with `UnitExists(token)`, `not UnitIsPlayer(token)`
+and `not UnitPlayerControlled(token)` (restricted answers count as
+player-controlled), so only NPCs are sampled, never players or their pets. No names,
 GUIDs, or free text are recorded by this tracker.
 
 - `PLAYER_TARGET_CHANGED`

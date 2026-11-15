@@ -1988,6 +1988,7 @@ local function TestUnitStateTracker()
   -- Mock WoW API for target and mouseover
   env.UnitExists = function(token) return token == "target" or token == "mouseover" end
   env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
   env.UnitLevel = function(token)
     if token == "target" then return 20 end
     if token == "mouseover" then return -1 end -- "??" skull boss
@@ -2073,6 +2074,27 @@ local function TestUnitStateTracker()
   assert(#functions.UnitClassification.target == 1, "Player target must not be sampled")
   assert(#functions.UnitReaction.player.target == 1, "Player target must not be sampled for reaction")
   assert(#functions.UnitAffectingCombat.target == 1, "Player target must not be sampled for combat")
+
+  -- Verify player pets are NOT sampled
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return true end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitLevel.target == 1, "Player pet target must not be sampled")
+  assert(#functions.UnitAffectingCombat.target == 1, "Player pet target must not be sampled for combat")
+
+  -- Verify a pet GUID is NOT sampled even when UnitPlayerControlled says otherwise
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(_token) return "Pet-0-1-1-1-416-0100000001" end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitLevel.target == 1, "A pet GUID must not be sampled")
+  env.UnitGUID = nil
+
+  -- Verify a restricted UnitPlayerControlled answer is treated as player-controlled
+  env.UnitPlayerControlled = function(_token) return "secret" end
+  env.issecretvalue = function(value) return value == "secret" end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitLevel.target == 1, "A restricted UnitPlayerControlled answer must not be sampled")
+  env.issecretvalue = nil
 end
 
 ---@param runtime table
