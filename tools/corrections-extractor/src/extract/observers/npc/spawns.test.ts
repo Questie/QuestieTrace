@@ -156,4 +156,33 @@ describe("observeSpawns", () => {
       },
     ]);
   });
+
+  function targetSession(distance: Array<{ t: number; tp: number; v?: boolean }> | undefined): SessionRecord {
+    return makeSession({
+      UnitGUID: {
+        target: [
+          { t: 5, tp: 5, v: "Creature-0-5208-0-7-197-000032" },
+          { t: 10, tp: 10, v: "Creature-0-5208-0-7-823-000031" },
+          { t: 15, tp: 15, v: "Creature-0-5208-0-7-299-000033" },
+        ],
+      },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 0, tp: 0, v: 1429 }] },
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 0, tp: 0, v: { x: 0.4746, y: 0.6218 } }] },
+      ...(distance ? { CheckInteractDistance: { target: { "4": distance } } } : {}),
+    });
+  }
+
+  it("should only keep target encounters within ~28 yards when the distance was recorded", () => {
+    const session = targetSession([
+      { t: 5, tp: 5, v: true },
+      { t: 10, tp: 10, v: false },
+      { t: 15, tp: 15 }, // unknown, e.g. the player was in combat
+    ]);
+
+    expect(observeSpawns(session).map((obs) => obs.entityId)).toEqual([197]);
+  });
+
+  it("should keep all target encounters of sessions recorded without the distance", () => {
+    expect(observeSpawns(targetSession(undefined)).map((obs) => obs.entityId)).toEqual([197, 823, 299]);
+  });
 });
