@@ -97,7 +97,7 @@ describe("mergeSpawns", () => {
     });
   });
 
-  it("should cluster nearby coordinates and average them", () => {
+  it("should cluster nearby coordinates into their median", () => {
     const observations: TaggedSpawnObservation[] = [
       // Multiple observations very close together (should cluster into one)
       obs(823, { zoneID: 40, x: 21.83, y: 45.3 }, 1, "questnpc"),
@@ -118,9 +118,9 @@ describe("mergeSpawns", () => {
     const result = mergeSpawns(observations);
     // All these points should cluster into a single spawn point
     expect(result[40]).toHaveLength(1);
-    // The centroid should be rounded to 2 decimal places: (21.85, 45.31)
-    expect(result[40]![0][0]).toBe(21.85);
-    expect(result[40]![0][1]).toBe(45.31);
+    // The median should be rounded to 2 decimal places: (21.84, 45.3)
+    expect(result[40]![0][0]).toBe(21.84);
+    expect(result[40]![0][1]).toBe(45.3);
   });
 
   it("should keep separate clusters when points are far apart", () => {
@@ -147,7 +147,7 @@ describe("mergeSpawns", () => {
     ];
 
     expect(mergeSpawns(observations)).toEqual({
-      267: [[62.56, 19.8]],
+      267: [[62.57, 19.75]],
     });
   });
 
@@ -211,7 +211,7 @@ describe("mergeSpawns", () => {
     ];
 
     expect(mergeSpawns(observations)).toEqual({
-      40: [[10.23, 50.21]],
+      40: [[10.31, 50.2]],
     });
   });
 
@@ -322,6 +322,17 @@ describe("mergeSpawns", () => {
     ];
 
     expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30], [60, 60]] });
+  });
+
+  it("should place a cluster at the median so an outlier does not pull it away", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(823, { zoneID: 40, x: 30.0, y: 30.0 }, 1, "target"),
+      obs(823, { zoneID: 40, x: 30.1, y: 30.1 }, 2, "target"),
+      obs(823, { zoneID: 40, x: 30.2, y: 30.2 }, 3, "target"),
+      obs(823, { zoneID: 40, x: 30.4, y: 30.4 }, 4, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30.15, 30.15]] });
   });
 
   it("should return empty object when no observations", () => {

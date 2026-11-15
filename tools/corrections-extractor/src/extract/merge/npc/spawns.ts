@@ -69,10 +69,10 @@ function mergeCloseClusters<C extends { members: Array<[number, number]>; count:
 }
 
 /**
- * Clusters nearby spawn coordinates and averages each cluster.
+ * Clusters nearby spawn coordinates and places each cluster at its median.
  * A point joins the nearest cluster whose centroid is within threshold, which
  * avoids chaining a long line of points (e.g. a patrol) into one cluster.
- * Each centroid is returned with the number of points in its cluster.
+ * Each position is returned with the points of its cluster.
  */
 function clusterAndAverageCoordinatess(
   coords: Array<[number, number]>,
@@ -108,14 +108,20 @@ function clusterAndAverageCoordinatess(
 
   mergeCloseClusters(clusters, threshold);
 
-  // Return the centroid of each cluster, rounded to 2 decimal places
+  // The median keeps a few far-off points from pulling the spawn away, rounded to 2 decimal places
   return clusters.map((c) => ({
     coord: [
-      Math.round((c.sumX / c.count) * 100) / 100,
-      Math.round((c.sumY / c.count) * 100) / 100,
+      Math.round(median(c.members.map((m) => m[0])) * 100) / 100,
+      Math.round(median(c.members.map((m) => m[1])) * 100) / 100,
     ],
     members: c.members,
   }));
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
 function coordKey(zoneID: number, x: number, y: number): string {
