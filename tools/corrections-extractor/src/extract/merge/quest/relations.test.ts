@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Observation } from "../../observation";
 import { mergeFinishedBy } from "./finishedBy";
-import { mergeStartedBy } from "./startedBy";
+import { hasNonNpcStarter, mergeStartedBy } from "./startedBy";
 import type { FinishedByFinisher } from "../../observers/quest/finishedBy";
 import type { StartedByStarter } from "../../observers/quest/startedBy";
 
@@ -81,5 +81,18 @@ describe("quest giver share of the strongest giver", () => {
     const observations = [...seen<StartedByStarter>({ itemId: 750 }, 1001), ...seen<StartedByStarter>({ creatureId: 1252 }, 5)];
 
     expect(mergeStartedBy(observations)).toEqual({ creatures: [], objects: [], items: [750] });
+  });
+});
+
+describe("hasNonNpcStarter", () => {
+  it("should see an item starter that is too rare to be exported", () => {
+    const observations = [...seen<StartedByStarter>({ creatureId: 1077 }, 5), ...seen<StartedByStarter>({ itemId: 99 }, 1)];
+
+    expect(mergeStartedBy(observations)).toEqual({ creatures: [1077], objects: [], items: [] });
+    expect(hasNonNpcStarter(observations)).toBe(true);
+  });
+
+  it("should be false when only creatures started the quest", () => {
+    expect(hasNonNpcStarter(seen<StartedByStarter>({ creatureId: 1077 }, 5))).toBe(false);
   });
 });
