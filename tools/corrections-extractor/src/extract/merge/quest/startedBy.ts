@@ -18,3 +18,8 @@ export function mergeStartedBy(observations: Observation<StartedByStarter>[]): S
   const [creatures, objects, items] = supportedIds(observations, (s) => s.creatureId, (s) => s.objectId, (s) => s.itemId);
   return creatures.length > 0 || objects.length > 0 || items.length > 0 ? { creatures, objects, items } : undefined;
 }
+
+/** Whether any starter is an object or item, however few sessions saw it: it rules out NPC-only race reasoning. */
+export function hasNonNpcStarter(observations: Observation<StartedByStarter>[]): boolean {
+  return observations.some((obs) => Boolean(obs.value.objectId) || Boolean(obs.value.itemId));
+}

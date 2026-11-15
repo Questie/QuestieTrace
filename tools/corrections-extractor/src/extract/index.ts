@@ -24,7 +24,7 @@ import { mergeNpcDrops, mergeObjectDrops } from "./merge/item/drops";
 import { mergeLevelRange as mergeNpcLevelRange, mergeSpawns as mergeNpcSpawns, mergeZoneID as mergeNpcZoneID, mergeFriendlyToFaction, mergeRank as mergeNpcRank } from './merge/npc';
 import { invertQuestRelations, type QuestRelations } from "./questRelations";
 import { mergeSpawns as mergeObjectSpawns, mergeZoneID as mergeObjectZoneID } from "./merge/object";
-import { mergeStartedBy, mergeFinishedBy, turnInPoiSpawns } from "./merge/quest";
+import { mergeStartedBy, hasNonNpcStarter, mergeFinishedBy, turnInPoiSpawns } from "./merge/quest";
 import type { TurnInPoiValue } from "./observers/quest/turnInPoi";
 import type { SpawnObservationValue } from "./observers/npc/spawns";
 import { mergeQuestObjectives, mergeQuestTriggerEnds } from "./merge/quest";
@@ -226,6 +226,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
     if (fact.value !== undefined) questXpRows.set(questId, { level: questLevelFacts.get(questId)!.value, xp: fact.value });
   }
   const startedByFacts = onlyDefinedFacts(field("startedBy", mergeStartedBy));
+  const nonNpcStarterFacts = field("startedBy", hasNonNpcStarter);
   const npcReactions = field("npcFriendlyToFaction", summarizeReactions);
   const questFactions = field("questFactions", mergeQuestFactions);
   const factionsByStarter = new Map<number, Map<number, Set<Faction>>>();
@@ -240,7 +241,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   for (const [questId, fact] of questFactions) {
     const starters = startedByFacts.get(questId)?.value;
     const npcStarters: ReactionSummary[] =
-      !starters || starters.objects.length > 0 || starters.items.length > 0
+      !starters || nonNpcStarterFacts.get(questId)?.value
         ? []
         : starters.creatures.map((id) => npcReactions.get(id)?.value ?? summarizeReactions([]));
     const siblingFactions = new Set<Faction>();
