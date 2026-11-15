@@ -2003,6 +2003,7 @@ local function TestUnitStateTracker()
     if unit == "player" and token == "mouseover" then return 8 end -- Exalted
     return nil
   end
+  env.UnitAffectingCombat = function(token) return token == "target" end
 
   runtime.core.StartCapture("unitstate test")
   SendEvent(runtime, "PLAYER_TARGET_CHANGED")
@@ -2043,11 +2044,27 @@ local function TestUnitStateTracker()
   assert(#functions.UnitReaction.player.mouseover >= 1, "UnitReaction[player][mouseover] must have entry")
   assert(functions.UnitReaction.player.mouseover[1].v == 8, "UnitReaction[player][mouseover] must be 8 (exalted)")
 
+  -- Verify UnitAffectingCombat recorded per token
+  assert(functions.UnitAffectingCombat and functions.UnitAffectingCombat.target, "UnitAffectingCombat[target] stream must exist")
+  assert(#functions.UnitAffectingCombat.target == 1, "UnitAffectingCombat[target] must have one entry")
+  assert(functions.UnitAffectingCombat.target[1].v == true, "UnitAffectingCombat[target] must be true")
+  assert(functions.UnitAffectingCombat.mouseover[1].v == false, "UnitAffectingCombat[mouseover] must be false")
+
+  -- Verify an unchanged combat state is not recorded again, and a restricted answer is skipped
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitAffectingCombat.target == 1, "Unchanged UnitAffectingCombat[target] must not be recorded again")
+  env.issecretvalue = function(_value) return true end
+  env.UnitAffectingCombat = function(_token) return false end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitAffectingCombat.target == 1, "A restricted UnitAffectingCombat answer must not be recorded")
+  env.issecretvalue = nil
+
   -- Verify player units are NOT sampled (guard works)
   env.UnitIsPlayer = function(_token) return true end
   env.UnitLevel = function(_token) return 60 end
   env.UnitClassification = function(_token) return "normal" end
   env.UnitReaction = function(_unit, _token) return 5 end
+  env.UnitAffectingCombat = function(_token) return false end
 
   SendEvent(runtime, "PLAYER_TARGET_CHANGED")
 
@@ -2055,6 +2072,7 @@ local function TestUnitStateTracker()
   assert(#functions.UnitLevel.target == 1, "Player target must not be sampled")
   assert(#functions.UnitClassification.target == 1, "Player target must not be sampled")
   assert(#functions.UnitReaction.player.target == 1, "Player target must not be sampled for reaction")
+  assert(#functions.UnitAffectingCombat.target == 1, "Player target must not be sampled for combat")
 end
 
 ---@param runtime table

@@ -195,7 +195,8 @@ recorded, since that reflects a state transition rather than PII.
 ### UnitState tracker
 
 Triggers raw `UnitLevel` (scalar number; `-1` = "??"), `UnitClassification`
-(scalar string), and `UnitReaction("player", token)` (scalar number 1..8)
+(scalar string), `UnitReaction("player", token)` (scalar number 1..8), and
+`UnitAffectingCombat` (scalar boolean; restricted answers skipped)
 sampling for the `"target"` and `"mouseover"` tokens. Streams are keyed by
 API name and literal token; `UnitReaction` is nested in native argument
 order: `functions["UnitReaction"]["player"][token]`.

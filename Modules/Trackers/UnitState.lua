@@ -7,6 +7,7 @@ local Core = QuestieTraceCore
 -- UnitLevel(unit)           -> number (or -1 for "??")
 -- UnitClassification(unit)  -> string ("normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus")
 -- UnitReaction(unit, unit)  -> number 1..8 (or nil)
+-- UnitAffectingCombat(unit) -> boolean
 -- UnitSubName (synthetic)   -> string: NPC title line ("Innkeeper") from
 --   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, func),
 --   i.e. the line after the UnitName line unless it is the level line.
@@ -23,6 +24,8 @@ local levelStreams
 local classificationStreams
 ---@type table<string, FunctionStreamEntry[]>?
 local reactionStreams
+---@type table<string, FunctionStreamEntry[]>?
+local combatStreams
 ---@type FunctionStreamEntry[]?
 local subNameStream
 ---@type CaptureState?
@@ -42,11 +45,11 @@ local function SafeScalarCall(fn, ...)
   return true, value
 end
 
----Sample UnitLevel, UnitClassification, and UnitReaction for all tokens.
+---Sample UnitLevel, UnitClassification, UnitReaction, and UnitAffectingCombat for all tokens.
 ---@param t number Session-relative GetTime()
 ---@param tp number Session-relative GetTimePreciseSec()
 local function SampleAll(t, tp)
-  if not levelStreams or not classificationStreams or not reactionStreams then return end
+  if not levelStreams or not classificationStreams or not reactionStreams or not combatStreams then return end
 
   for _, token in ipairs(TOKENS) do
     -- Guard: only sample non-player creatures
@@ -84,6 +87,18 @@ local function SampleAll(t, tp)
         local prevReaction = reactionStream[#reactionStream]
         if not prevReaction or prevReaction.v ~= reaction then
           reactionStream[#reactionStream + 1] = { t = t, tp = tp, v = reaction }
+        end
+      end
+
+      -- UnitAffectingCombat (scalar boolean). Restricted (secret) answers are skipped.
+      local combatOk, inCombat = SafeScalarCall(UnitAffectingCombat, token)
+      if combatOk and type(inCombat) == "boolean" and not (issecretvalue and issecretvalue(inCombat)) then
+        ---@type FunctionStreamEntry[]
+        local combatStream = combatStreams[token]
+        ---@type FunctionStreamEntry?
+        local prevCombat = combatStream[#combatStream]
+        if not prevCombat or prevCombat.v ~= inCombat then
+          combatStream[#combatStream + 1] = { t = t, tp = tp, v = inCombat }
         end
       end
     end
@@ -187,6 +202,7 @@ Core.RegisterTracker({
     if not functions["UnitClassification"] then functions["UnitClassification"] = {} end
     if not functions["UnitReaction"] then functions["UnitReaction"] = {} end
     if not functions["UnitReaction"]["player"] then functions["UnitReaction"]["player"] = {} end
+    if not functions["UnitAffectingCombat"] then functions["UnitAffectingCombat"] = {} end
     if not functions["UnitSubName"] then functions["UnitSubName"] = {} end
     functions["UnitSubName"]["mouseover"] = {}
     subNameStream = functions["UnitSubName"]["mouseover"]
@@ -194,13 +210,16 @@ Core.RegisterTracker({
     levelStreams = {}
     classificationStreams = {}
     reactionStreams = {}
+    combatStreams = {}
     for _, token in ipairs(TOKENS) do
       functions["UnitLevel"][token] = {}
       functions["UnitClassification"][token] = {}
       functions["UnitReaction"]["player"][token] = {}
+      functions["UnitAffectingCombat"][token] = {}
       levelStreams[token] = functions["UnitLevel"][token]
       classificationStreams[token] = functions["UnitClassification"][token]
       reactionStreams[token] = functions["UnitReaction"]["player"][token]
+      combatStreams[token] = functions["UnitAffectingCombat"][token]
     end
 
     currentCapture = capture
