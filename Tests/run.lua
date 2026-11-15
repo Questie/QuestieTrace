@@ -1988,6 +1988,7 @@ local function TestUnitStateTracker()
   -- Mock WoW API for target and mouseover
   env.UnitExists = function(token) return token == "target" or token == "mouseover" end
   env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
   env.UnitLevel = function(token)
     if token == "target" then return 20 end
     if token == "mouseover" then return -1 end -- "??" skull boss
@@ -2003,6 +2004,7 @@ local function TestUnitStateTracker()
     if unit == "player" and token == "mouseover" then return 8 end -- Exalted
     return nil
   end
+  env.UnitAffectingCombat = function(token) return token == "target" end
 
   runtime.core.StartCapture("unitstate test")
   SendEvent(runtime, "PLAYER_TARGET_CHANGED")
@@ -2043,11 +2045,37 @@ local function TestUnitStateTracker()
   assert(#functions.UnitReaction.player.mouseover >= 1, "UnitReaction[player][mouseover] must have entry")
   assert(functions.UnitReaction.player.mouseover[1].v == 8, "UnitReaction[player][mouseover] must be 8 (exalted)")
 
+  -- Verify UnitAffectingCombat recorded per token
+  assert(functions.UnitAffectingCombat and functions.UnitAffectingCombat.target, "UnitAffectingCombat[target] stream must exist")
+  assert(#functions.UnitAffectingCombat.target == 1, "UnitAffectingCombat[target] must have one entry")
+  assert(functions.UnitAffectingCombat.target[1].v == true, "UnitAffectingCombat[target] must be true")
+  assert(functions.UnitAffectingCombat.mouseover[1].v == false, "UnitAffectingCombat[mouseover] must be false")
+
+  -- Verify an unchanged combat state is not recorded again, and a restricted answer is skipped
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitAffectingCombat.target == 1, "Unchanged UnitAffectingCombat[target] must not be recorded again")
+  env.UnitAffectingCombat = function(_token) return false end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitAffectingCombat.target == 2 and functions.UnitAffectingCombat.target[2].v == false,
+    "A readable UnitAffectingCombat change must be recorded")
+  local restrictedCombatCalls = 0
+  env.UnitAffectingCombat = function(_token)
+    restrictedCombatCalls = restrictedCombatCalls + 1
+    return true
+  end
+  -- Only the restricted combat answer is secret; UnitPlayerControlled's readable false is not.
+  env.issecretvalue = function(value) return value == true end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(restrictedCombatCalls > 0, "UnitAffectingCombat must be asked for the restricted answer")
+  assert(#functions.UnitAffectingCombat.target == 2, "A restricted UnitAffectingCombat answer must not be recorded")
+  env.issecretvalue = nil
+
   -- Verify player units are NOT sampled (guard works)
   env.UnitIsPlayer = function(_token) return true end
   env.UnitLevel = function(_token) return 60 end
   env.UnitClassification = function(_token) return "normal" end
   env.UnitReaction = function(_unit, _token) return 5 end
+  env.UnitAffectingCombat = function(_token) return false end
 
   SendEvent(runtime, "PLAYER_TARGET_CHANGED")
 
@@ -2055,6 +2083,82 @@ local function TestUnitStateTracker()
   assert(#functions.UnitLevel.target == 1, "Player target must not be sampled")
   assert(#functions.UnitClassification.target == 1, "Player target must not be sampled")
   assert(#functions.UnitReaction.player.target == 1, "Player target must not be sampled for reaction")
+  assert(#functions.UnitAffectingCombat.target == 2, "Player target must not be sampled for combat")
+
+  -- Verify player pets are NOT sampled
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return true end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitLevel.target == 1, "Player pet target must not be sampled")
+  assert(#functions.UnitAffectingCombat.target == 2, "Player pet target must not be sampled for combat")
+
+  -- Verify a pet GUID is NOT sampled even when UnitPlayerControlled says otherwise
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(_token) return "Pet-0-1-1-1-416-0100000001" end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitLevel.target == 1, "A pet GUID must not be sampled")
+  env.UnitGUID = nil
+
+  -- Verify a restricted UnitPlayerControlled answer is treated as player-controlled
+  env.UnitPlayerControlled = function(_token) return "secret" end
+  env.issecretvalue = function(value) return value == "secret" end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitLevel.target == 1, "A restricted UnitPlayerControlled answer must not be sampled")
+  env.issecretvalue = nil
+
+  -- Verify a restricted GUID is treated as not an NPC
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(_token) return "secret-guid" end
+  env.issecretvalue = function(value) return value == "secret-guid" end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#functions.UnitLevel.target == 1, "A restricted UnitGUID answer must not be sampled")
+  env.issecretvalue = nil
+  env.UnitGUID = nil
+end
+
+local function TestUnitStateRecordsTargetDistance()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local inRange, inCombat = true, false
+  local requestedIndex
+  local distanceCalls = 0
+  env.UnitExists = function(token) return token == "target" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.InCombatLockdown = function() return inCombat end
+  env.CheckInteractDistance = function(token, index)
+    requestedIndex = index
+    distanceCalls = distanceCalls + 1
+    if token == "target" then return inRange end
+  end
+
+  runtime.core.StartCapture("target distance test")
+  local stream = Session(runtime).functions.CheckInteractDistance.target[4]
+  assert(requestedIndex == 4, "CheckInteractDistance must be asked for the ~28 yard range")
+  assert(#stream == 1 and stream[1].v == true, "An NPC target in range must be recorded as true")
+
+  inRange = false
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#stream == 2 and stream[2].v == false, "An NPC target out of range must be recorded as false")
+
+  inRange = true
+  inCombat = true
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#stream == 3 and stream[3].v == nil, "The distance must be recorded as unknown while the player is in combat")
+
+  inCombat = false
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  inRange = nil
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(#stream == 5 and stream[5].v == nil, "A nil answer from CheckInteractDistance must be recorded as unknown")
+
+  inRange = true
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  local callsBefore = distanceCalls
+  env.UnitIsPlayer = function(_token) return true end
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(distanceCalls == callsBefore, "A player target's distance must not be queried")
+  assert(#stream == 7 and stream[7].v == nil, "A target that is no NPC must reset the distance to unknown")
 end
 
 ---@param runtime table
@@ -3411,6 +3515,7 @@ local tests = {
   { name = "unit interaction mouseover records GUID and name", run = TestUnitInteractionMouseover },
   { name = "UnitInteraction skips a mouseover player's guid/name", run = TestUnitInteractionMouseoverPlayerIsSkipped },
   { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
+  { name = "should record whether the npc target is within ~28 yards", run = TestUnitStateRecordsTargetDistance },
   { name = "should record npc subname from unit tooltip", run = TestUnitStateRecordsSubNameFromTooltip },
   { name = "should redact player names in npc subname", run = TestUnitStateSanitizesSubName },
   { name = "should detect level lines by line type when UnitLevel exists", run = TestUnitStateUsesUnitLevelLineTypeWhenAvailable },
