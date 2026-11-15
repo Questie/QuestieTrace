@@ -33,8 +33,8 @@ console.log(
 for (const skipped of meta.skippedFiles) {
   console.warn(`Skipped ${skipped.name}: ${skipped.error}`);
 }
-for (const partial of meta.partialFiles) {
-  console.warn(`Partly decoded ${partial.name}: ${partial.droppedExports.join("; ")}`);
+if (meta.partialFiles.length > 0) {
+  console.warn(`${meta.partialFiles.length} submission(s) partly decoded (details in ${resolve(outputDir, "meta.json")})`);
 }
 if (meta.duplicateSessionsSkipped > 0) {
   // Exports contain every saved session, so later submissions repeat earlier sessions.
