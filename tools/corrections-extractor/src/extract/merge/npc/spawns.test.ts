@@ -294,6 +294,36 @@ describe("mergeSpawns", () => {
     expect(mergeZoneID(observations)).toBe(40);
   });
 
+  it("should drop a single-session cluster when the strongest cluster has many sessions", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 25; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "target"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    observations.push({ ...obs(823, { zoneID: 40, x: 60, y: 60 }, 99, "target"), provenance: { session: "s", sessionKey: "stray", t: 99 } });
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]] });
+  });
+
+  it("should keep a cluster seen in two sessions", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 25; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "target"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    observations.push({ ...obs(823, { zoneID: 12, x: 60, y: 60 }, 98, "target"), provenance: { session: "s", sessionKey: "a", t: 98 } });
+    observations.push({ ...obs(823, { zoneID: 12, x: 60, y: 60 }, 99, "target"), provenance: { session: "s", sessionKey: "b", t: 99 } });
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]], 12: [[60, 60]] });
+  });
+
+  it("should keep single-session clusters of rarely seen NPCs", () => {
+    const observations: TaggedSpawnObservation[] = [
+      { ...obs(823, { zoneID: 40, x: 30, y: 30 }, 1, "target"), provenance: { session: "s", sessionKey: "a", t: 1 } },
+      { ...obs(823, { zoneID: 40, x: 60, y: 60 }, 2, "target"), provenance: { session: "s", sessionKey: "b", t: 2 } },
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30], [60, 60]] });
+  });
+
   it("should return empty object when no observations", () => {
     expect(mergeSpawns([])).toEqual({});
   });
