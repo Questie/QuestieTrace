@@ -97,7 +97,7 @@ describe("mergeSpawns", () => {
     });
   });
 
-  it("should cluster nearby coordinates and average them", () => {
+  it("should cluster nearby coordinates into their median", () => {
     const observations: TaggedSpawnObservation[] = [
       // Multiple observations very close together (should cluster into one)
       obs(823, { zoneID: 40, x: 21.83, y: 45.3 }, 1, "questnpc"),
@@ -118,9 +118,9 @@ describe("mergeSpawns", () => {
     const result = mergeSpawns(observations);
     // All these points should cluster into a single spawn point
     expect(result[40]).toHaveLength(1);
-    // The centroid should be rounded to 2 decimal places: (21.85, 45.31)
-    expect(result[40]![0][0]).toBe(21.85);
-    expect(result[40]![0][1]).toBe(45.31);
+    // The median should be rounded to 2 decimal places: (21.84, 45.3)
+    expect(result[40]![0][0]).toBe(21.84);
+    expect(result[40]![0][1]).toBe(45.3);
   });
 
   it("should keep separate clusters when points are far apart", () => {
@@ -147,7 +147,7 @@ describe("mergeSpawns", () => {
     ];
 
     expect(mergeSpawns(observations)).toEqual({
-      267: [[62.56, 19.8]],
+      267: [[62.57, 19.75]],
     });
   });
 
@@ -193,8 +193,8 @@ describe("mergeSpawns", () => {
 
   it("should keep every cluster for entities that are not quest entities", () => {
     const observations: TaggedSpawnObservation[] = [
-      obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "npc"),
-      obs(823, { zoneID: 40, x: 30.0, y: 60.0 }, 2, "npc"),
+      obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
+      obs(823, { zoneID: 40, x: 30.0, y: 60.0 }, 2, "target"),
     ];
 
     expect(mergeSpawns(observations, false)).toEqual({
@@ -211,14 +211,14 @@ describe("mergeSpawns", () => {
     ];
 
     expect(mergeSpawns(observations)).toEqual({
-      40: [[10.23, 50.21]],
+      40: [[10.31, 50.2]],
     });
   });
 
   it("should use a larger grouping radius in capital cities", () => {
     const spread = (zoneID: number): TaggedSpawnObservation[] => [
-      obs(823, { zoneID, x: 50.0, y: 50.0 }, 1, "npc"),
-      obs(823, { zoneID, x: 50.8, y: 50.0 }, 2, "npc"),
+      obs(823, { zoneID, x: 50.0, y: 50.0 }, 1, "target"),
+      obs(823, { zoneID, x: 50.8, y: 50.0 }, 2, "target"),
     ];
 
     expect(mergeSpawns(spread(1537))).toEqual({ 1537: [[50.4, 50]] });
@@ -294,16 +294,69 @@ describe("mergeSpawns", () => {
     expect(mergeZoneID(observations)).toBe(40);
   });
 
+  it("should drop a single-session cluster when the strongest cluster has many sessions", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 25; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "target"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    observations.push({ ...obs(823, { zoneID: 40, x: 60, y: 60 }, 99, "target"), provenance: { session: "s", sessionKey: "stray", t: 99 } });
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]] });
+  });
+
+  it("should keep a cluster seen in two sessions", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 25; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "target"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    observations.push({ ...obs(823, { zoneID: 12, x: 60, y: 60 }, 98, "target"), provenance: { session: "s", sessionKey: "a", t: 98 } });
+    observations.push({ ...obs(823, { zoneID: 12, x: 60, y: 60 }, 99, "target"), provenance: { session: "s", sessionKey: "b", t: 99 } });
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]], 12: [[60, 60]] });
+  });
+
+  it("should pick the single quest entity spawn among well supported clusters", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 25; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "npc"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    for (let i = 0; i < 50; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 60, y: 60 + i * 0.001 }, 100 + i, "npc"), provenance: { session: "s", sessionKey: "one", t: 100 + i } });
+    }
+
+    expect(mergeSpawns(observations, true)).toEqual({ 40: [[30, 30]] });
+  });
+
+  it("should keep single-session clusters of rarely seen NPCs", () => {
+    const observations: TaggedSpawnObservation[] = [
+      { ...obs(823, { zoneID: 40, x: 30, y: 30 }, 1, "target"), provenance: { session: "s", sessionKey: "a", t: 1 } },
+      { ...obs(823, { zoneID: 40, x: 60, y: 60 }, 2, "target"), provenance: { session: "s", sessionKey: "b", t: 2 } },
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30], [60, 60]] });
+  });
+
+  it("should place a cluster at the median so an outlier does not pull it away", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(823, { zoneID: 40, x: 30.0, y: 30.0 }, 1, "target"),
+      obs(823, { zoneID: 40, x: 30.1, y: 30.1 }, 2, "target"),
+      obs(823, { zoneID: 40, x: 30.2, y: 30.2 }, 3, "target"),
+      obs(823, { zoneID: 40, x: 30.4, y: 30.4 }, 4, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30.15, 30.15]] });
+  });
+
   it("should return empty object when no observations", () => {
     expect(mergeSpawns([])).toEqual({});
   });
 
   it("should handle multiple zones with multiple coordinates each", () => {
     const observations: TaggedSpawnObservation[] = [
-      obs(823, { zoneID: 40, x: 30.01, y: 86.02 }, 1),
-      obs(823, { zoneID: 12, x: 47.46, y: 62.18 }, 2),
-      obs(823, { zoneID: 40, x: 31.0, y: 87.0 }, 3),
-      obs(823, { zoneID: 12, x: 48.0, y: 63.0 }, 4),
+      obs(823, { zoneID: 40, x: 30.01, y: 86.02 }, 1, "target"),
+      obs(823, { zoneID: 12, x: 47.46, y: 62.18 }, 2, "target"),
+      obs(823, { zoneID: 40, x: 31.0, y: 87.0 }, 3, "target"),
+      obs(823, { zoneID: 12, x: 48.0, y: 63.0 }, 4, "target"),
     ];
 
     const result = mergeSpawns(observations);
@@ -311,6 +364,44 @@ describe("mergeSpawns", () => {
     expect(result[12]).toEqual(expect.arrayContaining([[47.46, 62.18], [48.0, 63.0]]));
     expect(result[40]!.length).toBe(2);
     expect(result[12]!.length).toBe(2);
+  });
+
+  it("should reduce an interacted npc to a single spawn per zone at its interaction positions", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(823, { zoneID: 40, x: 50.0, y: 50.0 }, 1, "npc"),
+      obs(823, { zoneID: 40, x: 50.2, y: 50.0 }, 2, "npc"),
+      obs(823, { zoneID: 40, x: 52.0, y: 50.0 }, 3, "npc"),
+      obs(823, { zoneID: 40, x: 58.0, y: 45.0 }, 4, "target"),
+      obs(823, { zoneID: 40, x: 58.0, y: 45.0 }, 5, "target"),
+      obs(823, { zoneID: 40, x: 58.0, y: 45.0 }, 6, "target"),
+      obs(823, { zoneID: 12, x: 20.0, y: 20.0 }, 7, "npc"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[50.1, 50]], 12: [[20, 20]] });
+  });
+
+  it("should not let ignored targets add support to an interaction cluster", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(823, { zoneID: 40, x: 50.0, y: 50.0 }, 1, "npc"),
+      obs(823, { zoneID: 40, x: 50.0, y: 50.0 }, 2, "npc"),
+      obs(823, { zoneID: 40, x: 60.0, y: 60.0 }, 3, "npc"),
+      obs(823, { zoneID: 40, x: 60.0, y: 60.0 }, 4, "target"),
+      obs(823, { zoneID: 40, x: 60.0, y: 60.0 }, 5, "target"),
+      obs(823, { zoneID: 40, x: 60.0, y: 60.0 }, 6, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[50, 50]] });
+  });
+
+  it("should reduce an interacted npc's targets in a zone without interactions to a single spawn", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(823, { zoneID: 40, x: 50.0, y: 50.0 }, 1, "npc"),
+      obs(823, { zoneID: 12, x: 20.0, y: 20.0 }, 2, "target"),
+      obs(823, { zoneID: 12, x: 20.1, y: 20.0 }, 3, "target"),
+      obs(823, { zoneID: 12, x: 30.0, y: 30.0 }, 4, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[50, 50]], 12: [[20.05, 20]] });
   });
 
   it("should override questnpc and other coordinates when questpoi exists", () => {
