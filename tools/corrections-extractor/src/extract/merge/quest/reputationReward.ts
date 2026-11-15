@@ -51,9 +51,11 @@ function mergeForPlayerFaction(observations: Observation<ReputationTurnInValue>[
     if ((turnInsByFaction.get(factionID) ?? 0) < observations.length * MIN_PRESENCE_SHARE) continue;
     const allSessions = new Set([...amounts.values()].flatMap((sessions) => [...sessions]));
     if (allSessions.size < MIN_SESSIONS) continue;
-    const [amount, sessions] = [...amounts.entries()].sort((a, b) => b[1].size - a[1].size)[0];
-    if (sessions.size < MIN_SESSIONS || sessions.size < allSessions.size * MIN_AMOUNT_SHARE) continue;
-    rewards.push([factionID, amount]);
+    const qualifying = [...amounts.entries()].filter(
+      ([, sessions]) => sessions.size >= MIN_SESSIONS && sessions.size >= allSessions.size * MIN_AMOUNT_SHARE,
+    );
+    if (qualifying.length !== 1) continue;
+    rewards.push([factionID, qualifying[0][0]]);
   }
 
   const decided = new Map(rewards);

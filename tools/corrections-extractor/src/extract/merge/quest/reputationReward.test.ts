@@ -38,6 +38,11 @@ describe("mergeReputationReward", () => {
     ).toBeUndefined();
   });
 
+  it("should drop a faction when two amounts both reach the session thresholds", () => {
+    const observations = [1, 2, 3].flatMap((key) => [vote(key, "H", { 68: 100 }), vote(key, "H", { 68: 110 })]);
+    expect(mergeReputationReward(observations)).toBeUndefined();
+  });
+
   it("should drop a faction that shows up in less than half of the turn-ins", () => {
     expect(
       mergeReputationReward([
