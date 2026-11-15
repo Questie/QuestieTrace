@@ -195,13 +195,20 @@ recorded, since that reflects a state transition rather than PII.
 ### UnitState tracker
 
 Triggers raw `UnitLevel` (scalar number; `-1` = "??"), `UnitClassification`
-(scalar string), and `UnitReaction("player", token)` (scalar number 1..8)
+(scalar string), `UnitReaction("player", token)` (scalar number 1..8), and
+`UnitAffectingCombat` (scalar boolean; restricted answers skipped)
 sampling for the `"target"` and `"mouseover"` tokens. Streams are keyed by
 API name and literal token; `UnitReaction` is nested in native argument
 order: `functions["UnitReaction"]["player"][token]`.
 
-Privacy: sampling is guarded with `UnitExists(token) and not
-UnitIsPlayer(token)`, so only non-player creatures are sampled. No names,
+`CheckInteractDistance("target", 4)` (scalar boolean: within ~28 yards) is
+sampled for the `"target"` token only, at
+`functions["CheckInteractDistance"]["target"][4]`. It records nil while the
+player is in combat or when the answer is unavailable.
+
+Privacy: sampling is guarded with `UnitExists(token)`, `not UnitIsPlayer(token)`
+and `not UnitPlayerControlled(token)` (restricted answers count as
+player-controlled), so only NPCs are sampled, never players or their pets. No names,
 GUIDs, or free text are recorded by this tracker.
 
 - `PLAYER_TARGET_CHANGED`
