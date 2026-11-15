@@ -13,9 +13,13 @@
 // {[zoneID]: {{x,y},...},...} table.
 
 import type { SessionRecord } from "../../../core/types";
+import { getStream, valueAt } from "../../../core/emulator";
 import type { FieldObserver, Observation } from "../../observation";
 import { npcEncounters } from "./_encounters";
 import { playerZoneAt, playerPosAt, toQuestieMapPosition } from "../../probes";
+
+/** CheckInteractDistance index for the ~28 yard follow range (see Modules/Trackers/UnitState.lua). */
+const FOLLOW_DISTANCE_INDEX = 4;
 
 /** Token priority for spawn positioning: questnpc > npc > target.
  *
@@ -45,8 +49,13 @@ export interface SpawnObservationValue {
 export const observeSpawns: FieldObserver<SpawnObservationValue> = (session) => {
   const observations: TaggedSpawnObservation[] = [];
   const encounters = npcEncounters(session);
+  // Sessions recorded before the addon sampled the distance have no stream; their targets are all kept.
+  const targetDistance = getStream(session, "CheckInteractDistance", "target", FOLLOW_DISTANCE_INDEX);
 
   for (const encounter of encounters) {
+    // A target further away than ~28 yards, or at an unknown distance, says little about where the npc is.
+    if (encounter.token === "target" && targetDistance && valueAt(targetDistance, encounter.t) !== true) continue;
+
     const zoneID = playerZoneAt(session, encounter.t);
     if (zoneID === null) continue;
 
