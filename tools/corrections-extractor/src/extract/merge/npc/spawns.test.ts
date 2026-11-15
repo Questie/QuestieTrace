@@ -315,6 +315,18 @@ describe("mergeSpawns", () => {
     expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]], 12: [[60, 60]] });
   });
 
+  it("should pick the single quest entity spawn among well supported clusters", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 25; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "npc"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    for (let i = 0; i < 50; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 60, y: 60 + i * 0.001 }, 100 + i, "npc"), provenance: { session: "s", sessionKey: "one", t: 100 + i } });
+    }
+
+    expect(mergeSpawns(observations, true)).toEqual({ 40: [[30, 30]] });
+  });
+
   it("should keep single-session clusters of rarely seen NPCs", () => {
     const observations: TaggedSpawnObservation[] = [
       { ...obs(823, { zoneID: 40, x: 30, y: 30 }, 1, "target"), provenance: { session: "s", sessionKey: "a", t: 1 } },

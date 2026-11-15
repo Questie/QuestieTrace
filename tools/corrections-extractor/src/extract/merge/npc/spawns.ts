@@ -22,8 +22,9 @@ const CAPITAL_CITY_CLUSTER_THRESHOLD = 1.0;
 const CAPITAL_CITY_ZONE_IDS = new Set([1519, 1537, 1657, 1637, 1638, 1497]);
 const CLUSTER_EPSILON = 1e-9; // Tolerance for floating point comparisons
 // A cluster seen in a single session is only kept when it holds at least this share of
-// the sessions of the NPC's strongest cluster. Drops stray points from targeting at range
-// while NPCs seen only a few times keep all their spawns.
+// the sessions of the NPC's strongest cluster, so it only drops clusters once the strongest
+// one has more than 20 sessions. Drops stray points from targeting at range while NPCs
+// seen only a few times keep all their spawns.
 const MIN_CLUSTER_SESSIONS = 2;
 const MIN_CLUSTER_SESSION_SHARE = 0.05;
 
@@ -129,8 +130,9 @@ function coordKey(zoneID: number, x: number, y: number): string {
 }
 
 /**
- * Clusters each zone's distinct coordinates. With `singleSpawnPerZone`, only
- * the centroid of the cluster with the most observations is kept per zone.
+ * Clusters each zone's distinct coordinates and drops weakly supported clusters.
+ * With `singleSpawnPerZone`, only the remaining cluster with the most
+ * observations is kept per zone.
  */
 function clusterByZone(
   byZone: Map<number, Array<[number, number]>>,
@@ -138,38 +140,34 @@ function clusterByZone(
   coordSessions: Map<string, Set<string>>,
   singleSpawnPerZone: boolean,
 ): Record<number, Array<[number, number]>> {
-  const zoneClusters = new Map<number, Array<{ coord: [number, number]; sessions: number }>>();
+  type SupportedCluster = { coord: [number, number]; members: Array<[number, number]>; sessions: number };
+  const zoneClusters = new Map<number, SupportedCluster[]>();
+  let strongest = 0;
   for (const [zoneID, coords] of byZone) {
     const threshold = CAPITAL_CITY_ZONE_IDS.has(zoneID) ? CAPITAL_CITY_CLUSTER_THRESHOLD : SPAWN_CLUSTER_THRESHOLD;
-    let clusters = clusterAndAverageCoordinatess(coords, threshold);
+    const clusters = clusterAndAverageCoordinatess(coords, threshold).map((c) => {
+      const sessions = new Set<string>();
+      for (const [x, y] of c.members) {
+        for (const session of coordSessions.get(coordKey(zoneID, x, y)) ?? []) sessions.add(session);
+      }
+      strongest = Math.max(strongest, sessions.size);
+      return { ...c, sessions: sessions.size };
+    });
+    zoneClusters.set(zoneID, clusters);
+  }
+
+  const result: Record<number, Array<[number, number]>> = {};
+  for (const [zoneID, zoneCandidates] of zoneClusters) {
+    let clusters = zoneCandidates.filter(
+      (c) => c.sessions >= MIN_CLUSTER_SESSIONS || c.sessions >= strongest * MIN_CLUSTER_SESSION_SHARE,
+    );
+    if (clusters.length === 0) continue;
     if (singleSpawnPerZone) {
       const weight = (members: Array<[number, number]>) =>
         members.reduce((sum, [x, y]) => sum + (observationCounts.get(coordKey(zoneID, x, y)) ?? 1), 0);
       clusters = [clusters.reduce((best, c) => (weight(c.members) > weight(best.members) ? c : best))];
     }
-    zoneClusters.set(
-      zoneID,
-      clusters.map((c) => {
-        const sessions = new Set<string>();
-        for (const [x, y] of c.members) {
-          for (const session of coordSessions.get(coordKey(zoneID, x, y)) ?? []) sessions.add(session);
-        }
-        return { coord: c.coord, sessions: sessions.size };
-      }),
-    );
-  }
-
-  let strongest = 0;
-  for (const clusters of zoneClusters.values()) {
-    for (const c of clusters) strongest = Math.max(strongest, c.sessions);
-  }
-
-  const result: Record<number, Array<[number, number]>> = {};
-  for (const [zoneID, clusters] of zoneClusters) {
-    const spawns = clusters
-      .filter((c) => c.sessions >= MIN_CLUSTER_SESSIONS || c.sessions >= strongest * MIN_CLUSTER_SESSION_SHARE)
-      .map((c) => c.coord);
-    if (spawns.length === 0) continue;
+    const spawns = clusters.map((c) => c.coord);
     spawns.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     result[zoneID] = spawns;
   }
