@@ -22,7 +22,7 @@ Prefer the "Publish" workflow (.github/workflows/publish.yml), which can bump th
 version, then builds the zip via build.py and creates the GitHub release.
 """
 
-TOC_FILES = ["QuestieTrace-Classic.toc", "QuestieTrace-Camelot.toc"]
+TOC_FILES = ["QuestieTrace-Classic.toc", "QuestieTrace-Forever.toc"]
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-b\d+)?$")
 
 
