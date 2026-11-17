@@ -228,6 +228,26 @@ describe("extractCorrections", () => {
 describe("extractCorrections (incremental)", () => {
   const options = { log: () => undefined, workers: 0 };
 
+  it("should extract from the stored submissions without reading the source when offline", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-09/2026-09-30_000000Z_a.json": submission("a") });
+    await extractCorrections(traceDataDir, outputDir, options);
+    rmSync(join(traceDataDir, "submissions"), { recursive: true });
+    const source = { list: vi.fn(), fetch: vi.fn(), release: vi.fn() };
+
+    const meta = await extract(source, join(traceDataDir, "..", "store"), outputDir, { ...options, offline: true });
+
+    expect(source.list).not.toHaveBeenCalled();
+    expect(source.fetch).not.toHaveBeenCalled();
+    expect(meta).toMatchObject({ sessionCount: 1, submissionCount: 1 });
+  });
+
+  it("should fail offline when the store holds no submissions", async () => {
+    const { traceDataDir, outputDir } = setupDirs({});
+    const source = { list: vi.fn(), fetch: vi.fn(), release: vi.fn() };
+
+    await expect(extract(source, join(traceDataDir, "..", "store"), outputDir, { ...options, offline: true })).rejects.toThrow(/offline/);
+  });
+
   it("should only observe submissions added since the previous run", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-09/2026-09-30_000000Z_a.json": submission("a") });
     await extractCorrections(traceDataDir, outputDir, options);

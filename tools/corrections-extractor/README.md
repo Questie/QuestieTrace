@@ -43,6 +43,8 @@ A run therefore only observes submissions added since the last one. Submissions 
 
 Each run also writes `sessions.parquet` (the sessions in use) and `views.sql` into the store, so it can be queried with the DuckDB CLI, see [the data flow](../../docs/data-flow.md#querying-observations).
 
+To only re-run the merge, e.g. after changing code in `src/extract/merge/`, run `npm run extract:offline`. It extracts from the stored submissions without listing or downloading anything from the source, so new submissions are not added and removed ones not dropped. When the observer code changed, it fails and leaves the store untouched.
+
 ### Developing observers on a sample
 
 Changing observer code empties the store, so the next run observes every submission again. While working on an observer, use a fixed sample instead:

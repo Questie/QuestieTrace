@@ -118,11 +118,15 @@ export class ObservedStore {
     private readonly connection: DuckDBConnection,
   ) {}
 
-  /** Opens the store in `dir`, dropping its contents when they were made by another observer version. */
-  static async open(dir: string, observerVersion: string, log: (message: string) => void = () => undefined): Promise<ObservedStore> {
+  /**
+   * Opens the store in `dir`, dropping its contents when they were made by another observer version.
+   * With `reuseOnly`, such a store is kept and opening fails instead.
+   */
+  static async open(dir: string, observerVersion: string, log: (message: string) => void = () => undefined, reuseOnly = false): Promise<ObservedStore> {
     mkdirSync(dir, { recursive: true });
     let manifest = readManifest(dir, log);
     if (!manifest || manifest.observerVersion !== observerVersion || manifest.formatVersion !== FORMAT_VERSION) {
+      if (reuseOnly) throw new Error(`${dir} holds no observations of the current observer code; run without --offline to observe every submission again`);
       if (manifest) log("The observer code or store format changed: observing every submission again");
       rmSync(join(dir, "batches"), { recursive: true, force: true });
       // They would point at batches that no longer exist, or at new ones with the same names.

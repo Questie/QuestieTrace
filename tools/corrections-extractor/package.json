@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "extract": "tsx src/cli.ts",
+    "extract:offline": "tsx src/cli.ts --offline",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

@@ -21,7 +21,7 @@ try {
     storeDir = resolve(fullStoreDir, `sample-${sample}`);
     outputDir = resolve(outputDir, `sample-${sample}`);
   }
-  meta = await extractCorrections(source, storeDir, outputDir, { workers: workersFromEnv() });
+  meta = await extractCorrections(source, storeDir, outputDir, { workers: workersFromEnv(), offline: process.argv.includes("--offline") });
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);

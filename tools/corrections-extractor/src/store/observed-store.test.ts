@@ -257,6 +257,19 @@ describe("ObservedStore", () => {
     expect(existsSync(join(dir, "sessions.parquet"))).toBe(false);
     expect(existsSync(join(dir, "views.sql"))).toBe(false);
   });
+
+  it("should keep the stored observations and fail when reuseOnly meets another observer version", async () => {
+    const dir = tempDir();
+    const store = await ObservedStore.open(dir, "v1");
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1" }]) }]);
+    store.close();
+
+    await expect(ObservedStore.open(dir, "v2", undefined, true)).rejects.toThrow(/--offline/);
+
+    const reopened = await ObservedStore.open(dir, "v1");
+    reopened.close();
+    expect(reopened.keys().size).toBe(1);
+  });
 });
 
 describe("observerVersion", () => {
