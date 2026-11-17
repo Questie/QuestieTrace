@@ -49,7 +49,7 @@ def main():
     copy_content_to(release_addon_folder_path)
 
     if versionOverride != "":
-        for toc_file in ["QuestieTrace-Classic.toc", "QuestieTrace-Camelot.toc"]:
+        for toc_file in ["QuestieTrace-Classic.toc", "QuestieTrace-Forever.toc"]:
             toc_path = release_addon_folder_path + "/" + toc_file
             with fileinput.FileInput(toc_path, inplace=True) as file:
                 for line in file:
@@ -143,7 +143,7 @@ filesToInclude = [
     "QuestieTrace.lua",
     "QuestieTrace_UI.lua",
     "QuestieTrace-Classic.toc",
-    "QuestieTrace-Camelot.toc",
+    "QuestieTrace-Forever.toc",
     "LICENSE.md",
     "gpl-3.0.md",
 ]
@@ -197,7 +197,7 @@ def get_branch():
 
 def get_interface_versions():
     all_versions = []
-    toc_files = ["QuestieTrace-Classic.toc", "QuestieTrace-Camelot.toc"]
+    toc_files = ["QuestieTrace-Classic.toc", "QuestieTrace-Forever.toc"]
     
     for toc_file in toc_files:
         with open(toc_file, "r") as toc:
