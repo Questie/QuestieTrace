@@ -59,6 +59,8 @@ export interface ExtractOptions {
   workers?: number;
   /** Submissions fetched and stored at a time. */
   batchSize?: number;
+  /** Extract from the stored submissions only: the source is neither listed nor downloaded from. */
+  offline?: boolean;
 }
 
 /** EXTRACT_WORKERS as the number of worker threads, or undefined for the default. */
@@ -76,11 +78,16 @@ export async function extractCorrections(
   source: SubmissionSource,
   storeDir: string,
   outputDir: string,
-  { log = console.log, workers = Math.max(1, availableParallelism() - 1), batchSize = BATCH_SIZE }: ExtractOptions = {},
+  { log = console.log, workers = Math.max(1, availableParallelism() - 1), batchSize = BATCH_SIZE, offline = false }: ExtractOptions = {},
 ): Promise<ExtractMeta> {
-  const store = await timed(log, "Opened the observation store", () => ObservedStore.open(storeDir, observerVersion(), log));
+  const store = await timed(log, "Opened the observation store", () => ObservedStore.open(storeDir, observerVersion(), log, offline));
   try {
-    await updateStore(store, source, { log, workers, batchSize });
+    if (offline) {
+      if (store.keys().size === 0) throw new Error("The store holds no observed submissions, so there is nothing to extract offline; run without --offline");
+      log(`Offline: extracting from the ${store.keys().size} stored submission(s) without checking the source`);
+    } else {
+      await updateStore(store, source, { log, workers, batchSize, offline });
+    }
     return await writeOutputs(store, outputDir, log);
   } finally {
     store.close();
