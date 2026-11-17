@@ -10,6 +10,7 @@ export type { TaggedSpawnObservation, SpawnObservationValue } from "../../observ
 const TOKEN_PRIORITY: Record<string, number> = {
   questpoi: 4,
   questnpc: 3,
+  loot: 3,
   npc: 2,
   target: 1,
 };
@@ -30,8 +31,8 @@ function tokenPriority(token: string): number {
   return TOKEN_PRIORITY[token] ?? 0;
 }
 
-/** Tokens whose coordinates replace all other sources, in priority order. */
-const EXCLUSIVE_TOKENS = ["questpoi", "questnpc"];
+/** Tokens whose coordinates replace all other sources, in priority order. A loot needs the player next to the object, like questnpc. */
+const EXCLUSIVE_TOKENS = ["questpoi", "questnpc", "loot"];
 
 function findExclusiveToken(observations: TaggedSpawnObservation[]): string | undefined {
   return EXCLUSIVE_TOKENS.find((token) => observations.some((obs) => obs.token === token));
@@ -177,7 +178,7 @@ export function mergeSpawns(
   }
 
   if (exclusiveToken) {
-    // questpoi/questnpc override everything: only keep coordinates of that token
+    // questpoi/questnpc/loot override everything: only keep coordinates of that token
     const byZone = new Map<number, Array<[number, number]>>();
     for (const obs of tagged) {
       if (obs.token !== exclusiveToken) continue;

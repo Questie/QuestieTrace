@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../../../core/types";
 import { observeSpawns } from "./spawns";
 
-function makeSession(functions: SessionRecord["functions"]): SessionRecord {
+function makeSession(functions: SessionRecord["functions"], events: SessionRecord["events"] = []): SessionRecord {
   return {
     schemaVersion: 9,
     name: "test-session",
@@ -12,7 +12,7 @@ function makeSession(functions: SessionRecord["functions"]): SessionRecord {
     stoppedAtPrecise: 100,
     duration: 100,
     durationPrecise: 100,
-    events: [],
+    events,
     functions,
     functionsDelta: {},
   };
@@ -89,5 +89,23 @@ describe("observeSpawns (object)", () => {
     });
 
     expect(observeSpawns(session)).toEqual([]);
+  });
+
+  it("should observe a looted object's spawn at the player's position with the loot token", () => {
+    const session = makeSession({
+      GetLootSourceInfo: { 1: [{ t: 5, tp: 5, v: { 1: "GameObject-0-5208-0-7-673206-0000399", 2: 1, n: 2 } }] },
+      "C_Map.GetBestMapForUnit": { player: [{ t: 0, tp: 0, v: 1436 }] }, // Westfall -> area 40
+      "C_Map.GetPlayerMapPosition": { player: [{ t: 0, tp: 0, v: { x: 0.5611, y: 0.6164 } }] },
+    }, [{ t: 5, tp: 5, e: "LOOT_READY", a: { n: 0 } }]);
+
+    expect(observeSpawns(session)).toEqual([
+      {
+        entityId: 673206,
+        value: { zoneID: 40, x: 56.11, y: 61.64 },
+        confidence: "high",
+        provenance: { session: "test-session", t: 5 },
+        token: "loot",
+      },
+    ]);
   });
 });

@@ -3,7 +3,8 @@
 //
 // Observed by correlating object encounters with the player's map position at the
 // same time. The `target` token is the primary source for objects (when the player
-// targets/interacts with a GameObject like a chest or mine node).
+// targets/interacts with a GameObject like a chest or mine node), and loots of an
+// object are recorded with the `loot` token.
 //
 // Output shape: Observation<SpawnObservationValue> where each observation
 // represents one spawn point seen at a specific zone/coordinate, keyed by objectID.
@@ -13,6 +14,7 @@
 import type { SessionRecord } from "../../../core/types";
 import type { FieldObserver, Observation } from "../../observation";
 import { objectEncounters } from "./_encounters";
+import { objectLoots } from "./_loots";
 import { playerZoneAt, playerPosAt, toQuestieMapPosition } from "../../probes";
 
 export interface SpawnObservationValue {
@@ -28,9 +30,13 @@ export interface TaggedSpawnObservation extends Observation<SpawnObservationValu
 
 export const observeSpawns: FieldObserver<SpawnObservationValue> = (session) => {
   const observations: TaggedSpawnObservation[] = [];
-  const encounters = objectEncounters(session);
+  // Looted objects (chests, crates, ...) are mostly never targeted, so their loots are a source of their own.
+  const sightings = [
+    ...objectEncounters(session),
+    ...objectLoots(session).map((loot) => ({ ...loot, token: "loot" })),
+  ];
 
-  for (const encounter of encounters) {
+  for (const encounter of sightings) {
     const zoneID = playerZoneAt(session, encounter.t);
     if (zoneID === null) continue;
 

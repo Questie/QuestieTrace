@@ -18,6 +18,14 @@ function obs(
 }
 
 describe("mergeSpawns (object)", () => {
+  it("should only keep loot coordinates when an object was looted", () => {
+    const observations: TaggedSpawnObservation[] = [
+      obs(673206, { zoneID: 40, x: 30.0, y: 30.0 }, 1, "loot"),
+      obs(673206, { zoneID: 40, x: 60.0, y: 60.0 }, 2, "target"),
+    ];
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]] });
+  });
   it("should build zone -> coordinate array mapping", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(2843, { zoneID: 40, x: 30.01, y: 86.02 }, 10),
