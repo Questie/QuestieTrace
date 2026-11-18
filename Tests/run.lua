@@ -2769,19 +2769,13 @@ local function TestGameObjectTrackerSkipsUnreadableUnitNameLine()
     "GameObjectName must not record when the UnitName line is unreadable")
 end
 
-local function TestGameObjectTrackerSkipsWhenNoUnitNameLine()
-  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+---@param runtime TestRuntime
+---@param tooltips table[] Tooltip data handed to the Object post-call, in order
+local function InstallObjectTooltips(runtime, tooltips)
   runtime.env.TooltipDataProcessor = {
     AddTooltipPostCall = function(tooltipType, callback)
       if tooltipType == 4 then -- Enum.TooltipDataType.Object
-        callback(nil, {
-          type = 4,
-          lines = {
-            -- No line is tagged UnitName (not a real-world case, but defensive).
-            { type = 1, leftText = "Rusty Chest", rightText = "" },
-            { type = 1, leftText = "Locked", rightText = "" },
-          },
-        })
+        for _, data in ipairs(tooltips) do callback(nil, data) end
       end
     end,
   }
@@ -2789,14 +2783,72 @@ local function TestGameObjectTrackerSkipsWhenNoUnitNameLine()
     TooltipDataType = { Object = 4 },
     TooltipDataLineType = { UnitName = 2 },
   }
+end
 
-  runtime.core.StartCapture("game object no unit name line")
+local function TestGameObjectTrackerRecordsFirstLineWithoutUnitNameLine()
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  -- The shape Forever sends: the name is a default line, followed by quest lines.
+  InstallObjectTooltips(runtime, { {
+    type = 4,
+    lines = {
+      { type = 0, leftText = "Crate with Holes" },
+      { type = 17, leftText = "Blueleaf Tubers" },
+      { type = 8, leftText = "0/1 Crate With Holes" },
+    },
+  } })
 
-  local session = Session(runtime)
-  local functions = session.functions
+  runtime.core.StartCapture("game object forever tooltip")
 
-  assert(functions.GameObjectName == nil or #functions.GameObjectName == 0,
-    "GameObjectName must not record without a UnitName line")
+  local stream = Session(runtime).functions.GameObjectName
+  assert(#stream == 1 and stream[1].v == "Crate with Holes", "GameObjectName must be the first tooltip line")
+end
+
+local function TestGameObjectTrackerPrefersUnitNameLine()
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  runtime.env.issecretvalue = function(value) return value == "secret-guid" end
+  InstallObjectTooltips(runtime, {
+    { type = 4, guid = "GameObject-0-1-1-1-673206-0000399", lines = {
+      { type = 0, leftText = "Locked" },
+      { type = 2, leftText = "Stolen Explosives" },
+    } },
+    { type = 4, guid = "secret-guid", lines = { { type = 0, leftText = "Someplayer" } } },
+  })
+
+  runtime.core.StartCapture("game object unit name line")
+
+  local stream = Session(runtime).functions.GameObjectName
+  assert(#stream == 1 and stream[1].v == "Stolen Explosives",
+    "GameObjectName must prefer the UnitName line and skip a restricted GUID")
+end
+
+local function TestGameObjectTrackerSkipsNonObjectTooltips()
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  InstallObjectTooltips(runtime, {
+    { type = 2, lines = { { type = 0, leftText = "Someplayer" } } }, -- a unit tooltip
+    { type = 4, guid = "Player-1-000001", lines = { { type = 0, leftText = "Someplayer" } } },
+    { type = 4, guid = "Pet-0-1-1-1-416-0100000001", lines = { { type = 0, leftText = "Raichu" } } },
+  })
+
+  runtime.core.StartCapture("game object non object tooltips")
+
+  local stream = Session(runtime).functions.GameObjectName
+  assert(#stream == 0, "GameObjectName must not record unit, player or pet tooltips")
+end
+
+local function TestGameObjectTrackerRedactsPlayerNamesInObjectNames()
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  runtime.env.UnitName = function(unit)
+    if unit == "player" then
+      return "Tester"
+    end
+  end
+  InstallObjectTooltips(runtime, { { type = 4, lines = { { type = 0, leftText = "Tester's Portal" } } } })
+
+  runtime.core.StartCapture("game object player name")
+
+  local stream = Session(runtime).functions.GameObjectName
+  assert(#stream == 1 and stream[1].v ~= "Tester's Portal" and (not stream[1].v:find("Tester")),
+    "GameObjectName must redact player names: " .. tostring(stream[1] and stream[1].v))
 end
 
 ---Whether any string anywhere in a value (keys included) contains needle.
@@ -3530,7 +3582,10 @@ local tests = {
   { name = "quest poi tracker samples a same-frame QUEST_POI_UPDATE on the next frame", run = TestQuestPOTrackerSameFrameQuestPOIUpdate },
   { name = "game object tracker records object name", run = TestGameObjectTrackerRecordsObjectName },
   { name = "game object tracker skips unreadable UnitName line", run = TestGameObjectTrackerSkipsUnreadableUnitNameLine },
-  { name = "game object tracker skips when no UnitName line", run = TestGameObjectTrackerSkipsWhenNoUnitNameLine },
+  { name = "should record the first tooltip line as the object name without a UnitName line", run = TestGameObjectTrackerRecordsFirstLineWithoutUnitNameLine },
+  { name = "should prefer the UnitName line and skip restricted GUIDs", run = TestGameObjectTrackerPrefersUnitNameLine },
+  { name = "should not record names from unit, player or pet tooltips", run = TestGameObjectTrackerSkipsNonObjectTooltips },
+  { name = "should redact player names in object names", run = TestGameObjectTrackerRedactsPlayerNamesInObjectNames },
 }
 
 local failures = 0

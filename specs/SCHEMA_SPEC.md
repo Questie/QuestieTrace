@@ -410,7 +410,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `QuestLog` | object (number[]) | *(synthetic)* active quest IDs in quest-log order |
 | `FactionOrder` | object (number[]) | *(synthetic)* known faction IDs in display order |
 | `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration |
-| `GameObjectName` | scalar (string) | *(synthetic)* game object name extracted from TooltipDataProcessor (UnitName line) |
+| `GameObjectName` | scalar (string) | *(synthetic)* game object name extracted from TooltipDataProcessor Object tooltips (UnitName line, else the first line); player names redacted |
 
 ### Parameterized by `"player"`
 
