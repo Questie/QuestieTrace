@@ -21,6 +21,9 @@
 //! - a new nextQuestInChain to a quest whose prerequisites leave this one out. Questie hides a quest
 //!   once its next quest is done or in the log, so characters who reached the next quest another
 //!   way would lose this one.
+//! - a new nextQuestInChain to a quest whose prerequisites are an AND list (two or more quests in
+//!   preQuestGroup). QuestieDB's authors only chain into a single or OR prerequisite; with AND, every
+//!   member hands off into the quest, so the traces would chain each of them into it.
 //! - a new nextQuestInChain a signal saw contradicted more often than supported.
 //!
 //! A quest with nothing to apply is written commented out as a whole, so the module never creates
@@ -58,6 +61,8 @@ pub enum NotApplied {
     QuestieDbRequiresAll { required: Vec<QuestId> },
     /// A new chain to `next`, whose prerequisites as QuestieDB loads them (`required`) leave this quest out.
     NextDoesNotRequire { next: QuestId, required: Vec<QuestId> },
+    /// A new chain to `next`, which needs this quest together with `together` (an AND list).
+    NextNeedsAll { next: QuestId, together: Vec<QuestId> },
     /// A new chain one signal saw contradicted more often than supported.
     Contradicted { signal: String },
 }
@@ -290,13 +295,22 @@ fn chain_problem(quest_id: QuestId, next: QuestId, records: &LuaRecords, sources
             signal: claim.signal().to_owned(),
         });
     }
-    let required = loaded_prerequisites(next, records, sources);
-    (!required.is_empty() && !required.contains(&quest_id)).then_some(NotApplied::NextDoesNotRequire { next, required })
+    let (kind, required) = loaded_prerequisites(next, records, sources);
+    if required.is_empty() {
+        None
+    } else if !required.contains(&quest_id) {
+        Some(NotApplied::NextDoesNotRequire { next, required })
+    } else if kind == RelationField::PreQuestGroup && required.len() > 1 {
+        let together = required.into_iter().filter(|&other| other != quest_id).collect();
+        Some(NotApplied::NextNeedsAll { next, together })
+    } else {
+        None
+    }
 }
 
-/// A quest's prerequisites as QuestieDB will load them with this module: preQuestSingle when set,
-/// else preQuestGroup.
-fn loaded_prerequisites(quest_id: QuestId, records: &LuaRecords, sources: &RecordSources) -> Vec<QuestId> {
+/// A quest's prerequisites as QuestieDB will load them with this module, and which field they are
+/// in: preQuestSingle when set, else preQuestGroup.
+fn loaded_prerequisites(quest_id: QuestId, records: &LuaRecords, sources: &RecordSources) -> (RelationField, Vec<QuestId>) {
     let written = records.get(&quest_id).map_or(&[][..], Vec::as_slice);
     let loaded = |field: RelationField| -> Vec<QuestId> {
         match written
@@ -311,9 +325,9 @@ fn loaded_prerequisites(quest_id: QuestId, records: &LuaRecords, sources: &Recor
     };
     let single = loaded(RelationField::PreQuestSingle);
     if single.is_empty() {
-        loaded(RelationField::PreQuestGroup)
+        (RelationField::PreQuestGroup, loaded(RelationField::PreQuestGroup))
     } else {
-        single
+        (RelationField::PreQuestSingle, single)
     }
 }
 
@@ -368,6 +382,10 @@ fn not_applied_reason(field: RelationField, why: &NotApplied) -> String {
         NotApplied::NextDoesNotRequire { next, required } => format!(
             "not applied: {next} requires {}, not this quest, and Questie hides a quest once its next quest is done or in the log",
             joined(required)
+        ),
+        NotApplied::NextNeedsAll { next, together } => format!(
+            "not applied: {next} needs this quest together with {} (preQuestGroup), and chains only lead into a single or OR prerequisite",
+            joined(together)
         ),
         NotApplied::Contradicted { signal } => format!("not applied: {signal} saw it contradicted more often than supported"),
     }
@@ -609,14 +627,18 @@ mod tests {
     }
 
     #[test]
-    fn applies_a_new_chain_only_into_a_quest_whose_prerequisites_include_it() {
+    fn applies_a_new_chain_only_into_a_single_or_or_prerequisite_that_includes_it() {
         let records = records_of(
             &[
                 // 98299 requires 99: the chain from 98298 would hide 98298 from everyone who skipped it.
                 (98298, set(&[(NextQuestInChain, &[98299])])),
-                // 480's prerequisites become 479 AND 95981 through this module: the chain holds.
+                // 480's prerequisites become 479 AND 95981 through this module: chains never lead into an AND list.
                 (95981, set(&[(NextQuestInChain, &[480])])),
                 (480, set(&[(PreQuestGroup, &[479, 95981])])),
+                // 92847 already needs 92844 AND 92846 in QuestieDB.
+                (92844, set(&[(NextQuestInChain, &[92847])])),
+                // An OR list that includes the quest: the chain holds.
+                (7, set(&[(NextQuestInChain, &[8])])),
                 // Nothing known about 2's prerequisites: no evidence against the chain.
                 (1, set(&[(NextQuestInChain, &[2])])),
                 // QuestieDB already has this chain: shown, not judged.
@@ -625,6 +647,8 @@ mod tests {
             &[
                 (98299, set(&[(PreQuestSingle, &[99])])),
                 (480, set(&[(PreQuestSingle, &[479])])),
+                (92847, set(&[(PreQuestGroup, &[92844, 92846])])),
+                (8, set(&[(PreQuestSingle, &[7, 9])])),
                 (544, set(&[(NextQuestInChain, &[545])])),
                 (545, set(&[(PreQuestSingle, &[93680])])),
             ],
@@ -643,7 +667,29 @@ mod tests {
                 }
             )]
         );
-        assert_eq!(records[&95981], [applied(NextQuestInChain, &[480])]);
+        assert_eq!(
+            records[&95981],
+            [shown(
+                NextQuestInChain,
+                &[480],
+                NotApplied::NextNeedsAll {
+                    next: 480,
+                    together: vec![479]
+                }
+            )]
+        );
+        assert_eq!(
+            records[&92844],
+            [shown(
+                NextQuestInChain,
+                &[92847],
+                NotApplied::NextNeedsAll {
+                    next: 92847,
+                    together: vec![92846]
+                }
+            )]
+        );
+        assert_eq!(records[&7], [applied(NextQuestInChain, &[8])]);
         assert_eq!(records[&1], [applied(NextQuestInChain, &[2])]);
         assert_eq!(records[&544], [shown(NextQuestInChain, &[545], NotApplied::AlreadyInQuestieDb)]);
     }
