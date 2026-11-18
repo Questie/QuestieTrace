@@ -12,7 +12,7 @@ local Core = QuestieTraceCore
 --         guid: WOWGUID
 --         lines: TooltipDataLine[]
 --           TooltipDataLine:
---             type: Enum.TooltipDataLineType (2 = UnitName)
+--             type: Enum.TooltipDataLineType (2 = UnitName; Forever sends the name as 0 = Default)
 --             leftText: string
 --             rightText: string
 
@@ -34,27 +34,42 @@ local function SafeString(value)
 end
 
 ---Extract object name from Modern TooltipDataProcessor tooltip data.
+---The name is the UnitName line when there is one; Forever tags it as a default line
+---(type 0) instead, and the name is then the first line, as on every tooltip.
 ---@param tooltipData TooltipData?
 ---@return string? name
 local function ExtractModernGameObject(tooltipData)
-  if not tooltipData or not tooltipData.lines then return nil end
+  if (not tooltipData) or (not tooltipData.lines) then
+    return nil
+  end
+  -- Privacy: only world object tooltips. Players and pets are units, never objects.
+  if tooltipData.type ~= Enum.TooltipDataType.Object then
+    return nil
+  end
+  if tooltipData.guid ~= nil and Core.ParseGUIDKind(tooltipData.guid) ~= "object" then
+    return nil
+  end
   local lines = tooltipData.lines
 
-  -- The UnitName line type (2) holds the object's name. If it's missing or
-  -- unreadable (secret/empty), leave the name unset rather than guessing
+  -- An unreadable (secret/empty) name leaves the name unset rather than guessing
   -- from another line (e.g. a requirement/description line).
+  local nameLine = lines[1]
   for i = 1, #lines do
     local line = lines[i]
     if line and line.type == Enum.TooltipDataLineType.UnitName then
-      local text = SafeString(line.leftText)
-      if text ~= "" then
-        return text
-      end
-      return nil
+      nameLine = line
+      break
     end
   end
-
-  return nil
+  if (not nameLine) then
+    return nil
+  end
+  local text = SafeString(nameLine.leftText)
+  if text == "" then
+    return nil
+  end
+  -- Player-made objects can carry their owner's name, e.g. "<name>'s Portal".
+  return Core.SanitizeText(text)
 end
 
 ---Sample Modern TooltipDataProcessor for game object info.
