@@ -73,6 +73,16 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// The size in bytes of the value's CBOR encoding, for a value decoded lazily (every
+    /// function stream, `functionsDelta`, every event), whether it was read yet or not. None for a
+    /// value decoded with its parent.
+    pub fn encoded_len(&self) -> Option<usize> {
+        match self {
+            Value::Lazy(lazy) => Some(lazy.raw.len()),
+            _ => None,
+        }
+    }
+
     /// JS `Array.isArray`.
     pub fn is_array(&self) -> bool {
         matches!(self.resolved(), Value::Array(_))

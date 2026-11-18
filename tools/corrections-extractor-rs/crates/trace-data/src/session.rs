@@ -80,6 +80,13 @@ impl<'v, 'a> Session<'v, 'a> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionKey(u64, u64);
 
+impl SessionKey {
+    /// The clocks the key is made of: `startedAt` and `startedAtPrecise`, with -0 read as 0.
+    pub fn clocks(&self) -> (f64, f64) {
+        (f64::from_bits(self.0), f64::from_bits(self.1))
+    }
+}
+
 /// One recorded event: `{ t, tp, e, a }`, with its name and times already read.
 #[derive(Clone, Copy)]
 pub struct Event<'v, 'a> {

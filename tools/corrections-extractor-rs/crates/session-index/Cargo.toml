@@ -1,0 +1,16 @@
+[package]
+name = "session-index"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Lists every recorded session of a trace-data checkout once, and which submissions hold nothing else"
+
+[dependencies]
+trace-data.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+libdeflater.workspace = true

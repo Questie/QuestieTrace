@@ -486,6 +486,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-index"
+version = "0.1.0"
+dependencies = [
+ "libdeflater",
+ "rayon",
+ "serde",
+ "serde_json",
+ "trace-data",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

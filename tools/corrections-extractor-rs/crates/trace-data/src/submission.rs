@@ -41,9 +41,16 @@ pub struct Decoded<'a> {
 /// One decoded export.
 pub struct Trace<'a> {
     root: Value<'a>,
+    index: usize,
 }
 
 impl<'a> Trace<'a> {
+    /// Where the export is in the submission's `export_string`: its position among every start
+    /// marker (0-based), counting exports that did not decode.
+    pub fn export_index(&self) -> usize {
+        self.index
+    }
+
     /// The decoded export, as the TypeScript decoder returns it.
     pub fn root(&self) -> &Value<'a> {
         &self.root
@@ -167,7 +174,7 @@ impl Submission {
             match export {
                 Err(message) => dropped_exports.push(message.clone()),
                 Ok(inflated) => match decode_root(inflated.bytes(), arena) {
-                    Ok(root) => traces.push(Trace { root }),
+                    Ok(root) => traces.push(Trace { root, index }),
                     Err(message) => dropped_exports.push(format!("export {}: {message}", index + 1)),
                 },
             }
@@ -305,6 +312,8 @@ mod tests {
         let decoded = pasted.decode(&arena);
         assert_eq!(traces_json(&decoded), traces_json(&alone.decode(&arena)));
         assert_eq!(decoded.dropped_exports, ["export 1 has no matching end marker"]);
+        // The export that decoded is the second one in the export string.
+        assert_eq!(decoded.traces[0].export_index(), 1);
     }
 
     #[test]
