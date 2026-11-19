@@ -4,7 +4,7 @@ local function LoadApiModule(env)
   setmetatable(env, { __index = _G })
   env._G = env
   env.QuestieTraceCore = {}
-  env.QuestieTrace = { schemaVersion = 18, settings = {} }
+  env.QuestieTrace = { schemaVersion = 19, settings = {} }
 
   local chunk = assert(loadfile("Modules/API.lua"))
   setfenv(chunk, env)
