@@ -3,7 +3,8 @@
 //
 // Looted objects are rarely targeted, so their names come from the object tooltip instead
 // (GameObjectName, Modules/Trackers/GameObject.lua): an object has to be hovered to be looted,
-// so the last tooltip before a loot names the looted object. The tooltip has no GUID.
+// so the last tooltip before a loot names the looted object. Forever's tooltips have no GUID
+// (GameObjectGUID is ""), so the name cannot be checked against the looted object.
 
 import { getStream, valueAt } from "../../../core/emulator";
 import { getLocaleAt, unitNameAt } from "../../probes";

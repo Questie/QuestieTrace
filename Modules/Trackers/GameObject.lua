@@ -20,6 +20,8 @@ local Core = QuestieTraceCore
 local currentCapture
 ---@type FunctionStreamEntry[]?
 local modernNameStream
+---@type FunctionStreamEntry[]?
+local modernGUIDStream
 ---@type boolean
 local modernTooltipProcessorRegistered = false
 
@@ -83,12 +85,17 @@ local function SampleModern(_, tooltipData)
   local name = ExtractModernGameObject(tooltipData)
   if not name then return end
 
-  if modernNameStream then
-    local prev = modernNameStream[#modernNameStream]
-    if not prev or prev.v ~= name then
-      modernNameStream[#modernNameStream + 1] = { t = t, tp = tp, v = name }
-    end
-  end
+  if (not modernNameStream) or (not modernGUIDStream) then return end
+
+  -- Forever sends object tooltips without a GUID, so a name cannot be tied to an object there yet.
+  -- The GUID is still recorded whenever a client provides one, should that change; "" marks a tooltip
+  -- without a readable object GUID. Both streams are written together so each name has its GUID at the same t.
+  local guid = Core.ParseGUIDKind(tooltipData.guid) == "object" and tooltipData.guid or ""
+  local prevName = modernNameStream[#modernNameStream]
+  local prevGUID = modernGUIDStream[#modernGUIDStream]
+  if prevName and prevName.v == name and prevGUID and prevGUID.v == guid then return end
+  modernNameStream[#modernNameStream + 1] = { t = t, tp = tp, v = name }
+  modernGUIDStream[#modernGUIDStream + 1] = { t = t, tp = tp, v = guid }
 end
 
 ---Register TooltipDataProcessor for Modern/Forever game object detection.
@@ -114,8 +121,10 @@ Core.RegisterTracker({
 
     -- Modern/Forever streams
     if not functions["GameObjectName"] then functions["GameObjectName"] = {} end
+    if not functions["GameObjectGUID"] then functions["GameObjectGUID"] = {} end
 
     modernNameStream = functions["GameObjectName"]
+    modernGUIDStream = functions["GameObjectGUID"]
 
     -- Register TooltipDataProcessor for Modern/Forever
     RegisterTooltipDataProcessor()

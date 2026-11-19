@@ -411,6 +411,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `FactionOrder` | object (number[]) | *(synthetic)* known faction IDs in display order |
 | `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration |
 | `GameObjectName` | scalar (string) | *(synthetic)* game object name extracted from TooltipDataProcessor Object tooltips (UnitName line, else the first line); player names redacted |
+| `GameObjectGUID` | scalar (string) | *(synthetic)* object GUID of the tooltip each `GameObjectName` sample came from, written together with it at the same `t`; `""` when the tooltip has no readable object GUID (always on Forever) |
 
 ### Parameterized by `"player"`
 
