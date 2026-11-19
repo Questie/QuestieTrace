@@ -2728,8 +2728,8 @@ local function TestGameObjectTrackerRecordsObjectName()
   assert(#functions.GameObjectName >= 1, "GameObjectName must have entry")
   assert(functions.GameObjectName[1].v == "Copper Vein", "GameObjectName must be 'Copper Vein'")
 
-  -- GameObjectGUID stream should NOT exist (tooltips don't have GUID)
-  assert(functions.GameObjectGUID == nil, "GameObjectGUID stream must not exist")
+  -- GameObjectGUID marks the missing GUID, as on Forever
+  assert(#functions.GameObjectGUID == 1 and functions.GameObjectGUID[1].v == "", "GameObjectGUID must be empty without a GUID")
 end
 
 local function TestGameObjectTrackerSkipsUnreadableUnitNameLine()
@@ -2819,6 +2819,37 @@ local function TestGameObjectTrackerPrefersUnitNameLine()
   local stream = Session(runtime).functions.GameObjectName
   assert(#stream == 1 and stream[1].v == "Stolen Explosives",
     "GameObjectName must prefer the UnitName line and skip a restricted GUID")
+end
+
+local function TestGameObjectTrackerRecordsObjectGUID()
+  local runtime = NewRuntime({ "Modules/Trackers/GameObject.lua" })
+  local explosivesA = "GameObject-0-1-1-1-673206-0000399"
+  local explosivesB = "GameObject-0-1-1-1-673207-0000400"
+  InstallObjectTooltips(runtime, {
+    { type = 4, guid = explosivesA, lines = { { type = 0, leftText = "Stolen Explosives" } } },
+    { type = 4, guid = explosivesA, lines = { { type = 0, leftText = "Stolen Explosives" } } },
+    { type = 4, guid = explosivesB, lines = { { type = 0, leftText = "Stolen Explosives" } } },
+    { type = 4, lines = { { type = 0, leftText = "Crate with Holes" } } },
+    { type = 4, guid = explosivesA, lines = { { type = 0, leftText = "Stolen Explosives" } } },
+    { type = 4, guid = "Creature-0-1-1-1-1-000001", lines = { { type = 0, leftText = "Crate with Holes" } } },
+  })
+
+  runtime.core.StartCapture("game object guid")
+
+  local functions = Session(runtime).functions
+  local names, guids = functions.GameObjectName, functions.GameObjectGUID
+  local expected = {
+    { "Stolen Explosives", explosivesA },
+    { "Stolen Explosives", explosivesB },
+    { "Crate with Holes", "" },
+    { "Stolen Explosives", explosivesA },
+  }
+  assert(#names == #expected and #guids == #expected, "Both streams must have one entry per changed tooltip")
+  for i, pair in ipairs(expected) do
+    assert(names[i].v == pair[1] and guids[i].v == pair[2],
+      string.format("Entry %d must be %s / %q, got %s / %q", i, pair[1], pair[2], names[i].v, guids[i].v))
+    assert(names[i].t == guids[i].t and names[i].tp == guids[i].tp, "Name and GUID must be recorded at the same time")
+  end
 end
 
 local function TestGameObjectTrackerSkipsNonObjectTooltips()
@@ -3584,6 +3615,7 @@ local tests = {
   { name = "game object tracker skips unreadable UnitName line", run = TestGameObjectTrackerSkipsUnreadableUnitNameLine },
   { name = "should record the first tooltip line as the object name without a UnitName line", run = TestGameObjectTrackerRecordsFirstLineWithoutUnitNameLine },
   { name = "should prefer the UnitName line and skip restricted GUIDs", run = TestGameObjectTrackerPrefersUnitNameLine },
+  { name = "should record the object GUID together with the object name", run = TestGameObjectTrackerRecordsObjectGUID },
   { name = "should not record names from unit, player or pet tooltips", run = TestGameObjectTrackerSkipsNonObjectTooltips },
   { name = "should redact player names in object names", run = TestGameObjectTrackerRedactsPlayerNamesInObjectNames },
 }
