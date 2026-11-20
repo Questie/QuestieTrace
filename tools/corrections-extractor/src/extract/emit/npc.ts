@@ -12,6 +12,7 @@ import { emitRecords } from "./records";
 export interface NpcFacts {
   [field: string]: Map<number, Fact<unknown>>;
   name: Map<number, Fact<string>>;
+  subName: Map<number, Fact<string>>;
   minLevel: Map<number, Fact<number>>;
   maxLevel: Map<number, Fact<number>>;
   spawns: Map<number, Fact<Record<number, Array<[number, number]>>>>;

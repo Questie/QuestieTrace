@@ -286,6 +286,8 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   const npcLevelRanges = onlyDefinedFacts(field("npcLevel", mergeNpcLevelRange));
   const npcRecords = emitNpcRecords({
     name: aggregateNewestScalarSummary(scalars.npcName),
+    // "" means the NPC has no subname, which is Questie's default.
+    subName: new Map([...aggregateNewestScalarSummary(scalars.npcSubName)].filter(([, fact]) => fact.value !== "")) as Map<number, Fact<string>>,
     minLevel: mapFacts(npcLevelRanges, (range) => range.min),
     maxLevel: mapFacts(npcLevelRanges, (range) => range.max),
     spawns: field<SpawnObservationValue, ReturnType<typeof mergeNpcSpawns>>("npcSpawns", (obs) => mergeNpcSpawns(obs, questNpcIds.has(obs[0].entityId)), "npcTurnInSpawns"),

@@ -16,6 +16,7 @@ describe("emitNpcRecords", () => {
       zoneID: new Map(),
       friendlyToFaction: new Map(),
       rank: new Map(),
+      subName: new Map(),
     });
     expect(records.get(823)).toEqual({ name: "Deputy Willem", minLevel: 18 });
   });
@@ -29,6 +30,7 @@ describe("emitNpcRecords", () => {
       zoneID: new Map([[823, fact(823, 40)]]),
       friendlyToFaction: new Map([[823, fact(823, "AH")]]),
       rank: new Map(),
+      subName: new Map(),
     });
     expect(records.get(823)).toEqual({
       name: "Old Murk-Eye",
@@ -47,6 +49,7 @@ describe("emitNpcRecords", () => {
       zoneID: new Map(),
       friendlyToFaction: new Map(),
       rank: new Map(),
+      subName: new Map(),
     });
     expect([...records.keys()].sort()).toEqual([1, 2]);
     expect(records.get(1)).toEqual({ name: "Only Named" });
@@ -62,6 +65,7 @@ describe("emitNpcRecords", () => {
       zoneID: new Map(),
       friendlyToFaction: new Map(),
       rank: new Map(),
+      subName: new Map(),
     });
     expect(records.size).toBe(0);
   });
