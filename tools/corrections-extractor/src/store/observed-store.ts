@@ -516,11 +516,15 @@ function backUp(dir: string, log: (message: string) => void): void {
     log(`Keeping the backup of an earlier store in ${backupDir}: the run that made it did not finish`);
     return;
   }
-  if (!existsSync(join(dir, "manifest.json"))) return;
-  mkdirSync(backupDir);
+  // Files are moved to a staging directory first, so backup/ never holds part of a store. One
+  // left by a killed run already holds the files moved so far: the rest are added.
+  const stagingDir = `${backupDir}.tmp`;
+  if (!existsSync(join(dir, "manifest.json")) && !existsSync(stagingDir)) return;
+  mkdirSync(stagingDir, { recursive: true });
   for (const name of BACKED_UP) {
-    if (existsSync(join(dir, name))) renameSync(join(dir, name), join(backupDir, name));
+    if (existsSync(join(dir, name))) renameSync(join(dir, name), join(stagingDir, name));
   }
+  renameSync(stagingDir, backupDir);
   log(`Moved the previous store to ${backupDir}; it is removed once this run finishes`);
 }
 

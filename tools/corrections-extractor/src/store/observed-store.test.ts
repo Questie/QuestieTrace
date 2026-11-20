@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
@@ -273,6 +273,21 @@ describe("ObservedStore", () => {
     (await ObservedStore.open(dir, "v3")).close();
 
     expect(JSON.parse(readFileSync(join(dir, "backup", "manifest.json"), "utf8")).observerVersion).toBe("v1");
+  });
+
+  it("should finish a backup that a killed run only partly moved", async () => {
+    const dir = tempDir();
+    const store = await ObservedStore.open(dir, "v1");
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1" }]) }]);
+    store.close();
+    mkdirSync(join(dir, "backup.tmp"));
+    renameSync(join(dir, "manifest.json"), join(dir, "backup.tmp", "manifest.json"));
+
+    (await ObservedStore.open(dir, "v2")).close();
+
+    expect(existsSync(join(dir, "backup.tmp"))).toBe(false);
+    expect(readdirSync(join(dir, "backup")).sort()).toEqual(["batches", "manifest.json"]);
+    expect(readdirSync(join(dir, "backup", "batches")).sort()).toEqual(["0.observations.parquet", "0.sessions.parquet"]);
   });
 
   it("should remove the query views when the store is emptied", async () => {
