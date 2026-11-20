@@ -245,6 +245,36 @@ describe("ObservedStore", () => {
     expect(readdirSync(join(dir, "batches"))).toEqual([]);
   });
 
+  it("should move the dropped store to backup/ until dropBackup is called", async () => {
+    const dir = tempDir();
+    const store = await ObservedStore.open(dir, "v1");
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1" }]) }]);
+    await store.writeQueryViews();
+    store.close();
+
+    const reopened = await ObservedStore.open(dir, "v2");
+    const backup = join(dir, "backup");
+    expect(readdirSync(backup).sort()).toEqual(["batches", "manifest.json", "sessions.parquet", "views.sql"]);
+    expect(readdirSync(join(backup, "batches")).sort()).toEqual(["0.observations.parquet", "0.sessions.parquet"]);
+    expect(JSON.parse(readFileSync(join(backup, "manifest.json"), "utf8")).observerVersion).toBe("v1");
+
+    reopened.dropBackup();
+    reopened.close();
+    expect(existsSync(backup)).toBe(false);
+  });
+
+  it("should keep the backup of a run that did not finish when the observer version changes again", async () => {
+    const dir = tempDir();
+    const store = await ObservedStore.open(dir, "v1");
+    await store.add([{ key: "2026-10/a.json", submission: observed([{ key: "k1" }]) }]);
+    store.close();
+    (await ObservedStore.open(dir, "v2")).close();
+
+    (await ObservedStore.open(dir, "v3")).close();
+
+    expect(JSON.parse(readFileSync(join(dir, "backup", "manifest.json"), "utf8")).observerVersion).toBe("v1");
+  });
+
   it("should remove the query views when the store is emptied", async () => {
     const dir = tempDir();
     const store = await ObservedStore.open(dir, "v1");

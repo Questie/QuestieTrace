@@ -39,7 +39,7 @@ The observations are kept between runs in `TRACE_STORE_DIR`, by default `trace-s
 | `batches/<n>.sessions.parquet` | One row per observed session copy (submission, session key, contributor, server time) |
 | `batches/<n>.observations.parquet` | One row per observation (field, entity, value as JSON, confidence, time) |
 
-A run therefore only observes submissions added since the last one. Submissions no longer in the source (rejected ones are deleted from the bucket) are dropped, and older submissions that may hold copies of their sessions are observed again. When the observer code changes (a hash of the sources listed in `src/store/observer-version.ts`), the store is dropped and every submission is observed again. Delete the directory to force that.
+A run therefore only observes submissions added since the last one. Submissions no longer in the source (rejected ones are deleted from the bucket) are dropped, and older submissions that may hold copies of their sessions are observed again. When the observer code changes (a hash of the sources listed in `src/store/observer-version.ts`), the store is dropped and every submission is observed again. The dropped store is moved to `backup/` in the store directory and only removed once a run finishes; if that run fails or is stopped, the backup is kept, also across further observer changes. To restore it, move its contents back into the store directory. Delete the directory to force a full re-observation.
 
 Each run also writes `sessions.parquet` (the sessions in use) and `views.sql` into the store, so it can be queried with the DuckDB CLI, see [the data flow](../../docs/data-flow.md#querying-observations).
 
