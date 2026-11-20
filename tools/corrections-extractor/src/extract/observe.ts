@@ -12,6 +12,7 @@ import { observeNpcDrops } from "./observers/item/npcDrops";
 import { observeObjectDrops } from "./observers/item/objectDrops";
 import { observeLevel as observeNpcLevel, observeSpawns as observeNpcSpawns, observeFriendlyToFaction, observeRank as observeNpcRank } from "./observers/npc";
 import { observeName as observeNpcName } from "./observers/npc/name";
+import { observeSubName as observeNpcSubName } from "./observers/npc/subName";
 import { observeName as observeObjectName } from "./observers/object/name";
 import { observeSpawns as observeObjectSpawns } from "./observers/object";
 import {
@@ -112,6 +113,7 @@ export const SCALAR_OBSERVERS = {
   objectivesText: observeObjectivesText,
   objectiveCount: observeObjectiveCount,
   npcName: observeNpcName,
+  npcSubName: observeNpcSubName,
   itemName: observeItemName,
   objectName: observeObjectName,
 };

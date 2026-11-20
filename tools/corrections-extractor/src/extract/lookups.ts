@@ -13,7 +13,7 @@ import { writeLookupLua } from "./schema/lookup-writer";
 export { observeLookupSession, type StagedLookupSession } from "./observe-lookups";
 
 /** Names can change over time (e.g. a renamed NPC), so the newest one wins. */
-const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName", "objectName"]);
+const NEWEST_WINS = new Set<ObserverKey>(["npcName", "npcSubName", "questName", "itemName", "objectName"]);
 
 /** Per field, a scalar summary per locale. */
 export interface LookupAccumulator {
@@ -100,8 +100,9 @@ export function finalizeLookups(acc: LookupAccumulator): LookupBundle {
 
   for (const locale of locales("npcName")) {
     const names = valuesFor("npcName", locale);
-    // Subnames are not traced, so they are always nil.
-    const entries = new Map([...names].map(([id, name]) => [id, [name, null]]));
+    const subNames = valuesFor("npcSubName", locale);
+    // "" means the NPC has no subname.
+    const entries = new Map([...names].map(([id, name]) => [id, [name, subNames.get(id) || null]]));
     if (entries.size > 0) bundle.lookupNpcs[locale] = writeLookupLua("npcNameLookup", locale, entries);
   }
 

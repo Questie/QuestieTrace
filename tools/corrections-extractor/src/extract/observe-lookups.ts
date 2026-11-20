@@ -8,6 +8,7 @@ import type { Localized, Observation } from "./observation";
 import { isForeverSession } from "./observe";
 import { observeLocalizedName as observeItemName } from "./observers/item/name";
 import { observeLocalizedName as observeNpcName } from "./observers/npc/name";
+import { observeLocalizedSubName as observeNpcSubName } from "./observers/npc/subName";
 import { observeLocalizedName as observeObjectName } from "./observers/object/name";
 import { observeLocalizedName as observeQuestName, observeLocalizedObjectivesText } from "./observers/quest";
 import { sessionServerTime } from "./probes";
@@ -17,6 +18,7 @@ export const SKIPPED_LOCALE = "enUS";
 
 export const LOOKUP_OBSERVERS = {
   npcName: observeNpcName,
+  npcSubName: observeNpcSubName,
   questName: observeQuestName,
   objectivesText: observeLocalizedObjectivesText,
   itemName: observeItemName,

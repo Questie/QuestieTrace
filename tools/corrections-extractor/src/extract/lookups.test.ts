@@ -97,7 +97,7 @@ describe("finalizeLookups", () => {
     expect(bundle.lookupQuests.deDE).toContain('[90001] = {"Eine Quest", {"Tötet 5.","","Kehrt zurück."}},');
   });
 
-  it("should write npc names with a nil subname", () => {
+  it("should write npc names with a nil subname when none was observed", () => {
     const bundle = run([
       makeSession({
         GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
@@ -108,6 +108,22 @@ describe("finalizeLookups", () => {
 
     expect(bundle.lookupNpcs.deDE).toContain('l10n.npcNameLookup["deDE"] = loadstring([[return {');
     expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Koboldgezücht",nil},');
+  });
+
+  it("should write npc names with their observed subname", () => {
+    const bundle = run([
+      makeSession({
+        GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
+        UnitGUID: {
+          target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-30000-000031" }],
+          mouseover: [{ t: 4, tp: 4, v: "Creature-0-5208-0-7-30000-000031" }],
+        },
+        UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Grimm", n: 2 } }] },
+        UnitSubName: { mouseover: [{ t: 4, tp: 4.1, v: "Waffenhändler" }] },
+      }),
+    ]);
+
+    expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Grimm","Waffenhändler"},');
   });
 
   it("should leave the accumulator untouched when an observer throws for a later session", () => {

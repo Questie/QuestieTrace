@@ -99,6 +99,36 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
     expect(npcFixes).not.toContain("npcKeys.rank");
   });
 
+  it("should export the subname of an npc", () => {
+    const { npcFixes } = extractAll(
+      [
+        makeForeverSession({
+          GetLocale: { player: [apiSample(0, 0, "enUS")] },
+          UnitGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
+          UnitSubName: { mouseover: [apiSample(3, 3, "Weapon Vendor")] },
+        }),
+      ],
+      { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
+    );
+
+    expect(npcFixes).toContain('[npcKeys.subName] = "Weapon Vendor",');
+  });
+
+  it("should not export the empty subname of an npc without one", () => {
+    const { npcFixes } = extractAll(
+      [
+        makeForeverSession({
+          GetLocale: { player: [apiSample(0, 0, "enUS")] },
+          UnitGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
+          UnitSubName: { mouseover: [apiSample(3, 3, "")] },
+        }),
+      ],
+      { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
+    );
+
+    expect(npcFixes).not.toContain("npcKeys.subName");
+  });
+
   it("should produce a paste-ready foreverNpcTraces.lua correction for an npc encountered in the session", () => {
     const session = makeForeverSession({
       GetLocale: { player: [apiSample(0, 0, "enUS")] },
