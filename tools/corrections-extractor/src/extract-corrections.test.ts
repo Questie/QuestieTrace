@@ -156,6 +156,19 @@ describe("extractCorrections", () => {
     expect(existsSync(join(outputDir, "foreverNpcTraces.lua"))).toBe(false);
   });
 
+  it("should remove the backup of a dropped store once a run finished, but keep it when the run fails", async () => {
+    const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_broken.json": "{ not json" });
+    const backup = join(traceDataDir, "..", "store", "backup");
+    mkdirSync(backup, { recursive: true });
+
+    await expect(extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 })).rejects.toThrow("could be loaded");
+    expect(existsSync(backup)).toBe(true);
+
+    writeFileSync(join(traceDataDir, "submissions", "2026-10", "2026-10-01_000000Z_broken.json"), submission("a"));
+    await extractCorrections(traceDataDir, outputDir, { log: () => undefined, workers: 0 });
+    expect(existsSync(backup)).toBe(false);
+  });
+
   it("should abort and keep the previous output when folding a submission fails", async () => {
     const { traceDataDir, outputDir } = setupDirs({ "2026-10/2026-10-01_000000Z_a.json": submission("a") });
     mkdirSync(outputDir);

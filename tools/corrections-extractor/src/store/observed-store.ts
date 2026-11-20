@@ -12,7 +12,9 @@
 //
 // Rows are never rewritten. A submission that disappears from the source is dropped from the
 // manifest only, and only the batches and submissions the manifest lists are read. When the
-// observer code changes (see observer-version.ts) the whole store is dropped.
+// observer code changes (see observer-version.ts) the whole store is dropped. It is moved to
+// backup/ first, which only dropBackup removes once a run finished; a backup left behind by a
+// run that did not finish is kept rather than replaced by the partly rebuilt store.
 //
 // Replay hands the sessions over in the order a full run folds them: submissions newest first,
 // their sessions in export order, and of each session (by key) only the first copy met.
@@ -28,6 +30,8 @@ import { SKIPPED_LOCALE } from "../extract/observe-lookups";
 import type { ObservedSubmission } from "../observe-submission";
 
 const FORMAT_VERSION = 5;
+const BACKUP_DIR = "backup";
+const BACKED_UP = ["manifest.json", "batches", "sessions.parquet", "views.sql"];
 
 export interface ManifestEntry {
   batch: number;
@@ -128,6 +132,7 @@ export class ObservedStore {
     if (!manifest || manifest.observerVersion !== observerVersion || manifest.formatVersion !== FORMAT_VERSION) {
       if (reuseOnly) throw new Error(`${dir} holds no observations of the current observer code; run without --offline to observe every submission again`);
       if (manifest) log("The observer code or store format changed: observing every submission again");
+      backUp(dir, log);
       rmSync(join(dir, "batches"), { recursive: true, force: true });
       // They would point at batches that no longer exist, or at new ones with the same names.
       rmSync(join(dir, "sessions.parquet"), { force: true });
@@ -152,6 +157,11 @@ export class ObservedStore {
     this.connection.closeSync();
     this.instance.closeSync();
     rmSync(join(this.dir, ".tmp"), { recursive: true, force: true });
+  }
+
+  /** Removes the store dropped by open, once a run with the new one finished. */
+  dropBackup(): void {
+    rmSync(join(this.dir, BACKUP_DIR), { recursive: true, force: true });
   }
 
   keys(): Set<string> {
@@ -497,6 +507,21 @@ FROM read_parquet([${files}]) o JOIN sessions s USING (submission, batch, idx);
   private sessionsOf(name: string): string {
     return `(SELECT s.*, ${name}.rank FROM read_parquet(${this.files("sessions")}) s JOIN ${name} USING (submission, batch))`;
   }
+}
+
+/** Moves the store's files to backup/, unless a backup is already there. */
+function backUp(dir: string, log: (message: string) => void): void {
+  const backupDir = join(dir, BACKUP_DIR);
+  if (existsSync(backupDir)) {
+    log(`Keeping the backup of an earlier store in ${backupDir}: the run that made it did not finish`);
+    return;
+  }
+  if (!existsSync(join(dir, "manifest.json"))) return;
+  mkdirSync(backupDir);
+  for (const name of BACKED_UP) {
+    if (existsSync(join(dir, name))) renameSync(join(dir, name), join(backupDir, name));
+  }
+  log(`Moved the previous store to ${backupDir}; it is removed once this run finishes`);
 }
 
 function readManifest(dir: string, log: (message: string) => void): Manifest | undefined {

@@ -88,7 +88,9 @@ export async function extractCorrections(
     } else {
       await updateStore(store, source, { log, workers, batchSize, offline });
     }
-    return await writeOutputs(store, outputDir, log);
+    const meta = await writeOutputs(store, outputDir, log);
+    store.dropBackup();
+    return meta;
   } finally {
     store.close();
   }
