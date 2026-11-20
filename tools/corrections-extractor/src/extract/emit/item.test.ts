@@ -25,6 +25,16 @@ describe("emitItemRecords", () => {
     });
   });
 
+  it("should skip drops of world drop items", () => {
+    const ids = [248682, 248713, 211780, 211786, 281018, 262889, 249427, 249428, 274964];
+    const records = emitItemRecords({
+      name: new Map(),
+      npcDrops: new Map(ids.map((id) => [id, fact(id, [1])])),
+      objectDrops: new Map([...ids, 12345].map((id) => [id, fact(id, [2])])),
+    });
+    expect([...records.keys()]).toEqual([12345]);
+  });
+
   it("should return an empty map when no facts were observed", () => {
     const records = emitItemRecords({ name: new Map(), npcDrops: new Map(), objectDrops: new Map() });
     expect(records.size).toBe(0);
