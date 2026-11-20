@@ -21,6 +21,19 @@ export interface NpcFacts {
   rank: Map<number, Fact<number>>;
 }
 
+// NPCs that can be spawned anywhere in the world, so their spawns and zoneID are never exported.
+const SPAWN_ANYWHERE_NPC_IDS: ReadonlySet<number> = new Set([
+  271929, // Shen'dorei Windwell
+]);
+
+function withoutSpawnAnywhere<T>(facts: Map<number, Fact<T>>): Map<number, Fact<T>> {
+  return new Map([...facts].filter(([npcId]) => !SPAWN_ANYWHERE_NPC_IDS.has(npcId)));
+}
+
 export function emitNpcRecords(facts: NpcFacts): Map<number, Record<string, unknown>> {
-  return emitRecords(facts);
+  return emitRecords({
+    ...facts,
+    spawns: withoutSpawnAnywhere(facts.spawns),
+    zoneID: withoutSpawnAnywhere(facts.zoneID),
+  });
 }

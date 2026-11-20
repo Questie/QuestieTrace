@@ -21,6 +21,20 @@ describe("emitNpcRecords", () => {
     expect(records.get(823)).toEqual({ name: "Deputy Willem", minLevel: 18 });
   });
 
+  it("should skip spawns and zoneID of npcs that can be spawned anywhere", () => {
+    const records = emitNpcRecords({
+      name: new Map([[271929, fact(271929, "Shen'dorei Windwell")]]),
+      minLevel: new Map(),
+      maxLevel: new Map(),
+      spawns: new Map([[271929, fact(271929, { 40: [[30.01, 86.02]] })]]),
+      zoneID: new Map([[271929, fact(271929, 40)]]),
+      friendlyToFaction: new Map(),
+      rank: new Map(),
+      subName: new Map(),
+    });
+    expect(records.get(271929)).toEqual({ name: "Shen'dorei Windwell" });
+  });
+
   it("should include spawns, zoneID and friendlyToFaction when present", () => {
     const records = emitNpcRecords({
       name: new Map([[823, fact(823, "Old Murk-Eye")]]),
