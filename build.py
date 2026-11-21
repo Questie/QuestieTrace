@@ -55,6 +55,8 @@ def main():
                 for line in file:
                     if line.startswith("## Version"):
                         print("## Version: " + versionOverride.removeprefix("v"))
+                    elif line.startswith("## Title"):
+                        print("## Title: QuestieTrace|cFF00FF00 v" + versionOverride.removeprefix("v") + "|r")
                     else:
                         print(line, end="")
 
