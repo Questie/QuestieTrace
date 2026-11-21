@@ -94,6 +94,8 @@ def bump_toc_versions(version):
             for line in lines:
                 if line.startswith("## Version:"):
                     f.write(f"## Version: {version}\n")
+                elif line.startswith("## Title:"):
+                    f.write(f"## Title: QuestieTrace|cFF00FF00 v{version}|r\n")
                 else:
                     f.write(line)
 
