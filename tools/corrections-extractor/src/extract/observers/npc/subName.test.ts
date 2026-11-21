@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecord } from "../../../core/types";
-import { observeLocalizedSubName, observeSubName } from "./subName";
+import { isLevelLine, observeLocalizedSubName, observeSubName } from "./subName";
 
 function makeSession(functions: SessionRecord["functions"], events: SessionRecord["events"] = []): SessionRecord {
   return {
@@ -83,4 +83,42 @@ describe("observeSubName (npc)", () => {
     expect(observeSubName(session)).toEqual([]);
     expect(observeLocalizedSubName(session).map((observation) => observation.value)).toEqual([{ locale: "deDE", value: "Waffenhändler" }]);
   });
+
+  it("should observe a level line as no subname", () => {
+    const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "ruRU" }] },
+      UnitGUID: { mouseover: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Уровень 11 (элита)" }] },
+    });
+
+    expect(observeLocalizedSubName(session).map((observation) => observation.value)).toEqual([{ locale: "ruRU", value: "" }]);
+  });
+});
+
+describe("isLevelLine", () => {
+  it.each([
+    "Level 28",
+    "Level 10 (Elite)",
+    "Level ??",
+    "Level ?? (Boss)",
+    "Stufe 11 (Elite)",
+    "Niveau ?? (Élite)",
+    "Nivel ?? (Jefe)",
+    "Nível 11 (Elite)",
+    "Уровень 18",
+    "레벨 11 (정예)",
+    "等级 10（精英）",
+    "等級 11（精英）",
+    "<name> 10",
+    "Level 11 (<name>)",
+  ])("should treat %s as a level line", (subName) => {
+    expect(isLevelLine(subName)).toBe(true);
+  });
+
+  it.each(["Weapon Vendor", "Waffenhändler", "SI:7 Operative", "Leader of SI:7", "Agent du SI:7", "제2대 칸", "Level Trainer", ""])(
+    "should keep %s as a subname",
+    (subName) => {
+      expect(isLevelLine(subName)).toBe(false);
+    },
+  );
 });
