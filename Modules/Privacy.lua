@@ -103,6 +103,9 @@ end
 local function GetUnitNameParts(token)
   if type(UnitName) ~= "function" then return {} end
   local first, second = UnitName(token)
+  if issecretvalue and (issecretvalue(first) or issecretvalue(second)) then
+    return {}
+  end
   local parts = {}
   if type(first) == "string" and first ~= "" then
     parts[#parts + 1] = first

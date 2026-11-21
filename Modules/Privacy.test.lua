@@ -430,6 +430,16 @@ describe("GetPrivacyNameSet", function()
       assert.is_nil(sanitized[2])
     end)
 
+    it("should exclude secret unit names from the name set", function()
+      local secret = "SecretUnitName"
+      env.UnitName = function() return secret end
+      env.issecretvalue = function(value) return value == secret end
+      local names
+      assert.has_no.errors(function() names = Core.GetPrivacyNameSet() end)
+      assert.is_nil(names[secret])
+      assert.is_nil(names[secret:lower()])
+    end)
+
     it("should ignore secret sender names when redacting text", function()
       local secret = "SecretName"
       env.issecretvalue = function(value) return value == secret end
