@@ -242,7 +242,7 @@ local EVENT_ARG_SANITIZERS = {
   CHAT_MSG_LOOT = Core.SanitizeChatMsgArgs,
   CHAT_MSG_MONEY = Core.SanitizeChatMsgArgs,
   CHAT_MSG_SKILL = Core.SanitizeChatMsgArgs,
-  CHAT_MSG_TRADESKILLS = Core.SanitizeChatMsgArgs,
+  CHAT_MSG_TRADESKILLS = Core.SanitizeTradeskillChatMsgArgs,
   CHAT_MSG_COMBAT_FACTION_CHANGE = Core.SanitizeChatMsgArgs,
   CHAT_MSG_COMBAT_XP_GAIN = Core.SanitizeChatMsgArgs,
 }

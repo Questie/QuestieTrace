@@ -32,6 +32,12 @@ local function LoadPrivacyModule(env)
   env.ERR_LEARN_SPELL_S = "You have learned a new spell: %s."
   env.ERR_LEARN_RECIPE_S = "You have learned how to create a new item: %s."
   env.LEVEL_REQUIRED = "Req level %d"
+  env.TRADESKILL_LOG_FIRSTPERSON = "You create %s."
+  env.LOOT_ITEM_CREATED_SELF = "You create: %s."
+  env.LOOT_ITEM_CREATED_SELF_MULTIPLE = "You create: %sx%d."
+  env.TRADESKILL_LOG_THIRDPERSON = "%s creates %s."
+  env.CREATED_ITEM = "%s creates: %s."
+  env.CREATED_ITEM_MULTIPLE = "%s creates: %sx%d."
 
   -- Load globals.lua first (provides CopyPacked, etc.)
   local chunkGlobals = assert(loadfile("Modules/globals.lua"))
@@ -599,6 +605,49 @@ describe("GetPrivacyNameSet", function()
       local sanitized = Core.SanitizeChatMsgArgs(nil)
       assert.is_table(sanitized)
       assert.are.equal(0, sanitized.n)
+    end)
+  end)
+
+  describe("SanitizeTradeskillChatMsgArgs", function()
+    local item = "|cffffffff|Hitem:2589::::::::1:::::::|h[Linen Cloth]|h|r"
+
+    it("should redact the crafter name from every third-person template", function()
+      local cases = {
+        {"Grimtotem creates " .. item .. ".", "<name> creates " .. item .. "."},
+        {"Grimtotem creates: " .. item .. ".", "<name> creates: " .. item .. "."},
+        {"Grimtotem creates: " .. item .. "x2.", "<name> creates: " .. item .. "x2."},
+        {"|Hplayer:Grim-Realm|h[Grim-Realm]|h creates: " .. item .. ".", "<name> creates: " .. item .. "."},
+      }
+      for _, case in ipairs(cases) do
+        local sanitized = Core.SanitizeTradeskillChatMsgArgs(Core.PackArgs(case[1], "", "", ""))
+        assert.are.equal(case[2], sanitized[1])
+      end
+    end)
+
+    it("should redact the crafter name using the client's localized templates", function()
+      env.CREATED_ITEM = "%2$s wurde von %1$s hergestellt."
+
+      local sanitized = Core.SanitizeTradeskillChatMsgArgs(Core.PackArgs(item .. " wurde von Grimtotem hergestellt."))
+
+      assert.are.equal(item .. " wurde von <name> hergestellt.", sanitized[1])
+    end)
+
+    it("should keep own crafting messages unchanged", function()
+      local text = "You create: " .. item .. "x2."
+      assert.are.equal(text, Core.SanitizeTradeskillChatMsgArgs(Core.PackArgs(text))[1])
+    end)
+
+    it("should discard messages matching no known template", function()
+      local sanitized = Core.SanitizeTradeskillChatMsgArgs(Core.PackArgs("Grimtotem does something unknown."))
+      assert.is_nil(sanitized[1])
+    end)
+
+    it("should discard crafting messages when the global strings are missing", function()
+      env.CREATED_ITEM = nil
+
+      local sanitized = Core.SanitizeTradeskillChatMsgArgs(Core.PackArgs("Grimtotem creates: " .. item .. "."))
+
+      assert.is_nil(sanitized[1])
     end)
   end)
 
