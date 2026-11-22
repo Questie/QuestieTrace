@@ -26,6 +26,7 @@ use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
 use crate::model::{Evidence, QuestCatalog, QuestEpisode, QuestId, RelationCandidate, RelationField};
 use crate::text::{to_exponential, to_fixed};
+use anyhow::Result;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use serde_json::json;
@@ -80,26 +81,28 @@ impl Signal for Cooccurrence {
         "completion histories across characters -> implication/exclusion"
     }
 
-    fn run(&self, input: &SignalInput) -> Findings {
-        let episodes = forever_episodes(input.episodes);
+    fn run(&self, input: &SignalInput) -> Result<Findings> {
+        // Every episode at once, until this signal reads one bucket at a time.
+        let all = input.episodes.load_all()?;
+        let episodes = forever_episodes(&all);
         let Analysis {
             candidates,
             covered,
             mut report,
         } = analyze(&episodes, input.catalog, &PARAMS);
-        report["episodesRead"] = json!(input.episodes.len());
+        report["episodesRead"] = json!(&all.len());
         let params = FileParams {
             tunables: &PARAMS,
             support: "prerequisites: takers of the quest who could take the target; exclusiveTo: completers of either quest who could take the other",
             contradict: "always 0 for prerequisites and never-together exclusions (one contradiction drops the edge); co-flags: 0 as well",
         };
-        Findings {
+        Ok(Findings {
             input_count: episodes.len(),
             params: to_json(&params),
             covered_quest_ids: covered,
             candidates,
             reports: vec![("cooccurrence-summary", report)],
-        }
+        })
     }
 }
 

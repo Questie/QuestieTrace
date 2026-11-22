@@ -26,8 +26,9 @@ mod review;
 mod views;
 
 use crate::config::Config;
+use crate::episode_store::Episodes;
 use crate::io;
-use crate::model::{CandidateFile, GroundTruth, QuestCatalog, QuestEpisode, QuestId, RelationField, RelationSet};
+use crate::model::{CandidateFile, GroundTruth, QuestCatalog, QuestId, RelationField, RelationSet};
 use anyhow::{Context, Result};
 use crossval::{ModelParams, ScoredEdge, DEFAULT_MODEL_PARAMS};
 use edges::{Claim, Domain, EdgeKey, EdgeKind, QuestDomains, Reference, Truth};
@@ -55,7 +56,7 @@ pub struct CombineInput<'a> {
     pub catalog: &'a QuestCatalog,
     pub ground_truth: &'a GroundTruth,
     /// For counts only.
-    pub episodes: &'a [QuestEpisode],
+    pub episodes: &'a dyn Episodes,
 }
 
 /// Every file combine writes, rendered.
@@ -182,7 +183,7 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         generated_at: &config.generated_at,
     });
 
-    let (episode_count, character_count) = count_episodes(input.episodes);
+    let (episode_count, character_count) = count_episodes(input.episodes)?;
     let meta = RelationsMeta {
         generated_at: config.generated_at.clone(),
         min_score,

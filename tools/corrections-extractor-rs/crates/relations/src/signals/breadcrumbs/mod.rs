@@ -16,6 +16,7 @@ use self::links::{BreadcrumbParams, LinkCollector};
 use self::observe::{observe_episode, ObservationKind};
 use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::model::{QuestCatalog, QuestEpisode, QuestId};
+use anyhow::Result;
 use rayon::prelude::*;
 use serde::Serialize;
 use serde_json::json;
@@ -32,9 +33,11 @@ impl Signal for Breadcrumbs {
         "optional lead-in quests (breadcrumbs) from episodes"
     }
 
-    fn run(&self, input: &SignalInput) -> Findings {
+    fn run(&self, input: &SignalInput) -> Result<Findings> {
+        // Every episode at once, until this signal reads one bucket at a time.
+        let all = input.episodes.load_all()?;
         let params = BreadcrumbParams::default();
-        let episodes = forever_episodes(input.episodes);
+        let episodes = forever_episodes(&all);
         let result = infer(&episodes, input.catalog, &params);
         let catalog = input.catalog;
 
@@ -67,7 +70,7 @@ impl Signal for Breadcrumbs {
         review.sort_by(|a, b| b.score.total_cmp(&a.score));
         let report = json!({ "linkedPairs": result.tally.pairs.len(), "judged": review.len(), "pairs": review });
 
-        Findings {
+        Ok(Findings {
             input_count: episodes.len(),
             params: to_json(&FileParams {
                 tunables: &params,
@@ -76,7 +79,7 @@ impl Signal for Breadcrumbs {
             covered_quest_ids: result.covered_quest_ids,
             candidates: result.candidates,
             reports: vec![("breadcrumbs-pairs", report)],
-        }
+        })
     }
 }
 

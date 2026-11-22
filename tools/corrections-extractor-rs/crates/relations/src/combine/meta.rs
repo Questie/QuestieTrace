@@ -6,8 +6,10 @@
 use super::edges::{Domain, Reference};
 use super::lua::{LuaRecords, Written};
 use super::views::{QuestView, Status};
-use crate::model::{CandidateFile, QuestEpisode};
+use crate::episode_store::Episodes;
+use crate::model::CandidateFile;
 use crate::signals::forever_episodes;
+use anyhow::Result;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
@@ -78,10 +80,19 @@ pub struct RelationsMeta {
 
 /// Counts the same episodes the signals read ([`forever_episodes`]), and their distinct
 /// characters: (episodes, characters).
-pub fn count_episodes(episodes: &[QuestEpisode]) -> (usize, usize) {
-    let read = forever_episodes(episodes);
-    let characters: FxHashSet<&str> = read.iter().map(|episode| episode.character_key.as_str()).collect();
-    (read.len(), characters.len())
+pub fn count_episodes(episodes: &dyn Episodes) -> Result<(usize, usize)> {
+    let mut read = 0;
+    let mut characters: FxHashSet<String> = FxHashSet::default();
+    episodes.for_each_bucket(&mut |bucket| {
+        for episode in forever_episodes(bucket) {
+            read += 1;
+            if !characters.contains(&episode.character_key) {
+                characters.insert(episode.character_key.clone());
+            }
+        }
+        Ok(())
+    })?;
+    Ok((read, characters.len()))
 }
 
 /// Relation values the Lua module applies: each id of an applied list field, one per applied
@@ -123,7 +134,8 @@ mod tests {
     use crate::combine::edges::{EdgeKey, EdgeKind};
     use crate::combine::resolve::Outcome;
     use crate::combine::views::EdgeView;
-    use crate::model::{QuestId, RelationField, RelationSet};
+    use crate::episode_store::InMemory;
+    use crate::model::{QuestEpisode, QuestId, RelationField, RelationSet};
     use crate::test_support::make_episode;
 
     #[test]
@@ -141,7 +153,7 @@ mod tests {
             episode("c", Some(11507)),
         ];
 
-        assert_eq!(count_episodes(&episodes), (3, 2));
+        assert_eq!(count_episodes(&InMemory(&episodes)).unwrap(), (3, 2));
     }
 
     #[test]

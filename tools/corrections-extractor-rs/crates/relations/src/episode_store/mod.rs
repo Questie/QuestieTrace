@@ -26,8 +26,8 @@ use std::sync::mpsc;
 /// The layout of the bucket files; a store written in another layout is refused.
 pub const FORMAT_VERSION: u32 = 1;
 
-/// A bucket ends at the first character boundary after this many bytes.
-const BUCKET_BYTES: usize = 32 << 20;
+/// By default a bucket ends at the first character boundary after this many bytes.
+pub const BUCKET_BYTES: usize = 32 << 20;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +45,48 @@ struct Bucket {
     episodes: usize,
     characters: usize,
     bytes: usize,
+}
+
+/// Episodes as the steps read them: one bucket of whole characters at a time, in ingest's order.
+pub trait Episodes: Sync {
+    /// Hands every bucket to `work`, in order; stops at the first error.
+    fn for_each_bucket(&self, work: &mut dyn FnMut(&[QuestEpisode]) -> Result<()>) -> Result<()>;
+
+    fn episode_count(&self) -> usize;
+
+    /// Every episode at once.
+    fn load_all(&self) -> Result<Vec<QuestEpisode>>;
+}
+
+/// Episodes already in memory, in ingest's order, as one bucket (tests and small inputs).
+pub struct InMemory<'e>(pub &'e [QuestEpisode]);
+
+impl Episodes for InMemory<'_> {
+    fn for_each_bucket(&self, work: &mut dyn FnMut(&[QuestEpisode]) -> Result<()>) -> Result<()> {
+        work(self.0)
+    }
+
+    fn episode_count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn load_all(&self) -> Result<Vec<QuestEpisode>> {
+        Ok(self.0.to_vec())
+    }
+}
+
+impl Episodes for EpisodeStore {
+    fn for_each_bucket(&self, work: &mut dyn FnMut(&[QuestEpisode]) -> Result<()>) -> Result<()> {
+        EpisodeStore::for_each_bucket(self, work)
+    }
+
+    fn episode_count(&self) -> usize {
+        EpisodeStore::episode_count(self)
+    }
+
+    fn load_all(&self) -> Result<Vec<QuestEpisode>> {
+        EpisodeStore::load_all(self)
+    }
 }
 
 /// A written store, ready to read.
@@ -152,11 +194,8 @@ pub struct StoreWriter {
 }
 
 impl StoreWriter {
-    pub fn create(dir: &Path) -> Result<StoreWriter> {
-        StoreWriter::with_bucket_bytes(dir, BUCKET_BYTES)
-    }
-
-    fn with_bucket_bytes(dir: &Path, bucket_bytes: usize) -> Result<StoreWriter> {
+    /// A writer whose buckets end at the first character boundary after `bucket_bytes`.
+    pub fn create(dir: &Path, bucket_bytes: usize) -> Result<StoreWriter> {
         let staging = sibling(dir, "staging");
         if staging.exists() {
             fs::remove_dir_all(&staging).with_context(|| format!("removing {}", staging.display()))?;
@@ -263,8 +302,8 @@ fn sibling(dir: &Path, suffix: &str) -> PathBuf {
 }
 
 /// Writes a store of `episodes`, which are in ingest's order.
-pub fn write(dir: &Path, episodes: &[QuestEpisode]) -> Result<EpisodeStore> {
-    let mut writer = StoreWriter::create(dir)?;
+pub fn write(dir: &Path, episodes: &[QuestEpisode], bucket_bytes: usize) -> Result<EpisodeStore> {
+    let mut writer = StoreWriter::create(dir, bucket_bytes)?;
     for episode in episodes {
         writer.push(episode)?;
     }
@@ -322,7 +361,7 @@ mod tests {
 
     fn write_small(dir: &Path, episodes: &[QuestEpisode]) -> Result<EpisodeStore> {
         // One byte: every character boundary ends a bucket.
-        let mut writer = StoreWriter::with_bucket_bytes(dir, 1)?;
+        let mut writer = StoreWriter::create(dir, 1)?;
         for episode in episodes {
             writer.push(episode)?;
         }
@@ -351,7 +390,7 @@ mod tests {
     #[test]
     fn a_large_bucket_holds_several_characters() {
         let scratch = Scratch::new();
-        let store = write(&scratch.0.join("episodes"), &sample()).unwrap();
+        let store = write(&scratch.0.join("episodes"), &sample(), BUCKET_BYTES).unwrap();
         assert_eq!(store.bucket_count(), 1);
         assert_eq!(keys(&store.load_bucket(0).unwrap()), ["e1", "e2", "e3", "e4", "e5", "e6"]);
     }
