@@ -35,6 +35,7 @@ export SCRAPER_DIR=data/scraper/<tag>    # scraper release folder (data/raw/{for
 export RELATIONS_TRACE_MODULES_DIR=...   # optional: a dump's own forever*Traces.lua
 export RELATIONS_REQUIRE_FOREVER_VERSION=1
 export RELATIONS_DIR=.relations          # working files (default .relations)
+export RELATIONS_BUCKET_BYTES=1000000    # optional: smaller episode-store buckets (default 32 MB), for tests
 cargo run --release -p relations -- pipeline
 ```
 
@@ -50,7 +51,7 @@ Every step is also a command of its own that reads what the previous steps wrote
 
 | Command | Reads | Writes (in `RELATIONS_DIR`) |
 |---|---|---|
-| `ingest` | trace-data | `episodes.jsonl`, `reports/ingest.json` |
+| `ingest` | trace-data | `episodes/` (the episode store), `episodes.jsonl`, `reports/ingest.json` |
 | `catalog` | QuestieDB (+ trace modules) | `catalog.json`, `groundtruth.json`, `reports/catalog.json` |
 | `source:wowhead` | scraper databases | `candidates/wowhead-*.json`, `reports/wowhead-inventory.json` |
 | `signal:<name>` | episodes, catalog | `candidates/<name>.json`, `reports/<name>-*.json` |
@@ -58,10 +59,17 @@ Every step is also a command of its own that reads what the previous steps wrote
 | `score <signal> [--min-score N]` | one candidates file, ground truth | `reports/score-<signal>.json` and a table |
 
 `pipeline` runs ingest, catalog, the Wowhead source, every signal (one after another, each on all
-cores) and combine in one process, handing each step's output straight to the next and writing every
-file on the way. Combine gets exactly the candidate files the run produced; the `combine` command
-reads whatever `candidates/` holds. There is no incremental cache: a full run decodes every
-submission, which is what keeps it simple and always consistent.
+cores) and combine in one process, writing every file on the way. Combine gets exactly the candidate
+files the run produced; the `combine` command reads whatever `candidates/` holds. There is no
+incremental cache: a full run decodes every submission, which is what keeps it simple and always
+consistent.
+
+No step holds every episode. Ingest works through spill files one partition at a time and writes the
+episode store (`src/episode_store`): the episodes in a compact binary format, in buckets of whole
+characters (about 32 MB each, `RELATIONS_BUCKET_BYTES`), in ingest's order. The signals and combine
+read it one bucket at a time (`Episodes::for_each_bucket`), several passes where a signal needs them,
+and keep only what they add up across characters. `episodes.jsonl` is the same episodes as JSON lines,
+for people and the TypeScript tools.
 
 ## How it is built
 
@@ -79,8 +87,10 @@ scraper --wowhead--> context candidates ----------------------+--combine--> Lua,
   (race/class/level gating), `race_masks.rs`, `score.rs` (precision/recall against the ground
   truth), `text.rs` (numbers in text as the TypeScript pipeline prints them), `io.rs`.
 - `ingest` reads submissions with the `trace-data` crate on all cores (one arena per worker, reset
-  after each submission), distills each session to an episode, then merges the copies of a session,
-  resolves legacy greeting titles and groups sessions into characters on one thread.
+  after each submission) and distills each session to an episode, spilling every copy to a partition
+  by session key. Each partition then merges the copies of a session and resolves legacy greeting
+  titles, spilling the sessions kept to a partition by contributor; each of those, in order, is
+  grouped into characters and streamed to the episode store (see `ingest/spill.rs`).
 - Signals never read the ground truth; combine uses it to calibrate a logistic model per relation
   kind and to measure itself. Wowhead claims are context for reviewers only: they never decide.
 
@@ -88,10 +98,14 @@ scraper --wowhead--> context candidates ----------------------+--combine--> Lua,
 
 1. Write `src/signals/<name>/mod.rs` with a type implementing `signals::Signal`:
    `name()` (the candidates file name and the `signal:<name>` command), `describe()`, and
-   `run(&SignalInput) -> Findings` (its candidates, covered quests, input count, params and any
-   reports; the pipeline adds the signal name and `generatedAt` to make the candidates file).
-   Keep its tunables in one `#[derive(Serialize)]` struct and write that as `params`, so none
-   can go missing from the file.
+   `run(&SignalInput) -> Result<Findings>` (its candidates, covered quests, input count, params
+   and any reports; the pipeline adds the signal name and `generatedAt` to make the candidates
+   file). Keep its tunables in one `#[derive(Serialize)]` struct and write that as `params`, so
+   none can go missing from the file.
+   Read the episodes with `input.episodes.for_each_bucket`, one bucket of whole characters at a
+   time, and keep nothing that borrows from a bucket: intern character keys (`CharacterIds`) and
+   keep owned, compact tallies. Test with `PerCharacter` (a bucket per character) against
+   `InMemory` (one bucket) that the findings are the same.
 2. Add it to `signals::registry()`.
 
 The pipeline then runs it with the others, writes its files, `score <name>` measures it, and

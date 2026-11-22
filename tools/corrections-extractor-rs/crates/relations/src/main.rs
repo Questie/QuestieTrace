@@ -18,7 +18,7 @@ const USAGE: &str = "\
 Usage: relations <command>
 
   pipeline             every step in order: ingest, catalog, source:wowhead, signals, combine
-  ingest               trace-data submissions -> episodes.jsonl
+  ingest               trace-data submissions -> the episode store (episodes/) and episodes.jsonl
   catalog              QuestieDB -> catalog.json + groundtruth.json (runs QuestieDB's Lua loader)
   source:wowhead       scraper databases -> candidates/wowhead-*.json (review context only)
   signal:<name>        one signal: episodes + catalog -> candidates/<name>.json
