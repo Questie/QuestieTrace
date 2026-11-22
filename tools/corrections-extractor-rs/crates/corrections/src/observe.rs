@@ -129,7 +129,8 @@ fn translations<T: Clone + Eq + Hash>(observations: Vec<Observation<Localized<T>
 
 /// Runs every observer over one session; None for sessions that are not observed (not Forever).
 /// npcFriendlyToFaction is kept for every NPC: Classic NPCs start Forever quests, and their
-/// reactions decide those quests' requiredRaces.
+/// reactions decide those quests' requiredRaces. questXp is kept for every quest: Forever's XP can
+/// differ from Classic's, so the XP of known quests is exported too.
 pub fn observe_session(session: &Session) -> Option<StagedSession> {
     let max_ids = MAX_IDS;
     if !is_forever_session(session) {
@@ -151,7 +152,7 @@ pub fn observe_session(session: &Session) -> Option<StagedSession> {
         started_by: quest::started_by::observe(session),
         finished_by: quest::finished_by::observe(session),
         reputation_reward: quest::reputation_reward::observe(session),
-        quest_xp: above(quest::quest_xp::observe(session), max_ids.quest),
+        quest_xp: quest::quest_xp::observe(session),
         quest_factions: quest::required_races::observe_quest_factions(session),
         turn_in_poi: quest::turn_in_poi::observe(session),
         npc_spawns: above(npc::spawns::observe(session), max_ids.npc),
@@ -217,6 +218,23 @@ mod tests {
             let session = with_build_info(json!({}), version.clone());
             assert!(with_session(&session, is_forever_session), "{version}");
         }
+    }
+
+    #[test]
+    fn keeps_the_quest_xp_of_classic_quests() {
+        // Quest 312 is a Classic quest (at or below 9665); its Forever XP is still exported.
+        let sample = |t: f64, v: f64| json!({ "t": t, "tp": t, "v": v });
+        let session = session_json(
+            json!({
+                "GetQuestID": [sample(0.0, 0.0), sample(10.0, 312.0)],
+                "GetRewardXP": [sample(0.0, 0.0), sample(10.0, 900.0)],
+                "UnitLevel": { "player": [sample(0.0, 9.0)] },
+            }),
+            vec![],
+        );
+        let staged = with_session(&session, observe_session).expect("a Forever session");
+        let quest_ids: Vec<i64> = staged.quest_xp.iter().map(|obs| obs.entity_id).collect();
+        assert_eq!(quest_ids, [312]);
     }
 
     #[test]
