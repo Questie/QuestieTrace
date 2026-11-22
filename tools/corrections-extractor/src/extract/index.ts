@@ -12,7 +12,7 @@
 // are processed. See PlayerIdentity.lua for how interfaceVersion is captured:
 
 import type { SessionRecord } from "../core/types";
-import { aggregateNewestScalarSummary, highestConfidence, aggregateScalarSummary, addScalarGroup, addToScalarSummary, type Fact, type ScalarGroup, type ScalarSummary } from "./aggregate";
+import { aggregateAgreedScalarSummary, aggregateNewestScalarSummary, highestConfidence, aggregateScalarSummary, addScalarGroup, addToScalarSummary, type Fact, type ScalarGroup, type ScalarSummary } from "./aggregate";
 import type { QuestObjectivesValue } from "./merge/quest/objectives";
 import type { Observation } from "./observation";
 import { ObservationStore } from "./observation-store";
@@ -287,7 +287,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
   const npcRecords = emitNpcRecords({
     name: aggregateNewestScalarSummary(scalars.npcName),
     // "" means the NPC has no subname, which is Questie's default.
-    subName: new Map([...aggregateNewestScalarSummary(scalars.npcSubName)].filter(([, fact]) => fact.value !== "")) as Map<number, Fact<string>>,
+    subName: new Map([...aggregateAgreedScalarSummary(scalars.npcSubName)].filter(([, fact]) => fact.value !== "")) as Map<number, Fact<string>>,
     minLevel: mapFacts(npcLevelRanges, (range) => range.min),
     maxLevel: mapFacts(npcLevelRanges, (range) => range.max),
     spawns: field<SpawnObservationValue, ReturnType<typeof mergeNpcSpawns>>("npcSpawns", (obs) => mergeNpcSpawns(obs, questNpcIds.has(obs[0].entityId)), "npcTurnInSpawns"),

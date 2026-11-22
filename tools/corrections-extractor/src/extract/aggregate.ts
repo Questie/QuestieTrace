@@ -160,6 +160,29 @@ export function aggregateNewestScalarSummary<T>(summary: ScalarSummary<T>): Map<
   return facts;
 }
 
+/** Sessions a value needs before it can win by agreement. */
+const AGREED_MIN_SESSIONS = 2;
+/** How many times more sessions than the runner-up the winning value needs. */
+const AGREED_MIN_LEAD = 2;
+
+/**
+ * For values that rarely change but are sometimes observed wrongly (e.g. an NPC subname that was
+ * attached to a neighbouring NPC): the value seen in the most sessions wins, but only when at
+ * least AGREED_MIN_SESSIONS sessions saw it and it has AGREED_MIN_LEAD times the sessions of the
+ * runner-up. Entities without such a value are left out. Only sessions with a server time are counted.
+ */
+export function aggregateAgreedScalarSummary<T>(summary: ScalarSummary<T>): Map<number, Fact<T>> {
+  const facts = new Map<number, Fact<T>>();
+  for (const [entityId, groups] of summary) {
+    const all = [...groups.values()];
+    const [winner, runnerUp] = [...all].sort((a, b) => b.timedSessionCount - a.timedSessionCount || defaultOrder(a, b));
+    if (winner.timedSessionCount < AGREED_MIN_SESSIONS) continue;
+    if (runnerUp && winner.timedSessionCount < AGREED_MIN_LEAD * runnerUp.timedSessionCount) continue;
+    facts.set(entityId, toFact(entityId, winner, all));
+  }
+  return facts;
+}
+
 /**
  * Aggregates all Observations for one field (across every session) into one
  * Fact per entity id.

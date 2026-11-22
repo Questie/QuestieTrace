@@ -99,49 +99,48 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
     expect(npcFixes).not.toContain("npcKeys.rank");
   });
 
-  it("should export the subname of an npc", () => {
-    const { npcFixes } = extractAll(
-      [
-        makeForeverSession({
-          GetLocale: { player: [apiSample(0, 0, "enUS")] },
-          UnitSubName: { mouseover: [apiSample(3, 3, "Weapon Vendor")] },
-          UnitSubNameGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
-        }),
-      ],
-      { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
-    );
+  describe("npc subnames", () => {
+    const sighting = (subName: string, serverTime: number, npcId = 200001) =>
+      makeForeverSession({
+        GetLocale: { player: [apiSample(0, 0, "enUS")] },
+        GetServerTime: [apiSample(0, 0, serverTime)],
+        UnitSubName: { mouseover: [apiSample(3, 3, subName)] },
+        UnitSubNameGUID: { mouseover: [apiSample(3, 3, creatureGuid(npcId))] },
+      });
+    const run = (sessions: SessionRecord[]) =>
+      extractAll(sessions, { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } }).npcFixes;
 
-    expect(npcFixes).toContain('[npcKeys.subName] = "Weapon Vendor",');
-  });
+    it("should export the subname of an npc seen in two sessions", () => {
+      expect(run([sighting("Weapon Vendor", 1000), sighting("Weapon Vendor", 2000)])).toContain('[npcKeys.subName] = "Weapon Vendor",');
+    });
 
-  it("should not export the empty subname of an npc without one", () => {
-    const { npcFixes } = extractAll(
-      [
-        makeForeverSession({
-          GetLocale: { player: [apiSample(0, 0, "enUS")] },
-          UnitSubName: { mouseover: [apiSample(3, 3, "")] },
-          UnitSubNameGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
-        }),
-      ],
-      { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
-    );
+    it("should not export a subname seen in only one session", () => {
+      expect(run([sighting("Weapon Vendor", 1000)])).not.toContain("npcKeys.subName");
+    });
 
-    expect(npcFixes).not.toContain("npcKeys.subName");
-  });
+    it("should not export a single wrong subname over a conflicting one without a subname", () => {
+      expect(run([sighting("Isaac Chan's Companion", 1000), sighting("", 2000)])).not.toContain("npcKeys.subName");
+    });
 
-  it("should not export a level line as the subname of an npc", () => {
-    const { npcFixes } = extractAll(
-      [
-        makeForeverSession({
-          GetLocale: { player: [apiSample(0, 0, "enUS")] },
-          UnitSubName: { mouseover: [apiSample(3, 3, "Level 28")] },
-          UnitSubNameGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
-        }),
-      ],
-      { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
-    );
+    it("should export the subname most sessions agree on over a wrong one", () => {
+      const fixes = run([sighting("Tailor", 1000), sighting("Tailor", 2000), sighting("Leatherworker", 3000)]);
 
-    expect(npcFixes).not.toContain("npcKeys.subName");
+      expect(fixes).toContain('[npcKeys.subName] = "Tailor",');
+    });
+
+    it("should not export a subname without a clear majority", () => {
+      const fixes = run([sighting("Tailor", 1000), sighting("Tailor", 2000), sighting("Tailor", 3000), sighting("Leatherworker", 4000), sighting("Leatherworker", 5000)]);
+
+      expect(fixes).not.toContain("npcKeys.subName");
+    });
+
+    it("should not export the empty subname of an npc without one", () => {
+      expect(run([sighting("", 1000), sighting("", 2000)])).not.toContain("npcKeys.subName");
+    });
+
+    it("should not export a level line as the subname of an npc", () => {
+      expect(run([sighting("Level 28", 1000), sighting("Level 28", 2000)])).not.toContain("npcKeys.subName");
+    });
   });
 
   it("should produce a paste-ready foreverNpcTraces.lua correction for an npc encountered in the session", () => {
