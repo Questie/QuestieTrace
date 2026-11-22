@@ -9,9 +9,9 @@ local l10n = Core.l10n
 ---------------------------------------------------------------------------
 -- Settings panel (Game Menu > Options > AddOns > QuestieTrace)
 ---------------------------------------------------------------------------
--- Only holds a checkbox that mirrors `QuestieTrace.settings.dataCollectionConsent`.
--- Checking it grants consent and unchecking it revokes it, like the answers in the
--- consent prompt. Undecided (nil) shows as unchecked.
+-- Holds a checkbox that mirrors `QuestieTrace.settings.dataCollectionConsent` and a button
+-- that opens the export window. Checking the box grants consent and unchecking it revokes
+-- it, like the answers in the consent prompt. Undecided (nil) shows as unchecked.
 ---------------------------------------------------------------------------
 
 ---@return boolean
@@ -35,7 +35,7 @@ function Core.RegisterSettingsPanel()
     return
   end
 
-  local category = Settings.RegisterVerticalLayoutCategory("QuestieTrace")
+  local category, layout = Settings.RegisterVerticalLayoutCategory("QuestieTrace")
   local setting = Settings.RegisterProxySetting(
     category,
     "QUESTIETRACE_DATA_COLLECTION_CONSENT",
@@ -50,5 +50,15 @@ function Core.RegisterSettingsPanel()
     setting,
     l10n("Allow QuestieTrace to collect anonymized gameplay data, such as quest progress, positions, and loot. Your data stays on your machine unless you choose to export and share it.")
   )
+  if (CreateSettingsButtonInitializer and layout) then
+    local addSearchTags = true
+    layout:AddInitializer(CreateSettingsButtonInitializer(
+      l10n("Export data"),
+      l10n("Open export window"),
+      function() Core.ShowExportWindow() end,
+      l10n("Open the window to review and share the data QuestieTrace has collected."),
+      addSearchTags
+    ))
+  end
   Settings.RegisterAddOnCategory(category)
 end

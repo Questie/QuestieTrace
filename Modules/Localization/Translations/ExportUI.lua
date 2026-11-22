@@ -5,6 +5,42 @@ local Core = QuestieTraceCore
 local l10n = Core.l10n
 
 local exportUILocales = {
+  ["Export data"] = {
+    ["enUS"] = true,
+    ["deDE"] = "Daten exportieren", -- 🤖
+    ["esES"] = "Exportar datos", -- 🤖
+    ["esMX"] = "Exportar datos", -- 🤖
+    ["frFR"] = "Exporter les données", -- 🤖
+    ["koKR"] = "데이터 내보내기", -- 🤖
+    ["ptBR"] = "Exportar dados", -- 🤖
+    ["ruRU"] = "Экспорт данных", -- 🤖
+    ["zhCN"] = "导出数据", -- 🤖
+    ["zhTW"] = "匯出資料", -- 🤖
+  },
+  ["Open export window"] = {
+    ["enUS"] = true,
+    ["deDE"] = "Exportfenster öffnen", -- 🤖
+    ["esES"] = "Abrir ventana de exportación", -- 🤖
+    ["esMX"] = "Abrir ventana de exportación", -- 🤖
+    ["frFR"] = "Ouvrir la fenêtre d'export", -- 🤖
+    ["koKR"] = "내보내기 창 열기", -- 🤖
+    ["ptBR"] = "Abrir janela de exportação", -- 🤖
+    ["ruRU"] = "Открыть окно экспорта", -- 🤖
+    ["zhCN"] = "打开导出窗口", -- 🤖
+    ["zhTW"] = "開啟匯出視窗", -- 🤖
+  },
+  ["Open the window to review and share the data QuestieTrace has collected."] = {
+    ["enUS"] = true,
+    ["deDE"] = "Öffnet das Fenster, in dem du die von QuestieTrace gesammelten Daten prüfen und teilen kannst.", -- 🤖
+    ["esES"] = "Abre la ventana para revisar y compartir los datos que QuestieTrace ha recopilado.", -- 🤖
+    ["esMX"] = "Abre la ventana para revisar y compartir los datos que QuestieTrace ha recopilado.", -- 🤖
+    ["frFR"] = "Ouvre la fenêtre permettant de consulter et de partager les données collectées par QuestieTrace.", -- 🤖
+    ["koKR"] = "QuestieTrace가 수집한 데이터를 검토하고 공유할 수 있는 창을 엽니다.", -- 🤖
+    ["ptBR"] = "Abre a janela para revisar e compartilhar os dados que o QuestieTrace coletou.", -- 🤖
+    ["ruRU"] = "Открывает окно, в котором можно просмотреть данные, собранные QuestieTrace, и поделиться ими.", -- 🤖
+    ["zhCN"] = "打开窗口，查看并分享 QuestieTrace 收集的数据。", -- 🤖
+    ["zhTW"] = "開啟視窗，檢視並分享 QuestieTrace 收集的資料。", -- 🤖
+  },
   ["QuestieTrace Export"] = {
     ["enUS"] = true,
     ["deDE"] = "QuestieTrace Export", -- 🤖

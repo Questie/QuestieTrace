@@ -23,13 +23,16 @@ end
 
 ---@param env table<string, any>
 local function MockSettingsApi(env)
-  env.registered = { categories = {}, settings = {}, checkboxes = {}, addOnCategories = {} }
+  env.registered = { categories = {}, settings = {}, checkboxes = {}, addOnCategories = {}, initializers = {} }
   env.Settings = {
     VarType = { Boolean = "boolean" },
     RegisterVerticalLayoutCategory = function(name)
       local category = { name = name }
       env.registered.categories[#env.registered.categories + 1] = category
-      return category
+      local layout = {
+        AddInitializer = function(_, initializer) env.registered.initializers[#env.registered.initializers + 1] = initializer end,
+      }
+      return category, layout
     end,
     RegisterProxySetting = function(category, variable, variableType, name, defaultValue, getValue, setValue)
       local setting = { category = category, variable = variable, variableType = variableType, name = name, defaultValue = defaultValue, getValue = getValue, setValue = setValue }
@@ -43,6 +46,13 @@ local function MockSettingsApi(env)
       env.registered.addOnCategories[#env.registered.addOnCategories + 1] = category
     end,
   }
+end
+
+---@param env table<string, any>
+local function MockSettingsButton(env)
+  env.CreateSettingsButtonInitializer = function(name, buttonText, buttonClick, tooltip, addSearchTags)
+    return { name = name, buttonText = buttonText, buttonClick = buttonClick, tooltip = tooltip, addSearchTags = addSearchTags }
+  end
 end
 
 ---@param env table<string, any>
@@ -123,6 +133,40 @@ describe("Settings", function()
     env.registered.settings[1].setValue(true)
 
     assert.is_false(called)
+  end)
+
+  it("should add a button that opens the export window", function()
+    MockSettingsButton(env)
+    LoadSettingsFile(env)
+    Core.RegisterSettingsPanel()
+
+    assert.are.equal(1, #env.registered.initializers)
+    assert.are.equal("Export data", env.registered.initializers[1].name)
+    assert.are.equal("Open export window", env.registered.initializers[1].buttonText)
+  end)
+
+  it("should open the export window without touching the settings panel", function()
+    MockSettingsButton(env)
+    LoadSettingsFile(env)
+    Core.RegisterSettingsPanel()
+    local opened = false
+    local closed = false
+    env.SettingsPanel = { Close = function() closed = true end }
+    env.HideUIPanel = function() closed = true end
+    Core.ShowExportWindow = function() opened = true end
+
+    env.registered.initializers[1].buttonClick()
+
+    assert.is_true(opened)
+    assert.is_false(closed)
+  end)
+
+  it("should only register the checkbox when the client has no button initializer", function()
+    LoadSettingsFile(env)
+    Core.RegisterSettingsPanel()
+
+    assert.are.equal(1, #env.registered.checkboxes)
+    assert.are.equal(0, #env.registered.initializers)
   end)
 
   it("should register nothing on clients without the Settings API", function()

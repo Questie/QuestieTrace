@@ -163,7 +163,8 @@ With the consent dialog visible, show/dismiss a normal Blizzard popup and Edit M
 
 ## 8) Settings panel
 
-`Modules/Settings.lua` registers a "QuestieTrace" category in the Blizzard settings (Options > AddOns) on `PLAYER_LOGIN`, once the saved variables are loaded. Clients without the Settings API get no panel. It holds a single checkbox, "Allow data collection", with no other options.
+`Modules/Settings.lua` registers a "QuestieTrace" category in the Blizzard settings (Options > AddOns) on `PLAYER_LOGIN`, once the saved variables are loaded. Clients without the Settings API get no panel. It holds a checkbox, "Allow data collection", and a button, "Open export window", with no other options.
 
 - The checkbox is checked only when `QuestieTrace.settings.dataCollectionConsent == true`; undecided and declined both show it unchecked.
 - Checking it calls `Core.SetConsent(true)` and unchecking it `Core.SetConsent(false)`, the same as Yes and No in the consent dialog (section 7), including hiding the dialog if it is open.
+- The button calls `Core.ShowExportWindow()`, like `/qlt export`. The export window (strata `DIALOG`) opens above the settings panel (strata `HIGH`), so the panel stays open. Do not close it from addon code: `SettingsPanel:Close()` ends in `ToggleGameMenu()`, which calls the protected `SpellStopCasting()` from tainted code and raises `ADDON_ACTION_FORBIDDEN`. The button is only added when the client provides `CreateSettingsButtonInitializer`.
