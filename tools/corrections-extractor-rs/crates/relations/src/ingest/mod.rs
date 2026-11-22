@@ -23,6 +23,7 @@ mod titles;
 mod test_trace;
 
 use crate::config::Config;
+use crate::episode_store;
 use crate::io;
 use crate::model::QuestEpisode;
 use anyhow::{bail, Context, Result};
@@ -48,8 +49,11 @@ pub struct IngestOutput {
 }
 
 impl IngestOutput {
+    /// Writes the episodes twice: as JSON lines for people and the TS tools, and as the episode
+    /// store the steps read.
     pub fn write(&self, config: &Config) -> Result<()> {
         io::write_episodes(&config.episodes(), &self.episodes)?;
+        episode_store::write(&config.episode_store(), &self.episodes)?;
         io::write_json(&config.report("ingest"), &self.report)
     }
 }

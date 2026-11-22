@@ -60,6 +60,12 @@ impl Config {
         self.relations_dir.join("episodes.jsonl")
     }
 
+    /// The episodes as the steps read them, one bucket of characters at a time (see
+    /// [`crate::episode_store`]).
+    pub fn episode_store(&self) -> PathBuf {
+        self.relations_dir.join("episodes")
+    }
+
     pub fn catalog(&self) -> PathBuf {
         self.relations_dir.join("catalog.json")
     }
