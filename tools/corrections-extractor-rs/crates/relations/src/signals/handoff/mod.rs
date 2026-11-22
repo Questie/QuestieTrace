@@ -28,8 +28,9 @@ use self::timing::TimingHistogram;
 use self::variants::{quests_in_variant_edges, variant_edges, CompletionMoments, SameNameVariants};
 use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
-use crate::model::{QuestId, RelationCandidate};
+use crate::model::{QuestEpisode, QuestId, RelationCandidate};
 use crate::timeline::EpisodeTimeline;
+use anyhow::Result;
 use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
@@ -58,8 +59,10 @@ impl Signal for Handoff {
         "turn-in -> immediate next offer chains"
     }
 
-    fn run(&self, input: &SignalInput) -> Findings {
-        run(input)
+    fn run(&self, input: &SignalInput) -> Result<Findings> {
+        // Every episode at once, until this signal reads one bucket at a time.
+        let all = input.episodes.load_all()?;
+        Ok(run(&all, input))
     }
 }
 
@@ -116,9 +119,9 @@ struct PairsReport<'a> {
 /// Quests other observed prerequisites of X were completed or not at one hand-off to X.
 type CompanionStates = (Pair, Vec<(QuestId, bool)>);
 
-fn run(input: &SignalInput) -> Findings {
+fn run(all: &[QuestEpisode], input: &SignalInput) -> Findings {
     let catalog = input.catalog;
-    let episodes = forever_episodes(input.episodes);
+    let episodes = forever_episodes(all);
 
     let found: Vec<EpisodeHandoffs> = episodes
         .par_iter()
@@ -197,7 +200,7 @@ fn run(input: &SignalInput) -> Findings {
     eprintln!(
         "handoff: {} episodes ({} non-Forever skipped), {} observed pairs, {} candidates on {} Forever-new quests, {} covered\n  {by_field:?}",
         episodes.len(),
-        input.episodes.len() - episodes.len(),
+        all.len() - episodes.len(),
         observed.len(),
         candidates.len(),
         forever_quests.len(),
@@ -264,6 +267,7 @@ fn companion_states(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::episode_store::InMemory;
     use crate::model::{CatalogQuest, CompletedChange, CompletedSource, CompletedTimeline, QuestEpisode, QuestEventKind, RelationField, TimedValue};
     use crate::test_support::{catalog, catalog_quest, event, gossip, make_episode, npc};
 
@@ -290,11 +294,13 @@ mod tests {
 
     fn run_on(episodes: &[QuestEpisode], quests: Vec<CatalogQuest>) -> Findings {
         let catalog = catalog(quests);
-        Handoff.run(&SignalInput {
-            episodes,
-            catalog: &catalog,
-            generated_at: "2026-11-11T00:00:00.000Z",
-        })
+        Handoff
+            .run(&SignalInput {
+                episodes: &InMemory(episodes),
+                catalog: &catalog,
+                generated_at: "2026-11-11T00:00:00.000Z",
+            })
+            .expect("in-memory episodes always read")
     }
 
     #[test]

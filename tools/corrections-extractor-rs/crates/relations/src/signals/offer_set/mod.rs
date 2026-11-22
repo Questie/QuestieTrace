@@ -23,6 +23,7 @@ mod variants;
 use super::{to_json, Findings, Signal, SignalInput};
 use crate::model::{QuestId, RelationCandidate};
 use aggregate::{FinisherIndex, QuestAssessment, QuestFold};
+use anyhow::Result;
 use infer::{infer_quest, to_candidate};
 use observe::{group_by_character, observe_character, prerequisite_candidates, CharacterView, ObserveStats};
 use rayon::prelude::*;
@@ -93,11 +94,13 @@ impl Signal for OfferSet {
         "completed sets at offer time -> prerequisites"
     }
 
-    fn run(&self, input: &SignalInput) -> Findings {
+    fn run(&self, input: &SignalInput) -> Result<Findings> {
+        // Every episode at once, until this signal reads one bucket at a time.
+        let all = input.episodes.load_all()?;
         let params = &PARAMS;
         let catalog = input.catalog;
         let mut stats = ObserveStats::default();
-        let characters: Vec<_> = group_by_character(input.episodes, &mut stats).into_values().collect();
+        let characters: Vec<_> = group_by_character(&all, &mut stats).into_values().collect();
 
         let candidates = prerequisite_candidates(catalog);
         let variants = VariantIndex::new(catalog);
@@ -151,7 +154,7 @@ impl Signal for OfferSet {
             "covered": covered.len(),
             "candidates": candidates.len(),
         });
-        Findings {
+        Ok(Findings {
             input_count: stats.usable_episodes,
             params: to_json(&FileParams {
                 tunables: params,
@@ -162,6 +165,6 @@ impl Signal for OfferSet {
             covered_quest_ids: covered,
             candidates,
             reports: vec![("offer-set-summary", summary)],
-        }
+        })
     }
 }

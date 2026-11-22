@@ -25,6 +25,7 @@ mod states;
 use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
 use crate::model::{QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
+use anyhow::Result;
 use blocked::{Blocked, BlockedCollector, SkipReason};
 use indexmap::IndexMap;
 use locality::Locality;
@@ -43,9 +44,11 @@ impl Signal for Absence {
         "complete offer lists without a quest -> blockers/exclusivity"
     }
 
-    fn run(&self, input: &SignalInput) -> Findings {
+    fn run(&self, input: &SignalInput) -> Result<Findings> {
+        // Every episode at once, until this signal reads one bucket at a time.
+        let all = input.episodes.load_all()?;
         let params = AbsenceParams::default();
-        let result = analyze(input.episodes, input.catalog, params);
+        let result = analyze(&all, input.catalog, params);
         let summary = Summary::of(&result, input.generated_at);
         let AbsenceResult {
             index,
@@ -53,13 +56,13 @@ impl Signal for Absence {
             covered_quest_ids,
             ..
         } = result;
-        Findings {
+        Ok(Findings {
             input_count: index.episodes,
             params: to_json(&params),
             covered_quest_ids,
             candidates,
             reports: vec![("absence-summary", to_json(&summary))],
-        }
+        })
     }
 }
 

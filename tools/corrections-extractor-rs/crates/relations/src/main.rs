@@ -57,7 +57,7 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
         "combine" => timed("combine", || {
             let catalog: QuestCatalog = io::read_json(&config.catalog(), "catalog")?;
             let ground_truth: GroundTruth = io::read_json(&config.ground_truth(), "catalog")?;
-            let episodes = EpisodeStore::open(&config.episode_store())?.load_all()?;
+            let episodes = EpisodeStore::open(&config.episode_store())?;
             let candidate_files = io::read_candidate_files(&config.candidates_dir())?;
             let input = CombineInput {
                 candidate_files,
@@ -89,7 +89,7 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
         {
             Some(signal) => timed(other, || {
                 let catalog: QuestCatalog = io::read_json(&config.catalog(), "catalog")?;
-                let episodes = EpisodeStore::open(&config.episode_store())?.load_all()?;
+                let episodes = EpisodeStore::open(&config.episode_store())?;
                 let input = SignalInput {
                     episodes: &episodes,
                     catalog: &catalog,
@@ -130,6 +130,9 @@ fn pipeline(config: &Config) -> Result<()> {
 
     let ingested = ingest::run(config).context("ingest failed")?;
     ingested.write(config)?;
+    // From here on the steps read the episodes from the store, one bucket at a time.
+    drop(ingested);
+    let episodes = EpisodeStore::open(&config.episode_store())?;
     done("ingest");
 
     let cataloged = catalog::run(config).context("catalog failed")?;
@@ -144,7 +147,7 @@ fn pipeline(config: &Config) -> Result<()> {
     // renamed or removed signal left there must not count.
     let mut candidate_files = wowhead.files;
     let input = SignalInput {
-        episodes: &ingested.episodes,
+        episodes: &episodes,
         catalog: &cataloged.catalog,
         generated_at: &config.generated_at,
     };
@@ -160,7 +163,7 @@ fn pipeline(config: &Config) -> Result<()> {
         candidate_files,
         catalog: &cataloged.catalog,
         ground_truth: &cataloged.ground_truth,
-        episodes: &ingested.episodes,
+        episodes: &episodes,
     };
     combine::run(config, input).context("combine failed")?.write(config)?;
     done("combine");

@@ -53,7 +53,7 @@ impl IngestOutput {
     /// store the steps read.
     pub fn write(&self, config: &Config) -> Result<()> {
         io::write_episodes(&config.episodes(), &self.episodes)?;
-        episode_store::write(&config.episode_store(), &self.episodes)?;
+        episode_store::write(&config.episode_store(), &self.episodes, config.bucket_bytes()?)?;
         io::write_json(&config.report("ingest"), &self.report)
     }
 }

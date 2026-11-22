@@ -17,6 +17,7 @@
 
 use crate::config::Config;
 use crate::eligibility::is_forever_interface;
+use crate::episode_store::Episodes;
 use crate::io;
 use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
 use anyhow::{bail, Result};
@@ -29,8 +30,9 @@ mod offer_set;
 
 /// What every signal reads.
 pub struct SignalInput<'a> {
-    /// Every episode; signals look at the `forever_episodes` only.
-    pub episodes: &'a [QuestEpisode],
+    /// Every episode, one bucket of whole characters at a time; signals look at the
+    /// `forever_episodes` only.
+    pub episodes: &'a dyn Episodes,
     pub catalog: &'a QuestCatalog,
     /// The run's start time, for `generatedAt`.
     pub generated_at: &'a str,
@@ -71,8 +73,9 @@ pub trait Signal: Sync {
     fn name(&self) -> &'static str;
     /// One line for the command list.
     fn describe(&self) -> &'static str;
-    /// What the signal found; [`run_one`] makes its files of it.
-    fn run(&self, input: &SignalInput) -> Findings;
+    /// What the signal found; [`run_one`] makes its files of it. Fails when the episodes cannot
+    /// be read.
+    fn run(&self, input: &SignalInput) -> Result<Findings>;
 }
 
 /// Every signal, in the order the pipeline lists them.
@@ -107,7 +110,7 @@ pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> Result<SignalOutput>
         covered_quest_ids,
         candidates,
         reports,
-    } = signal.run(input);
+    } = signal.run(input)?;
     if let Some(bad) = candidates.iter().find(|candidate| !(0.0..=1.0).contains(&candidate.score)) {
         bail!(
             "signal {} scored {} {} {} as {}, not a number in [0, 1]",
@@ -146,6 +149,7 @@ pub fn run_all(input: &SignalInput, mut on_output: impl FnMut(SignalOutput) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::episode_store::InMemory;
     use crate::model::RelationField;
     use crate::test_support::catalog;
 
@@ -161,8 +165,8 @@ mod tests {
             "test signal"
         }
 
-        fn run(&self, _: &SignalInput) -> Findings {
-            Findings {
+        fn run(&self, _: &SignalInput) -> Result<Findings> {
+            Ok(Findings {
                 input_count: 0,
                 params: serde_json::Value::Null,
                 covered_quest_ids: vec![10],
@@ -177,7 +181,7 @@ mod tests {
                     note: None,
                 }],
                 reports: vec![],
-            }
+            })
         }
     }
 
@@ -185,7 +189,7 @@ mod tests {
     fn a_candidates_file_carries_the_signal_name_and_rejects_scores_outside_0_to_1() {
         let catalog = catalog([]);
         let input = SignalInput {
-            episodes: &[],
+            episodes: &InMemory(&[]),
             catalog: &catalog,
             generated_at: "2026-11-12T00:00:00.000Z",
         };

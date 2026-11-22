@@ -1,7 +1,7 @@
 //! Where the pipeline reads its inputs and writes its files. The environment variables are the
 //! ones the TypeScript pipeline and the Exporters dump use, so the binary is a drop-in.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
@@ -21,6 +21,9 @@ pub struct Config {
     pub output_dir: PathBuf,
     /// RELATIONS_REQUIRE_FOREVER_VERSION=1: only sessions with a Forever interface version.
     pub require_forever_version: bool,
+    /// RELATIONS_BUCKET_BYTES: where the episode store ends a bucket (see
+    /// [`Config::bucket_bytes`]); small values make tests cross many bucket boundaries.
+    pub bucket_bytes: Option<String>,
     /// When this run started (ISO 8601), written as `generatedAt` everywhere.
     pub generated_at: String,
 }
@@ -40,7 +43,20 @@ impl Config {
             output_dir: env_path("RELATIONS_OUTPUT_DIR").unwrap_or_else(|| relations_dir.join("output")),
             relations_dir,
             require_forever_version: std::env::var("RELATIONS_REQUIRE_FOREVER_VERSION").is_ok_and(|v| v == "1"),
+            bucket_bytes: std::env::var("RELATIONS_BUCKET_BYTES").ok().filter(|value| !value.is_empty()),
             generated_at,
+        }
+    }
+
+    /// Bytes of encoded episodes after which the store ends a bucket at the next character.
+    pub fn bucket_bytes(&self) -> Result<usize> {
+        match &self.bucket_bytes {
+            None => Ok(crate::episode_store::BUCKET_BYTES),
+            Some(value) => value
+                .parse::<usize>()
+                .ok()
+                .filter(|&bytes| bytes > 0)
+                .with_context(|| format!("RELATIONS_BUCKET_BYTES={value:?} is not a positive number of bytes")),
         }
     }
 
