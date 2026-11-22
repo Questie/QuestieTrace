@@ -95,37 +95,41 @@ impl Signal for OfferSet {
     }
 
     fn run(&self, input: &SignalInput) -> Result<Findings> {
-        // Every episode at once, until this signal reads one bucket at a time.
-        let all = input.episodes.load_all()?;
         let params = &PARAMS;
         let catalog = input.catalog;
         let mut stats = ObserveStats::default();
-        let characters: Vec<_> = group_by_character(&all, &mut stats).into_values().collect();
-
         let candidates = prerequisite_candidates(catalog);
         let variants = VariantIndex::new(catalog);
+        let mut finishers = FinisherIndex::new(catalog, []);
         // Each quest's views are folded in character order (evidence lists the first characters).
+        // A character is whole in its bucket, so the buckets in order give every character in order.
         let mut folds: BTreeMap<QuestId, QuestFold> = BTreeMap::new();
-        for chunk in characters.chunks(CHARACTERS_PER_CHUNK) {
-            let views: Vec<Vec<CharacterView>> = chunk
-                .par_iter()
-                .map(|episodes| observe_character(episodes, catalog, &candidates, params.completion_tolerance_seconds))
-                .collect();
-            let mut views_by_quest: FxHashMap<QuestId, Vec<&CharacterView>> = FxHashMap::default();
-            for view in views.iter().flatten() {
-                stats.views += 1;
-                views_by_quest.entry(view.quest_id).or_default().push(view);
-                folds.entry(view.quest_id).or_insert_with(|| QuestFold::new(view.quest_id));
+        input.episodes.for_each_bucket(&mut |bucket| {
+            let characters: Vec<_> = group_by_character(bucket, &mut stats).into_values().collect();
+            for &episode in characters.iter().flatten() {
+                finishers.add(episode);
             }
-            folds.par_iter_mut().for_each(|(quest_id, fold)| {
-                for view in views_by_quest.get(quest_id).into_iter().flatten() {
-                    fold.add(view, catalog, params, &variants);
+            for chunk in characters.chunks(CHARACTERS_PER_CHUNK) {
+                let views: Vec<Vec<CharacterView>> = chunk
+                    .par_iter()
+                    .map(|episodes| observe_character(episodes, catalog, &candidates, params.completion_tolerance_seconds))
+                    .collect();
+                let mut views_by_quest: FxHashMap<QuestId, Vec<&CharacterView>> = FxHashMap::default();
+                for view in views.iter().flatten() {
+                    stats.views += 1;
+                    views_by_quest.entry(view.quest_id).or_default().push(view);
+                    folds.entry(view.quest_id).or_insert_with(|| QuestFold::new(view.quest_id));
                 }
-            });
-        }
+                folds.par_iter_mut().for_each(|(quest_id, fold)| {
+                    for view in views_by_quest.get(quest_id).into_iter().flatten() {
+                        fold.add(view, catalog, params, &variants);
+                    }
+                });
+            }
+            Ok(())
+        })?;
         let quests_seen = folds.len();
 
-        let finishers = FinisherIndex::new(catalog, characters.iter().flatten().copied());
         let assessments: BTreeMap<QuestId, QuestAssessment> = folds
             .into_par_iter()
             .map(|(quest_id, fold)| (quest_id, fold.finish(catalog, params, &finishers, &variants)))
@@ -166,5 +170,69 @@ impl Signal for OfferSet {
             candidates,
             reports: vec![("offer-set-summary", summary)],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::episode_store::{Episodes, InMemory, PerCharacter};
+    use crate::model::{CatalogQuest, CompletedChange, CompletedSource, CompletedTimeline, QuestEpisode, QuestEventKind, Starters};
+    use crate::test_support::{catalog, catalog_quest, event, gossip, make_episode, npc};
+
+    const UNIVERSAL: QuestId = 1;
+    const PREREQ: QuestId = 10;
+    const QUEST: QuestId = 20;
+
+    /// A character that turns PREREQ in at npc 100 (no catalog finisher: only the traces say where)
+    /// and is then offered QUEST there.
+    fn takes_quest_after_prereq(offered_prereq_at: f64) -> QuestEpisode {
+        QuestEpisode {
+            completed: Some(CompletedTimeline {
+                source: CompletedSource::Modern,
+                initial: vec![UNIVERSAL],
+                changes: vec![CompletedChange {
+                    t: 101.0,
+                    add: Some(vec![PREREQ]),
+                    remove: None,
+                }],
+            }),
+            offers: vec![gossip(offered_prereq_at, npc(100), &[PREREQ], &[]), gossip(100.5, npc(100), &[QUEST], &[])],
+            quest_events: vec![event(100.0, QuestEventKind::TurnedIn, PREREQ, Some(npc(100)))],
+            ..make_episode()
+        }
+    }
+
+    #[test]
+    fn finds_the_same_with_every_character_in_a_bucket_of_its_own() {
+        let catalog = catalog([
+            catalog_quest(UNIVERSAL),
+            catalog_quest(PREREQ),
+            CatalogQuest {
+                starters: Starters {
+                    npcs: vec![100],
+                    ..Starters::default()
+                },
+                ..catalog_quest(QUEST)
+            },
+        ]);
+        let episodes: Vec<QuestEpisode> = (0..12).map(|i| takes_quest_after_prereq(10.0 + f64::from(i))).collect();
+        let run = |episodes: &dyn Episodes| {
+            OfferSet
+                .run(&SignalInput {
+                    episodes,
+                    catalog: &catalog,
+                    generated_at: "2026-11-22T00:00:00.000Z",
+                })
+                .unwrap()
+        };
+        let one_bucket = run(&InMemory(&episodes));
+        let per_character = run(&PerCharacter(&episodes));
+
+        assert!(!one_bucket.candidates.is_empty(), "the fixture must produce candidates");
+        assert_eq!(per_character.candidates, one_bucket.candidates);
+        assert_eq!(per_character.covered_quest_ids, one_bucket.covered_quest_ids);
+        assert_eq!(per_character.input_count, one_bucket.input_count);
+        assert_eq!(per_character.reports, one_bucket.reports);
     }
 }

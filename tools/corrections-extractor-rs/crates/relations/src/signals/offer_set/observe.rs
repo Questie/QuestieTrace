@@ -165,7 +165,7 @@ pub fn group_by_character<'e>(episodes: &'e [QuestEpisode], stats: &mut ObserveS
     for sessions in characters.values_mut() {
         sessions.sort_by_key(|episode| episode.session_order);
     }
-    stats.characters = characters.len();
+    stats.characters += characters.len();
     characters
 }
 
