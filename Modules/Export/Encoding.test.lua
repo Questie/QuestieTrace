@@ -1,11 +1,12 @@
 ---@param env table<string, any>
+---@param libDeflate table? Defaults to a stub that leaves strings unchanged.
 ---@return QuestieTraceCore
-local function LoadEncodingModule(env)
+local function LoadEncodingModule(env, libDeflate)
   setmetatable(env, { __index = _G })
   env._G = env
   env.QuestieTraceCore = { Debug = function() end }
   env.LibStub = function()
-    return {
+    return libDeflate or {
       EncodeForPrint = function(_, compressed) return compressed end,
       DecodeForPrint = function(_, encoded) return encoded end,
     }
@@ -198,5 +199,59 @@ describe("Encoding.EncodeExportPayload", function()
 
     assert.is_nil(encoded)
     assert.matches("secret value", err)
+  end)
+end)
+
+describe("Encoding.EncodeExportPayload in chunks", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+  ---@type table
+  local LibDeflate
+  ---@type string
+  local compressed
+
+  --- Bytes covering every value, so every printable character is produced.
+  ---@param length integer
+  ---@return string
+  local function MakeBytes(length)
+    local bytes = {}
+    for i = 1, length do
+      bytes[i] = string.char((i * 7) % 256)
+    end
+    return table.concat(bytes)
+  end
+
+  before_each(function()
+    env = {}
+    LibDeflate = assert(loadfile("Libs/LibDeflate/LibDeflate.lua"))()
+    Core = LoadEncodingModule(env, LibDeflate)
+    env.C_EncodingUtil.CompressString = function() return compressed end
+  end)
+
+  for _, length in ipairs({ 0, 1, 2, 3, 30000, 30001, 30002, 90000, 95000 }) do
+    it("should encode " .. length .. " bytes exactly like encoding them in one go", function()
+      compressed = MakeBytes(length)
+
+      local encoded = Core.EncodeExportPayload({}, function() end)
+
+      assert.equal(LibDeflate:EncodeForPrint(compressed), encoded)
+    end)
+  end
+
+  it("should yield before each chunk of 30000 bytes", function()
+    compressed = MakeBytes(65000)
+    local yields = 0
+
+    Core.EncodeExportPayload({}, function() yields = yields + 1 end)
+
+    assert.equal(3, yields)
+  end)
+
+  it("should not yield without a yield function", function()
+    compressed = MakeBytes(65000)
+
+    assert.equal(LibDeflate:EncodeForPrint(compressed), Core.EncodeExportPayload({}))
   end)
 end)

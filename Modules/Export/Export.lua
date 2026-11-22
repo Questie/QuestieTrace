@@ -356,11 +356,12 @@ end
 --- internally) lets callers build it once, inspect hasExportableData, encode
 --- it, and mark it exported, all from the same payload/sourceSessions.
 ---@param payload table? Result of Core.BuildExportPayload(). Built fresh (with defaults) if omitted.
+---@param yield fun()? Passed on to Core.EncodeExportPayload(), to spread the encoding over several frames.
 ---@return boolean ok Whether `text` contains real encoded data (false = error message).
 ---@return string text
-function Core.BuildExportString(payload)
+function Core.BuildExportString(payload, yield)
   payload = payload or Core.BuildExportPayload()
-  local encoded, err = Core.EncodeExportPayload(payload)
+  local encoded, err = Core.EncodeExportPayload(payload, yield)
   if encoded then
     return  true, EXPORT_PREFIX .. encoded .. EXPORT_SUFFIX
   end

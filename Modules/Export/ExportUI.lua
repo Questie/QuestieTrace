@@ -360,7 +360,8 @@ local function _RotateLiveSession()
 end
 
 --- Fill the export window. Runs as a coroutine and yields between the slow
---- steps (saving the live session, decoding each saved session, encoding),
+--- steps (saving the live session, decoding each saved session, compressing,
+--- and each chunk of turning it into printable text),
 --- so no single frame runs long enough to hit the client's script time limit.
 ---@param frame ExportFrame
 local function _RunExportJob(frame)
@@ -378,7 +379,7 @@ local function _RunExportJob(frame)
   end
 
   coroutine.yield()
-  local ok, text = Core.BuildExportString(payload)
+  local ok, text = Core.BuildExportString(payload, coroutine.yield)
   frame.editBox.originalText = text
   frame.editBox:SetText(text)
 
