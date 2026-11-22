@@ -351,6 +351,7 @@ to trackers for login-time data sampling (see tracker sections above).
 - `MODIFIER_STATE_CHANGED`
 - `PLAYER_REGEN_DISABLED`
 - `PLAYER_REGEN_ENABLED`
+- `UPDATE_MOUSEOVER_UNIT` *(also UnitInteraction + UnitState)*
 - `PLAYER_EQUIPMENT_CHANGED`
 - `SKILL_LINES_CHANGED`
 - `NEW_RECIPE_LEARNED`
