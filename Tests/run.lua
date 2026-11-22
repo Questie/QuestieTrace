@@ -2294,6 +2294,62 @@ local function TestUnitStateUsesUnitLevelLineTypeWhenAvailable()
   assert(stream[2].v == "", "A UnitLevel line must be treated as no title")
 end
 
+local function TestUnitStateDetectsLevelLinesWithoutLevelLineType()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local holder = InstallUnitTooltipProcessor(runtime)
+  env.Enum.TooltipDataLineType.UnitLevel = 47
+  local guid = "Creature-0-1-1-1-1-000005"
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return guid end end
+
+  runtime.core.StartCapture("unit subname level line text test")
+  for _, text in ipairs({ "Level 15", "Level 60 (Elite)", "Level ?? (Boss)" }) do
+    holder.callback(nil, { guid = guid, lines = { { type = 2, leftText = "Kobold" }, { type = 0, leftText = text } } })
+    guid = guid .. "0"
+  end
+
+  local stream = Session(runtime).functions.UnitSubName.mouseover
+  assert(#stream == 3, "each new NPC must get an entry")
+  for i = 1, 3 do
+    assert(stream[i].v == "", "a level line without the UnitLevel line type must be treated as no title: " .. tostring(stream[i].v))
+  end
+end
+
+local function TestUnitStateKeepsTitlesThatLookLikeLevelLines()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local holder = InstallUnitTooltipProcessor(runtime)
+  env.Enum.TooltipDataLineType.UnitLevel = 47
+  local guid = "Creature-0-1-1-1-1-000006"
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return guid end end
+
+  runtime.core.StartCapture("unit subname level title test")
+  for _, case in ipairs({
+    { template = "Level %s", text = "Level Trainer", expected = "Level Trainer" },
+    { template = "Stufe %s", text = "Stufe 15", expected = "" },
+    { template = "Stufe %s", text = "Stufe ?? (Boss)", expected = "" },
+    { template = "%s 레벨", text = "15 레벨", expected = "" },
+    { template = "%s 레벨", text = "레벨 담당관", expected = "레벨 담당관" },
+    { template = "等级 %s", text = "等级 15", expected = "" },
+    { template = "等级 %s", text = "等级 10（精英）", expected = "" },
+    { template = "Level %s", text = "Level 7 Trainer", expected = "Level 7 Trainer" },
+    { template = "Level %s", text = "Level 60 (Elite)", expected = "" },
+    { template = "%s 레벨", text = "15 레벨 담당관", expected = "15 레벨 담당관" },
+  }) do
+    env.TOOLTIP_UNIT_LEVEL = case.template
+    guid = guid .. "0"
+    holder.callback(nil, { guid = guid, lines = { { type = 2, leftText = "Someone" }, { type = 0, leftText = case.text } } })
+    local stream = Session(runtime).functions.UnitSubName.mouseover
+    assert(stream[#stream].v == case.expected, case.template .. " / " .. case.text .. " -> " .. tostring(stream[#stream].v))
+  end
+end
+
 local function TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits()
   local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
   local env = runtime.env
@@ -3666,6 +3722,8 @@ local tests = {
   { name = "should record the npc guid together with each subname", run = TestUnitStateRecordsGuidWithSubName },
   { name = "should redact player names in npc subname", run = TestUnitStateSanitizesSubName },
   { name = "should detect level lines by line type when UnitLevel exists", run = TestUnitStateUsesUnitLevelLineTypeWhenAvailable },
+  { name = "should detect level lines by text when the line type does not say so", run = TestUnitStateDetectsLevelLinesWithoutLevelLineType },
+  { name = "should keep titles that only look like level lines", run = TestUnitStateKeepsTitlesThatLookLikeLevelLines },
   { name = "should not record subname for players, player pets or other units", run = TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits },
   { name = "should register every event a tracker listens to", run = TestEveryTrackerEventIsRegistered },
   { name = "should record and sample the mouseover unit on UPDATE_MOUSEOVER_UNIT", run = TestMouseoverEventIsRecordedAndSampled },
