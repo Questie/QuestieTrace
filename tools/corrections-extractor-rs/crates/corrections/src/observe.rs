@@ -80,6 +80,7 @@ pub struct StagedSession {
     pub objectives_text: SessionScalars<QuestObjectivesTextValue>,
     pub objective_count: SessionScalars<Num>,
     pub npc_name: SessionScalars<String>,
+    pub npc_sub_name: SessionScalars<String>,
     pub item_name: SessionScalars<String>,
     pub object_name: SessionScalars<String>,
 
@@ -109,6 +110,7 @@ pub struct StagedSession {
 #[derive(Default)]
 pub struct StagedLookups {
     pub npc_name: SessionScalars<Localized<String>>,
+    pub npc_sub_name: SessionScalars<Localized<String>>,
     pub quest_name: SessionScalars<Localized<String>>,
     pub objectives_text: SessionScalars<Localized<QuestObjectivesTextValue>>,
     pub item_name: SessionScalars<Localized<String>>,
@@ -144,6 +146,7 @@ pub fn observe_session(session: &Session) -> Option<StagedSession> {
         objectives_text: SessionScalars::new(quest::objectives_text::observe(session)),
         objective_count: SessionScalars::new(quest::objective_count::observe(session)),
         npc_name: SessionScalars::new(npc::name::observe(session)),
+        npc_sub_name: SessionScalars::new(npc::sub_name::observe(session)),
         item_name: SessionScalars::new(item::name::observe(session)),
         object_name: SessionScalars::new(object::name::observe(session)),
         required_level: quest::required_level::observe(session),
@@ -164,6 +167,7 @@ pub fn observe_session(session: &Session) -> Option<StagedSession> {
         object_spawns: above(object::spawns::observe(session), max_ids.object),
         lookups: StagedLookups {
             npc_name: translations(npc::name::observe_localized(session)),
+            npc_sub_name: translations(npc::sub_name::observe_localized(session)),
             quest_name: translations(quest::name::observe_localized(session)),
             objectives_text: translations(quest::objectives_text::observe_localized(session)),
             item_name: translations(item::name::observe_localized(session)),
