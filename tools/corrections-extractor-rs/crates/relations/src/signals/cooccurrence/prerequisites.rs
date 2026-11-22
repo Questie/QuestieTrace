@@ -305,17 +305,21 @@ fn baseline_for(population: &Population, quest_index: usize, prereq: QuestId) ->
     let prereq_index = population.index_of(prereq).expect("implications name quests of the population");
     let mut narrow = Baseline::default();
     let mut broad = Baseline::default();
-    for character in &population.characters {
-        let history = &character.history;
-        if history.taken.contains_key(&quest.id) || !population.allows(character, prereq_index) {
+    // Every character is asked whether it took X and completed P: walking the ascending lists of
+    // takers and completers answers that without looking either quest up per character.
+    let mut takers = population.takers[quest_index].iter().peekable();
+    let mut completers = population.completers[prereq_index].iter().peekable();
+    for (index, character) in population.characters.iter().enumerate() {
+        let took = takers.next_if_eq(&&index).is_some();
+        let completed = usize::from(completers.next_if_eq(&&index).is_some());
+        if took || !population.allows(character, prereq_index) {
             continue;
         }
-        if let (Some(required), Some(level)) = (quest.required_level, history.max_level) {
+        if let (Some(required), Some(level)) = (quest.required_level, character.history.max_level) {
             if level < required {
                 continue;
             }
         }
-        let completed = usize::from(history.done.contains_key(&prereq));
         broad.of += 1;
         broad.completed += completed;
         if population.could_take(character, quest_index) {
@@ -331,15 +335,15 @@ fn baseline_for(population: &Population, quest_index: usize, prereq: QuestId) ->
 }
 
 /// Computes, once per quest, the implications that survive for it.
-struct ImplicationFinder<'p, 'e> {
-    population: &'p Population<'e>,
+struct ImplicationFinder<'p, 'c> {
+    population: &'p Population<'c>,
     params: &'p PrerequisiteParams,
     /// Per quest index, its surviving implications by ascending prerequisite id.
     survivors: Vec<OnceLock<Vec<Implication>>>,
 }
 
-impl<'p, 'e> ImplicationFinder<'p, 'e> {
-    fn new(population: &'p Population<'e>, params: &'p PrerequisiteParams) -> Self {
+impl<'p, 'c> ImplicationFinder<'p, 'c> {
+    fn new(population: &'p Population<'c>, params: &'p PrerequisiteParams) -> Self {
         ImplicationFinder {
             population,
             params,
@@ -427,9 +431,9 @@ impl<'p, 'e> ImplicationFinder<'p, 'e> {
             cells: Vec::new(),
             witnesses: Vec::new(),
         };
-        struct Witness<'c, 'e> {
+        struct Witness<'c> {
             lead: Option<SessionTime>,
-            character: &'c Character<'e>,
+            character: &'c Character,
             done: Stamp,
             taken: Stamp,
         }
@@ -481,9 +485,9 @@ fn reached_level(character: &Character, from: &Stamp, to: &Stamp, level: Option<
     let (Some(level), Some(from_t), Some(to_t)) = (level, from.time(), to.time()) else {
         return false;
     };
-    let timeline = &character.history.sessions[from.session];
+    let session = &character.history.sessions[from.session];
     // The level-up is often logged a moment before the turn-in event that caused it.
-    match (timeline.level_at(from_t - LEVEL_UP_LEAD_SECONDS), timeline.level_at(to_t)) {
+    match (session.level_at(from_t - LEVEL_UP_LEAD_SECONDS), session.level_at(to_t)) {
         (Some(before), Some(after)) => before < level && after >= level,
         _ => false,
     }

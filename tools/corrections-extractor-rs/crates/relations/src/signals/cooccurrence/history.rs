@@ -6,8 +6,11 @@
 //! session started happened at an unknown time since the previous session, so two such quests of
 //! the same session are unordered against each other, but both precede everything that happens
 //! during that session and follow everything from earlier sessions.
+//!
+//! A history owns what the inference asks of it and refers to no episode, so histories are built
+//! one bucket of whole characters at a time while the episodes come and go.
 
-use crate::model::{CompletedTimeline, PlayerContext, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
+use crate::model::{CompletedTimeline, PlayerContext, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime, TimedValue};
 use crate::timeline::{Completion, EpisodeTimeline};
 use indexmap::IndexMap;
 use rayon::prelude::*;
@@ -15,6 +18,8 @@ use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
+use std::collections::BTreeMap;
+use std::ops::{AddAssign, Index};
 
 /// Quests first seen in the log this early in a session, without an accept, were held at its start.
 const LATE_LOG_SECONDS: SessionTime = 60.0;
@@ -117,37 +122,202 @@ pub fn lead_within_session(earlier: &Stamp, later: &Stamp) -> Option<SessionTime
     }
 }
 
-pub struct CharacterHistory<'e> {
-    pub key: &'e str,
+pub struct CharacterHistory {
+    pub key: String,
     pub player: PlayerContext,
     /// Highest level seen in any session; a lower bound on what the character reached.
     pub max_level: Option<i64>,
-    /// One timeline per kept session, in history order, for point-in-time checks (levels, log,
-    /// completion). A [`Stamp`]'s `session` indexes this.
-    pub sessions: Vec<EpisodeTimeline<'e>>,
+    /// One per kept session, in history order. A [`Stamp`]'s `session` indexes this.
+    pub sessions: Vec<SessionFacts>,
     /// First completion of each quest. Only quests the client's completed set actually contained.
-    pub done: FxHashMap<QuestId, Stamp>,
+    pub done: Stamps,
     /// First moment each quest was in the log, accepted, or completed.
-    pub taken: FxHashMap<QuestId, Stamp>,
+    pub taken: Stamps,
+    held: HeldTogether,
 }
 
-impl CharacterHistory<'_> {
+impl CharacterHistory {
     /// The episode a stamp was seen in, for evidence.
     pub fn episode_key(&self, stamp: &Stamp) -> &str {
-        &self.sessions[stamp.session].episode.key
+        &self.sessions[stamp.session].key
+    }
+}
+
+/// A stamp per quest, by ascending quest. Built once per character and only read after, so a
+/// sorted slice rather than a hash map: every character's stamps are kept at once, and a hash map
+/// takes about half as much again.
+pub struct Stamps(Box<[(QuestId, Stamp)]>);
+
+impl Stamps {
+    fn new(stamps: FxHashMap<QuestId, Stamp>) -> Stamps {
+        let mut stamps: Vec<(QuestId, Stamp)> = stamps.into_iter().collect();
+        stamps.sort_unstable_by_key(|&(quest_id, _)| quest_id);
+        Stamps(stamps.into())
+    }
+
+    /// The quest's position among the quests, ascending.
+    fn position(&self, quest_id: QuestId) -> Option<usize> {
+        self.0.binary_search_by_key(&quest_id, |&(id, _)| id).ok()
+    }
+
+    pub fn get(&self, quest_id: &QuestId) -> Option<&Stamp> {
+        self.position(*quest_id).map(|position| &self.0[position].1)
+    }
+
+    pub fn contains_key(&self, quest_id: &QuestId) -> bool {
+        self.position(*quest_id).is_some()
+    }
+
+    /// The quests, ascending.
+    pub fn keys(&self) -> impl Iterator<Item = &QuestId> {
+        self.0.iter().map(|(quest_id, _)| quest_id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl Index<&QuestId> for Stamps {
+    type Output = Stamp;
+
+    fn index(&self, quest_id: &QuestId) -> &Stamp {
+        self.get(quest_id).unwrap_or_else(|| panic!("no stamp for quest {quest_id}"))
+    }
+}
+
+/// What the inference still asks of a kept session once its episode is gone.
+pub struct SessionFacts {
+    /// The episode's key, for evidence.
+    pub key: String,
+    /// The episode's level change points.
+    levels: Box<[TimedValue<i64>]>,
+    /// Quests turned in during the session, ascending.
+    turned_in: Box<[QuestId]>,
+}
+
+impl SessionFacts {
+    fn of(episode: &QuestEpisode) -> SessionFacts {
+        let mut turned_in: Vec<QuestId> = episode
+            .quest_events
+            .iter()
+            .filter(|event| event.kind == QuestEventKind::TurnedIn)
+            .map(|event| event.quest_id)
+            .collect();
+        turned_in.sort_unstable();
+        turned_in.dedup();
+        SessionFacts {
+            key: episode.key.clone(),
+            levels: episode.levels.as_slice().into(),
+            turned_in: turned_in.into(),
+        }
+    }
+
+    /// Level at `t`; before the first change point, the first recorded level (the level at
+    /// capture start), as [`EpisodeTimeline::level_at`] reads it.
+    pub fn level_at(&self, t: SessionTime) -> Option<i64> {
+        match self.levels.partition_point(|level| level.t <= t).checked_sub(1) {
+            Some(index) => Some(self.levels[index].v),
+            None => self.levels.first().map(|level| level.v),
+        }
+    }
+
+    pub fn turned_in(&self, quest_id: QuestId) -> bool {
+        self.turned_in.binary_search(&quest_id).is_ok()
     }
 }
 
 /// The character had both quests active at once: both in the log, or one in the log while the
-/// other was completed. Exclusive quests never are.
+/// other was completed. Exclusive quests never are. Only asked about quests the character took
+/// (see [`HeldTogether`]).
 pub fn held_together(history: &CharacterHistory, a: QuestId, b: QuestId) -> bool {
-    history.sessions.iter().any(|timeline| {
-        timeline.episode.quest_log.iter().any(|entry| {
-            let has_a = entry.v.contains(&a);
-            let has_b = entry.v.contains(&b);
-            (has_a && (has_b || timeline.is_completed_at(b, entry.t))) || (has_b && timeline.is_completed_at(a, entry.t))
-        })
-    })
+    let (held, taken) = (&history.held, &history.taken);
+    debug_assert!(
+        taken.contains_key(&a) && taken.contains_key(&b),
+        "held_together({a}, {b}) on quests not both taken"
+    );
+    held.row_has(taken, a, b) || held.row_has(taken, b, a)
+}
+
+/// [`held_together`] for one character, worked out while its episodes were at hand: per quest it
+/// ever had in its log, the quests in the log with it or completed at the same moment, in any kept
+/// session. Bitsets over the quests the character took (a quest's bit is its position in
+/// [`CharacterHistory::taken`]), the only quests anyone asks about: one row of a bit per taken
+/// quest for each quest ever in the log, where the timelines it replaces took kilobytes per
+/// session (on the 5% sample of November 2026, 9 MB of rows for 6,079 characters).
+struct HeldTogether {
+    /// The quests ever in the log, ascending: row `i` of `rows` belongs to `logged[i]`.
+    logged: Box<[QuestId]>,
+    /// `logged.len()` rows of one bit per taken quest, in whole words.
+    rows: Box<[u64]>,
+}
+
+impl HeldTogether {
+    /// Walks every log entry of the kept sessions: each quest in the log was active together with
+    /// the rest of the log and with everything completed at that moment.
+    fn new(taken: &Stamps, sessions: &[KeptSession]) -> HeldTogether {
+        let words = taken.len().div_ceil(64);
+        let bit_of = |quest_id: QuestId| taken.position(quest_id);
+        let set = |bits: &mut [u64], bit: usize| bits[bit / 64] |= 1 << (bit % 64);
+        // By the logged quest's bit, so the rows come out in ascending quest order.
+        let mut rows: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
+        for KeptSession { episode, completed, timeline } in sessions {
+            // Completion only changes at a completed-set change or a turn-in (the timeline's
+            // toggles): every other quest keeps the state it had at the session's start.
+            let turned_in = episode.quest_events.iter().filter(|event| event.kind == QuestEventKind::TurnedIn);
+            let changing: FxHashSet<QuestId> = completed
+                .changes
+                .iter()
+                .flat_map(|change| change.add.iter().chain(&change.remove).flatten().copied())
+                .chain(turned_in.map(|event| event.quest_id))
+                .collect();
+            let mut steady = vec![0u64; words];
+            for &quest_id in completed.initial.iter().filter(|quest_id| !changing.contains(quest_id)) {
+                if let Some(bit) = bit_of(quest_id) {
+                    set(&mut steady, bit);
+                }
+            }
+            let changing: Vec<(QuestId, usize)> = changing.into_iter().filter_map(|quest_id| Some((quest_id, bit_of(quest_id)?))).collect();
+
+            for entry in &episode.quest_log {
+                let in_log: Vec<usize> = entry.v.iter().filter_map(|&quest_id| bit_of(quest_id)).collect();
+                if in_log.is_empty() {
+                    continue;
+                }
+                let mut active = steady.clone();
+                for &(quest_id, bit) in &changing {
+                    if timeline.is_completed_at(quest_id, entry.t) {
+                        set(&mut active, bit);
+                    }
+                }
+                for &bit in &in_log {
+                    set(&mut active, bit);
+                }
+                for &bit in &in_log {
+                    let row = rows.entry(bit).or_insert_with(|| vec![0; words]);
+                    row.iter_mut().zip(&active).for_each(|(word, active)| *word |= active);
+                }
+            }
+        }
+        HeldTogether {
+            logged: rows.keys().map(|&bit| taken.0[bit].0).collect(),
+            rows: rows.into_values().flatten().collect(),
+        }
+    }
+
+    /// `other` was in the log with `logged`, or completed while `logged` was in the log. `taken`
+    /// is the character's, which the bits are positions in.
+    fn row_has(&self, taken: &Stamps, logged: QuestId, other: QuestId) -> bool {
+        let (Ok(row), Some(bit)) = (self.logged.binary_search(&logged), taken.position(other)) else {
+            return false;
+        };
+        let words = taken.len().div_ceil(64);
+        self.rows[row * words + bit / 64] & (1 << (bit % 64)) != 0
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -165,10 +335,34 @@ pub struct HistoryReport {
     pub inconsistent_characters: usize,
 }
 
-/// Quests whose completion state is not a one-way "done forever" flag, so co-occurrence says
-/// nothing about them.
-pub fn unstable_quests(episodes: &[&QuestEpisode], catalog: &QuestCatalog) -> FxHashSet<QuestId> {
-    let mut unstable: FxHashSet<QuestId> = catalog.quests.values().filter(|quest| quest.is_repeatable()).map(|quest| quest.id).collect();
+/// Adds up the reports of buckets read one after another.
+impl AddAssign for HistoryReport {
+    fn add_assign(&mut self, other: HistoryReport) {
+        // Every field by name, so a new one cannot be left out of the sum.
+        let HistoryReport {
+            episodes,
+            without_completed,
+            broken_initial_sets,
+            characters,
+            inconsistent_characters,
+        } = other;
+        self.episodes += episodes;
+        self.without_completed += without_completed;
+        self.broken_initial_sets += broken_initial_sets;
+        self.characters += characters;
+        self.inconsistent_characters += inconsistent_characters;
+    }
+}
+
+/// The catalog's repeatables: the first of the unstable quests, whose completion state is not a
+/// one-way "done forever" flag, so co-occurrence says nothing about them. [`add_unstable_quests`]
+/// adds the rest from the episodes.
+pub fn repeatable_quests(catalog: &QuestCatalog) -> FxHashSet<QuestId> {
+    catalog.quests.values().filter(|quest| quest.is_repeatable()).map(|quest| quest.id).collect()
+}
+
+/// Adds the quests `episodes` show resetting or offered as repeatable to `unstable`.
+pub fn add_unstable_quests(unstable: &mut FxHashSet<QuestId>, episodes: &[&QuestEpisode]) {
     for episode in episodes {
         if let Some(completed) = &episode.completed {
             // Daily/weekly resets remove a few quests from the completed set. A change that drops
@@ -193,7 +387,6 @@ pub fn unstable_quests(episodes: &[&QuestEpisode], catalog: &QuestCatalog) -> Fx
             }
         }
     }
-    unstable
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -210,15 +403,24 @@ struct Session<'e> {
     completed: &'e CompletedTimeline,
 }
 
-/// Every character's history, in the order characters first appear in `episodes`. Quests in
-/// `ignore` (see [`unstable_quests`]) are left out of `done`/`taken` entirely.
-pub fn build_histories<'e>(episodes: &[&'e QuestEpisode], params: &HistoryParams, ignore: &FxHashSet<QuestId>) -> (Vec<CharacterHistory<'e>>, HistoryReport) {
+/// A session that passed the broken-read check, with its timeline, while the history is built.
+struct KeptSession<'e> {
+    episode: &'e QuestEpisode,
+    completed: &'e CompletedTimeline,
+    timeline: EpisodeTimeline<'e>,
+}
+
+/// Every character's history, in the order characters first appear in `episodes`, which hold
+/// every session of each character in them (a bucket of whole characters). Quests in `ignore`
+/// (the unstable quests of every episode, see [`repeatable_quests`]) are left out of
+/// `done`/`taken` entirely.
+pub fn build_histories(episodes: &[&QuestEpisode], params: &HistoryParams, ignore: &FxHashSet<QuestId>) -> (Vec<CharacterHistory>, HistoryReport) {
     let mut report = HistoryReport {
         episodes: episodes.len(),
         ..HistoryReport::default()
     };
 
-    let mut by_character: IndexMap<&'e str, Vec<Session<'e>>, FxBuildHasher> = IndexMap::default();
+    let mut by_character: IndexMap<&str, Vec<Session>, FxBuildHasher> = IndexMap::default();
     for &episode in episodes {
         match episode.completed.as_ref().filter(|completed| !completed_looks_missing(episode, completed)) {
             Some(completed) => by_character.entry(&episode.character_key).or_default().push(Session { episode, completed }),
@@ -227,8 +429,8 @@ pub fn build_histories<'e>(episodes: &[&'e QuestEpisode], params: &HistoryParams
     }
 
     // Characters are independent, so they are built side by side (in order).
-    let characters: Vec<(&'e str, Vec<Session<'e>>)> = by_character.into_iter().collect();
-    let built: Vec<Option<Built<'e>>> = characters
+    let characters: Vec<(&str, Vec<Session>)> = by_character.into_iter().collect();
+    let built: Vec<Option<Built>> = characters
         .into_par_iter()
         .map(|(key, mut sessions)| {
             let player = merge_player(&sessions)?;
@@ -261,8 +463,8 @@ pub fn build_histories<'e>(episodes: &[&'e QuestEpisode], params: &HistoryParams
 }
 
 /// One character's history, and how many of its sessions were dropped as broken reads.
-struct Built<'e> {
-    history: CharacterHistory<'e>,
+struct Built {
+    history: CharacterHistory,
     broken_initial_sets: usize,
 }
 
@@ -307,23 +509,19 @@ fn keep_first(map: &mut FxHashMap<QuestId, Stamp>, ignore: &FxHashSet<QuestId>, 
     }
 }
 
-fn build_history<'e>(key: &'e str, player: PlayerContext, sessions: &[Session<'e>], params: &HistoryParams, ignore: &FxHashSet<QuestId>) -> Built<'e> {
-    let mut history = CharacterHistory {
-        key,
-        player,
-        max_level: None,
-        sessions: Vec::new(),
-        done: FxHashMap::default(),
-        taken: FxHashMap::default(),
-    };
+fn build_history(key: &str, player: PlayerContext, sessions: &[Session], params: &HistoryParams, ignore: &FxHashSet<QuestId>) -> Built {
+    let mut max_level: Option<i64> = None;
+    let mut done: FxHashMap<QuestId, Stamp> = FxHashMap::default();
+    let mut taken: FxHashMap<QuestId, Stamp> = FxHashMap::default();
+    let mut kept: Vec<KeptSession> = Vec::new();
     let mut broken_initial_sets = 0;
 
     for &Session { episode, completed } in sessions {
-        if initial_set_looks_broken(&completed.initial, &history.done, params.max_initial_loss) {
+        if initial_set_looks_broken(&completed.initial, &done, params.max_initial_loss) {
             broken_initial_sets += 1;
             continue;
         }
-        let session = history.sessions.len();
+        let session = kept.len();
         let at_start = Stamp {
             session,
             when: When::AtStart,
@@ -369,8 +567,8 @@ fn build_history<'e>(key: &'e str, player: PlayerContext, sessions: &[Session<'e
                     ..during(t, turned_in_at(quest_id, t))
                 },
             };
-            keep_first(&mut history.done, ignore, quest_id, stamp);
-            keep_first(&mut history.taken, ignore, quest_id, stamp);
+            keep_first(&mut done, ignore, quest_id, stamp);
+            keep_first(&mut taken, ignore, quest_id, stamp);
         }
 
         // The log often loads a few seconds into the session (5% of sessions start with an empty
@@ -379,18 +577,29 @@ fn build_history<'e>(key: &'e str, player: PlayerContext, sessions: &[Session<'e
             for &quest_id in &entry.v {
                 let loaded_late = entry.t <= LATE_LOG_SECONDS && !accepted.contains(&quest_id);
                 let stamp = if entry_index == 0 || loaded_late { at_start } else { during(entry.t, false) };
-                keep_first(&mut history.taken, ignore, quest_id, stamp);
+                keep_first(&mut taken, ignore, quest_id, stamp);
             }
         }
         for event in episode.quest_events.iter().filter(|event| event.kind == QuestEventKind::Accepted) {
-            keep_first(&mut history.taken, ignore, event.quest_id, during(event.t, true));
+            keep_first(&mut taken, ignore, event.quest_id, during(event.t, true));
         }
 
         for level in &episode.levels {
-            history.max_level = Some(history.max_level.map_or(level.v, |max| max.max(level.v)));
+            max_level = Some(max_level.map_or(level.v, |max| max.max(level.v)));
         }
-        history.sessions.push(timeline);
+        kept.push(KeptSession { episode, completed, timeline });
     }
+
+    let taken = Stamps::new(taken);
+    let history = CharacterHistory {
+        key: key.to_owned(),
+        player,
+        max_level,
+        sessions: kept.iter().map(|session| SessionFacts::of(session.episode)).collect(),
+        done: Stamps::new(done),
+        held: HeldTogether::new(&taken, &kept),
+        taken,
+    };
     Built { history, broken_initial_sets }
 }
 
@@ -425,8 +634,8 @@ fn initial_set_looks_broken(initial: &[QuestId], known: &FxHashMap<QuestId, Stam
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CompletedChange, CompletedSource, TimedValue};
-    use crate::signals::cooccurrence::fixtures::{catalog_of, session, SessionSpec};
+    use crate::model::{CompletedChange, CompletedSource};
+    use crate::signals::cooccurrence::fixtures::{session, SessionSpec};
     use crate::test_support::{event, make_episode};
 
     const PARAMS: HistoryParams = HistoryParams { max_initial_loss: 0.1 };
@@ -472,7 +681,7 @@ mod tests {
         let (histories, _) = build_histories(&[&later, &earlier], &PARAMS, &FxHashSet::default());
         let history = &histories[0];
 
-        let keys: Vec<&str> = history.sessions.iter().map(|timeline| timeline.episode.key.as_str()).collect();
+        let keys: Vec<&str> = history.sessions.iter().map(|session| session.key.as_str()).collect();
         assert_eq!(keys, [earlier.key.as_str(), later.key.as_str()]);
         assert_eq!(order(&history.done[&2], &history.taken[&3], 10.0), Order::Before);
     }
@@ -539,8 +748,49 @@ mod tests {
                 },
             ],
         });
-        let unstable = unstable_quests(&[&reset, &bad_read], &catalog_of([]));
+        let mut unstable = FxHashSet::default();
+        add_unstable_quests(&mut unstable, &[&reset, &bad_read]);
 
         assert_eq!(unstable.into_iter().collect::<Vec<_>>(), [5]);
+    }
+
+    #[test]
+    fn quests_are_held_together_where_a_log_entry_shows_both_active_at_its_time() {
+        // Quests 1 and 4 were completed at the start, but a bad read hides 1 (and the rest of the
+        // set but 4) from t=5 to t=50. Quest 2, accepted at t=1, is turned in at t=30, and the
+        // session ends before the completed set shows it. The log is 10 at t=0, 10+12 at t=10, 10
+        // at t=20, 10+13 at t=35.
+        let mut episode = make_episode();
+        episode.completed = Some(CompletedTimeline {
+            source: CompletedSource::Modern,
+            initial: vec![1, 4, 5, 6, 7],
+            changes: vec![
+                CompletedChange {
+                    t: 5.0,
+                    add: None,
+                    remove: Some(vec![1, 5, 6, 7]),
+                },
+                CompletedChange {
+                    t: 50.0,
+                    add: Some(vec![1, 5, 6, 7]),
+                    remove: None,
+                },
+            ],
+        });
+        episode.quest_log = [(0.0, vec![10]), (10.0, vec![10, 12]), (20.0, vec![10]), (35.0, vec![10, 13])]
+            .into_iter()
+            .map(|(t, v)| TimedValue { t, v })
+            .collect();
+        episode.quest_events = vec![event(1.0, QuestEventKind::Accepted, 2, None), event(30.0, QuestEventKind::TurnedIn, 2, None)];
+        let (histories, _) = build_histories(&[&episode], &PARAMS, &FxHashSet::default());
+        let held = |a: QuestId, b: QuestId| held_together(&histories[0], a, b);
+
+        assert!(held(10, 12) && held(12, 10), "in the log together");
+        assert!(held(12, 4), "4 was completed all session long");
+        assert!(held(10, 1), "10 was in the log at t=0, while 1 was completed");
+        assert!(!held(12, 1), "12 was only in the log while the bad read hid 1");
+        assert!(held(13, 2) && held(2, 13), "only the turn-in shows 2 completed by the time the log showed 13");
+        assert!(!held(12, 2), "2 was not completed yet at t=10");
+        assert!(!held(12, 13), "never in one log entry, neither completed");
     }
 }

@@ -200,16 +200,16 @@ fn same_hidden_gate(population: &Population, a: usize, b: usize) -> bool {
 
 /// Pair statistics over the population, with the completer bitsets they need. Quests are quest
 /// indexes.
-struct PairCounter<'p, 'e> {
-    population: &'p Population<'e>,
+struct PairCounter<'p, 'c> {
+    population: &'p Population<'c>,
     /// Per quest index, its completers as a bitset over character indexes.
     completed_by: Vec<Vec<u64>>,
     /// Per cell, its characters.
     cell_members: Vec<Vec<usize>>,
 }
 
-impl<'p, 'e> PairCounter<'p, 'e> {
-    fn new(population: &'p Population<'e>) -> Self {
+impl<'p, 'c> PairCounter<'p, 'c> {
+    fn new(population: &'p Population<'c>) -> Self {
         let words = population.characters.len().div_ceil(64);
         let completed_by = population
             .completers
@@ -299,7 +299,7 @@ impl<'p, 'e> PairCounter<'p, 'e> {
             .count()
     }
 
-    fn both_taken(&self, a: usize, id_b: QuestId) -> impl Iterator<Item = &'p Character<'e>> + '_ {
+    fn both_taken(&self, a: usize, id_b: QuestId) -> impl Iterator<Item = &'p Character> + '_ {
         let population = self.population;
         population.takers[a]
             .iter()

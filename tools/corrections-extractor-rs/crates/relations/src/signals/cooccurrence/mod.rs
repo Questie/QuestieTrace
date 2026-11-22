@@ -3,9 +3,10 @@
 //!
 //! Every session records the character's full completed set at capture start plus every change,
 //! so this signal reaches quests no giver interaction was recorded for. Pipeline: [`history`]
-//! (sessions -> one ordered history per character), [`population`] (dense indexes),
-//! [`prerequisites`], [`coflag`] and [`exclusion`] (inference), [`calibration`] (features ->
-//! score). Writes `candidates/cooccurrence.json` and `reports/cooccurrence-summary.json`.
+//! (sessions -> one ordered history per character, built one bucket of episodes at a time),
+//! [`population`] (dense indexes), [`prerequisites`], [`coflag`] and [`exclusion`] (inference),
+//! [`calibration`] (features -> score). Writes `candidates/cooccurrence.json` and
+//! `reports/cooccurrence-summary.json`.
 
 mod calibration;
 mod coflag;
@@ -19,12 +20,13 @@ mod prerequisites;
 use self::calibration::{co_flag_score, exclusion_score, prerequisite_score};
 use self::coflag::{infer_co_flags, CoFlagEdge, CoFlagParams, CoFlagged};
 use self::exclusion::{infer_exclusions, ExclusionEdge, ExclusionKind, ExclusionParams};
-use self::history::{build_histories, unstable_quests, HistoryParams};
+use self::history::{add_unstable_quests, build_histories, repeatable_quests, CharacterHistory, HistoryParams, HistoryReport};
 use self::population::Population;
 use self::prerequisites::{infer_prerequisites, PrerequisiteEdge, PrerequisiteParams};
 use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
-use crate::model::{Evidence, QuestCatalog, QuestEpisode, QuestId, RelationCandidate, RelationField};
+use crate::episode_store::Episodes;
+use crate::model::{Evidence, QuestCatalog, QuestId, RelationCandidate, RelationField};
 use crate::text::{to_exponential, to_fixed};
 use anyhow::Result;
 use rustc_hash::FxHashSet;
@@ -82,22 +84,21 @@ impl Signal for Cooccurrence {
     }
 
     fn run(&self, input: &SignalInput) -> Result<Findings> {
-        // Every episode at once, until this signal reads one bucket at a time.
-        let all = input.episodes.load_all()?;
-        let episodes = forever_episodes(&all);
         let Analysis {
             candidates,
             covered,
             mut report,
-        } = analyze(&episodes, input.catalog, &PARAMS);
-        report["episodesRead"] = json!(&all.len());
+            input_count,
+            episodes_read,
+        } = analyze(input.episodes, input.catalog, &PARAMS)?;
+        report["episodesRead"] = json!(episodes_read);
         let params = FileParams {
             tunables: &PARAMS,
             support: "prerequisites: takers of the quest who could take the target; exclusiveTo: completers of either quest who could take the other",
             contradict: "always 0 for prerequisites and never-together exclusions (one contradiction drops the edge); co-flags: 0 as well",
         };
         Ok(Findings {
-            input_count: episodes.len(),
+            input_count,
             params: to_json(&params),
             covered_quest_ids: covered,
             candidates,
@@ -114,12 +115,21 @@ pub struct Analysis {
     pub covered: Vec<QuestId>,
     /// reports/cooccurrence-summary.json, less `episodesRead`.
     pub report: serde_json::Value,
+    /// The Forever episodes the histories were built from.
+    pub input_count: usize,
+    /// Every episode read, Forever or not.
+    pub episodes_read: usize,
 }
 
-/// The whole signal on the (Forever) episodes given.
-pub fn analyze(episodes: &[&QuestEpisode], catalog: &QuestCatalog, params: &Params) -> Analysis {
-    let ignore = unstable_quests(episodes, catalog);
-    let (histories, history_report) = build_histories(episodes, &params.history, &ignore);
+/// The whole signal on the episodes given (their Forever ones), read one bucket at a time.
+pub fn analyze(episodes: &dyn Episodes, catalog: &QuestCatalog, params: &Params) -> Result<Analysis> {
+    let Histories {
+        histories,
+        report: history_report,
+        ignore,
+        episodes_read,
+    } = read_histories(episodes, catalog, &params.history)?;
+    let input_count = history_report.episodes;
     let population = Population::new(histories, catalog, &ignore);
     let coflags = infer_co_flags(&population, &params.coflag);
     let co_flagged = CoFlagged::new(coflags.edges.iter().map(|edge| (edge.a, edge.b)));
@@ -166,7 +176,51 @@ pub fn analyze(episodes: &[&QuestEpisode], catalog: &QuestCatalog, params: &Para
             "exclusionPairs": exclusions.edges.iter().filter(|edge| either_forever(edge.pair.a, edge.pair.b)).count(),
         },
     });
-    Analysis { candidates, covered, report }
+    Ok(Analysis {
+        candidates,
+        covered,
+        report,
+        input_count,
+        episodes_read,
+    })
+}
+
+/// What the passes over the episodes leave for the inference.
+struct Histories {
+    /// Every character's history, characters in the order they are read.
+    histories: Vec<CharacterHistory>,
+    report: HistoryReport,
+    /// The unstable quests, which the histories leave out (see [`repeatable_quests`]).
+    ignore: FxHashSet<QuestId>,
+    episodes_read: usize,
+}
+
+/// Reads the episodes twice, one bucket at a time: the quests to ignore depend on every episode,
+/// and the histories leave them out. A bucket holds whole characters, so each history is built
+/// from one bucket and owns what it needs; the bucket goes once its histories are built.
+fn read_histories(episodes: &dyn Episodes, catalog: &QuestCatalog, params: &HistoryParams) -> Result<Histories> {
+    let mut ignore = repeatable_quests(catalog);
+    let mut episodes_read = 0;
+    episodes.for_each_bucket(&mut |bucket| {
+        episodes_read += bucket.len();
+        add_unstable_quests(&mut ignore, &forever_episodes(bucket));
+        Ok(())
+    })?;
+
+    let mut histories = Vec::new();
+    let mut report = HistoryReport::default();
+    episodes.for_each_bucket(&mut |bucket| {
+        let (built, built_report) = build_histories(&forever_episodes(bucket), params, &ignore);
+        histories.extend(built);
+        report += built_report;
+        Ok(())
+    })?;
+    Ok(Histories {
+        histories,
+        report,
+        ignore,
+        episodes_read,
+    })
 }
 
 fn prerequisite_candidate(edge: &PrerequisiteEdge) -> RelationCandidate {
@@ -273,7 +327,85 @@ fn count(characters: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::episode_store::{InMemory, PerCharacter};
+    use crate::model::{CompletedChange, QuestEpisode};
     use crate::signals::cooccurrence::fixtures::{catalog_of, session, SessionSpec};
+
+    /// Characters `keys` each doing `spec`.
+    fn characters(keys: &[&str], spec: impl Fn() -> SessionSpec) -> Vec<QuestEpisode> {
+        keys.iter().map(|key| session(key, spec())).collect()
+    }
+
+    #[test]
+    fn reads_the_same_bucket_by_bucket_as_all_at_once() {
+        // a-c complete 9, then hand 2 off to 3; d-f turn in 41, which flags its copy 42; g-i did
+        // nothing relevant; y only ever completed 9. z, read last, shows 9 resetting: 9 is ignored
+        // from the first character on, so y has no history at all.
+        let mut episodes = characters(&["a", "b", "c"], || SessionSpec {
+            initial: vec![8],
+            turn_ins: vec![(50.0, 9), (100.0, 2)],
+            accepts: vec![(101.0, 3)],
+            ..SessionSpec::default()
+        });
+        episodes.extend(characters(&["d", "e", "f"], || SessionSpec {
+            initial: vec![8],
+            turn_ins: vec![(100.0, 41)],
+            flags: vec![(100.5, 42)],
+            ..SessionSpec::default()
+        }));
+        episodes.extend(characters(&["g", "h", "i"], || SessionSpec {
+            initial: vec![8],
+            ..SessionSpec::default()
+        }));
+        episodes.extend(characters(&["y"], || SessionSpec {
+            initial: vec![9],
+            ..SessionSpec::default()
+        }));
+        let mut reset = session(
+            "z",
+            SessionSpec {
+                initial: vec![8, 9],
+                ..SessionSpec::default()
+            },
+        );
+        if let Some(completed) = &mut reset.completed {
+            completed.changes.push(CompletedChange {
+                t: 10.0,
+                add: None,
+                remove: Some(vec![9]),
+            });
+        }
+        episodes.push(reset);
+        let catalog = catalog_of([2, 3, 8, 9, 41, 42]);
+
+        let together = analyze(&InMemory(&episodes), &catalog, &PARAMS).unwrap();
+        let claims: Vec<(QuestId, RelationField, QuestId)> = together
+            .candidates
+            .iter()
+            .map(|candidate| (candidate.quest_id, candidate.field, candidate.target))
+            .collect();
+        assert_eq!(
+            claims,
+            [
+                (3, RelationField::PreQuestSingle, 2),
+                (41, RelationField::ExclusiveTo, 42),
+                (42, RelationField::ExclusiveTo, 41)
+            ],
+            "9 is no prerequisite of 2: it is unstable"
+        );
+        assert_eq!(together.report["history"]["characters"], 10, "every character but y");
+        assert_eq!(
+            (together.input_count, together.episodes_read),
+            (episodes.len(), episodes.len()),
+            "every episode read once"
+        );
+
+        let apart = analyze(&PerCharacter(&episodes), &catalog, &PARAMS).unwrap();
+        assert_eq!(apart.candidates, together.candidates);
+        assert_eq!(apart.covered, together.covered);
+        assert_eq!(apart.report, together.report);
+        assert_eq!((apart.input_count, apart.episodes_read), (together.input_count, together.episodes_read));
+    }
 
     #[test]
     fn co_flags_are_claimed_on_both_quests_and_cover_only_quests_judged_for_both_fields() {
@@ -291,8 +423,7 @@ mod tests {
                 )
             })
             .collect();
-        let episodes: Vec<&QuestEpisode> = episodes.iter().collect();
-        let analysis = analyze(&episodes, &catalog_of([8, 41, 42]), &PARAMS);
+        let analysis = analyze(&InMemory(&episodes), &catalog_of([8, 41, 42]), &PARAMS).unwrap();
 
         let claims: Vec<(QuestId, RelationField, QuestId, u32)> = analysis
             .candidates
