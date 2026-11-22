@@ -38,14 +38,14 @@ impl LocalReason {
 }
 
 pub struct Locality<'i> {
-    index: &'i OfferIndex<'i>,
+    index: &'i OfferIndex,
     catalog: &'i QuestCatalog,
     givers_of: FxHashMap<QuestId, FxHashSet<GiverRef>>,
     finishers_of: FxHashMap<QuestId, FxHashSet<GiverRef>>,
 }
 
 impl<'i> Locality<'i> {
-    pub fn new(index: &'i OfferIndex<'i>, catalog: &'i QuestCatalog) -> Self {
+    pub fn new(index: &'i OfferIndex, catalog: &'i QuestCatalog) -> Self {
         let mut givers_of: FxHashMap<QuestId, FxHashSet<GiverRef>> = FxHashMap::default();
         let mut finishers_of: FxHashMap<QuestId, FxHashSet<GiverRef>> = FxHashMap::default();
         for (&giver, quests) in &index.quests_by_giver {

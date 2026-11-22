@@ -34,6 +34,7 @@ use crate::model::{QuestCatalog, QuestId, RelationCandidate, RelationField};
 use crate::signals::CharacterId;
 use crate::text::to_fixed;
 use indexmap::{IndexMap, IndexSet};
+use rayon::prelude::*;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 
 struct Edge {
@@ -49,6 +50,8 @@ struct Edge {
     note: String,
 }
 
+/// Every blocked quest's candidates. Quests are independent of each other, so they are classified
+/// side by side.
 pub fn classify(
     blocked_quests: &IndexMap<QuestId, BlockedQuest, FxBuildHasher>,
     index: &OfferIndex,
@@ -56,23 +59,39 @@ pub fn classify(
     catalog: &QuestCatalog,
     params: &AbsenceParams,
 ) -> Vec<RelationCandidate> {
-    let mut edges: Vec<Edge> = Vec::new();
-    for (&quest_id, blocked) in blocked_quests {
-        let offers = &index.quests[&quest_id];
-        let explanations = attribute(blocked, params);
-        let quest_edges = suspects_of(&explanations, index, catalog)
-            .into_iter()
-            .flat_map(|target| edges_for(quest_id, target, &explanations, offers, index, params))
-            .collect();
-        edges.extend(without_ancestors(quest_edges, index));
-    }
+    let quests: Vec<(&QuestId, &BlockedQuest)> = blocked_quests.iter().collect();
+    let by_quest: Vec<Vec<RelationCandidate>> = quests
+        .par_iter()
+        .map(|&(&quest_id, blocked)| classify_quest(quest_id, blocked, index, locality, catalog, params))
+        .collect();
+    let mut candidates: Vec<RelationCandidate> = by_quest.into_iter().flatten().collect();
+    candidates.sort_by_key(RelationCandidate::canonical_order);
+    candidates
+}
+
+/// One blocked quest's candidates, in the order its edges are found.
+fn classify_quest(
+    quest_id: QuestId,
+    blocked: &BlockedQuest,
+    index: &OfferIndex,
+    locality: &Locality,
+    catalog: &QuestCatalog,
+    params: &AbsenceParams,
+) -> Vec<RelationCandidate> {
+    let offers = &index.quests[&quest_id];
+    let explanations = attribute(blocked, params);
+    let edges = suspects_of(&explanations, index, catalog)
+        .into_iter()
+        .flat_map(|target| edges_for(quest_id, target, &explanations, offers, index, params))
+        .collect();
+    let unexplained_rate = if blocked.characters.is_empty() {
+        0.0
+    } else {
+        blocked.unexplained.len() as f64 / blocked.characters.len() as f64
+    };
 
     let mut candidates: Vec<RelationCandidate> = Vec::new();
-    for edge in &edges {
-        let unexplained_rate = match blocked_quests.get(&edge.quest_id) {
-            Some(blocked) if !blocked.characters.is_empty() => blocked.unexplained.len() as f64 / blocked.characters.len() as f64,
-            _ => 0.0,
-        };
+    for edge in &without_ancestors(edges, index) {
         let mut shares: Vec<&Share> = edge.shares.values().collect();
         shares.sort_by(|a, b| b.share.total_cmp(&a.share));
         let local = bundle_reason(locality, index, edge.quest_id, edge.target);
@@ -104,7 +123,6 @@ pub fn classify(
             note: Some(note),
         });
     }
-    candidates.sort_by_key(RelationCandidate::canonical_order);
     candidates
 }
 
