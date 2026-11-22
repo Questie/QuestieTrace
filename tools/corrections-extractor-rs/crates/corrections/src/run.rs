@@ -413,7 +413,13 @@ mod tests {
     #[test]
     fn writes_lookups_for_classic_ids_too_but_corrections_only_for_new_ones() {
         let checkout = Checkout::new();
-        let sessions = [localized_session(1.0, "deDE", 25, "Klassisch"), localized_session(2.0, "deDE", 96659, "Neu")];
+        // Quest names reach the corrections from enUS sessions, and the lookups from the others.
+        let sessions = [
+            localized_session(1.0, "deDE", 25, "Klassisch"),
+            localized_session(2.0, "deDE", 96659, "Neu"),
+            titled_session(3.0, 25, "Classic"),
+            titled_session(4.0, 96659, "New"),
+        ];
         checkout.submission("2026-10/2026-10-01_000000Z_a.json", &export_string(&sessions));
         let output = TempDir::new("output");
 
@@ -423,6 +429,7 @@ mod tests {
         assert!(lookup.contains("[25] = {\"Klassisch\", nil},"), "{lookup}");
         assert!(lookup.contains("[96659] = {\"Neu\", nil},"), "{lookup}");
         let quests = read(&output.0.join("foreverQuestTraces.lua"));
+        assert!(quests.contains("[96659] = {\n            [questKeys.name] = \"New\","), "{quests}");
         assert!(!quests.contains("[25] = {"), "{quests}");
     }
 

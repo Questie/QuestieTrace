@@ -538,3 +538,122 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
         ("lookupObjects", names(&acc.object_name, LookupTable::Object)),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aggregate::SessionScalars;
+    use crate::observation::Confidence;
+    use crate::observe::StagedSession;
+    use crate::observers::item::npc_drops::NpcDrop;
+    use crate::observers::item::object_drops::ObjectDrop;
+    use crate::observers::npc::friendly_to_faction::FactionReactionValue;
+    use crate::observers::quest::finished_by::FinishedByFinisher;
+    use crate::observers::quest::started_by::StartedByStarter;
+
+    const QUEST: i64 = 96659;
+
+    fn obs<T>(entity_id: i64, value: T) -> Observation<T> {
+        Observation::new(entity_id, value, Confidence::High, 0.0)
+    }
+
+    /// Folds one staged session per entry, in order, and renders the output modules.
+    fn finalized(sessions: Vec<StagedSession>) -> Bundle {
+        let mut acc = Accumulator::default();
+        for staged in sessions {
+            acc.add(staged);
+        }
+        finalize(&acc, 1, "test")
+    }
+
+    fn module<'b>(bundle: &'b Bundle, name: &str) -> &'b str {
+        &bundle.modules.iter().find(|(file, _)| *file == name).expect("module written").1
+    }
+
+    /// The lines of entity `id`'s record, `None` without one.
+    fn record(lua: &str, id: i64) -> Option<String> {
+        let start = lua.find(&format!("        [{id}] = {{\n"))?;
+        let end = start + lua[start..].find("\n        },")?;
+        Some(lua[start..end].to_owned())
+    }
+
+    /// Sessions in which `quest` was started by `starter`, one per session.
+    fn started(quest: i64, starter: StartedByStarter, sessions: usize) -> Vec<StagedSession> {
+        (0..sessions)
+            .map(|_| StagedSession {
+                started_by: vec![obs(quest, starter)],
+                ..StagedSession::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn leaves_out_the_drops_of_world_drop_items_but_keeps_their_names() {
+        let bundle = finalized(vec![StagedSession {
+            item_name: SessionScalars::new(vec![obs(248682, "Waylaid Supplies".to_owned())]),
+            npc_drops: vec![obs(248682, NpcDrop { npc_id: 20000 }), obs(30000, NpcDrop { npc_id: 20000 })],
+            object_drops: vec![obs(248682, ObjectDrop { object_id: 300200 }), obs(30000, ObjectDrop { object_id: 300200 })],
+            ..StagedSession::default()
+        }]);
+        let items = module(&bundle, "foreverItemTraces.lua");
+        let world_drop = record(items, 248682).expect("the world-drop item keeps its name");
+        assert!(world_drop.contains("[itemKeys.name] = \"Waylaid Supplies\""), "{world_drop}");
+        assert!(!world_drop.contains("Drops"), "{world_drop}");
+        let other = record(items, 30000).expect("an item with drops");
+        assert!(other.contains("[itemKeys.npcDrops_add] = {20000}"), "{other}");
+        assert!(other.contains("[itemKeys.objectDrops_add] = {300200}"), "{other}");
+    }
+
+    #[test]
+    fn exports_only_quest_givers_seen_in_at_least_5_sessions() {
+        let mut sessions = started(QUEST, StartedByStarter::Creature(20001), 5);
+        sessions.extend(started(QUEST, StartedByStarter::Creature(20002), 4));
+        sessions.extend((0..4).map(|_| StagedSession {
+            finished_by: vec![obs(QUEST, FinishedByFinisher::Creature(20003))],
+            ..StagedSession::default()
+        }));
+        let bundle = finalized(sessions);
+
+        let quest = record(module(&bundle, "foreverQuestTraces.lua"), QUEST).expect("the quest's record");
+        assert!(quest.contains("[questKeys.startedBy_add] = {{20001}"), "{quest}");
+        assert!(!quest.contains("20002") && !quest.contains("finishedBy"), "{quest}");
+        let npcs = module(&bundle, "foreverNpcTraces.lua");
+        let starter = record(npcs, 20001).expect("the starter's record");
+        assert!(starter.contains("[npcKeys.questStarts_add] = {96659}"), "{starter}");
+        assert_eq!(record(npcs, 20002), None);
+        assert_eq!(record(npcs, 20003), None);
+    }
+
+    /// Five sessions in which the Alliance saw `QUEST`, started by NPC 20001, which was hostile
+    /// to the Horde in three of them and friendly to the Alliance in two: proof enough that
+    /// the Horde cannot get the quest, if 20001 is its only starter.
+    fn alliance_only_quest() -> Vec<StagedSession> {
+        let mut sessions = started(QUEST, StartedByStarter::Creature(20001), 5);
+        for (index, staged) in sessions.iter_mut().enumerate() {
+            staged.quest_factions = vec![obs(QUEST, Faction::Alliance)];
+            let faction = if index < 3 { Faction::Horde } else { Faction::Alliance };
+            let reaction = FactionReactionValue {
+                faction,
+                friendly: faction == Faction::Alliance,
+                session_time: None,
+            };
+            staged.npc_friendly_to_faction = vec![obs(20001, reaction)];
+        }
+        sessions
+    }
+
+    #[test]
+    fn restricts_races_from_the_reactions_of_npc_starters() {
+        let quest = record(module(&finalized(alliance_only_quest()), "foreverQuestTraces.lua"), QUEST).expect("the quest's record");
+        assert!(quest.contains("[questKeys.requiredRaces] = 4294967373"), "{quest}");
+    }
+
+    #[test]
+    fn does_not_restrict_races_when_an_item_started_the_quest_however_rarely() {
+        let mut sessions = alliance_only_quest();
+        // Seen once, so not exported as a starter, but the quest is not NPC-only.
+        sessions[0].started_by.push(obs(QUEST, StartedByStarter::Item(750)));
+        let quest = record(module(&finalized(sessions), "foreverQuestTraces.lua"), QUEST).expect("the quest's record");
+        assert!(!quest.contains("requiredRaces") && !quest.contains("750"), "{quest}");
+    }
+}
