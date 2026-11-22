@@ -41,6 +41,10 @@ local exportFrame
 ---@type SessionRecord[]?
 local pendingSourceSessions
 
+--- Coroutine currently filling the export window, if any (see Core.ShowExportWindow()).
+---@type thread?
+local exportJob
+
 --- Icons shown before each statistic. All ship with the Classic client.
 ---@type string
 local ICON_EVENTS = "Interface\\Icons\\INV_Misc_Note_02"
@@ -286,100 +290,173 @@ local function _HideReportingControls(frame)
   frame.reportedButton:Hide()
 end
 
---- Show the export window, populated with the current export string.
---- If there is nothing to export, displays a warning and hides the input elements.
---- After successfully encoding the payload, the live session is saved (if present)
---- so its events are persisted and the saved-session counter increments. If a capture
---- was running, a new session is then started so subsequent events don't mutate the payload snapshot
---- that was encoded and displayed. This guarantees that DeleteReportedSessions()
---- will delete only the exact data that was shown, not a version polluted by later events.
+--- Show "nothing to share" instead of the export string.
+---@param frame ExportFrame
+local function _ShowNothingToShare(frame)
+  frame.warningText:SetText(l10n("Nothing new to share yet. Keep playing and check back later."))
+  frame.warningText:Show()
+
+  frame.urlEditBox:Hide()
+  frame.hint:Hide()
+  frame.editBox:Hide()
+  _HideReportingControls(frame)
+end
+
+--- Show the "preparing" message while the export job runs. Nothing can be
+--- copied or confirmed until the job has finished.
+---@param frame ExportFrame
+local function _ShowPreparing(frame)
+  frame.warningText:SetText(l10n("Preparing export..."))
+  frame.warningText:Show()
+
+  frame.urlEditBox:Hide()
+  frame.hint:Hide()
+  frame.editBox:Hide()
+  _HideReportingControls(frame)
+end
+
+--- Save the live session and, if it was recording, keep recording in a new
+--- one, so later events cannot change what is exported. Skipped without codec
+--- support, because saving would then drop the session.
+---
+--- The saved sessions are listed before saving, because saving may prune the
+--- oldest one, which must still be exported.
+---@return EncodedSessionRecord[] savedSessions Saved sessions to export, including the live session if it was saved.
+---@return boolean skipLiveSession True if the current live session was started after the export began.
+local function _RotateLiveSession()
+  local characterDb = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter or {}
+  local storedSessions = type(characterDb.sessions) == "table" and characterDb.sessions or {}
+  ---@type EncodedSessionRecord[]
+  local savedSessions = {}
+  for i = 1, #storedSessions do
+    savedSessions[i] = storedSessions[i]
+  end
+
+  local liveSession = characterDb.currentSession
+  if type(liveSession) ~= "table" or type(liveSession.events) ~= "table" or #liveSession.events == 0 then
+    return savedSessions, false
+  end
+  if (not Core.HasCodecSupport()) then
+    return savedSessions, false
+  end
+
+  local wasRunning = Core.GetCaptureState() == "running"
+  local lastBefore = storedSessions[#storedSessions]
+  Core.SaveCapture()
+  -- Only continue recording if the player was recording; a stopped capture stays stopped.
+  if wasRunning then
+    Core.StartCapture()
+  end
+
+  -- SaveCapture appends the live session as a new record.
+  storedSessions = type(characterDb.sessions) == "table" and characterDb.sessions or {}
+  local lastAfter = storedSessions[#storedSessions]
+  if lastAfter ~= nil and lastAfter ~= lastBefore then
+    savedSessions[#savedSessions + 1] = lastAfter
+  end
+  -- If saving left the live session in place, it is still the one to export,
+  -- and confirming discards it (see Core.DeleteReportedSessions()).
+  return savedSessions, characterDb.currentSession ~= liveSession
+end
+
+--- Fill the export window. Runs as a coroutine and yields between the slow
+--- steps (saving the live session, decoding each saved session, encoding),
+--- so no single frame runs long enough to hit the client's script time limit.
+---@param frame ExportFrame
+local function _RunExportJob(frame)
+  local savedSessions, skipLiveSession = _RotateLiveSession()
+  -- Build once: reused for the hasExportableData check, the encoded string,
+  -- and deleting reported sessions, so all three agree on the same data.
+  local payload, sourceSessions = Core.BuildExportPayload({
+    savedSessions = savedSessions,
+    skipLiveSession = skipLiveSession,
+    yield = coroutine.yield,
+  })
+  if (not payload.hasExportableData) then
+    _ShowNothingToShare(frame)
+    return
+  end
+
+  coroutine.yield()
+  local ok, text = Core.BuildExportString(payload)
+  frame.editBox.originalText = text
+  frame.editBox:SetText(text)
+
+  -- Show export UI, hide warning
+  frame.urlEditBox:Show()
+  frame.hint:Show()
+  frame.editBox:Show()
+  frame.warningText:Hide()
+  frame.editBox:SetFocus()
+  frame.editBox:HighlightText()
+
+  -- Only offer "I reported this" if the string actually contains encoded
+  -- data. If the codec is unavailable, `text` is just an error message --
+  -- there is nothing real to confirm as reported.
+  if (not ok) then
+    _HideReportingControls(frame)
+    return
+  end
+
+  -- Counted from the same payload that was just encoded, so the numbers
+  -- match exactly what the player is about to submit.
+  local stats = Core.BuildExportStats(payload)
+  local rows = frame.stats
+  rows.events.text:SetText(l10n("Events captured: %s", _HighlightValue(_FormatCount(stats.eventCount))))
+  rows.time.text:SetText(l10n("Time recorded: %s", _HighlightValue(_FormatDuration(stats.timeRecorded))))
+  rows.questsAccepted.text:SetText(l10n("Quests accepted: %s", _HighlightValue(_FormatCount(stats.questsAccepted))))
+  rows.questsTurnedIn.text:SetText(l10n("Quests turned in: %s", _HighlightValue(_FormatCount(stats.questsTurnedIn))))
+  frame.statsFrame:Show()
+
+  pendingSourceSessions = sourceSessions
+  frame.reportedButton:Show()
+end
+
+--- Run the next step of `job`, then schedule the following one for the next
+--- frame. Stops when the job is done, replaced by a newer one, or the window
+--- was closed.
+---@param job thread
+local function _StepExportJob(job)
+  if job ~= exportJob then
+    return
+  end
+  if (not exportFrame) or (not exportFrame:IsShown()) then
+    exportJob = nil
+    return
+  end
+
+  local ok, err = coroutine.resume(job)
+  if (not ok) or coroutine.status(job) == "dead" then
+    exportJob = nil
+  end
+  if (not ok) then
+    error(err, 0)
+  end
+
+  if exportJob == job then
+    C_Timer.After(0, function() _StepExportJob(job) end)
+  end
+end
+
+--- Show the export window and fill it with the current export string over
+--- the next frames. Reopening the window restarts the job; closing it stops it.
+---
+--- Before the payload is built, the live session (if any) is saved, and if a
+--- capture was running a new session is started, so later events don't change
+--- the exported data. This guarantees that DeleteReportedSessions() will
+--- delete only the exact data that was shown, not a version polluted by later events.
 function Core.ShowExportWindow()
   if (not exportFrame) then
     exportFrame = BuildExportFrame()
   end
 
-
-  -- Build once: reused for the hasExportableData check, the encoded string,
-  -- and deleting reported sessions, so all three agree on the same data.
-  local payload, sourceSessions = Core.BuildExportPayload()
-  local hasData = payload.hasExportableData
-
-  if hasData then
-    -- Show the export data
-    local ok, text = Core.BuildExportString(payload)
-    exportFrame.editBox.originalText = text
-    exportFrame.editBox:SetText(text)
-
-    -- Show export UI, hide warning
-    exportFrame.urlEditBox:Show()
-    exportFrame.hint:Show()
-    exportFrame.editBox:Show()
-    exportFrame.warningText:Hide()
-    exportFrame.editBox:SetFocus()
-    exportFrame.editBox:HighlightText()
-
-    -- Only offer "I reported this" if the string actually contains encoded
-    -- data. If the codec is unavailable, `text` is just an error message --
-    -- there is nothing real to confirm as reported.
-    if ok then
-      -- Counted from the same payload that was just encoded, so the numbers
-      -- match exactly what the player is about to submit.
-      local stats = Core.BuildExportStats(payload)
-      local rows = exportFrame.stats
-      rows.events.text:SetText(l10n("Events captured: %s", _HighlightValue(_FormatCount(stats.eventCount))))
-      rows.time.text:SetText(l10n("Time recorded: %s", _HighlightValue(_FormatDuration(stats.timeRecorded))))
-      rows.questsAccepted.text:SetText(l10n("Quests accepted: %s", _HighlightValue(_FormatCount(stats.questsAccepted))))
-      rows.questsTurnedIn.text:SetText(l10n("Quests turned in: %s", _HighlightValue(_FormatCount(stats.questsTurnedIn))))
-      exportFrame.statsFrame:Show()
-
-      -- After successful encoding, save the live session so its events are
-      -- persisted and the saved-session counter increments. This ensures the
-      -- export watermark (set by MarkExportOpened below) matches the counter,
-      -- preventing a false reminder on next login when the logout auto-save
-      -- would otherwise increment the counter past the watermark.
-      local liveSession = type(QuestieTraceCharacter) == "table" and QuestieTraceCharacter.currentSession or nil
-      if liveSession then
-        local wasRunning = Core.GetCaptureState() == "running"
-        local savedSessions = QuestieTraceCharacter.sessions
-        local lastBefore = type(savedSessions) == "table" and savedSessions[#savedSessions] or nil
-        Core.SaveCapture()
-
-        -- SaveCapture appends the live session as a new record (and may prune
-        -- the oldest one). Confirming must delete that record, or the session
-        -- is exported again next time.
-        savedSessions = QuestieTraceCharacter.sessions
-        local lastAfter = type(savedSessions) == "table" and savedSessions[#savedSessions] or nil
-        local savedRecord = lastAfter ~= lastBefore and lastAfter or nil
-        -- Only continue recording if the player was recording; a stopped capture stays stopped.
-        if wasRunning then
-          Core.StartCapture()
-        end
-        if savedRecord then
-          for i = 1, #sourceSessions do
-            if sourceSessions[i] == liveSession then
-              sourceSessions[i] = savedRecord
-            end
-          end
-        end
-      end
-
-      pendingSourceSessions = sourceSessions
-      exportFrame.reportedButton:Show()
-    else
-      _HideReportingControls(exportFrame)
-    end
-  else
-    -- Show warning, hide export data
-    exportFrame.warningText:SetText(l10n("Nothing new to share yet. Keep playing and check back later."))
-    exportFrame.warningText:Show()
-
-    exportFrame.urlEditBox:Hide()
-    exportFrame.hint:Hide()
-    exportFrame.editBox:Hide()
-    _HideReportingControls(exportFrame)
-  end
-
+  _ShowPreparing(exportFrame)
   exportFrame:Show()
+
+  local frame = exportFrame
+  local job = coroutine.create(function() _RunExportJob(frame) end)
+  exportJob = job
+  _StepExportJob(job)
 
   -- Pause share reminders until another session is saved. The write itself
   -- lives in ExportReminder.lua so this file stays free of SavedVariables access.
