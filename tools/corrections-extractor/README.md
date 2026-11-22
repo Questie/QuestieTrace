@@ -73,7 +73,7 @@ The trace-analyzer's Extract tab shows these files for copy/download.
 
 ### Translations
 
-The same run writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Unlike the corrections, every observed ID is exported, Classic ones included. NPC subnames come from the mouseover tooltip (`UnitSubName`); NPCs without an observed subname get `nil`.
+The same run writes Questie l10n lookup modules for every non-enUS locale found in the Forever traces, one directory per entity (`output/lookupNpcs/`, `output/lookupQuests/`, `output/lookupItems/`, `output/lookupObjects/`) with one file per locale (e.g. `output/lookupItems/deDE.lua`). Unlike the corrections, every observed ID is exported, Classic ones included. NPC subnames come from the mouseover tooltip (`UnitSubName`); NPCs without an observed subname get `nil`. Traces recorded with schema 21 or later carry the NPC's GUID with each subname (`UnitSubNameGUID`). For older traces the NPC is inferred: it is the one targeted within a second after the subname was shown, outside of combat (see `observers/npc/subName.ts`).
 
 ## How it works
 
