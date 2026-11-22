@@ -26,11 +26,12 @@
 use super::attribute::{attribute, Explanations, Share, SharesByCharacter};
 use super::blocked::{BlockKind, BlockedQuest, Explanation};
 use super::locality::{LocalReason, Locality};
-use super::offers::{Character, OfferIndex, QuestOffers};
+use super::offers::{OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
 use super::score::{score_edge, ScoreGroup};
 use crate::eligibility::is_forever_quest_id;
 use crate::model::{QuestCatalog, QuestId, RelationCandidate, RelationField};
+use crate::signals::CharacterId;
 use crate::text::to_fixed;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxBuildHasher, FxHashSet};
@@ -43,7 +44,7 @@ struct Edge {
     group: ScoreGroup,
     shares: SharesByCharacter,
     /// Prerequisites only: characters blocked while the prerequisite was not even in their log.
-    untaken: Option<FxHashSet<Character>>,
+    untaken: Option<FxHashSet<CharacterId>>,
     contradict: usize,
     note: String,
 }

@@ -53,9 +53,6 @@ pub trait Episodes: Sync {
     fn for_each_bucket(&self, work: &mut dyn FnMut(&[QuestEpisode]) -> Result<()>) -> Result<()>;
 
     fn episode_count(&self) -> usize;
-
-    /// Every episode at once.
-    fn load_all(&self) -> Result<Vec<QuestEpisode>>;
 }
 
 /// Episodes already in memory, in ingest's order, as one bucket (tests and small inputs).
@@ -68,10 +65,6 @@ impl Episodes for InMemory<'_> {
 
     fn episode_count(&self) -> usize {
         self.0.len()
-    }
-
-    fn load_all(&self) -> Result<Vec<QuestEpisode>> {
-        Ok(self.0.to_vec())
     }
 }
 
@@ -93,10 +86,6 @@ impl Episodes for PerCharacter<'_> {
     fn episode_count(&self) -> usize {
         self.0.len()
     }
-
-    fn load_all(&self) -> Result<Vec<QuestEpisode>> {
-        Ok(self.0.to_vec())
-    }
 }
 
 impl Episodes for EpisodeStore {
@@ -106,10 +95,6 @@ impl Episodes for EpisodeStore {
 
     fn episode_count(&self) -> usize {
         EpisodeStore::episode_count(self)
-    }
-
-    fn load_all(&self) -> Result<Vec<QuestEpisode>> {
-        EpisodeStore::load_all(self)
     }
 }
 
@@ -174,7 +159,8 @@ impl EpisodeStore {
         })
     }
 
-    /// Every episode at once, for code that still needs them together.
+    /// Every episode at once (tests).
+    #[cfg(test)]
     pub fn load_all(&self) -> Result<Vec<QuestEpisode>> {
         let mut episodes = Vec::with_capacity(self.episode_count());
         for number in 0..self.bucket_count() {

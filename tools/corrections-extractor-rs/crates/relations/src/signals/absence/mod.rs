@@ -29,11 +29,12 @@ use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
 use crate::episode_store::Episodes;
 use crate::model::{QuestCatalog, QuestId, RelationCandidate};
+use crate::signals::CharacterIds;
 use anyhow::Result;
 use blocked::{Blocked, BlockedCollector, SkipReason};
 use indexmap::IndexMap;
 use locality::Locality;
-use offers::{Characters, OfferIndex};
+use offers::OfferIndex;
 use params::AbsenceParams;
 use serde::Serialize;
 
@@ -79,7 +80,7 @@ struct AbsenceResult<'c> {
 /// The absence signal end to end, over the episodes of Forever builds. Fails when the episodes
 /// cannot be read.
 fn analyze<'c>(episodes: &dyn Episodes, catalog: &'c QuestCatalog, params: AbsenceParams) -> Result<AbsenceResult<'c>> {
-    let mut characters = Characters::default();
+    let mut characters = CharacterIds::default();
     let index = offers::index_offers(episodes, catalog, params, &mut characters)?;
 
     let locality = Locality::new(&index, catalog);

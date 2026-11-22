@@ -15,32 +15,11 @@ use super::states::{EpisodeStates, QuestSet};
 use crate::episode_store::Episodes;
 use crate::model::{CompletedTimeline, Faction, GiverRef, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
 use crate::signals::forever_episodes;
+use crate::signals::{CharacterId, CharacterIds};
 use anyhow::Result;
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use std::rc::Rc;
-
-/// A character, by the id [`Characters`] gives its pseudonymous `QuestEpisode::character_key`.
-/// Everything kept across buckets names characters this way: it cannot borrow the key from an
-/// episode whose bucket is gone.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Character(u32);
-
-/// Every character met so far, by key: one id per `character_key` across buckets and passes.
-#[derive(Default)]
-pub struct Characters(FxHashMap<String, Character>);
-
-impl Characters {
-    /// The character's id, new when the key is first met.
-    pub fn id(&mut self, character_key: &str) -> Character {
-        if let Some(&character) = self.0.get(character_key) {
-            return character;
-        }
-        let character = Character(u32::try_from(self.0.len()).expect("fewer than 2^32 characters"));
-        self.0.insert(character_key.to_owned(), character);
-        character
-    }
-}
 
 /// What was observed while one quest was available. `'c` is the catalog's lifetime.
 #[derive(Default)]
@@ -64,7 +43,7 @@ pub struct QuestOffers<'c> {
     /// Smallest member -> members seen completed (ascending).
     pub required_any: IndexMap<QuestId, Vec<QuestId>, FxBuildHasher>,
     /// Per character the quest was offered to (in any list, or accepted), the earliest offer.
-    pub first_offered_at: FxHashMap<Character, Moment>,
+    pub first_offered_at: FxHashMap<CharacterId, Moment>,
     /// What `required` and `required_any` are made of once every character is tallied.
     prerequisites: PrerequisiteTally<'c>,
 }
@@ -151,7 +130,7 @@ impl Moment {
 
 /// Pass 1 over the Forever episodes, a bucket at a time (in file order: insertion orders follow
 /// it). `characters` gives every character met its id, for the later passes to use too.
-pub fn index_offers<'c>(episodes: &dyn Episodes, catalog: &'c QuestCatalog, params: AbsenceParams, characters: &mut Characters) -> Result<OfferIndex<'c>> {
+pub fn index_offers<'c>(episodes: &dyn Episodes, catalog: &'c QuestCatalog, params: AbsenceParams, characters: &mut CharacterIds) -> Result<OfferIndex<'c>> {
     let mut builder = OfferIndexBuilder {
         params,
         shared_names: shared_names(catalog),
@@ -214,14 +193,14 @@ struct OfferIndexBuilder<'c> {
     shared_names: FxHashMap<QuestId, &'c str>,
     index: OfferIndex<'c>,
     /// Per character whose episodes are being read, per quest offered to them.
-    reading: FxHashMap<Character, FxHashMap<QuestId, CharacterOffers>>,
+    reading: FxHashMap<CharacterId, FxHashMap<QuestId, CharacterOffers>>,
     /// Quest -> quests in every completed-set batch it arrived in, and how many batches that was.
     batch_mates: FxHashMap<QuestId, FxHashSet<QuestId>>,
     batch_counts: FxHashMap<QuestId, usize>,
 }
 
 impl<'c> OfferIndexBuilder<'c> {
-    fn add(&mut self, episode: &QuestEpisode, character: Character) {
+    fn add(&mut self, episode: &QuestEpisode, character: CharacterId) {
         self.index.episodes += 1;
         let mut states = EpisodeStates::new(episode, &self.params);
         let mut moments: IndexMap<QuestId, Vec<OfferMoment>, FxBuildHasher> = IndexMap::default();
@@ -271,7 +250,7 @@ impl<'c> OfferIndexBuilder<'c> {
         }
     }
 
-    fn record_offers(&mut self, episode: &QuestEpisode, character: Character, states: &mut EpisodeStates, quest_id: QuestId, mut moments: Vec<OfferMoment>) {
+    fn record_offers(&mut self, episode: &QuestEpisode, character: CharacterId, states: &mut EpisodeStates, quest_id: QuestId, mut moments: Vec<OfferMoment>) {
         let offers = self.index.quests.entry(quest_id).or_default();
         let player = &episode.player;
         if let Some(faction) = player.faction.filter(|faction| !offers.factions.contains(faction)) {
@@ -330,7 +309,7 @@ impl<'c> OfferIndexBuilder<'c> {
     }
 
     /// Adds a character whose episodes have all been read to the counts of every quest offered to them.
-    fn tally_character(&mut self, character: Character) {
+    fn tally_character(&mut self, character: CharacterId) {
         let Some(quests) = self.reading.remove(&character) else {
             return;
         };
@@ -567,7 +546,7 @@ mod tests {
         episodes.push(offered("first", &[30], 1));
         let catalog = catalog([catalog_quest(X)]);
 
-        let index = index_offers(&InMemory(&episodes), &catalog, AbsenceParams::default(), &mut Characters::default()).unwrap();
+        let index = index_offers(&InMemory(&episodes), &catalog, AbsenceParams::default(), &mut CharacterIds::default()).unwrap();
 
         assert_eq!(index.quests[&X].required.iter().copied().collect::<Vec<_>>(), [30, 20]);
         assert_eq!(index.quests[&X].characters(), 10);
