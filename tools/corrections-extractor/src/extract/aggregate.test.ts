@@ -3,6 +3,7 @@ import type { Observation } from "./observation";
 import {
   addToScalarSummary,
   aggregateField,
+  aggregateAgreedScalarSummary,
   aggregateNewestScalarSummary,
   aggregateScalarSummary,
   type ScalarSummary,
@@ -131,5 +132,44 @@ describe("aggregateNewestScalarSummary", () => {
     addToScalarSummary(summary, [sessionObs(1, "New Name", 3, null), sessionObs(1, "New Name", 4, 400)]);
 
     expect(aggregateNewestScalarSummary(summary).get(1)?.value).toBe("Old Name");
+  });
+});
+
+describe("aggregateAgreedScalarSummary", () => {
+  function summaryOf(counts: Record<string, number>): ScalarSummary<string> {
+    const summary: ScalarSummary<string> = new Map();
+    let key = 0;
+    for (const [value, sessions] of Object.entries(counts)) {
+      for (let i = 0; i < sessions; i++) {
+        key++;
+        addToScalarSummary(summary, [sessionObs(1, value, key, key * 100)]);
+      }
+    }
+    return summary;
+  }
+
+  it("should pick the value of the most sessions, not the newest", () => {
+    const facts = aggregateAgreedScalarSummary(summaryOf({ Tailor: 3, Leatherworker: 1 }));
+
+    expect(facts.get(1)).toMatchObject({ value: "Tailor", observationCount: 4, alternativeCount: 1 });
+  });
+
+  it("should leave out a value seen in only one session", () => {
+    expect(aggregateAgreedScalarSummary(summaryOf({ Tailor: 1 })).has(1)).toBe(false);
+  });
+
+  it("should accept a value with exactly twice the sessions of the runner-up", () => {
+    expect(aggregateAgreedScalarSummary(summaryOf({ Tailor: 4, Leatherworker: 2 })).get(1)?.value).toBe("Tailor");
+  });
+
+  it("should leave out a value without a clear lead", () => {
+    expect(aggregateAgreedScalarSummary(summaryOf({ Tailor: 3, Leatherworker: 2 })).has(1)).toBe(false);
+  });
+
+  it("should only count sessions with a server time", () => {
+    const summary: ScalarSummary<string> = new Map();
+    addToScalarSummary(summary, [sessionObs(1, "Tailor", 1, null), sessionObs(1, "Tailor", 2, 200)]);
+
+    expect(aggregateAgreedScalarSummary(summary).has(1)).toBe(false);
   });
 });

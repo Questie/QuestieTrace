@@ -110,18 +110,35 @@ describe("finalizeLookups", () => {
     expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Koboldgezücht",nil},');
   });
 
-  it("should write npc names with their observed subname", () => {
-    const bundle = run([
+  describe("npc subnames", () => {
+    const sighting = (subName: string, serverTime: number) =>
       makeSession({
         GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
+        GetServerTime: [{ t: 0, tp: 0, v: serverTime }],
+        GetBuildInfo: { player: [{ t: 0, tp: 0, v: 16001 }] },
         UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-30000-000031" }] },
         UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Grimm", n: 2 } }] },
-        UnitSubName: { mouseover: [{ t: 4, tp: 4.1, v: "Waffenhändler" }] },
+        UnitSubName: { mouseover: [{ t: 4, tp: 4.1, v: subName }] },
         UnitSubNameGUID: { mouseover: [{ t: 4, tp: 4.1, v: "Creature-0-5208-0-7-30000-000031" }] },
-      }),
-    ]);
+      });
 
-    expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Grimm","Waffenhändler"},');
+    it("should write npc names with their subname seen in two sessions", () => {
+      const bundle = run([sighting("Waffenhändler", 1000), sighting("Waffenhändler", 2000)]);
+
+      expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Grimm","Waffenhändler"},');
+    });
+
+    it("should write a nil subname for one that was seen in only one session", () => {
+      const bundle = run([sighting("Waffenhändler", 1000)]);
+
+      expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Grimm",nil},');
+    });
+
+    it("should write the subname most sessions agree on, not the newest", () => {
+      const bundle = run([sighting("Waffenhändler", 1000), sighting("Waffenhändler", 2000), sighting("Schneider", 3000)]);
+
+      expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Grimm","Waffenhändler"},');
+    });
   });
 
   it("should leave the accumulator untouched when an observer throws for a later session", () => {

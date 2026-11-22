@@ -5,7 +5,7 @@
 // into forever*Traces.lua.
 
 import type { SessionRecord } from "../core/types";
-import { addScalarGroup, addToScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarGroup, type ScalarSummary } from "./aggregate";
+import { addScalarGroup, addToScalarSummary, aggregateAgreedScalarSummary, aggregateNewestScalarSummary, aggregateScalarSummary, type ScalarGroup, type ScalarSummary } from "./aggregate";
 import type { Localized, Observation } from "./observation";
 import { LOOKUP_OBSERVERS as OBSERVERS, observeLookupSession, SKIPPED_LOCALE, type LookupObserverKey as ObserverKey, type StagedLookupSession } from "./observe-lookups";
 import { writeLookupLua } from "./schema/lookup-writer";
@@ -13,7 +13,10 @@ import { writeLookupLua } from "./schema/lookup-writer";
 export { observeLookupSession, type StagedLookupSession } from "./observe-lookups";
 
 /** Names can change over time (e.g. a renamed NPC), so the newest one wins. */
-const NEWEST_WINS = new Set<ObserverKey>(["npcName", "npcSubName", "questName", "itemName", "objectName"]);
+const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName", "objectName"]);
+
+/** Subnames rarely change but are sometimes attached to the wrong NPC, so they need agreement between sessions. */
+const AGREEMENT_NEEDED = new Set<ObserverKey>(["npcSubName"]);
 
 /** Per field, a scalar summary per locale. */
 export interface LookupAccumulator {
@@ -85,7 +88,7 @@ export function finalizeLookups(acc: LookupAccumulator): LookupBundle {
     const values = new Map<number, unknown>();
     const summary = acc.summaries[key].get(locale);
     if (!summary) return values;
-    const aggregate = NEWEST_WINS.has(key) ? aggregateNewestScalarSummary : aggregateScalarSummary;
+    const aggregate = AGREEMENT_NEEDED.has(key) ? aggregateAgreedScalarSummary : NEWEST_WINS.has(key) ? aggregateNewestScalarSummary : aggregateScalarSummary;
     for (const [id, fact] of aggregate(summary)) {
       values.set(id, fact.value);
     }
