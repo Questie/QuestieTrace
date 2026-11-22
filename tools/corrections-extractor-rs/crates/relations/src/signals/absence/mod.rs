@@ -10,8 +10,14 @@
 //! classify.rs  suspect -> Questie field, blame from attribute.rs, score from score.rs
 //! ```
 //!
-//! What outlives a bucket owns its data: characters are ids ([`offers::Characters`]), blocked
-//! moments carry their episode's key.
+//! What outlives a bucket owns its data: characters are ids ([`CharacterIds`]), blocked moments
+//! carry their episode's key.
+//!
+//! Both passes read many characters at once, each on its own, then add what each one showed to
+//! what the pass keeps, in the order the buckets list the characters ([`for_each_character_chunk`]).
+//! That order decides how prerequisites and evidence are listed and in which order blame is
+//! summed, so the output does not depend on the number of threads. classify.rs works on each
+//! blocked quest on its own.
 //!
 //! states.rs reads one episode's log and completed set at a moment, locality.rs says which
 //! suspects are plausible partners of a blocked quest before any evidence.
@@ -28,15 +34,21 @@ mod states;
 use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
 use crate::episode_store::Episodes;
-use crate::model::{QuestCatalog, QuestId, RelationCandidate};
-use crate::signals::CharacterIds;
+use crate::model::{QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
+use crate::signals::{CharacterId, CharacterIds};
 use anyhow::Result;
-use blocked::{Blocked, BlockedCollector, SkipReason};
+use blocked::{Blocked, BlockedFinder, SkipReason};
 use indexmap::IndexMap;
 use locality::Locality;
 use offers::OfferIndex;
 use params::AbsenceParams;
+use rayon::prelude::*;
+use rustc_hash::FxBuildHasher;
 use serde::Serialize;
+
+/// Characters read side by side before what they showed is added up: enough to keep every core
+/// busy, few enough that their results stay small next to a bucket.
+const CHARACTERS_PER_CHUNK: usize = 256;
 
 pub struct Absence;
 
@@ -69,8 +81,8 @@ impl Signal for Absence {
     }
 }
 
-struct AbsenceResult<'c> {
-    index: OfferIndex<'c>,
+struct AbsenceResult {
+    index: OfferIndex,
     blocked: Blocked,
     candidates: Vec<RelationCandidate>,
     /// Quests with at least one blocked moment that passed gating, ascending.
@@ -79,19 +91,19 @@ struct AbsenceResult<'c> {
 
 /// The absence signal end to end, over the episodes of Forever builds. Fails when the episodes
 /// cannot be read.
-fn analyze<'c>(episodes: &dyn Episodes, catalog: &'c QuestCatalog, params: AbsenceParams) -> Result<AbsenceResult<'c>> {
+fn analyze(episodes: &dyn Episodes, catalog: &QuestCatalog, params: AbsenceParams) -> Result<AbsenceResult> {
     let mut characters = CharacterIds::default();
     let index = offers::index_offers(episodes, catalog, params, &mut characters)?;
 
     let locality = Locality::new(&index, catalog);
-    let mut collector = BlockedCollector::new(&index, &locality, catalog, params);
-    episodes.for_each_bucket(&mut |bucket| {
-        for episode in forever_episodes(bucket) {
-            collector.add(episode, characters.id(&episode.character_key));
+    let finder = BlockedFinder::new(&index, &locality, catalog, params);
+    let mut blocked = Blocked::default();
+    for_each_character_chunk(episodes, &mut characters, |chunk| {
+        let found: Vec<Blocked> = chunk.par_iter().map(|character| finder.find(character)).collect();
+        for found in found {
+            blocked.add(found);
         }
-        Ok(())
     })?;
-    let blocked = collector.finish();
 
     let candidates = classify::classify(&blocked.quests, &index, &locality, catalog, &params);
     let mut covered_quest_ids: Vec<QuestId> = blocked.quests.keys().copied().collect();
@@ -101,6 +113,32 @@ fn analyze<'c>(episodes: &dyn Episodes, catalog: &'c QuestCatalog, params: Absen
         blocked,
         candidates,
         covered_quest_ids,
+    })
+}
+
+/// One character's Forever episodes, in the order of their bucket (in the store, session order).
+struct Character<'e> {
+    id: CharacterId,
+    episodes: Vec<&'e QuestEpisode>,
+}
+
+/// Hands every Forever episode to `work` grouped by character, a chunk of characters at a time,
+/// characters in the order the buckets list them. Ids are given here, on the calling thread in
+/// that order, so each pass gives every character the same id whatever runs in parallel.
+fn for_each_character_chunk(episodes: &dyn Episodes, ids: &mut CharacterIds, mut work: impl FnMut(&[Character])) -> Result<()> {
+    episodes.for_each_bucket(&mut |bucket| {
+        // The store keeps a character's episodes together; grouping by key keeps a character whole
+        // even when they are not (episodes in memory, in tests). Such a character then counts as
+        // met where it first appears, which is not what reading episode by episode would give.
+        let mut by_key: IndexMap<&str, Vec<&QuestEpisode>, FxBuildHasher> = IndexMap::default();
+        for episode in forever_episodes(bucket) {
+            by_key.entry(episode.character_key.as_str()).or_default().push(episode);
+        }
+        let characters: Vec<Character> = by_key.into_iter().map(|(key, episodes)| Character { id: ids.id(key), episodes }).collect();
+        for chunk in characters.chunks(CHARACTERS_PER_CHUNK) {
+            work(chunk);
+        }
+        Ok(())
     })
 }
 
@@ -232,11 +270,11 @@ mod tests {
         entries.iter().map(|&(t, v)| TimedValue { t, v: v.to_vec() }).collect()
     }
 
-    fn run<'c>(episodes: &[QuestEpisode], catalog: &'c QuestCatalog) -> AbsenceResult<'c> {
+    fn run(episodes: &[QuestEpisode], catalog: &QuestCatalog) -> AbsenceResult {
         analyze(&InMemory(episodes), catalog, AbsenceParams::default()).expect("episodes in memory")
     }
 
-    fn edge<'r>(result: &'r AbsenceResult, quest_id: QuestId, field: RelationField, target: QuestId) -> Option<&'r RelationCandidate> {
+    fn edge(result: &AbsenceResult, quest_id: QuestId, field: RelationField, target: QuestId) -> Option<&RelationCandidate> {
         result
             .candidates
             .iter()
@@ -659,6 +697,44 @@ mod tests {
         assert_eq!(per_character.covered_quest_ids, one_bucket.covered_quest_ids);
         assert_eq!(per_character.input_count, one_bucket.input_count);
         assert_eq!(per_character.reports, one_bucket.reports);
+    }
+
+    #[test]
+    fn lists_evidence_in_the_order_the_characters_come_when_reading_them_side_by_side() {
+        // The characters of one bucket, more than a chunk of them, read side by side, choose Y over
+        // X alike, so each takes the same share of X's blocks. Of equal shares the evidence shows
+        // the first five in the order the characters come, which is the order their blocked
+        // moments were added in.
+        let characters = CHARACTERS_PER_CHUNK + 44;
+        let choosers: Vec<QuestEpisode> = (0..characters)
+            .map(|i| QuestEpisode {
+                key: format!("chooser-{i:03}"),
+                quest_log: quest_log(&[(0.0, &[]), (13.0, &[Y])]),
+                quest_events: vec![event(12.0, Accepted, Y, Some(GIVER))],
+                offers: vec![gossip(10.0, GIVER, &[X, Y], &[]), gossip(20.0, GIVER, &[], &[])],
+                ..make_episode()
+            })
+            .collect();
+        let catalog = catalog(plain_variants());
+        let findings = |episodes: &dyn Episodes| {
+            let input = SignalInput {
+                episodes,
+                catalog: &catalog,
+                generated_at: "2026-11-22T00:00:00.000Z",
+            };
+            Absence.run(&input).expect("episodes in memory")
+        };
+
+        let one_bucket = findings(&InMemory(&choosers));
+        let exclusive = one_bucket
+            .candidates
+            .iter()
+            .find(|candidate| candidate.quest_id == X && candidate.field == ExclusiveTo && candidate.target == Y)
+            .expect("X exclusiveTo Y");
+        assert_eq!(exclusive.support as usize, characters);
+        let references: Vec<&str> = exclusive.evidence.iter().map(|evidence| evidence.reference.as_str()).collect();
+        assert_eq!(references, ["chooser-000", "chooser-001", "chooser-002", "chooser-003", "chooser-004"]);
+        assert_eq!(findings(&PerCharacter(&choosers)).candidates, one_bucket.candidates);
     }
 
     mod gating {

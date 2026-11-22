@@ -12,6 +12,7 @@ use super::locality::Locality;
 use super::offers::{Moment, OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
 use super::states::{EpisodeStates, QuestSet};
+use super::Character;
 use crate::eligibility::{has_untracked_requirements, is_statically_eligible};
 use crate::model::{CatalogQuest, GiverRef, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
 use crate::signals::CharacterId;
@@ -20,6 +21,7 @@ use crate::timeline::Completion;
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// How a suspect Y (or prerequisite P) explains "X missing from the list at t".
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -56,7 +58,7 @@ pub struct Suspect {
 pub struct BlockedMoment {
     pub character: CharacterId,
     /// QuestEpisode::key, shared by the episode's moments.
-    pub reference: Rc<str>,
+    pub reference: Arc<str>,
     pub t: SessionTime,
     /// "npc:123 list at 45.0s lacked 678"
     pub what: String,
@@ -127,6 +129,24 @@ pub struct Blocked {
     pub blocked_moments: usize,
 }
 
+impl Blocked {
+    /// Adds what the next character's episodes showed ([`BlockedFinder::find`]). Characters come
+    /// in the order the buckets list them: quests and reasons keep the order first met, and each
+    /// quest's moments that order, in which attribute.rs sums their blame.
+    pub fn add(&mut self, character: Blocked) {
+        self.blocked_moments += character.blocked_moments;
+        for (reason, count) in character.skipped {
+            *self.skipped.entry(reason).or_default() += count;
+        }
+        for (quest_id, found) in character.quests {
+            let blocked = self.quests.entry(quest_id).or_default();
+            blocked.characters.extend(found.characters);
+            blocked.unexplained.extend(found.unexplained);
+            blocked.moments.extend(found.moments);
+        }
+    }
+}
+
 /// Skill, reputation and spell requirements: quests with equal ones have the same untracked gate.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct Requirements {
@@ -147,59 +167,77 @@ impl Requirements {
     }
 }
 
-/// Pass 2, one episode at a time. The moments it keeps own what they need of the episode (its
-/// character's id, its key), so the episode's bucket can go.
-pub struct BlockedCollector<'i> {
-    found: Blocked,
-    index: &'i OfferIndex<'i>,
+/// Pass 2, one character at a time: what each character's episodes are read against. Nothing in
+/// it changes while reading, so the threads share it.
+pub struct BlockedFinder<'i> {
+    index: &'i OfferIndex,
     locality: &'i Locality<'i>,
     catalog: &'i QuestCatalog,
     params: AbsenceParams,
     quests_by_requirements: FxHashMap<Requirements, Vec<QuestId>>,
-    first_offer_by_requirements: FxHashMap<(CharacterId, Requirements), Option<Moment>>,
 }
 
-impl<'i> BlockedCollector<'i> {
-    pub fn new(index: &'i OfferIndex<'i>, locality: &'i Locality<'i>, catalog: &'i QuestCatalog, params: AbsenceParams) -> Self {
+impl<'i> BlockedFinder<'i> {
+    pub fn new(index: &'i OfferIndex, locality: &'i Locality<'i>, catalog: &'i QuestCatalog, params: AbsenceParams) -> Self {
         let mut quests_by_requirements: FxHashMap<Requirements, Vec<QuestId>> = FxHashMap::default();
         for &quest_id in index.quests.keys() {
             if let Some(quest) = catalog.quest(quest_id).filter(|quest| has_untracked_requirements(quest)) {
                 quests_by_requirements.entry(Requirements::of(quest)).or_default().push(quest_id);
             }
         }
-        BlockedCollector {
-            found: Blocked::default(),
+        BlockedFinder {
             index,
             locality,
             catalog,
             params,
             quests_by_requirements,
-            first_offer_by_requirements: FxHashMap::default(),
         }
     }
 
-    pub fn finish(self) -> Blocked {
-        self.found
+    /// The blocked moments of one character's episodes. They own what they need of an episode
+    /// (the character's id, the episode's key), so the episode's bucket can go.
+    pub fn find(&self, character: &Character) -> Blocked {
+        let mut reader = CharacterReader {
+            finder: self,
+            character: character.id,
+            found: Blocked::default(),
+            first_offer_by_requirements: FxHashMap::default(),
+        };
+        for episode in &character.episodes {
+            reader.add(episode);
+        }
+        reader.found
     }
+}
 
-    /// The blocked moments of one episode of `character`.
-    pub fn add(&mut self, episode: &QuestEpisode, character: CharacterId) {
+/// Pass 2 over one character's episodes, in session order.
+struct CharacterReader<'f> {
+    finder: &'f BlockedFinder<'f>,
+    character: CharacterId,
+    found: Blocked,
+    first_offer_by_requirements: FxHashMap<Requirements, Option<Moment>>,
+}
+
+impl CharacterReader<'_> {
+    /// The blocked moments of one episode.
+    fn add(&mut self, episode: &QuestEpisode) {
         if episode.completed.is_none() {
             return self.skip(SkipReason::NoCompletedHistory);
         }
         if episode.quest_log.is_empty() {
             return self.skip(SkipReason::NoQuestLog);
         }
-        let mut states = EpisodeStates::new(episode, &self.params);
-        let reference: Rc<str> = Rc::from(episode.key.as_str());
+        let finder = self.finder;
+        let index = finder.index;
+        let mut states = EpisodeStates::new(episode, &finder.params);
+        let reference: Arc<str> = Arc::from(episode.key.as_str());
         let offered_here = offer_times_of(episode);
         let mut last_state: FxHashMap<QuestId, (Rc<QuestSet>, Vec<QuestId>)> = FxHashMap::default();
         let mut last_list_with_quests: FxHashMap<GiverRef, SessionTime> = FxHashMap::default();
-        let index = self.index;
 
         for snapshot in &episode.offers {
             let Some(giver) = snapshot.giver else { continue };
-            if !snapshot.list_complete || !self.params.blocked_sources.contains(&snapshot.source) {
+            if !snapshot.list_complete || !finder.params.blocked_sources.contains(&snapshot.source) {
                 continue;
             }
             let listed: FxHashSet<QuestId> = snapshot
@@ -212,7 +250,7 @@ impl<'i> BlockedCollector<'i> {
                 last_list_with_quests.insert(giver, snapshot.t);
             } else if snapshot.source == OfferSource::Gossip {
                 let previous = last_list_with_quests.get(&giver).copied();
-                if previous.is_some_and(|previous| snapshot.t - previous <= self.params.sub_menu_window && !states.any_event_within(previous, snapshot.t)) {
+                if previous.is_some_and(|previous| snapshot.t - previous <= finder.params.sub_menu_window && !states.any_event_within(previous, snapshot.t)) {
                     self.skip(SkipReason::GossipSubMenu);
                     continue;
                 }
@@ -224,7 +262,7 @@ impl<'i> BlockedCollector<'i> {
                     continue;
                 }
                 let offers = &index.quests[&quest_id];
-                if let Some(reason) = self.gate(episode, character, &mut states, quest_id, offers, snapshot.t) {
+                if let Some(reason) = self.gate(episode, &mut states, quest_id, offers, snapshot.t) {
                     self.skip(reason);
                     continue;
                 }
@@ -251,22 +289,15 @@ impl<'i> BlockedCollector<'i> {
                     log,
                     offered_here: offered_here.get(&quest_id).map_or(&[], Vec::as_slice),
                 };
-                self.record(character, &reference, &states, quest_id, offers, read);
+                self.record(&reference, &states, quest_id, offers, read);
             }
         }
     }
 
     /// Why the character might not have been able to take the quest anyway; None if eligible.
-    fn gate(
-        &mut self,
-        episode: &QuestEpisode,
-        character: CharacterId,
-        states: &mut EpisodeStates,
-        quest_id: QuestId,
-        offers: &QuestOffers,
-        t: SessionTime,
-    ) -> Option<SkipReason> {
-        let Some(quest) = self.catalog.quest(quest_id) else {
+    fn gate(&mut self, episode: &QuestEpisode, states: &mut EpisodeStates, quest_id: QuestId, offers: &QuestOffers, t: SessionTime) -> Option<SkipReason> {
+        let params = self.finder.params;
+        let Some(quest) = self.finder.catalog.quest(quest_id) else {
             return Some(SkipReason::Uncataloged);
         };
         if offers.periodic || quest.is_repeatable() {
@@ -292,7 +323,7 @@ impl<'i> BlockedCollector<'i> {
         if !player.faction.is_some_and(|faction| offers.factions.contains(&faction)) {
             return Some(SkipReason::UnofferedFaction);
         }
-        let open = self.params.open_demographics;
+        let open = params.open_demographics;
         if offers.races.len() < open && !player.race_id.is_some_and(|race| offers.races.contains(&race)) {
             return Some(SkipReason::UnofferedRace);
         }
@@ -303,13 +334,13 @@ impl<'i> BlockedCollector<'i> {
         // character of a quest with the very same requirements (often a zone copy of this quest)
         // shows they met them; skills and reputation rarely go back down.
         if has_untracked_requirements(quest) {
-            let first = self.first_offer_with_requirements(Requirements::of(quest), character);
+            let first = self.first_offer_with_requirements(Requirements::of(quest));
             if !first.is_some_and(|first| first.is_earlier(Moment::of(episode, t))) {
                 return Some(SkipReason::UntrackedRequirements);
             }
         }
 
-        let slack = self.params.self_slack;
+        let slack = params.self_slack;
         if states.is_completed(quest_id, t + slack) {
             return Some(SkipReason::OwnState);
         }
@@ -323,15 +354,15 @@ impl<'i> BlockedCollector<'i> {
     }
 
     /// The character's earliest offer of any quest with these untracked requirements.
-    fn first_offer_with_requirements(&mut self, requirements: Requirements, character: CharacterId) -> Option<Moment> {
-        let index = self.index;
-        let quests = &self.quests_by_requirements;
-        *self.first_offer_by_requirements.entry((character, requirements)).or_insert_with(|| {
-            quests
+    fn first_offer_with_requirements(&mut self, requirements: Requirements) -> Option<Moment> {
+        let (finder, character) = (self.finder, self.character);
+        *self.first_offer_by_requirements.entry(requirements).or_insert_with(|| {
+            finder
+                .quests_by_requirements
                 .get(&requirements)
                 .into_iter()
                 .flatten()
-                .filter_map(|quest_id| index.quests.get(quest_id)?.first_offered_at.get(&character).copied())
+                .filter_map(|quest_id| finder.index.quests.get(quest_id)?.first_offered_at.get(&character).copied())
                 .fold(None, |first, offered| match first {
                     Some(first) if !offered.is_earlier(first) => Some(first),
                     _ => Some(offered),
@@ -339,10 +370,11 @@ impl<'i> BlockedCollector<'i> {
         })
     }
 
-    fn record(&mut self, character: CharacterId, reference: &Rc<str>, states: &EpisodeStates, quest_id: QuestId, offers: &QuestOffers, read: ListRead) {
-        let index = self.index;
+    fn record(&mut self, reference: &Arc<str>, states: &EpisodeStates, quest_id: QuestId, offers: &QuestOffers, read: ListRead) {
+        let (finder, character) = (self.finder, self.character);
+        let (index, params) = (finder.index, finder.params);
         let t = read.t;
-        let suspects = suspects_at(index, offers, quest_id, &read, self.params.max_contradictions);
+        let suspects = suspects_at(index, offers, quest_id, &read, params.max_contradictions);
         if suspects.is_empty() {
             let blocked = self.found.quests.entry(quest_id).or_default();
             blocked.characters.insert(character);
@@ -354,11 +386,11 @@ impl<'i> BlockedCollector<'i> {
             .map(|explanation| {
                 let related = members_of(index, offers, explanation)
                     .iter()
-                    .any(|&member| self.locality.reason(quest_id, member).is_some());
+                    .any(|&member| finder.locality.reason(quest_id, member).is_some());
                 if related {
                     1.0
                 } else {
-                    self.params.unrelated_weight
+                    params.unrelated_weight
                 }
             })
             .collect();
@@ -368,7 +400,7 @@ impl<'i> BlockedCollector<'i> {
         let mut kept: Vec<Suspect> = Vec::new();
         let mut residual_weight = 0.0;
         for (explanation, &weight) in suspects.iter().zip(&weights) {
-            if weight / total_weight < self.params.min_share {
+            if weight / total_weight < params.min_share {
                 residual_weight += weight;
             } else {
                 let detail = describe_state(states, explanation.kind, members_of(index, offers, explanation), t);
@@ -387,7 +419,7 @@ impl<'i> BlockedCollector<'i> {
         }
         let moment = BlockedMoment {
             character,
-            reference: Rc::clone(reference),
+            reference: Arc::clone(reference),
             t,
             what,
             transition: offers
