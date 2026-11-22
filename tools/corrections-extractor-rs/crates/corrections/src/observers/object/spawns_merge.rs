@@ -1,39 +1,102 @@
-//! The merges of object spawns and object zoneID. Port of
-//! `extract/observers/object/spawnsMerge.ts`, which mirrors npc/spawnsMerge.ts and adds one
-//! step: an object whose spawns in a zone all lie close together is one object seen from
-//! different sides (a mailbox approached from all directions), so they collapse into one.
+//! The merges of object spawns and object zoneID. Port of `extract/merge/object/spawns.ts`.
+//!
+//! spawns: per zone, the observed coordinates clustered and averaged. An object whose spawns in
+//! a zone all lie close together is one object seen from different sides (a mailbox approached
+//! from all directions), so they collapse into one.
+//! zoneID: the zone with the most observations, weighted by token.
 //!
 //! Both receive, per object, its observed spawns followed by the quest turn-in POIs attached
 //! to it (token `questpoi`).
 
+use crate::aggregate::Num;
 use crate::js;
 use crate::observation::Observation;
-use crate::observers::npc::spawns_merge::{merge_spawns_with, Cluster, CLUSTER_EPSILON};
-use crate::observers::spawn::SpawnObservation;
+use crate::observers::spawn::{
+    best_coordinates_by_zone, cluster_coordinates, cluster_threshold, compare_coords, coord_key, distinct_coordinates_by_zone, find_exclusive_token,
+    in_js_property_order, round_2_decimals, CoordKey, SpawnObservation, SpawnToken, CLUSTER_EPSILON,
+};
+use indexmap::IndexMap;
+use std::collections::HashMap;
 
-/// Identical to the npc merge in TS too.
-pub use crate::observers::npc::spawns_merge::{merge_zone_id, Spawns};
+/// Identical to the npc merge in TS.
+pub use crate::observers::spawn::{merge_zone_id, Spawns};
+
+/// Tokens whose coordinates replace all other sources, in priority order.
+const EXCLUSIVE_TOKENS: [SpawnToken; 2] = [SpawnToken::QuestPoi, SpawnToken::QuestNpc];
 
 /// Max distance between all spawns of a zone for them to be one object.
 const OBJECT_COMPACT_EXTENT: f64 = 2.0;
 
-/// The npc spawns merge, then per zone: when there are several clusters and all lie within
-/// OBJECT_COMPACT_EXTENT of each other, one spawn at the mean of all their points.
+/// Merges spawn observations into the Questie spawns table.
+///
+/// questpoi observations overrule all others, then questnpc: when present, only that token's
+/// coordinates are kept. Without either, each coordinate keeps its highest-priority token.
+///
+/// With `single_spawn_per_zone` (quest givers and enders, which stand still) only the cluster
+/// with the most observations is kept per zone. Otherwise, when several clusters of a zone all
+/// lie within OBJECT_COMPACT_EXTENT of each other, they become one spawn at the mean of all their
+/// points.
 pub fn merge_spawns(observations: &[Observation<SpawnObservation>], single_spawn_per_zone: bool) -> Spawns {
-    merge_spawns_with(observations, single_spawn_per_zone, |clusters| {
-        let centroids: Vec<[f64; 2]> = clusters.iter().map(|c| c.coord).collect();
-        if clusters.len() <= 1 || !is_compact(&centroids) {
-            return clusters;
-        }
-        let members: Vec<[f64; 2]> = clusters.into_iter().flat_map(|c| c.members).collect();
-        let count = members.len() as f64;
-        let sum_x = members.iter().fold(0.0, |sum, &[x, _]| sum + x);
-        let sum_y = members.iter().fold(0.0, |sum, &[_, y]| sum + y);
-        vec![Cluster {
-            coord: [js::round((sum_x / count) * 100.0) / 100.0, js::round((sum_y / count) * 100.0) / 100.0],
-            members,
-        }]
-    })
+    let exclusive_token = find_exclusive_token(observations, &EXCLUSIVE_TOKENS);
+    let used = observations
+        .iter()
+        .map(|obs| &obs.value)
+        .filter(|spawn| exclusive_token.is_none_or(|token| spawn.token == token));
+    let mut observation_counts: HashMap<CoordKey, usize> = HashMap::new();
+    for spawn in used.clone() {
+        *observation_counts.entry(coord_key(spawn.zone_id, spawn.x, spawn.y)).or_insert(0) += 1;
+    }
+    let by_zone = match exclusive_token {
+        Some(_) => distinct_coordinates_by_zone(used),
+        None => best_coordinates_by_zone(used),
+    };
+    cluster_by_zone(by_zone, &observation_counts, single_spawn_per_zone)
+}
+
+/// Clusters each zone's distinct coordinates and places each cluster at its rounded centroid.
+fn cluster_by_zone(by_zone: IndexMap<Num, Vec<[f64; 2]>>, observation_counts: &HashMap<CoordKey, usize>, single_spawn_per_zone: bool) -> Spawns {
+    let zones = by_zone
+        .into_iter()
+        .map(|(zone, coords)| {
+            let zone_id = zone.0;
+            let mut clusters = cluster_coordinates(&coords, cluster_threshold(zone_id));
+            if single_spawn_per_zone {
+                let weight = |members: &[[f64; 2]]| -> usize {
+                    members
+                        .iter()
+                        .map(|&[x, y]| observation_counts.get(&coord_key(zone_id, x, y)).copied().unwrap_or(1))
+                        .sum()
+                };
+                // `reduce`: the first cluster of the highest weight wins.
+                let mut best = 0;
+                for index in 1..clusters.len() {
+                    if weight(&clusters[index].members) > weight(&clusters[best].members) {
+                        best = index;
+                    }
+                }
+                clusters = vec![clusters.swap_remove(best)];
+            }
+            let centroids: Vec<[f64; 2]> = clusters
+                .iter()
+                .map(|c| {
+                    let [x, y] = c.centroid();
+                    [round_2_decimals(x), round_2_decimals(y)]
+                })
+                .collect();
+            let mut spawns = if centroids.len() > 1 && is_compact(&centroids) {
+                let members: Vec<[f64; 2]> = clusters.into_iter().flat_map(|c| c.members).collect();
+                let count = members.len() as f64;
+                let sum_x = members.iter().fold(0.0, |sum, &[x, _]| sum + x);
+                let sum_y = members.iter().fold(0.0, |sum, &[_, y]| sum + y);
+                vec![[round_2_decimals(sum_x / count), round_2_decimals(sum_y / count)]]
+            } else {
+                centroids
+            };
+            spawns.sort_by(compare_coords);
+            (zone_id, spawns)
+        })
+        .collect();
+    in_js_property_order(zones)
 }
 
 fn is_compact(coords: &[[f64; 2]]) -> bool {

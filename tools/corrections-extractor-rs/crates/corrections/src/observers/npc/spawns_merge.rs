@@ -1,306 +1,163 @@
-//! The merges of npc spawns and npc zoneID. Port of `extract/observers/npc/spawnsMerge.ts`.
+//! The merges of npc spawns and npc zoneID. Port of `extract/merge/npc/spawns.ts`.
 //!
-//! spawns: per zone, the observed coordinates clustered and averaged.
+//! spawns: per zone, the observed coordinates clustered, each cluster placed at its median.
 //! zoneID: the zone with the most observations, weighted by token.
 //!
-//! Both receive, per NPC, its observed spawns followed by the quest turn-in POIs attached to
-//! it (token `questpoi`). The object merges (object/spawns_merge.rs) reuse this module: their
-//! TS twin mirrors this one, except that it collapses compact clusters.
+//! Both receive, per NPC, its observed spawns followed by the quest turn-in POIs attached to it
+//! (token `questpoi`).
 
 use crate::aggregate::Num;
-use crate::js;
-use crate::observation::Observation;
-use crate::observers::spawn::{SpawnObservation, SpawnToken};
-use indexmap::map::Entry;
+use crate::observation::{Observation, SessionId};
+use crate::observers::spawn::{
+    best_coordinates_by_zone, cluster_coordinates, cluster_threshold, compare_coords, compare_numbers, coord_key, distinct_coordinates_by_zone,
+    find_exclusive_token, in_js_property_order, round_2_decimals, CoordKey, SpawnObservation, SpawnToken,
+};
 use indexmap::IndexMap;
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-/// A spawns table `{[zoneID]: [[x, y], ...]}`: per zone (AreaTable areaID) its spawn points in
-/// Questie 0-100 map coordinates. Zones are in JS property order (integer ids ascending), the
-/// order `Object.entries` gives the Lua writer.
-pub type Spawns = Vec<(f64, Vec<[f64; 2]>)>;
-
-fn token_priority(token: SpawnToken) -> u32 {
-    match token {
-        SpawnToken::QuestPoi => 4,
-        SpawnToken::QuestNpc => 3,
-        SpawnToken::Npc => 2,
-        SpawnToken::Target => 1,
-    }
-}
-
-/// Max distance (Questie 0-100 map units) from a cluster's centroid. Covers the spread of
-/// recording the player's position within interaction range.
-const SPAWN_CLUSTER_THRESHOLD: f64 = 0.5;
-/// Capital city maps are small, so the same interaction range covers more map units.
-const CAPITAL_CITY_CLUSTER_THRESHOLD: f64 = 1.0;
-/// Stormwind, Ironforge, Darnassus, Orgrimmar, Thunder Bluff, Undercity.
-const CAPITAL_CITY_ZONE_IDS: [f64; 6] = [1519.0, 1537.0, 1657.0, 1637.0, 1638.0, 1497.0];
-/// Tolerance for floating point comparisons.
-pub(crate) const CLUSTER_EPSILON: f64 = 1e-9;
+/// Identical to the object merge in TS.
+pub use crate::observers::spawn::{merge_zone_id, Spawns};
 
 /// Tokens whose coordinates replace all other sources, in priority order.
 const EXCLUSIVE_TOKENS: [SpawnToken; 2] = [SpawnToken::QuestPoi, SpawnToken::QuestNpc];
 
-fn find_exclusive_token(observations: &[Observation<SpawnObservation>]) -> Option<SpawnToken> {
-    EXCLUSIVE_TOKENS
-        .into_iter()
-        .find(|&token| observations.iter().any(|obs| obs.value.token == token))
-}
+/// A cluster seen in a single session is only kept when it holds at least this share of the
+/// sessions of the NPC's strongest cluster, so it only drops clusters once the strongest one has
+/// more than 20 sessions. Drops stray points from targeting at range while NPCs seen only a few
+/// times keep all their spawns.
+const MIN_CLUSTER_SESSIONS: usize = 2;
+const MIN_CLUSTER_SESSION_SHARE: f64 = 0.05;
 
 /// Merges spawn observations into the Questie spawns table.
 ///
 /// questpoi observations (quest turn-in POIs from C_QuestLog.GetQuestsOnMap) overrule all
 /// others, then questnpc: when present, only that token's coordinates are kept. questnpc fires
 /// during quest interactions, which need the player next to the NPC; target and npc can fire
-/// from a distance. Without either, each coordinate keeps its highest-priority token.
+/// from a distance. Without either, each coordinate keeps its highest-priority token. An NPC
+/// with npc observations (an interaction window was open) then gets a single spawn per zone; in
+/// zones where it was interacted with, only those positions are used.
 ///
-/// With `single_spawn_per_zone` (quest givers and enders, which stand still) only the cluster
-/// with the most observations is kept per zone.
+/// Clusters seen in a single session are dropped when the NPC's strongest cluster was seen in
+/// many (see MIN_CLUSTER_SESSION_SHARE). With `single_spawn_per_zone` (quest givers and enders,
+/// which stand still) only the remaining cluster with the most observations is kept per zone.
 pub fn merge_spawns(observations: &[Observation<SpawnObservation>], single_spawn_per_zone: bool) -> Spawns {
-    merge_spawns_with(observations, single_spawn_per_zone, |clusters| clusters)
-}
-
-/// The zone the most observations were made in: questnpc counts 3, npc 2 and target 1. When
-/// questpoi observations exist only they count. 0 (the schema default) without observations.
-pub fn merge_zone_id(observations: &[Observation<SpawnObservation>]) -> f64 {
-    if observations.is_empty() {
-        return 0.0;
-    }
-    let has_questpoi = observations.iter().any(|obs| obs.value.token == SpawnToken::QuestPoi);
-    let mut zone_weights: IndexMap<Num, u32> = IndexMap::new();
-    for obs in observations {
-        if has_questpoi && obs.value.token != SpawnToken::QuestPoi {
-            continue;
-        }
-        // A JS Map stores a -0 key as +0.
-        *zone_weights.entry(Num(obs.value.zone_id + 0.0)).or_insert(0) += token_priority(obs.value.token);
-    }
-    let (mut best_zone, mut best_weight) = (0.0, 0);
-    for (zone, weight) in zone_weights {
-        if weight > best_weight {
-            best_weight = weight;
-            best_zone = zone.0;
-        }
-    }
-    best_zone
-}
-
-/// A cluster of nearby coordinates: its centroid rounded to 2 decimals, and its points.
-pub(crate) struct Cluster {
-    pub coord: [f64; 2],
-    pub members: Vec<[f64; 2]>,
-}
-
-/// mergeSpawns, with `refine` applied to each zone's clusters before they are sorted into
-/// spawn points. The object merge collapses compact clusters there.
-pub(crate) fn merge_spawns_with(
-    observations: &[Observation<SpawnObservation>],
-    single_spawn_per_zone: bool,
-    refine: impl Fn(Vec<Cluster>) -> Vec<Cluster>,
-) -> Spawns {
-    let exclusive_token = find_exclusive_token(observations);
-    let mut observation_counts: HashMap<CoordKey, usize> = HashMap::new();
-    for obs in observations {
-        if exclusive_token.is_some_and(|token| obs.value.token != token) {
-            continue;
-        }
-        *observation_counts.entry(coord_key(obs.value.zone_id, obs.value.x, obs.value.y)).or_insert(0) += 1;
-    }
-
-    // Zones in the order first seen; a JS Map stores a -0 key as +0.
-    let mut by_zone: IndexMap<Num, Vec<[f64; 2]>> = IndexMap::new();
-    if let Some(exclusive_token) = exclusive_token {
-        for obs in observations.iter().filter(|obs| obs.value.token == exclusive_token) {
-            let SpawnObservation { zone_id, x, y, .. } = obs.value;
-            let coords = by_zone.entry(Num(zone_id + 0.0)).or_default();
-            if !coords.iter().any(|c| c[0] == x && c[1] == y) {
-                coords.push([x, y]);
-            }
-        }
-    } else {
-        // Per zone and coordinate, the observation with the highest token priority. A replaced
-        // observation keeps the position of the first one, as Map.set does.
-        let mut best_per_coord: IndexMap<CoordKey, &SpawnObservation> = IndexMap::new();
-        for obs in observations {
-            let SpawnObservation { zone_id, x, y, token } = obs.value;
-            match best_per_coord.entry(coord_key(zone_id, x, y)) {
-                Entry::Occupied(mut best) => {
-                    if token_priority(token) > token_priority(best.get().token) {
-                        best.insert(&obs.value);
-                    }
-                }
-                Entry::Vacant(slot) => {
-                    slot.insert(&obs.value);
-                }
-            }
-        }
-        for spawn in best_per_coord.values() {
-            by_zone.entry(Num(spawn.zone_id + 0.0)).or_default().push([spawn.x, spawn.y]);
-        }
-    }
-
-    let zones = by_zone
-        .into_iter()
-        .map(|(zone, coords)| {
-            let zone_id = zone.0;
-            let threshold = if CAPITAL_CITY_ZONE_IDS.contains(&zone_id) {
-                CAPITAL_CITY_CLUSTER_THRESHOLD
-            } else {
-                SPAWN_CLUSTER_THRESHOLD
-            };
-            let mut clusters = cluster_and_average_coordinates(&coords, threshold);
-            if single_spawn_per_zone {
-                let weight = |members: &[[f64; 2]]| -> usize {
-                    members
-                        .iter()
-                        .map(|&[x, y]| observation_counts.get(&coord_key(zone_id, x, y)).copied().unwrap_or(1))
-                        .sum()
-                };
-                // `reduce`: the first cluster of the highest weight wins.
-                let mut best = 0;
-                for index in 1..clusters.len() {
-                    if weight(&clusters[index].members) > weight(&clusters[best].members) {
-                        best = index;
-                    }
-                }
-                clusters = vec![clusters.swap_remove(best)];
-            }
-            let mut spawns: Vec<[f64; 2]> = refine(clusters).into_iter().map(|c| c.coord).collect();
-            spawns.sort_by(compare_coords);
-            (zone_id, spawns)
-        })
+    let exclusive_token = find_exclusive_token(observations, &EXCLUSIVE_TOKENS);
+    // An NPC the player opened an interaction window with (gossip, vendor, innkeeper, ...) has a
+    // single spawn per zone: where it was interacted with, else its strongest cluster.
+    let interaction_zones: HashSet<Num> = observations
+        .iter()
+        .filter(|obs| obs.value.token == SpawnToken::Npc)
+        .map(|obs| Num(obs.value.zone_id))
         .collect();
+    let is_used = |spawn: &SpawnObservation| match exclusive_token {
+        Some(token) => spawn.token == token,
+        None => spawn.token == SpawnToken::Npc || !interaction_zones.contains(&Num(spawn.zone_id)),
+    };
+    let used: Vec<&Observation<SpawnObservation>> = observations.iter().filter(|obs| is_used(&obs.value)).collect();
+
+    let mut support: HashMap<CoordKey, CoordSupport> = HashMap::new();
+    for obs in &used {
+        let coord = support.entry(coord_key(obs.value.zone_id, obs.value.x, obs.value.y)).or_default();
+        coord.observations += 1;
+        coord.sessions.insert(obs.session);
+    }
+
+    let spawns = used.iter().map(|obs| &obs.value);
+    match exclusive_token {
+        Some(_) => cluster_by_zone(distinct_coordinates_by_zone(spawns), &support, single_spawn_per_zone),
+        None => {
+            let interactable = !interaction_zones.is_empty();
+            cluster_by_zone(best_coordinates_by_zone(spawns), &support, single_spawn_per_zone || interactable)
+        }
+    }
+}
+
+/// What backs one coordinate key: its used observations and the sessions they came from.
+#[derive(Default)]
+struct CoordSupport {
+    observations: usize,
+    sessions: HashSet<SessionId>,
+}
+
+/// A cluster placed at its median, with the number of sessions that saw one of its points.
+struct SupportedCluster {
+    coord: [f64; 2],
+    members: Vec<[f64; 2]>,
+    sessions: usize,
+}
+
+/// Clusters each zone's distinct coordinates and drops weakly supported clusters. With
+/// `single_spawn_per_zone`, only the remaining cluster with the most observations is kept per
+/// zone; a zone without remaining clusters is left out.
+fn cluster_by_zone(by_zone: IndexMap<Num, Vec<[f64; 2]>>, support: &HashMap<CoordKey, CoordSupport>, single_spawn_per_zone: bool) -> Spawns {
+    // The strongest cluster of every zone, before any is dropped.
+    let mut strongest = 0;
+    let mut zone_clusters: Vec<(f64, Vec<SupportedCluster>)> = Vec::new();
+    for (zone, coords) in by_zone {
+        let zone_id = zone.0;
+        let mut clusters = Vec::new();
+        for cluster in cluster_coordinates(&coords, cluster_threshold(zone_id)) {
+            let mut sessions = HashSet::new();
+            for &[x, y] in &cluster.members {
+                if let Some(coord) = support.get(&coord_key(zone_id, x, y)) {
+                    sessions.extend(coord.sessions.iter().copied());
+                }
+            }
+            strongest = strongest.max(sessions.len());
+            // The median keeps a few far-off points from pulling the spawn away.
+            let coord = [
+                round_2_decimals(median(cluster.members.iter().map(|m| m[0]).collect())),
+                round_2_decimals(median(cluster.members.iter().map(|m| m[1]).collect())),
+            ];
+            clusters.push(SupportedCluster {
+                coord,
+                members: cluster.members,
+                sessions: sessions.len(),
+            });
+        }
+        zone_clusters.push((zone_id, clusters));
+    }
+
+    let mut zones = Vec::new();
+    for (zone_id, candidates) in zone_clusters {
+        let mut clusters: Vec<SupportedCluster> = candidates
+            .into_iter()
+            .filter(|c| c.sessions >= MIN_CLUSTER_SESSIONS || c.sessions as f64 >= strongest as f64 * MIN_CLUSTER_SESSION_SHARE)
+            .collect();
+        if clusters.is_empty() {
+            continue;
+        }
+        if single_spawn_per_zone {
+            let weight = |members: &[[f64; 2]]| -> usize {
+                members
+                    .iter()
+                    .map(|&[x, y]| support.get(&coord_key(zone_id, x, y)).map_or(1, |coord| coord.observations))
+                    .sum()
+            };
+            // `reduce`: the first cluster of the highest weight wins.
+            let mut best = 0;
+            for index in 1..clusters.len() {
+                if weight(&clusters[index].members) > weight(&clusters[best].members) {
+                    best = index;
+                }
+            }
+            clusters = vec![clusters.swap_remove(best)];
+        }
+        let mut spawns: Vec<[f64; 2]> = clusters.into_iter().map(|c| c.coord).collect();
+        spawns.sort_by(compare_coords);
+        zones.push((zone_id, spawns));
+    }
     in_js_property_order(zones)
 }
 
-/// `(a, b) => a[0] - b[0] || a[1] - b[1]`, read the way JS sort reads it (NaN is equal).
-fn compare_coords(a: &[f64; 2], b: &[f64; 2]) -> Ordering {
-    let dx = a[0] - b[0];
-    let difference = if dx == 0.0 || dx.is_nan() { a[1] - b[1] } else { dx };
-    if difference < 0.0 {
-        Ordering::Less
-    } else if difference > 0.0 {
-        Ordering::Greater
+fn median(mut values: Vec<f64>) -> f64 {
+    values.sort_by(|a, b| compare_numbers(*a, *b));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[mid - 1] + values[mid]) / 2.0
     } else {
-        Ordering::Equal
+        values[mid]
     }
-}
-
-/// A cluster while points join it.
-struct GrowingCluster {
-    members: Vec<[f64; 2]>,
-    count: usize,
-    sum_x: f64,
-    sum_y: f64,
-}
-
-impl GrowingCluster {
-    fn centroid(&self) -> [f64; 2] {
-        [self.sum_x / self.count as f64, self.sum_y / self.count as f64]
-    }
-}
-
-/// Clusters nearby coordinates and averages each cluster. A point joins the nearest cluster
-/// whose centroid is within `threshold`, which avoids chaining a line of points (a patrol)
-/// into one cluster.
-fn cluster_and_average_coordinates(coords: &[[f64; 2]], threshold: f64) -> Vec<Cluster> {
-    // Sorted first for a consistent clustering order.
-    let mut coords = coords.to_vec();
-    coords.sort_by(compare_coords);
-
-    let mut clusters: Vec<GrowingCluster> = Vec::new();
-    for [x, y] in coords {
-        let mut nearest = None;
-        let mut nearest_dist = f64::INFINITY;
-        for (index, cluster) in clusters.iter().enumerate() {
-            let [cx, cy] = cluster.centroid();
-            let (dx, dy) = (x - cx, y - cy);
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist < nearest_dist {
-                nearest_dist = dist;
-                nearest = Some(index);
-            }
-        }
-        match nearest {
-            Some(index) if nearest_dist <= threshold + CLUSTER_EPSILON => {
-                let cluster = &mut clusters[index];
-                cluster.members.push([x, y]);
-                cluster.count += 1;
-                cluster.sum_x += x;
-                cluster.sum_y += y;
-            }
-            _ => clusters.push(GrowingCluster {
-                members: vec![[x, y]],
-                count: 1,
-                sum_x: x,
-                sum_y: y,
-            }),
-        }
-    }
-
-    merge_close_clusters(&mut clusters, threshold);
-
-    // Each centroid rounded to 2 decimals.
-    clusters
-        .into_iter()
-        .map(|c| Cluster {
-            coord: [
-                js::round((c.sum_x / c.count as f64) * 100.0) / 100.0,
-                js::round((c.sum_y / c.count as f64) * 100.0) / 100.0,
-            ],
-            members: c.members,
-        })
-        .collect()
-}
-
-/// Greedy clustering can leave two clusters whose centroids are closer than the threshold.
-/// Merges the first such pair until none is left.
-fn merge_close_clusters(clusters: &mut Vec<GrowingCluster>, threshold: f64) {
-    while let Some((i, j)) = first_close_pair(clusters, threshold) {
-        let b = clusters.remove(j);
-        let a = &mut clusters[i];
-        a.members.extend(b.members);
-        a.count += b.count;
-        a.sum_x += b.sum_x;
-        a.sum_y += b.sum_y;
-    }
-}
-
-fn first_close_pair(clusters: &[GrowingCluster], threshold: f64) -> Option<(usize, usize)> {
-    for i in 0..clusters.len() {
-        for j in i + 1..clusters.len() {
-            let ([ax, ay], [bx, by]) = (clusters[i].centroid(), clusters[j].centroid());
-            let (dx, dy) = (ax - bx, ay - by);
-            if (dx * dx + dy * dy).sqrt() <= threshold + CLUSTER_EPSILON {
-                return Some((i, j));
-            }
-        }
-    }
-    None
-}
-
-/// TS `coordKey`: `${zoneID}:${x.toFixed(4)},${y.toFixed(4)}`. Num compares zones the way
-/// `String(zoneID)` does (-0 and 0 alike).
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct CoordKey(Num, String, String);
-
-fn coord_key(zone_id: f64, x: f64, y: f64) -> CoordKey {
-    CoordKey(Num(zone_id), js::to_fixed_4(x), js::to_fixed_4(y))
-}
-
-/// The zones in the order a JS object iterates them: array-index keys (integers
-/// 0 ..= 2^32 - 2) ascending, then the others in insertion order.
-fn in_js_property_order(mut zones: Spawns) -> Spawns {
-    let array_index = |zone: f64| (zone.fract() == 0.0 && (0.0..=4_294_967_294.0).contains(&zone)).then_some(zone);
-    zones.sort_by(|(a, _), (b, _)| match (array_index(*a), array_index(*b)) {
-        (Some(a), Some(b)) => a.total_cmp(&b),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    });
-    zones
 }
 
 #[cfg(test)]
@@ -309,8 +166,17 @@ mod tests {
     use crate::observation::Confidence;
     use SpawnToken::{Npc, QuestNpc, QuestPoi, Target};
 
+    /// An observation of npc 823. Observations left without a session all count as one.
     fn obs(zone_id: f64, x: f64, y: f64, t: f64, token: SpawnToken) -> Observation<SpawnObservation> {
         Observation::new(823, SpawnObservation { zone_id, x, y, token }, Confidence::High, t)
+    }
+
+    /// `obs` seen in its own session (TS sets `provenance.sessionKey`).
+    fn obs_in(session: u32, zone_id: f64, x: f64, y: f64, t: f64, token: SpawnToken) -> Observation<SpawnObservation> {
+        Observation {
+            session: SessionId(session),
+            ..obs(zone_id, x, y, t, token)
+        }
     }
 
     /// The zone's spawn points; empty when the zone is missing.
@@ -374,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn clusters_a_tight_group_into_its_rounded_centroid() {
+    fn clusters_nearby_coordinates_into_their_median() {
         let points = [
             (21.83, 45.3),
             (21.83, 45.32),
@@ -395,7 +261,7 @@ mod tests {
             .enumerate()
             .map(|(i, &(x, y))| obs(40.0, x, y, i as f64 + 1.0, QuestNpc))
             .collect();
-        assert_eq!(zone(&merge_spawns(&observations, false), 40.0), [[21.85, 45.31]]);
+        assert_eq!(zone(&merge_spawns(&observations, false), 40.0), [[21.84, 45.3]]);
     }
 
     #[test]
@@ -417,7 +283,7 @@ mod tests {
             obs(267.0, 62.57, 19.9, 2.0, Target),
             obs(267.0, 62.59, 19.75, 3.0, Target),
         ];
-        assert_eq!(merge_spawns(&observations, false), [(267.0, vec![[62.56, 19.8]])]);
+        assert_eq!(merge_spawns(&observations, false), [(267.0, vec![[62.57, 19.75]])]);
     }
 
     #[test]
@@ -455,7 +321,7 @@ mod tests {
 
     #[test]
     fn keeps_every_cluster_for_entities_that_are_not_quest_entities() {
-        let observations = [obs(40.0, 10.0, 50.0, 1.0, Npc), obs(40.0, 30.0, 60.0, 2.0, Npc)];
+        let observations = [obs(40.0, 10.0, 50.0, 1.0, Target), obs(40.0, 30.0, 60.0, 2.0, Target)];
         assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[10.0, 50.0], [30.0, 60.0]])]);
     }
 
@@ -467,12 +333,12 @@ mod tests {
             obs(40.0, 10.31, 50.0, 3.0, Npc),
             obs(40.0, 10.32, 50.4, 4.0, Npc),
         ];
-        assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[10.23, 50.21]])]);
+        assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[10.31, 50.2]])]);
     }
 
     #[test]
     fn uses_a_larger_grouping_radius_in_capital_cities() {
-        let spread = |zone_id| [obs(zone_id, 50.0, 50.0, 1.0, Npc), obs(zone_id, 50.8, 50.0, 2.0, Npc)];
+        let spread = |zone_id| [obs(zone_id, 50.0, 50.0, 1.0, Target), obs(zone_id, 50.8, 50.0, 2.0, Target)];
         assert_eq!(merge_spawns(&spread(1537.0), false), [(1537.0, vec![[50.4, 50.0]])]);
         assert_eq!(zone(&merge_spawns(&spread(40.0), false), 40.0).len(), 2);
     }
@@ -521,6 +387,46 @@ mod tests {
     }
 
     #[test]
+    fn drops_a_single_session_cluster_when_the_strongest_cluster_has_many_sessions() {
+        let mut observations: Vec<_> = (0..25).map(|i| obs_in(i, 40.0, 30.0, 30.0, i as f64, Target)).collect();
+        observations.push(obs_in(99, 40.0, 60.0, 60.0, 99.0, Target));
+        assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[30.0, 30.0]])]);
+    }
+
+    #[test]
+    fn keeps_a_cluster_seen_in_two_sessions() {
+        let mut observations: Vec<_> = (0..25).map(|i| obs_in(i, 40.0, 30.0, 30.0, i as f64, Target)).collect();
+        observations.push(obs_in(98, 12.0, 60.0, 60.0, 98.0, Target));
+        observations.push(obs_in(99, 12.0, 60.0, 60.0, 99.0, Target));
+        assert_eq!(merge_spawns(&observations, false), [(12.0, vec![[60.0, 60.0]]), (40.0, vec![[30.0, 30.0]])]);
+    }
+
+    #[test]
+    fn picks_the_single_quest_entity_spawn_among_well_supported_clusters() {
+        // The cluster at (60, 60) has more observations, but all from one session.
+        let mut observations: Vec<_> = (0..25).map(|i| obs_in(i, 40.0, 30.0, 30.0, i as f64, Npc)).collect();
+        observations.extend((0..50).map(|i| obs_in(100, 40.0, 60.0, 60.0 + i as f64 * 0.001, 100.0 + i as f64, Npc)));
+        assert_eq!(merge_spawns(&observations, true), [(40.0, vec![[30.0, 30.0]])]);
+    }
+
+    #[test]
+    fn keeps_single_session_clusters_of_rarely_seen_npcs() {
+        let observations = [obs_in(1, 40.0, 30.0, 30.0, 1.0, Target), obs_in(2, 40.0, 60.0, 60.0, 2.0, Target)];
+        assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[30.0, 30.0], [60.0, 60.0]])]);
+    }
+
+    #[test]
+    fn places_a_cluster_at_the_median_so_an_outlier_does_not_pull_it_away() {
+        let observations = [
+            obs(40.0, 30.0, 30.0, 1.0, Target),
+            obs(40.0, 30.1, 30.1, 2.0, Target),
+            obs(40.0, 30.2, 30.2, 3.0, Target),
+            obs(40.0, 30.4, 30.4, 4.0, Target),
+        ];
+        assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[30.15, 30.15]])]);
+    }
+
+    #[test]
     fn spawns_of_no_observations_are_empty() {
         assert_eq!(merge_spawns(&[], false), []);
     }
@@ -528,15 +434,53 @@ mod tests {
     #[test]
     fn handles_several_zones_with_several_coordinates_each() {
         let observations = [
-            obs(40.0, 30.01, 86.02, 1.0, Npc),
-            obs(12.0, 47.46, 62.18, 2.0, Npc),
-            obs(40.0, 31.0, 87.0, 3.0, Npc),
-            obs(12.0, 48.0, 63.0, 4.0, Npc),
+            obs(40.0, 30.01, 86.02, 1.0, Target),
+            obs(12.0, 47.46, 62.18, 2.0, Target),
+            obs(40.0, 31.0, 87.0, 3.0, Target),
+            obs(12.0, 48.0, 63.0, 4.0, Target),
         ];
         assert_eq!(
             merge_spawns(&observations, false),
             [(12.0, vec![[47.46, 62.18], [48.0, 63.0]]), (40.0, vec![[30.01, 86.02], [31.0, 87.0]])]
         );
+    }
+
+    #[test]
+    fn reduces_an_interacted_npc_to_a_single_spawn_per_zone_at_its_interaction_positions() {
+        let observations = [
+            obs(40.0, 50.0, 50.0, 1.0, Npc),
+            obs(40.0, 50.2, 50.0, 2.0, Npc),
+            obs(40.0, 52.0, 50.0, 3.0, Npc),
+            obs(40.0, 58.0, 45.0, 4.0, Target),
+            obs(40.0, 58.0, 45.0, 5.0, Target),
+            obs(40.0, 58.0, 45.0, 6.0, Target),
+            obs(12.0, 20.0, 20.0, 7.0, Npc),
+        ];
+        assert_eq!(merge_spawns(&observations, false), [(12.0, vec![[20.0, 20.0]]), (40.0, vec![[50.1, 50.0]])]);
+    }
+
+    #[test]
+    fn does_not_let_ignored_targets_add_support_to_an_interaction_cluster() {
+        let observations = [
+            obs(40.0, 50.0, 50.0, 1.0, Npc),
+            obs(40.0, 50.0, 50.0, 2.0, Npc),
+            obs(40.0, 60.0, 60.0, 3.0, Npc),
+            obs(40.0, 60.0, 60.0, 4.0, Target),
+            obs(40.0, 60.0, 60.0, 5.0, Target),
+            obs(40.0, 60.0, 60.0, 6.0, Target),
+        ];
+        assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[50.0, 50.0]])]);
+    }
+
+    #[test]
+    fn reduces_an_interacted_npcs_targets_in_a_zone_without_interactions_to_a_single_spawn() {
+        let observations = [
+            obs(40.0, 50.0, 50.0, 1.0, Npc),
+            obs(12.0, 20.0, 20.0, 2.0, Target),
+            obs(12.0, 20.1, 20.0, 3.0, Target),
+            obs(12.0, 30.0, 30.0, 4.0, Target),
+        ];
+        assert_eq!(merge_spawns(&observations, false), [(12.0, vec![[20.05, 20.0]]), (40.0, vec![[50.0, 50.0]])]);
     }
 
     #[test]
@@ -548,6 +492,8 @@ mod tests {
         ];
         assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[50.0, 70.0]])]);
     }
+
+    // describe("mergeZoneID")
 
     #[test]
     fn zone_id_is_the_most_observed_zone() {
@@ -587,10 +533,10 @@ mod tests {
     #[test]
     fn zones_come_out_in_js_property_order() {
         let observations = [
-            obs(1519.0, 1.0, 1.0, 1.0, Npc),
-            obs(-1.0, 2.0, 2.0, 2.0, Npc),
-            obs(12.0, 3.0, 3.0, 3.0, Npc),
-            obs(0.5, 4.0, 4.0, 4.0, Npc),
+            obs(1519.0, 1.0, 1.0, 1.0, Target),
+            obs(-1.0, 2.0, 2.0, 2.0, Target),
+            obs(12.0, 3.0, 3.0, 3.0, Target),
+            obs(0.5, 4.0, 4.0, 4.0, Target),
         ];
         let zones: Vec<f64> = merge_spawns(&observations, false).into_iter().map(|(zone, _)| zone).collect();
         assert_eq!(zones, [12.0, 1519.0, -1.0, 0.5]);
