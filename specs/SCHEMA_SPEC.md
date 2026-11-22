@@ -510,7 +510,8 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | `UnitClassification` | scalar (string) | "normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus"; UnitState tracker; raw value recorded verbatim — treat as an open string in consumers |
 | `UnitAffectingCombat` | scalar (boolean) | Whether the NPC is in combat; UnitState tracker; restricted (secret) answers are skipped |
 | `CheckInteractDistance` | scalar (boolean) | Whether the NPC target is within ~28 yards; only `CheckInteractDistance["target"][4]`; nil while the player is in combat or when the answer is unavailable; UnitState tracker |
-| `UnitSubName` | scalar (string) | *(synthetic)* NPC title line (e.g. "Innkeeper") from the Unit TooltipDataProcessor callback; only `UnitSubName["mouseover"]`, recorded when the tooltip GUID matches the mouseover NPC (players and player-controlled units skipped); updates only on hover; `""` = NPC without title; UnitState tracker; Modern/Forever only |
+| `UnitSubName` | scalar (string) | *(synthetic)* NPC title line (e.g. "Innkeeper") from the Unit TooltipDataProcessor callback; only `UnitSubName["mouseover"]`, recorded when the tooltip GUID matches the mouseover NPC (players and player-controlled units skipped); written when the title or the NPC changes; `""` = NPC without title; UnitState tracker; Modern/Forever only |
+| `UnitSubNameGUID` | scalar (string) | *(synthetic)* GUID of the NPC the `UnitSubName` entry at the same index was shown for; only `UnitSubNameGUID["mouseover"]`, written together with `UnitSubName` (same length, `t` and `tp`); UnitState tracker; Modern/Forever only |
 
 ### Nested parameterized by native arguments (UnitReaction)
 

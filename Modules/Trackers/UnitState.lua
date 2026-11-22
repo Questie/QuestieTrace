@@ -14,6 +14,8 @@ local Core = QuestieTraceCore
 --   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, func),
 --   i.e. the line after the UnitName line unless it is the level line.
 --   "" when the NPC has no title. mouseover only, Modern/Forever only.
+-- UnitSubNameGUID (synthetic) -> string: GUID of the NPC the title was shown for.
+--   Written together with UnitSubName, so both streams have the same length and times.
 ---------------------------------------------------------------------------
 
 ---@type string[]
@@ -30,6 +32,8 @@ local reactionStreams
 local combatStreams
 ---@type FunctionStreamEntry[]?
 local subNameStream
+---@type FunctionStreamEntry[]?
+local subNameGuidStream
 ---@type FunctionStreamEntry[]?
 local targetDistanceStream
 
@@ -229,7 +233,7 @@ end
 ---@param tooltipData TooltipData?
 local function SampleSubName(_, tooltipData)
   local capture = currentCapture
-  if not subNameStream or not capture or not tooltipData then return end
+  if not subNameStream or not subNameGuidStream or not capture or not tooltipData then return end
   local guid = tooltipData.guid
   if Core.ParseGUIDKind(guid) ~= "npc" then return end
 
@@ -242,14 +246,16 @@ local function SampleSubName(_, tooltipData)
 
   local subName = ExtractSubName(tooltipData)
   if subName == nil then return end
+  -- Both streams are written together, so each subname has the GUID of the NPC it was shown for at the same index.
   local stream = subNameStream
+  local guidStream = subNameGuidStream
   local prev = stream[#stream]
-  if not prev or prev.v ~= subName then
-    stream[#stream + 1] = {
-      t = GetTime() - capture.startedAt,
-      tp = GetTimePreciseSec() - capture.startedAtPrecise,
-      v = subName,
-    }
+  local prevGuid = guidStream[#guidStream]
+  if not prev or prev.v ~= subName or not prevGuid or prevGuid.v ~= guid then
+    local t = GetTime() - capture.startedAt
+    local tp = GetTimePreciseSec() - capture.startedAtPrecise
+    stream[#stream + 1] = { t = t, tp = tp, v = subName }
+    guidStream[#guidStream + 1] = { t = t, tp = tp, v = guid }
   end
 end
 
@@ -281,6 +287,9 @@ Core.RegisterTracker({
     if not functions["UnitSubName"] then functions["UnitSubName"] = {} end
     functions["UnitSubName"]["mouseover"] = {}
     subNameStream = functions["UnitSubName"]["mouseover"]
+    if not functions["UnitSubNameGUID"] then functions["UnitSubNameGUID"] = {} end
+    functions["UnitSubNameGUID"]["mouseover"] = {}
+    subNameGuidStream = functions["UnitSubNameGUID"]["mouseover"]
     if (not functions["CheckInteractDistance"]) then functions["CheckInteractDistance"] = {} end
     functions["CheckInteractDistance"]["target"] = { [FOLLOW_DISTANCE_INDEX] = {} }
     targetDistanceStream = functions["CheckInteractDistance"]["target"][FOLLOW_DISTANCE_INDEX]
