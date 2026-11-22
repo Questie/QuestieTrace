@@ -3,6 +3,7 @@
 use anyhow::{bail, Context, Result};
 use relations::combine::CombineInput;
 use relations::config::Config;
+use relations::episode_store::EpisodeStore;
 use relations::model::{CandidateFile, GroundTruth, QuestCatalog};
 use relations::signals::{self, SignalInput};
 use relations::{catalog, combine, ingest, io, score, sources};
@@ -56,7 +57,7 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
         "combine" => timed("combine", || {
             let catalog: QuestCatalog = io::read_json(&config.catalog(), "catalog")?;
             let ground_truth: GroundTruth = io::read_json(&config.ground_truth(), "catalog")?;
-            let episodes = io::read_episodes(&config.episodes())?;
+            let episodes = EpisodeStore::open(&config.episode_store())?.load_all()?;
             let candidate_files = io::read_candidate_files(&config.candidates_dir())?;
             let input = CombineInput {
                 candidate_files,
@@ -88,7 +89,7 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
         {
             Some(signal) => timed(other, || {
                 let catalog: QuestCatalog = io::read_json(&config.catalog(), "catalog")?;
-                let episodes = io::read_episodes(&config.episodes())?;
+                let episodes = EpisodeStore::open(&config.episode_store())?.load_all()?;
                 let input = SignalInput {
                     episodes: &episodes,
                     catalog: &catalog,

@@ -17,6 +17,7 @@ pub mod catalog;
 pub mod combine;
 pub mod config;
 mod eligibility;
+pub mod episode_store;
 pub mod ingest;
 pub mod io;
 pub mod model;
