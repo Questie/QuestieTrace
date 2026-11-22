@@ -2,7 +2,7 @@
 //! `extract/observe.ts` and `extract/observe-lookups.ts`.
 
 use crate::aggregate::{Num, SessionScalars};
-use crate::js::format_number;
+use crate::js::{self, format_number};
 use crate::observation::{Localized, Observation};
 use crate::observers::item::{npc_drops::NpcDrop, object_drops::ObjectDrop};
 use crate::observers::npc::friendly_to_faction::FactionReactionValue;
@@ -18,7 +18,7 @@ use crate::observers::spawn::SpawnObservation;
 use crate::observers::{item, npc, object, quest};
 use crate::probes::{session_server_time, Faction};
 use std::hash::Hash;
-use trace_data::Session;
+use trace_data::{Session, Value};
 
 /// The highest ids Classic knows per entity. Only ids above them are exported, so npc, item
 /// and object observations at or below them are dropped right away.
@@ -45,10 +45,25 @@ fn interface_version(session: &Session) -> Option<f64> {
     first.is_table().then(|| first.get("v")?.as_num()).flatten()
 }
 
-/// Sessions from WoW Forever builds (interface 16xxx) are observed. Sessions without
-/// GetBuildInfo are included: they may be early Forever traces.
+/// The interface version in the session's top-level buildInfo (`buildInfo["4"]`, schema 15+);
+/// None when absent, not a number or string, or not a positive integer.
+fn top_level_interface_version(session: &Session) -> Option<f64> {
+    let raw = session.field("buildInfo")?.get("4")?;
+    let version = match raw.resolved() {
+        Value::Num(n) => *n,
+        Value::Str(s) => js::number(s),
+        _ => return None,
+    };
+    (version.fract() == 0.0 && version > 0.0).then_some(version)
+}
+
+/// Sessions from WoW Forever builds (interface 16xxx) are observed. The GetBuildInfo stream is
+/// read first, then the top-level buildInfo, which covers sessions where the stream is missing.
+/// Sessions with neither are included: they may be early Forever traces.
 pub fn is_forever_session(session: &Session) -> bool {
-    interface_version(session).is_none_or(|version| format_number(version).starts_with("16"))
+    interface_version(session)
+        .or_else(|| top_level_interface_version(session))
+        .is_none_or(|version| format_number(version).starts_with("16"))
 }
 
 /// One session's observations, ready for the fold. Scalar fields are merged by the default
@@ -154,4 +169,58 @@ pub fn observe_session(session: &Session) -> Option<StagedSession> {
             object_name: translations(object::name::observe_localized(session)),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{session_json, stream, with_session};
+    use serde_json::{json, Value as Json};
+
+    fn with_build_info(functions: Json, version: Json) -> Json {
+        let mut session = session_json(functions, vec![]);
+        session["buildInfo"] = json!({ "4": version, "n": 4 });
+        session
+    }
+
+    #[test]
+    fn rejects_a_classic_session_known_only_from_its_top_level_build_info() {
+        let session = with_build_info(json!({}), json!(11508));
+        assert!(!with_session(&session, is_forever_session));
+    }
+
+    #[test]
+    fn accepts_a_forever_session_known_only_from_its_top_level_build_info() {
+        let session = with_build_info(json!({}), json!(16001));
+        assert!(with_session(&session, is_forever_session));
+        let as_text = with_build_info(json!({}), json!("11508"));
+        assert!(!with_session(&as_text, is_forever_session));
+    }
+
+    #[test]
+    fn prefers_the_get_build_info_stream_over_the_top_level_build_info() {
+        let session = with_build_info(json!({ "GetBuildInfo": { "player": stream([(0.0, json!(16001))]) } }), json!(11508));
+        assert!(with_session(&session, is_forever_session));
+    }
+
+    #[test]
+    fn treats_a_top_level_version_that_is_not_a_number_or_string_as_unavailable() {
+        for version in [json!(true), json!(null), json!([]), json!({})] {
+            let session = with_build_info(json!({}), version.clone());
+            assert!(with_session(&session, is_forever_session), "{version}");
+        }
+    }
+
+    #[test]
+    fn treats_a_top_level_version_that_is_no_positive_integer_as_unavailable() {
+        for version in [json!(0), json!(-11508), json!(11508.5), json!(""), json!("abc")] {
+            let session = with_build_info(json!({}), version.clone());
+            assert!(with_session(&session, is_forever_session), "{version}");
+        }
+    }
+
+    #[test]
+    fn accepts_a_session_that_has_no_version_information() {
+        assert!(with_session(&session_json(json!({}), vec![]), is_forever_session));
+    }
 }
