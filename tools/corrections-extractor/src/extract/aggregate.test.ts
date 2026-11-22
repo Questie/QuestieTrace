@@ -173,3 +173,29 @@ describe("aggregateAgreedScalarSummary", () => {
     expect(aggregateAgreedScalarSummary(summary).has(1)).toBe(false);
   });
 });
+
+describe("aggregateScalarSummary tie-break", () => {
+  it("should prefer the value of the newest session over a later time within an older session", () => {
+    const summary: ScalarSummary<string> = new Map();
+    addToScalarSummary(summary, [{ ...sessionObs(1, "Older", 1, 100), provenance: { session: "s1", sessionKey: "k1", sessionTime: 100, t: 3000 } }]);
+    addToScalarSummary(summary, [{ ...sessionObs(1, "Newer", 2, 200), provenance: { session: "s2", sessionKey: "k2", sessionTime: 200, t: 10 } }]);
+
+    expect(aggregateScalarSummary(summary).get(1)?.value).toBe("Newer");
+  });
+
+  it("should rank a value without a session time below one with a session time", () => {
+    const summary: ScalarSummary<string> = new Map();
+    addToScalarSummary(summary, [{ ...sessionObs(1, "Untimed", 1, null), provenance: { session: "s1", sessionKey: "k1", sessionTime: null, t: 3000 } }]);
+    addToScalarSummary(summary, [{ ...sessionObs(1, "Timed", 2, 200), provenance: { session: "s2", sessionKey: "k2", sessionTime: 200, t: 10 } }]);
+
+    expect(aggregateScalarSummary(summary).get(1)?.value).toBe("Timed");
+  });
+
+  it("should still use the time within a session when no session has a server time", () => {
+    const summary: ScalarSummary<string> = new Map();
+    addToScalarSummary(summary, [{ ...sessionObs(1, "Early", 1, null), provenance: { session: "s1", sessionKey: "k1", sessionTime: null, t: 10 } }]);
+    addToScalarSummary(summary, [{ ...sessionObs(1, "Late", 2, null), provenance: { session: "s2", sessionKey: "k2", sessionTime: null, t: 20 } }]);
+
+    expect(aggregateScalarSummary(summary).get(1)?.value).toBe("Late");
+  });
+});
