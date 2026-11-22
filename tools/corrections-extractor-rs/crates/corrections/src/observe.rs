@@ -20,8 +20,9 @@ use crate::probes::{session_server_time, Faction};
 use std::hash::Hash;
 use trace_data::{Session, Value};
 
-/// The highest ids Classic knows per entity. Only ids above them are exported, so npc, item
-/// and object observations at or below them are dropped right away.
+/// The highest ids Classic knows per entity. The corrections only export ids above them, so npc,
+/// item and object observations at or below them are dropped right away. Quest XP and the
+/// lookups are exported for every id.
 #[derive(Clone, Copy, Debug)]
 pub struct MaxIds {
     pub npc: i64,

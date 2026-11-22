@@ -102,6 +102,10 @@ Reviewed and left as they are: real trace data cannot produce any of them.
   `latestT` can differ for it. The addon always records `t`.
 - An observer that panics stops the run even on a session copy that would be skipped as a
   duplicate; the TS tool only stops when the failing copy is used.
+- A top-level `buildInfo` that is text, or whose version (`buildInfo["4"]`) is a hex, octal or
+  binary string, gives no version here, so the session counts as Forever; JS reads a character
+  of the text, or the number the string spells. The addon always records `buildInfo` as a table
+  with a numeric version.
 
 ## Observers
 
