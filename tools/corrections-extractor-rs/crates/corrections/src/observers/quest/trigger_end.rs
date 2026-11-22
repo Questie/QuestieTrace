@@ -346,26 +346,17 @@ mod tests {
 
     #[test]
     fn merge_prefers_the_quests_zone_or_sort_zone_when_any_sample_observed_it() {
+        // The preferred zone beats a zone with more and newer samples.
         let merged = merge(
             &[
-                obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 10.0),
-                obs(value("Light the campfire", &[(12.0, &[(47.46, 62.18)])]), 20.0),
+                obs(value("Light the campfire", &[(12.0, &[(47.46, 62.18)])]), 10.0),
+                obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 20.0),
+                obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 30.0),
             ],
             // zoneOrSort resolved Elwynn Forest for this quest
             Some(12.0),
         );
         assert_eq!(merged, value("Light the campfire", &[(12.0, &[(47.46, 62.18)])]));
-        // Not in the TS test, where zone 12 also wins by recency: the preferred zone beats a
-        // zone with more and newer samples.
-        let merged = merge(
-            &[
-                obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 10.0),
-                obs(value("Light the campfire", &[(12.0, &[(47.46, 62.18)])]), 20.0),
-                obs(value("Light the campfire", &[(12.0, &[(47.46, 62.18)])]), 30.0),
-            ],
-            Some(40.0),
-        );
-        assert_eq!(merged, value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]));
     }
 
     #[test]
@@ -390,11 +381,6 @@ mod tests {
             merge(&[earlier.clone(), later], None),
             value("Light the campfire", &[(40.0, &[(56.11, 61.64)])])
         );
-        // As in the TS test (which only holds zone 12).
-        assert_eq!(
-            merge(&[earlier.clone(), earlier.clone()], None),
-            value("Light the campfire", &[(12.0, &[(30.0, 40.0)])])
-        );
         // Equal counts and recency: the lowest zone id wins, whichever zone is met first.
         let same_time = obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 10.0);
         assert_eq!(merge(&[same_time, earlier], None), value("Light the campfire", &[(12.0, &[(30.0, 40.0)])]));
@@ -404,9 +390,10 @@ mod tests {
     fn merge_picks_the_most_observed_coordinate_pair_within_the_winning_zone() {
         let merged = merge(
             &[
-                obs(value("Light the campfire", &[(40.0, &[(57.0, 62.0)])]), 10.0),
+                obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 10.0),
                 obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 20.0),
-                obs(value("Light the campfire", &[(40.0, &[(56.11, 61.64)])]), 30.0),
+                // The most recent pair loses to the most observed one.
+                obs(value("Light the campfire", &[(40.0, &[(57.0, 62.0)])]), 30.0),
             ],
             None,
         );
