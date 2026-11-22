@@ -173,50 +173,83 @@ fn round(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
 
-impl IngestReport {
-    pub fn new(generated_at: String, seconds: u64, require_forever_version: bool, tally: Tally, episodes: &[QuestEpisode]) -> Self {
-        let mut builds = Builds::default();
-        let mut completed = CompletedCounts::default();
-        let mut by_source: IndexMap<OfferSource, ListCounts> = IndexMap::new();
-        let mut by_kind: IndexMap<QuestEventKind, usize> = IndexMap::new();
-        let mut giver_kinds: IndexMap<GiverKind, usize> = IndexMap::new();
-        let (mut with_giver, mut with_quest_info, mut with_player_context) = (0, 0, 0);
-        for episode in episodes {
-            match episode.interface_version {
-                None => builds.unknown += 1,
-                Some(version) if is_forever_build(version) => builds.forever += 1,
-                Some(_) => builds.other += 1,
-            }
-            match episode.completed.as_ref().map(|completed| completed.source) {
-                Some(CompletedSource::Modern) => completed.modern += 1,
-                Some(CompletedSource::Legacy) => completed.legacy += 1,
-                None => completed.none += 1,
-            }
-            let changes = episode.completed.iter().flat_map(|completed| &completed.changes);
-            if changes
-                .into_iter()
-                .any(|change| change.t < 30.0 && change.add.as_ref().is_some_and(|add| add.len() > 20))
-            {
-                completed.early_bulk_adds += 1;
-            }
-            for offer in &episode.offers {
-                let counts = by_source.entry(offer.source).or_default();
-                counts.total += 1;
-                counts.list_complete += usize::from(offer.list_complete);
-            }
-            for event in &episode.quest_events {
-                *by_kind.entry(event.kind).or_default() += 1;
-                if let Some(giver) = event.giver {
-                    with_giver += 1;
-                    *giver_kinds.entry(giver.kind).or_default() += 1;
-                }
-            }
-            with_quest_info += usize::from(episode.quest_info.is_some());
-            with_player_context += usize::from(episode.player.race_id.is_some() && episode.player.class_id.is_some());
+/// What reports/ingest.json counts about the episodes, added up one episode at a time in ingest's
+/// order (the maps keep first-met order).
+#[derive(Default)]
+pub struct EpisodeSummary {
+    episodes: usize,
+    builds: Builds,
+    completed: CompletedCounts,
+    by_source: IndexMap<OfferSource, ListCounts>,
+    by_kind: IndexMap<QuestEventKind, usize>,
+    giver_kinds: IndexMap<GiverKind, usize>,
+    with_giver: usize,
+    with_quest_info: usize,
+    with_player_context: usize,
+    contributors: FxHashSet<String>,
+    characters: FxHashSet<String>,
+}
+
+impl EpisodeSummary {
+    pub fn add(&mut self, episode: &QuestEpisode) {
+        self.episodes += 1;
+        match episode.interface_version {
+            None => self.builds.unknown += 1,
+            Some(version) if is_forever_build(version) => self.builds.forever += 1,
+            Some(_) => self.builds.other += 1,
         }
+        match episode.completed.as_ref().map(|completed| completed.source) {
+            Some(CompletedSource::Modern) => self.completed.modern += 1,
+            Some(CompletedSource::Legacy) => self.completed.legacy += 1,
+            None => self.completed.none += 1,
+        }
+        let changes = episode.completed.iter().flat_map(|completed| &completed.changes);
+        if changes
+            .into_iter()
+            .any(|change| change.t < 30.0 && change.add.as_ref().is_some_and(|add| add.len() > 20))
+        {
+            self.completed.early_bulk_adds += 1;
+        }
+        for offer in &episode.offers {
+            let counts = self.by_source.entry(offer.source).or_default();
+            counts.total += 1;
+            counts.list_complete += usize::from(offer.list_complete);
+        }
+        for event in &episode.quest_events {
+            *self.by_kind.entry(event.kind).or_default() += 1;
+            if let Some(giver) = event.giver {
+                self.with_giver += 1;
+                *self.giver_kinds.entry(giver.kind).or_default() += 1;
+            }
+        }
+        self.with_quest_info += usize::from(episode.quest_info.is_some());
+        self.with_player_context += usize::from(episode.player.race_id.is_some() && episode.player.class_id.is_some());
+        if !self.contributors.contains(&episode.contributor_id) {
+            self.contributors.insert(episode.contributor_id.clone());
+        }
+        if !self.characters.contains(&episode.character_key) {
+            self.characters.insert(episode.character_key.clone());
+        }
+    }
+}
+
+impl IngestReport {
+    pub fn new(generated_at: String, seconds: u64, require_forever_version: bool, tally: Tally, summary: EpisodeSummary) -> Self {
+        let EpisodeSummary {
+            episodes,
+            builds,
+            completed,
+            by_source,
+            by_kind,
+            giver_kinds,
+            with_giver,
+            with_quest_info,
+            with_player_context,
+            contributors,
+            characters,
+        } = summary;
         let total_offers = by_source.values().map(|counts| counts.total).sum::<usize>();
         let complete_offers = by_source.values().map(|counts| counts.list_complete).sum::<usize>();
-        let distinct = |key: fn(&QuestEpisode) -> &str| episodes.iter().map(key).collect::<FxHashSet<_>>().len();
 
         IngestReport {
             generated_at,
@@ -246,7 +279,7 @@ impl IngestReport {
                 unique: tally.unique,
                 duplicate_copies_merged: tally.copies - tally.unique,
                 seen_under_several_contributors: tally.seen_under_several_contributors,
-                kept: episodes.len(),
+                kept: episodes,
                 skipped: tally.skipped,
             },
             episodes: EpisodeCounts {
@@ -254,8 +287,8 @@ impl IngestReport {
                 with_player_context,
                 completed,
                 with_quest_info,
-                contributors: distinct(|episode| &episode.contributor_id),
-                characters: distinct(|episode| &episode.character_key),
+                contributors: contributors.len(),
+                characters: characters.len(),
             },
             offers: OfferCounts {
                 by_source,
