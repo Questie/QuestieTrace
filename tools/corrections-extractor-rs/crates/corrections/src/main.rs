@@ -121,6 +121,14 @@ fn main() -> ExitCode {
             for skipped in &meta.skipped_files {
                 eprintln!("Skipped {}: {}", skipped.name, skipped.error);
             }
+            if !meta.partial_files.is_empty() {
+                let meta_path = args.output.join("meta.json");
+                eprintln!(
+                    "{} submission(s) partly decoded (details in {})",
+                    meta.partial_files.len(),
+                    std::path::absolute(&meta_path).unwrap_or(meta_path).display()
+                );
+            }
             if meta.duplicate_sessions_skipped > 0 {
                 println!(
                     "Ignored {} older copies of sessions that later submissions exported again (the newest copy is used)",
