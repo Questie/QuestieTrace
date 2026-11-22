@@ -31,6 +31,25 @@ mod timeline;
 #[cfg(test)]
 mod test_support;
 
+/// Hands the memory the allocator holds but no longer uses back to the system. The steps run one
+/// after another and each frees what it built, but glibc keeps freed memory for reuse: without
+/// this the process stays as large as every earlier step's peak (7.6 GB on the full archive of
+/// November 22, mostly memory earlier signals had freed). A no-op where the allocator is not
+/// glibc's.
+pub fn release_freed_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn malloc_trim(pad: usize) -> std::ffi::c_int;
+        }
+        // SAFETY: malloc_trim only hands free heap pages back to the system; it is thread-safe and
+        // never touches memory in use.
+        unsafe {
+            malloc_trim(0);
+        }
+    }
+}
+
 /// `unix_millis` as an ISO 8601 UTC timestamp with milliseconds, like JS `Date.toISOString()`.
 fn iso_timestamp(unix_millis: i64) -> String {
     let days = unix_millis.div_euclid(86_400_000);

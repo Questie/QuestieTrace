@@ -132,6 +132,7 @@ fn pipeline(config: &Config) -> Result<()> {
     ingested.write(config)?;
     // From here on the steps read the episodes from the store, one bucket at a time.
     drop(ingested);
+    relations::release_freed_memory();
     let episodes = EpisodeStore::open(&config.episode_store())?;
     done("ingest");
 

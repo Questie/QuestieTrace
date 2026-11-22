@@ -171,6 +171,8 @@ pub fn run_all(input: &SignalInput, mut on_output: impl FnMut(SignalOutput) -> R
     for signal in registry() {
         let started = std::time::Instant::now();
         on_output(run_one(signal, input)?)?;
+        // Everything the signal built is dropped by now; the next one starts from a small process.
+        crate::release_freed_memory();
         eprintln!("== signal:{} done in {:.1}s", signal.name(), started.elapsed().as_secs_f64());
     }
     Ok(())
