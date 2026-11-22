@@ -379,7 +379,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
             ),
             ("xpDB-traces.lua", write_quest_xp(&quest_xp_rows, &header)),
         ],
-        lookups: finalize_lookups(&acc.lookups, &max),
+        lookups: finalize_lookups(&acc.lookups),
     }
 }
 
@@ -449,11 +449,14 @@ fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, started_by::Star
     required_races
 }
 
-/// lookups.ts `valuesFor`: one value per entity above `max_id` in `locale`.
-fn values_for<T: Clone + Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>, locale: &str, newest_wins: bool, max_id: i64) -> IndexMap<i64, T> {
+/// lookups.ts `valuesFor`: one value per entity in `locale`, Classic ones included.
+fn values_for<T: Clone + Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>, locale: &str, newest_wins: bool) -> IndexMap<i64, T> {
     let Some(summary) = by_locale.get(locale) else { return IndexMap::new() };
-    let values = if newest_wins { summary.aggregate_newest() } else { summary.aggregate() };
-    values.into_iter().filter(|(id, _)| *id > max_id).collect()
+    if newest_wins {
+        summary.aggregate_newest()
+    } else {
+        summary.aggregate()
+    }
 }
 
 fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) -> Vec<String> {
@@ -462,13 +465,14 @@ fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) 
     locales
 }
 
-/// lookups.ts `finalizeLookups`: per entity and locale, a Questie l10n module. Names can change
-/// over time (a renamed NPC), so the newest one wins; objective texts use the default policy.
-fn finalize_lookups(acc: &LookupAccumulator, max: &MaxIds) -> Vec<(&'static str, Vec<(String, String)>)> {
+/// lookups.ts `finalizeLookups`: per entity and locale, a Questie l10n module of every observed
+/// id (unlike the corrections, Classic ones too). Names can change over time (a renamed NPC), so
+/// the newest one wins; objective texts use the default policy.
+fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, String)>)> {
     let mut npcs = Vec::new();
     for locale in sorted_locales(&acc.npc_name) {
         // Subnames are not traced, so they are always nil.
-        let entries: Vec<(i64, Js)> = values_for(&acc.npc_name, &locale, true, max.npc)
+        let entries: Vec<(i64, Js)> = values_for(&acc.npc_name, &locale, true)
             .into_iter()
             .map(|(id, name)| (id, Js::Array(vec![Js::Str(name), Js::Null])))
             .collect();
@@ -478,9 +482,9 @@ fn finalize_lookups(acc: &LookupAccumulator, max: &MaxIds) -> Vec<(&'static str,
     }
     let mut quests = Vec::new();
     for locale in sorted_locales(&acc.quest_name) {
-        let objectives = values_for(&acc.objectives_text, &locale, false, max.quest);
+        let objectives = values_for(&acc.objectives_text, &locale, false);
         // Quests without an observed title are left out: Questie needs the title.
-        let entries: Vec<(i64, Js)> = values_for(&acc.quest_name, &locale, true, max.quest)
+        let entries: Vec<(i64, Js)> = values_for(&acc.quest_name, &locale, true)
             .into_iter()
             .map(|(id, name)| {
                 let text = objectives.get(&id).map_or(Js::Null, |lines| Js::Array(lines.iter().map(Js::str).collect()));
@@ -491,14 +495,11 @@ fn finalize_lookups(acc: &LookupAccumulator, max: &MaxIds) -> Vec<(&'static str,
             quests.push((locale.clone(), write_lookup(LookupTable::Quest, &locale, &entries)));
         }
     }
-    let names = |by_locale: &IndexMap<String, ScalarSummary<String>>, table: LookupTable, max_id: i64| -> Vec<(String, String)> {
+    let names = |by_locale: &IndexMap<String, ScalarSummary<String>>, table: LookupTable| -> Vec<(String, String)> {
         sorted_locales(by_locale)
             .into_iter()
             .filter_map(|locale| {
-                let entries: Vec<(i64, Js)> = values_for(by_locale, &locale, true, max_id)
-                    .into_iter()
-                    .map(|(id, name)| (id, Js::Str(name)))
-                    .collect();
+                let entries: Vec<(i64, Js)> = values_for(by_locale, &locale, true).into_iter().map(|(id, name)| (id, Js::Str(name))).collect();
                 (!entries.is_empty()).then(|| {
                     let module = write_lookup(table, &locale, &entries);
                     (locale, module)
@@ -509,7 +510,7 @@ fn finalize_lookups(acc: &LookupAccumulator, max: &MaxIds) -> Vec<(&'static str,
     vec![
         ("lookupNpcs", npcs),
         ("lookupQuests", quests),
-        ("lookupItems", names(&acc.item_name, LookupTable::Item, max.item)),
-        ("lookupObjects", names(&acc.object_name, LookupTable::Object, max.object)),
+        ("lookupItems", names(&acc.item_name, LookupTable::Item)),
+        ("lookupObjects", names(&acc.object_name, LookupTable::Object)),
     ]
 }
