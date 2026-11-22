@@ -4,7 +4,9 @@
 //! events, each read within its interaction (see [`super::interaction`]):
 //!
 //! - QUEST_COMPLETE: GetQuestID() for the quest.
-//! - QUEST_TURNED_IN: the quest id from the event (argument 1).
+//! - QUEST_TURNED_IN: the quest id from the event (argument 1). Only a fallback for quests no
+//!   QUEST_COMPLETE showed earlier in the session: the server confirms the turn-in
+//!   asynchronously, so by then questnpc can be the next giver the player opened.
 //! - GOSSIP_SHOW: the last observed C_GossipInfo.GetActiveQuests() list, replayed against the
 //!   current giver (active quests are in the log and can be turned in here).
 //!
@@ -18,7 +20,7 @@
 use super::interaction::{quest_event_lookup, InteractionLookup, InteractionValue};
 use crate::guid::{parse_guid, GuidKind};
 use crate::observation::{Confidence, Observation};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use trace_data::{KeyRef, Session, Value};
 
 /// One finisher seen for a quest (TS `FinishedByFinisher`, which sets exactly one of its fields).
@@ -85,6 +87,8 @@ fn push_finisher(quest_id: f64, t: f64, lookup: &InteractionLookup, tokens: &[&s
 
 pub fn observe(session: &Session) -> Vec<Observation<FinishedByFinisher>> {
     let mut observations = Vec::new();
+    // Quests a QUEST_COMPLETE showed, as f64 bits.
+    let mut shown_in_dialog = HashSet::new();
 
     for (index, event) in session.events().enumerate() {
         if !(event.is("QUEST_COMPLETE") || event.is("QUEST_TURNED_IN") || event.is("GOSSIP_SHOW")) {
@@ -106,10 +110,17 @@ pub fn observe(session: &Session) -> Vec<Observation<FinishedByFinisher>> {
         }
 
         let quest_id = if event.is("QUEST_COMPLETE") {
-            quest_id_at(&lookup)
+            let quest_id = quest_id_at(&lookup);
+            if let Some(quest_id) = quest_id {
+                shown_in_dialog.insert(quest_id.to_bits());
+            }
+            quest_id
         } else if event.arg_count().is_some_and(|n| n >= 1.0) {
             // QUEST_TURNED_IN
-            event.arg(1).and_then(Value::as_num).filter(|&id| id != 0.0)
+            event
+                .arg(1)
+                .and_then(Value::as_num)
+                .filter(|&id| id != 0.0 && !shown_in_dialog.contains(&id.to_bits()))
         } else {
             None
         };
@@ -269,18 +280,21 @@ mod tests {
     }
 
     #[test]
-    fn observes_both_quest_complete_and_quest_turned_in_for_the_same_quest() {
+    fn does_not_take_a_finisher_at_quest_turned_in_when_a_dialog_already_showed_the_quest() {
+        // The turn-in of 1104 is confirmed while the dialog of 1105 is open.
         let session = session_json(
-            json!({ "GetQuestID": [sample(3.0, 3.0, json!(96659))], "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(197))] } }),
+            json!({
+                "GetQuestID": [sample(1.0, 1.001, json!(1104)), sample(2.0, 2.002, json!(0)), sample(3.0, 3.001, json!(1105))],
+                "UnitGUID": { "questnpc": [sample(1.0, 1.001, creature_guid(4453)), sample(2.0, 2.001, None), sample(3.0, 3.001, creature_guid(4454))] },
+            }),
             vec![
+                trace_event("QUEST_COMPLETE", 1.0, 1.0, &[]),
+                trace_event("QUEST_FINISHED", 2.0, 2.0, &[]),
                 trace_event("QUEST_COMPLETE", 3.0, 3.0, &[]),
-                trace_event("QUEST_TURNED_IN", 4.0, 4.0, &[json!(96659)]),
+                trace_event("QUEST_TURNED_IN", 4.0, 4.0, &[json!(1104)]),
             ],
         );
-        let results = with_session(&session, observe);
-        // One from each event; the merge keeps the creature once.
-        assert_eq!(results.iter().filter(|o| matches!(o.value, Creature(_))).count(), 2);
-        assert_eq!(merge(&results).creatures, [197]);
+        assert_eq!(quests_and_values(&session), [(1104, Creature(4453)), (1105, Creature(4454))]);
     }
 
     #[test]
