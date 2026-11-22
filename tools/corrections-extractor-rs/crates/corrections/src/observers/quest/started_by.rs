@@ -5,7 +5,9 @@
 //!
 //! - QUEST_DETAIL: GetQuestID() for the quest, and its questStartItemID argument for an item
 //!   starter.
-//! - QUEST_ACCEPTED: the quest id from the event.
+//! - QUEST_ACCEPTED: the quest id from the event. Only a fallback for quests no QUEST_DETAIL showed
+//!   earlier in the session: the server confirms the accept asynchronously, so by then questnpc can
+//!   be the next giver the player opened (quest 928 attributed to a Lost Journal, say).
 //! - GOSSIP_SHOW: the last observed C_GossipInfo.GetAvailableQuests() list, replayed against
 //!   the current giver (available quests can be started here).
 //!
@@ -20,7 +22,7 @@
 use super::interaction::{quest_event_lookup, InteractionLookup, InteractionValue};
 use crate::guid::{parse_guid, GuidKind};
 use crate::observation::{Confidence, Observation};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use trace_data::{KeyRef, Session, Value};
 
 /// One starter seen for a quest (TS `StartedByStarter`, which sets exactly one of its fields).
@@ -95,6 +97,8 @@ fn push_giver(quest_id: f64, t: f64, lookup: &InteractionLookup, tokens: &[&str]
 
 pub fn observe(session: &Session) -> Vec<Observation<StartedByStarter>> {
     let mut observations = Vec::new();
+    // Quests a QUEST_DETAIL showed, as f64 bits.
+    let mut shown_in_dialog = HashSet::new();
 
     for (index, event) in session.events().enumerate() {
         if !(event.is("QUEST_DETAIL") || event.is("QUEST_ACCEPTED") || event.is("GOSSIP_SHOW")) {
@@ -120,7 +124,11 @@ pub fn observe(session: &Session) -> Vec<Observation<StartedByStarter>> {
             if event.arg_count().is_some_and(|n| n >= 1.0) {
                 starter_item_id = event.arg(1).and_then(Value::as_num);
             }
-            quest_id_at(&lookup)
+            let quest_id = quest_id_at(&lookup);
+            if let Some(quest_id) = quest_id {
+                shown_in_dialog.insert(quest_id.to_bits());
+            }
+            quest_id
         } else {
             // QUEST_ACCEPTED: Era, TBC, Wrath and Mists send (questLogIndex, questID), Forever (questID).
             let args = event.args();
@@ -129,7 +137,9 @@ pub fn observe(session: &Session) -> Vec<Observation<StartedByStarter>> {
             } else {
                 event.arg(2)
             };
-            quest_id.and_then(Value::as_num).filter(|&id| id != 0.0)
+            quest_id
+                .and_then(Value::as_num)
+                .filter(|&id| id != 0.0 && !shown_in_dialog.contains(&id.to_bits()))
         };
         let Some(quest_id) = quest_id else { continue };
 
@@ -238,6 +248,25 @@ mod tests {
             );
             assert_eq!(observed(&session), [], "payload {args}");
         }
+    }
+
+    #[test]
+    fn does_not_take_a_starter_at_quest_accepted_when_a_dialog_already_showed_the_quest() {
+        // Quest 928 is shown by Tenaron Stormgrip, but the server confirms the accept only after
+        // the player opened the Lost Journal's own quest.
+        let session = session_json(
+            json!({
+                "GetQuestID": [sample(1.0, 1.001, json!(928)), sample(2.0, 2.002, json!(0)), sample(3.0, 3.001, json!(96630))],
+                "UnitGUID": { "questnpc": [sample(1.0, 1.001, creature_guid(3514)), sample(2.0, 2.001, None), sample(3.0, 3.001, object_guid(654846))] },
+            }),
+            vec![
+                trace_event("QUEST_DETAIL", 1.0, 1.0, &[json!(0)]),
+                trace_event("QUEST_FINISHED", 2.0, 2.0, &[]),
+                trace_event("QUEST_DETAIL", 3.0, 3.0, &[json!(0)]),
+                trace_event("QUEST_ACCEPTED", 4.0, 4.0, &[json!(928)]),
+            ],
+        );
+        assert_eq!(quests_and_values(&session), [(928, Creature(3514)), (96630, Object(654846))]);
     }
 
     #[test]
