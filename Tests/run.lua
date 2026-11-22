@@ -2212,6 +2212,37 @@ local function TestUnitStateRecordsSubNameFromTooltip()
   assert(stream[2].v == "", "UnitSubName must record an empty string for an NPC without title")
 end
 
+local function TestUnitStateRecordsGuidWithSubName()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
+  local env = runtime.env
+  local holder = InstallUnitTooltipProcessor(runtime)
+  local guid = "Creature-0-1-1-1-1-000001"
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return guid end end
+  local function Hover(name, subName)
+    holder.callback(nil, {
+      guid = guid,
+      lines = { { type = 2, leftText = name }, { type = 0, leftText = subName } },
+    })
+  end
+
+  runtime.core.StartCapture("unit subname guid test")
+  Hover("Isaac Chan", "Isaac Chan's Companion")
+  guid = "Creature-0-1-1-1-2-000002"
+  AdvanceTo(runtime, 1)
+  Hover("Nordun", "Isaac Chan's Companion")
+  AdvanceTo(runtime, 2)
+  Hover("Nordun", "Isaac Chan's Companion")
+
+  local functions = Session(runtime).functions
+  local names, guids = functions.UnitSubName.mouseover, functions.UnitSubNameGUID.mouseover
+  assert(#names == 2 and #guids == 2, "a new NPC with the same title must get its own entry, an unchanged hover none")
+  assert(guids[1].v == "Creature-0-1-1-1-1-000001" and guids[2].v == "Creature-0-1-1-1-2-000002", "each subname must carry its NPC's GUID")
+  assert(names[2].v == "Isaac Chan's Companion" and names[2].t == guids[2].t and names[2].tp == guids[2].tp, "both streams must share t and tp")
+end
+
 local function TestUnitStateSanitizesSubName()
   local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua" })
   local env = runtime.env
@@ -2288,7 +2319,7 @@ local function TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits()
   env.UnitGUID = function(token) if token == "mouseover" then return "Player-1-00000001" end end
   holder.callback(nil, data)
 
-  assert(#Session(runtime).functions.UnitSubName.mouseover == 0,
+  assert(#Session(runtime).functions.UnitSubName.mouseover == 0 and #Session(runtime).functions.UnitSubNameGUID.mouseover == 0,
     "UnitSubName must not record players, player pets, non-npc guids or other units")
 end
 
@@ -3632,6 +3663,7 @@ local tests = {
   { name = "unit state tracker records level and classification", run = TestUnitStateTracker },
   { name = "should record whether the npc target is within ~28 yards", run = TestUnitStateRecordsTargetDistance },
   { name = "should record npc subname from unit tooltip", run = TestUnitStateRecordsSubNameFromTooltip },
+  { name = "should record the npc guid together with each subname", run = TestUnitStateRecordsGuidWithSubName },
   { name = "should redact player names in npc subname", run = TestUnitStateSanitizesSubName },
   { name = "should detect level lines by line type when UnitLevel exists", run = TestUnitStateUsesUnitLevelLineTypeWhenAvailable },
   { name = "should not record subname for players, player pets or other units", run = TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits },
