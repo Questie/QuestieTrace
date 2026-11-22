@@ -95,6 +95,23 @@ pub(crate) fn forever_episodes(episodes: &[QuestEpisode]) -> Vec<&QuestEpisode> 
     episodes.iter().filter(|episode| is_forever_interface(episode.interface_version)).collect()
 }
 
+/// Small ids for character keys, so what a signal keeps across buckets does not hold the keys
+/// themselves (episodes are read one bucket at a time) nor copies of them.
+#[derive(Default)]
+pub(crate) struct CharacterIds(rustc_hash::FxHashMap<String, u32>);
+
+impl CharacterIds {
+    /// The id of `character_key`, the same for every episode of the character.
+    pub fn id(&mut self, character_key: &str) -> u32 {
+        if let Some(&id) = self.0.get(character_key) {
+            return id;
+        }
+        let id = u32::try_from(self.0.len()).expect("fewer than 2^32 characters");
+        self.0.insert(character_key.to_owned(), id);
+        id
+    }
+}
+
 /// Params and reports as JSON. They are plain data (numbers, strings, lists, maps keyed by strings
 /// or integers), which always serializes.
 pub(crate) fn to_json(value: &impl serde::Serialize) -> serde_json::Value {
