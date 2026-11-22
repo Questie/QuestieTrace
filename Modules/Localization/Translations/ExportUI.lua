@@ -89,6 +89,18 @@ local exportUILocales = {
     ["zhCN"] = "目前没有新的可分享内容。继续游戏，稍后再来看看。", -- 🤖
     ["zhTW"] = "目前沒有新的可分享內容。繼續遊玩，稍後再回來看看。", -- 🤖
   },
+  ["Preparing export..."] = {
+    ["enUS"] = true,
+    ["deDE"] = "Export wird vorbereitet...", -- 🤖
+    ["esES"] = "Preparando la exportación...", -- 🤖
+    ["esMX"] = "Preparando la exportación...", -- 🤖
+    ["frFR"] = "Préparation de l'exportation...", -- 🤖
+    ["koKR"] = "내보내기 준비 중...", -- 🤖
+    ["ptBR"] = "Preparando a exportação...", -- 🤖
+    ["ruRU"] = "Подготовка экспорта...", -- 🤖
+    ["zhCN"] = "正在准备导出……", -- 🤖
+    ["zhTW"] = "正在準備匯出……", -- 🤖
+  },
   ["Events captured: %s"] = {
     ["enUS"] = true,
     ["deDE"] = "Erfasste Ereignisse: %s", -- 🤖

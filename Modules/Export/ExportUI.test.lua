@@ -29,6 +29,10 @@ local function LoadExportUIModules(env, l10n)
   env.QuestieTraceCore.GetCaptureState = function() return "running" end
   env.QuestieTraceCore.MarkExportOpened = function() end
   env.QuestieTraceCore.DecodeExportPayload = function() return { functions = {} } end
+  env.QuestieTraceCore.HasCodecSupport = function() return true end
+  -- Run the export job's next-frame steps right away; tests that care about
+  -- frames replace this with a queue.
+  env.C_Timer = { After = function(_, callback) callback() end }
 
   local exportChunk = assert(loadfile("Modules/Export/Export.lua"))
   setfenv(exportChunk, env)
@@ -377,6 +381,7 @@ local function NewWidgetRecorder()
     Hide = function(self) self.shown = false end,
     SetTexture = function(self, texture) self.texture = texture end,
     SetPoint = function(self, ...) self.points[#self.points + 1] = { ... } end,
+    IsShown = function(self) return self.shown end,
     CreateFontString = function() return NewWidgetRecorder() end,
     CreateTexture = function() return NewWidgetRecorder() end,
   }, {
@@ -595,5 +600,195 @@ describe("ExportUI export statistics", function()
     Core.ShowExportWindow()
 
     assert.equal("Time recorded: 0:00:00", StatText("time"))
+  end)
+end)
+
+describe("ExportUI export job over several frames", function()
+  ---@type table<string, any>
+  local env
+  ---@type QuestieTraceCore
+  local Core
+  ---@type table?
+  local exportFrame
+  ---@type fun()[]
+  local nextFrame
+  ---@type string[]
+  local calls
+
+  --- Run the callbacks scheduled for the next frame.
+  local function RunFrame()
+    local callbacks = nextFrame
+    nextFrame = {}
+    for _, callback in ipairs(callbacks) do
+      callback()
+    end
+  end
+
+  --- Run frames until nothing is scheduled anymore.
+  local function RunAllFrames()
+    while #nextFrame > 0 do
+      RunFrame()
+    end
+  end
+
+  ---@return table
+  local function Frame()
+    return assert(exportFrame, "export frame was not created")
+  end
+
+  before_each(function()
+    env = {}
+    Core = LoadExportUIModules(env)
+    nextFrame = {}
+    calls = {}
+    env.C_Timer = { After = function(_, callback) nextFrame[#nextFrame + 1] = callback end }
+    Core.DecodeExportPayload = function(encoded)
+      calls[#calls + 1] = "decode " .. encoded
+      return { functions = {}, events = MakeEvents(1) }
+    end
+    Core.EncodeExportPayload = function()
+      calls[#calls + 1] = "encode"
+      return "ENCODED_PAYLOAD"
+    end
+    Core.SaveCapture = function()
+      calls[#calls + 1] = "save"
+      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+    Core.StartCapture = function()
+      env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(1) }
+    end
+    env.QuestieTraceCharacter = { sessions = { { encoded = "A" }, { encoded = "B" } } }
+
+    exportFrame = nil
+    env.CreateFrame = function(_, name)
+      local frame = NewWidgetRecorder()
+      if name == "QuestieTraceExportFrame" then
+        exportFrame = frame
+      end
+      return frame
+    end
+  end)
+
+  it("should show the preparing message until the export string is ready", function()
+    Core.ShowExportWindow()
+
+    assert.is_true(Frame().shown)
+    assert.equal("Preparing export...", Frame().warningText.text)
+    assert.is_true(Frame().warningText.shown)
+    assert.is_false(Frame().editBox.shown)
+    assert.is_false(Frame().reportedButton.shown)
+
+    RunAllFrames()
+
+    assert.is_false(Frame().warningText.shown)
+    assert.is_true(Frame().editBox.shown)
+    assert.is_true(Frame().reportedButton.shown)
+  end)
+
+  it("should decode each saved session and encode the payload in separate frames", function()
+    Core.ShowExportWindow()
+    assert.same({}, calls)
+
+    RunFrame()
+    assert.same({ "decode A" }, calls)
+    RunFrame()
+    assert.same({ "decode A", "decode B" }, calls)
+    RunFrame()
+    assert.same({ "decode A", "decode B", "encode" }, calls)
+  end)
+
+  it("should save the live session before decoding the saved sessions", function()
+    env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(2) }
+
+    Core.ShowExportWindow()
+    RunAllFrames()
+
+    assert.same({ "save", "decode A", "decode B", "decode LIVE", "encode" }, calls)
+  end)
+
+  it("should not export events recorded while the export is being prepared", function()
+    env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(2) }
+    local payload
+    local buildExportString = Core.BuildExportString
+    Core.BuildExportString = function(p)
+      payload = p
+      return buildExportString(p)
+    end
+
+    Core.ShowExportWindow()
+    table.insert(env.QuestieTraceCharacter.currentSession.events, { t = 99, e = "LATER" })
+    RunAllFrames()
+
+    assert.equal(3, #payload.sessions)
+    for _, session in ipairs(payload.sessions) do
+      assert.equal(1, #session.events)
+    end
+  end)
+
+  it("should export the oldest session even when saving the live session prunes it", function()
+    local oldest = { encoded = "A" }
+    env.QuestieTraceCharacter.sessions = { oldest, { encoded = "B" } }
+    env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(2) }
+    Core.SaveCapture = function()
+      calls[#calls + 1] = "save"
+      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      table.remove(env.QuestieTraceCharacter.sessions, 1)
+      env.QuestieTraceCharacter.currentSession = nil
+    end
+
+    Core.ShowExportWindow()
+    RunAllFrames()
+    Core.ConfirmExportReported()
+
+    assert.same({ "save", "decode A", "decode B", "decode LIVE", "encode" }, calls)
+    assert.same({}, env.QuestieTraceCharacter.sessions)
+  end)
+
+  it("should not save the live session without codec support", function()
+    Core.HasCodecSupport = function() return false end
+    env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(2) }
+
+    Core.ShowExportWindow()
+    RunAllFrames()
+
+    assert.equal(2, #env.QuestieTraceCharacter.sessions)
+    assert.is_not_nil(env.QuestieTraceCharacter.currentSession)
+  end)
+
+  it("should stop preparing when the window is closed", function()
+    Core.ShowExportWindow()
+    RunFrame()
+    Frame():Hide()
+    RunAllFrames()
+
+    assert.same({ "decode A" }, calls)
+    assert.is_false(Frame().reportedButton.shown)
+  end)
+
+  it("should not confirm anything when the window was closed while preparing", function()
+    Core.ShowExportWindow()
+    Frame():Hide()
+    RunAllFrames()
+    Core.ConfirmExportReported()
+
+    assert.equal(2, #env.QuestieTraceCharacter.sessions)
+  end)
+
+  it("should restart preparing when the window is reopened", function()
+    Core.ShowExportWindow()
+    RunFrame()
+    Core.ShowExportWindow()
+    RunAllFrames()
+
+    assert.same({ "decode A", "decode A", "decode B", "encode" }, calls)
+  end)
+
+  it("should produce the same export string as building it in one go", function()
+    Core.ShowExportWindow()
+    RunAllFrames()
+
+    local _, expected = Core.BuildExportString(Core.BuildExportPayload())
+    assert.equal(expected, Frame().editBox.originalText)
   end)
 end)
