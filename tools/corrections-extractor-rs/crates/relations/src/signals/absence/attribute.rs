@@ -25,10 +25,10 @@ pub struct Share {
 
 /// Character -> the character's most convincing moment for one explanation; characters in the
 /// order of their first moment naming it.
-pub type SharesByCharacter<'a> = IndexMap<Character<'a>, Share, FxBuildHasher>;
+pub type SharesByCharacter = IndexMap<Character, Share, FxBuildHasher>;
 
 /// Explanation -> its shares, explanations in the order the moments first name them.
-pub type Explanations<'a> = IndexMap<Explanation, SharesByCharacter<'a>, FxBuildHasher>;
+pub type Explanations = IndexMap<Explanation, SharesByCharacter, FxBuildHasher>;
 
 /// How readily each cause blocks this quest, re-estimated every EM iteration.
 struct Propensity {
@@ -36,7 +36,7 @@ struct Propensity {
     unknown: f64,
 }
 
-pub fn attribute<'a>(blocked: &BlockedQuest<'a>, params: &AbsenceParams) -> Explanations<'a> {
+pub fn attribute(blocked: &BlockedQuest, params: &AbsenceParams) -> Explanations {
     let moments = &blocked.moments;
     // Every character counts once, however many moments they contributed.
     let mut moments_per_character: FxHashMap<Character, usize> = FxHashMap::default();
@@ -57,7 +57,7 @@ pub fn attribute<'a>(blocked: &BlockedQuest<'a>, params: &AbsenceParams) -> Expl
         let mut unknown_blame = 0.0;
         let mut total_blame = 0.0;
         for moment in moments {
-            let weight = 1.0 / moments_per_character[moment.character] as f64;
+            let weight = 1.0 / moments_per_character[&moment.character] as f64;
             let shares = responsibilities(moment, &propensity, params.unknown_weight);
             let mut explained = 0.0;
             for (suspect, share) in moment.suspects.iter().zip(shares) {
@@ -80,7 +80,7 @@ pub fn attribute<'a>(blocked: &BlockedQuest<'a>, params: &AbsenceParams) -> Expl
         let others = moment.suspects.len().saturating_sub(1);
         for (suspect, share) in moment.suspects.iter().zip(shares) {
             let by_character = result.entry(suspect.explanation).or_default();
-            if by_character.get(moment.character).is_some_and(|best| best.share >= share) {
+            if by_character.get(&moment.character).is_some_and(|best| best.share >= share) {
                 continue;
             }
             let mut text = format!("{}; {}", moment.what, suspect.detail);
@@ -88,7 +88,7 @@ pub fn attribute<'a>(blocked: &BlockedQuest<'a>, params: &AbsenceParams) -> Expl
                 text += &format!(" ({others} other suspects)");
             }
             let evidence = Evidence {
-                reference: moment.reference.to_owned(),
+                reference: moment.reference.to_string(),
                 t: Some(moment.t),
                 text,
             };
@@ -121,11 +121,12 @@ fn responsibilities(moment: &BlockedMoment, propensity: &Propensity, unknown_wei
 mod tests {
     use super::*;
     use crate::signals::absence::blocked::{BlockKind, Suspect};
+    use crate::signals::absence::offers::Characters;
 
-    fn moment<'a>(character: &'a str, suspects: &[Explanation], residual_weight: f64) -> BlockedMoment<'a> {
+    fn moment(character: Character, suspects: &[Explanation], residual_weight: f64) -> BlockedMoment {
         BlockedMoment {
             character,
-            reference: character,
+            reference: "episode".into(),
             t: 1.0,
             what: "npc:1 list at 1.0s lacked 100".into(),
             transition: false,
@@ -158,14 +159,16 @@ mod tests {
     #[test]
     fn gives_the_blame_to_the_suspect_that_explains_every_character_not_to_its_proxies() {
         // completed 7 is the real blocker; 8 and 9 are quests players usually do right after it.
+        let mut characters = Characters::default();
+        let [a, b, c] = ["a", "b", "c"].map(|key| characters.id(key));
         let quest = blocked(vec![
-            moment("a", &[completed(7), completed(8)], 0.0),
-            moment("b", &[completed(7), completed(9)], 0.0),
-            moment("c", &[completed(7)], 0.0),
+            moment(a, &[completed(7), completed(8)], 0.0),
+            moment(b, &[completed(7), completed(9)], 0.0),
+            moment(c, &[completed(7)], 0.0),
         ]);
         let shares = attribute(&quest, &AbsenceParams::default());
-        assert!(shares[&completed(7)]["a"].share > 0.85);
-        assert!(shares[&completed(8)]["a"].share < 0.1);
+        assert!(shares[&completed(7)][&a].share > 0.85);
+        assert!(shares[&completed(8)][&a].share < 0.1);
     }
 
     #[test]
@@ -176,7 +179,9 @@ mod tests {
             kind: BlockKind::InLog,
             quest: 5,
         };
-        let quest = blocked(vec![moment("a", &[in_log], 3.0), moment("b", &[], 3.0), moment("c", &[], 3.0)]);
-        assert!(attribute(&quest, &AbsenceParams::default())[&in_log]["a"].share < 0.3);
+        let mut characters = Characters::default();
+        let [a, b, c] = ["a", "b", "c"].map(|key| characters.id(key));
+        let quest = blocked(vec![moment(a, &[in_log], 3.0), moment(b, &[], 3.0), moment(c, &[], 3.0)]);
+        assert!(attribute(&quest, &AbsenceParams::default())[&in_log][&a].share < 0.3);
     }
 }

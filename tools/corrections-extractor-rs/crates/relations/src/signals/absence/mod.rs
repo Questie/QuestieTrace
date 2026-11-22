@@ -2,13 +2,16 @@
 //! blocked it (exclusiveTo, nextQuestInChain, breadcrumbs, disabledByQuest,
 //! availableUntilCompleted, missing prerequisites).
 //!
-//! The pipeline reads every Forever episode twice:
+//! The pipeline reads every Forever episode twice, one bucket at a time:
 //!
 //! ```text
 //! offers.rs    pass 1: when quests WERE available, to whom, in which state  -> OfferIndex
 //! blocked.rs   pass 2: when they were not, and the suspects for each moment -> Blocked
 //! classify.rs  suspect -> Questie field, blame from attribute.rs, score from score.rs
 //! ```
+//!
+//! What outlives a bucket owns its data: characters are ids ([`offers::Characters`]), blocked
+//! moments carry their episode's key.
 //!
 //! states.rs reads one episode's log and completed set at a moment, locality.rs says which
 //! suspects are plausible partners of a blocked quest before any evidence.
@@ -24,12 +27,13 @@ mod states;
 
 use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
-use crate::model::{QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
+use crate::episode_store::Episodes;
+use crate::model::{QuestCatalog, QuestId, RelationCandidate};
 use anyhow::Result;
 use blocked::{Blocked, BlockedCollector, SkipReason};
 use indexmap::IndexMap;
 use locality::Locality;
-use offers::OfferIndex;
+use offers::{Characters, OfferIndex};
 use params::AbsenceParams;
 use serde::Serialize;
 
@@ -45,10 +49,8 @@ impl Signal for Absence {
     }
 
     fn run(&self, input: &SignalInput) -> Result<Findings> {
-        // Every episode at once, until this signal reads one bucket at a time.
-        let all = input.episodes.load_all()?;
         let params = AbsenceParams::default();
-        let result = analyze(&all, input.catalog, params);
+        let result = analyze(input.episodes, input.catalog, params)?;
         let summary = Summary::of(&result, input.generated_at);
         let AbsenceResult {
             index,
@@ -66,35 +68,39 @@ impl Signal for Absence {
     }
 }
 
-struct AbsenceResult<'a> {
-    index: OfferIndex<'a>,
-    blocked: Blocked<'a>,
+struct AbsenceResult<'c> {
+    index: OfferIndex<'c>,
+    blocked: Blocked,
     candidates: Vec<RelationCandidate>,
     /// Quests with at least one blocked moment that passed gating, ascending.
     covered_quest_ids: Vec<QuestId>,
 }
 
-/// The absence signal end to end, over the episodes of Forever builds.
-fn analyze<'a>(episodes: &'a [QuestEpisode], catalog: &'a QuestCatalog, params: AbsenceParams) -> AbsenceResult<'a> {
-    let forever = forever_episodes(episodes);
-    let index = offers::index_offers(&forever, catalog, params);
+/// The absence signal end to end, over the episodes of Forever builds. Fails when the episodes
+/// cannot be read.
+fn analyze<'c>(episodes: &dyn Episodes, catalog: &'c QuestCatalog, params: AbsenceParams) -> Result<AbsenceResult<'c>> {
+    let mut characters = Characters::default();
+    let index = offers::index_offers(episodes, catalog, params, &mut characters)?;
 
     let locality = Locality::new(&index, catalog);
     let mut collector = BlockedCollector::new(&index, &locality, catalog, params);
-    for episode in forever {
-        collector.add(episode);
-    }
+    episodes.for_each_bucket(&mut |bucket| {
+        for episode in forever_episodes(bucket) {
+            collector.add(episode, characters.id(&episode.character_key));
+        }
+        Ok(())
+    })?;
     let blocked = collector.finish();
 
     let candidates = classify::classify(&blocked.quests, &index, &locality, catalog, &params);
     let mut covered_quest_ids: Vec<QuestId> = blocked.quests.keys().copied().collect();
     covered_quest_ids.sort_unstable();
-    AbsenceResult {
+    Ok(AbsenceResult {
         index,
         blocked,
         candidates,
         covered_quest_ids,
-    }
+    })
 }
 
 /// reports/absence-summary.json
@@ -168,9 +174,10 @@ fn count_by<'c, K: std::hash::Hash + Eq>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::episode_store::{InMemory, PerCharacter};
     use crate::model::{
         CatalogQuest, CompletedChange, CompletedSource, CompletedTimeline, Faction, Finishers, GiverRef, OfferSnapshot, OfferSource, OfferedQuest,
-        PlayerContext, QuestEventKind, RelationField, Starters, TimedValue,
+        PlayerContext, QuestEpisode, QuestEventKind, RelationField, Starters, TimedValue,
     };
     use crate::test_support::{catalog, catalog_quest, event, gossip, make_episode, npc};
     use QuestEventKind::{Accepted, Detail, TurnedIn};
@@ -224,8 +231,8 @@ mod tests {
         entries.iter().map(|&(t, v)| TimedValue { t, v: v.to_vec() }).collect()
     }
 
-    fn run<'a>(episodes: &'a [QuestEpisode], catalog: &'a QuestCatalog) -> AbsenceResult<'a> {
-        analyze(episodes, catalog, AbsenceParams::default())
+    fn run<'c>(episodes: &[QuestEpisode], catalog: &'c QuestCatalog) -> AbsenceResult<'c> {
+        analyze(&InMemory(episodes), catalog, AbsenceParams::default()).expect("episodes in memory")
     }
 
     fn edge<'r>(result: &'r AbsenceResult, quest_id: QuestId, field: RelationField, target: QuestId) -> Option<&'r RelationCandidate> {
@@ -562,6 +569,95 @@ mod tests {
         let result = run(&episodes, &catalog);
 
         assert_eq!(result.blocked.blocked_moments, 2);
+    }
+
+    #[test]
+    fn finds_the_same_with_every_character_in_a_bucket_of_its_own() {
+        // Three characters in three buckets choose Y over the skill-gated X: three characters of
+        // support, each let through the skill gate by their own earlier offer (one in an earlier
+        // session). The learner is blocked on `next` before the veterans who show it requires
+        // `prerequisite` are read, and is never offered `next`: only every bucket's offers explain
+        // the block.
+        let (prerequisite, next) = (2000, 2001);
+        let next_giver = npc(200);
+        let chooser = |character: &str| QuestEpisode {
+            character_key: character.into(),
+            quest_log: quest_log(&[(0.0, &[]), (13.0, &[Y])]),
+            quest_events: vec![event(12.0, Accepted, Y, Some(GIVER))],
+            offers: vec![gossip(10.0, GIVER, &[X, Y], &[]), gossip(20.0, GIVER, &[], &[])],
+            ..make_episode()
+        };
+        let learner = QuestEpisode {
+            character_key: "learner".into(),
+            completed: completed(&[], &[(31.0, &[prerequisite])]),
+            quest_log: quest_log(&[(0.0, &[]), (21.0, &[prerequisite]), (31.0, &[])]),
+            quest_events: vec![
+                event(20.0, Accepted, prerequisite, Some(npc(7))),
+                event(30.0, TurnedIn, prerequisite, Some(next_giver)),
+            ],
+            offers: vec![gossip(10.0, next_giver, &[], &[])],
+            ..make_episode()
+        };
+        let veteran = |character: &str| QuestEpisode {
+            character_key: character.into(),
+            completed: completed(&[prerequisite], &[]),
+            offers: vec![gossip(5.0, next_giver, &[next], &[])],
+            ..make_episode()
+        };
+        let returning = |session_order: u32, episode: QuestEpisode| QuestEpisode {
+            character_key: "returning".into(),
+            session_order,
+            ..episode
+        };
+        let episodes = [
+            chooser("chooser-1"),
+            chooser("chooser-2"),
+            learner,
+            veteran("veteran-1"),
+            veteran("veteran-2"),
+            returning(
+                0,
+                QuestEpisode {
+                    offers: vec![gossip(5.0, GIVER, &[X, Y], &[])],
+                    ..make_episode()
+                },
+            ),
+            returning(
+                1,
+                QuestEpisode {
+                    quest_log: quest_log(&[(0.0, &[Y])]),
+                    offers: vec![gossip(10.0, GIVER, &[], &[])],
+                    ..make_episode()
+                },
+            ),
+        ];
+        let mut quests = variants();
+        quests.extend([named(prerequisite, "First Step"), named(next, "Second Step")]);
+        let catalog = catalog(quests);
+        let findings = |episodes: &dyn Episodes| {
+            let input = SignalInput {
+                episodes,
+                catalog: &catalog,
+                generated_at: "2026-11-22T00:00:00.000Z",
+            };
+            Absence.run(&input).expect("episodes in memory")
+        };
+
+        let one_bucket = findings(&InMemory(&episodes));
+        let candidate = |quest_id, field, target| {
+            one_bucket
+                .candidates
+                .iter()
+                .find(|candidate| candidate.quest_id == quest_id && candidate.field == field && candidate.target == target)
+        };
+        assert_eq!(candidate(X, ExclusiveTo, Y).expect("X exclusiveTo Y").support, 3);
+        assert!(candidate(next, PreQuestSingle, prerequisite).is_some(), "next requires the prerequisite");
+
+        let per_character = findings(&PerCharacter(&episodes));
+        assert_eq!(per_character.candidates, one_bucket.candidates);
+        assert_eq!(per_character.covered_quest_ids, one_bucket.covered_quest_ids);
+        assert_eq!(per_character.input_count, one_bucket.input_count);
+        assert_eq!(per_character.reports, one_bucket.reports);
     }
 
     mod gating {

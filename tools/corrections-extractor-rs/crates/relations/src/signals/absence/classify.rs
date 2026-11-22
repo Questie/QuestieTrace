@@ -35,15 +35,15 @@ use crate::text::to_fixed;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxBuildHasher, FxHashSet};
 
-struct Edge<'a> {
+struct Edge {
     quest_id: QuestId,
     field: RelationField,
     target: QuestId,
     /// For preQuestSingle edges, decided after ancestors are folded in (see score_group_of).
     group: ScoreGroup,
-    shares: SharesByCharacter<'a>,
+    shares: SharesByCharacter,
     /// Prerequisites only: characters blocked while the prerequisite was not even in their log.
-    untaken: Option<FxHashSet<Character<'a>>>,
+    untaken: Option<FxHashSet<Character>>,
     contradict: usize,
     note: String,
 }
@@ -160,14 +160,7 @@ fn suspects_of(explanations: &Explanations, index: &OfferIndex, catalog: &QuestC
     targets
 }
 
-fn edges_for<'a>(
-    quest_id: QuestId,
-    target: QuestId,
-    explanations: &Explanations<'a>,
-    offers: &QuestOffers,
-    index: &OfferIndex,
-    params: &AbsenceParams,
-) -> Vec<Edge<'a>> {
+fn edges_for(quest_id: QuestId, target: QuestId, explanations: &Explanations, offers: &QuestOffers, index: &OfferIndex, params: &AbsenceParams) -> Vec<Edge> {
     let get = |kind: BlockKind| {
         let quest = match kind {
             BlockKind::InLog | BlockKind::MissingAny => target,
@@ -176,7 +169,7 @@ fn edges_for<'a>(
         explanations.get(&Explanation { kind, quest })
     };
     let mut edges = Vec::new();
-    let edge = |field: RelationField, target: QuestId, group: ScoreGroup, shares: SharesByCharacter<'a>, contradict: usize, note: String| Edge {
+    let edge = |field: RelationField, target: QuestId, group: ScoreGroup, shares: SharesByCharacter, contradict: usize, note: String| Edge {
         quest_id,
         field,
         target,
@@ -293,7 +286,7 @@ fn edges_for<'a>(
 /// splits between X's direct prerequisite P and P's own prerequisites. Questie lists only P, so a
 /// prerequisite suspect that another one requires is dropped and its blame handed over once,
 /// split evenly when several kept prerequisites require it.
-fn without_ancestors<'a>(mut edges: Vec<Edge<'a>>, index: &OfferIndex) -> Vec<Edge<'a>> {
+fn without_ancestors(mut edges: Vec<Edge>, index: &OfferIndex) -> Vec<Edge> {
     let prerequisites: Vec<usize> = (0..edges.len()).filter(|&i| edges[i].group == ScoreGroup::Prerequisite).collect();
     let requires = |edges: &[Edge], edge: usize, ancestor: usize| {
         edge != ancestor
@@ -346,11 +339,11 @@ fn without_ancestors<'a>(mut edges: Vec<Edge<'a>>, index: &OfferIndex) -> Vec<Ed
 }
 
 /// Per character, the sharper of the shares; characters in the order the maps list them.
-fn best_of<'a>(maps: &[Option<&SharesByCharacter<'a>>]) -> SharesByCharacter<'a> {
+fn best_of(maps: &[Option<&SharesByCharacter>]) -> SharesByCharacter {
     let mut result = SharesByCharacter::default();
     for map in maps.iter().flatten() {
         for (&character, share) in map.iter() {
-            if result.get(character).is_none_or(|best: &Share| share.share > best.share) {
+            if result.get(&character).is_none_or(|best: &Share| share.share > best.share) {
                 result.insert(character, share.clone());
             }
         }
