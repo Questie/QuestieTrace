@@ -282,14 +282,15 @@ mod tests {
     // Not in the TS tests: the privacy rule of CLAUDE.md for tooltip lines.
 
     #[test]
-    fn never_hands_a_line_sampled_after_a_players_guid_to_the_npc_before_it() {
-        // A player's tooltip line is their guild. Should one be recorded, the player's GUID
-        // sample in the same frame ends the npc's pairing window before it.
+    fn never_hands_a_line_sampled_after_a_player_to_the_npc_before_it() {
+        // A player's tooltip line is their guild. The tracker never records it; should it, the
+        // player's sample in the same frame (UnitInteraction.lua records a player as a sample
+        // without a GUID) still ends the npc's pairing window before it.
         let functions = json!({
             "GetLocale": { "player": [{ "t": 0, "tp": 0, "v": "enUS" }] },
             "UnitGUID": { "mouseover": [
                 { "t": 3, "tp": 3, "v": "Creature-0-5208-0-7-823-000031" },
-                { "t": 3, "tp": 3.2, "v": "Player-5284-0362ABCD" },
+                { "t": 3, "tp": 3.2 },
             ]},
             "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.3, "v": "Some Guild" }] },
         });
