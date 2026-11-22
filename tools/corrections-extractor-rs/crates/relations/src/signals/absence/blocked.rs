@@ -52,10 +52,10 @@ pub struct Suspect {
     pub detail: String,
 }
 
-pub struct BlockedMoment<'a> {
-    pub character: Character<'a>,
-    /// QuestEpisode::key
-    pub reference: &'a str,
+pub struct BlockedMoment {
+    pub character: Character,
+    /// QuestEpisode::key, shared by the episode's moments.
+    pub reference: Rc<str>,
     pub t: SessionTime,
     /// "npc:123 list at 45.0s lacked 678"
     pub what: String,
@@ -67,12 +67,12 @@ pub struct BlockedMoment<'a> {
 }
 
 #[derive(Default)]
-pub struct BlockedQuest<'a> {
+pub struct BlockedQuest {
     /// Characters with at least one blocked moment that passed gating.
-    pub characters: FxHashSet<Character<'a>>,
+    pub characters: FxHashSet<Character>,
     /// Characters with a blocked moment nothing consistent explains (an unmodelled gate).
-    pub unexplained: FxHashSet<Character<'a>>,
-    pub moments: Vec<BlockedMoment<'a>>,
+    pub unexplained: FxHashSet<Character>,
+    pub moments: Vec<BlockedMoment>,
 }
 
 /// Why a candidate blocked moment was set aside, for the report.
@@ -118,9 +118,9 @@ impl SkipReason {
 
 /// What pass 2 found.
 #[derive(Default)]
-pub struct Blocked<'a> {
+pub struct Blocked {
     /// Per quest with a blocked moment that passed gating, in the order they were first blocked.
-    pub quests: IndexMap<QuestId, BlockedQuest<'a>, FxBuildHasher>,
+    pub quests: IndexMap<QuestId, BlockedQuest, FxBuildHasher>,
     /// Set-aside moments per reason, reasons in the order first met.
     pub skipped: IndexMap<SkipReason, usize, FxBuildHasher>,
     pub blocked_moments: usize,
@@ -146,18 +146,20 @@ impl Requirements {
     }
 }
 
-pub struct BlockedCollector<'i, 'a> {
-    found: Blocked<'a>,
+/// Pass 2, one episode at a time. The moments it keeps own what they need of the episode (its
+/// character's id, its key), so the episode's bucket can go.
+pub struct BlockedCollector<'i> {
+    found: Blocked,
     index: &'i OfferIndex<'i>,
     locality: &'i Locality<'i>,
-    catalog: &'a QuestCatalog,
+    catalog: &'i QuestCatalog,
     params: AbsenceParams,
     quests_by_requirements: FxHashMap<Requirements, Vec<QuestId>>,
-    first_offer_by_requirements: FxHashMap<(Character<'a>, Requirements), Option<Moment>>,
+    first_offer_by_requirements: FxHashMap<(Character, Requirements), Option<Moment>>,
 }
 
-impl<'i, 'a> BlockedCollector<'i, 'a> {
-    pub fn new(index: &'i OfferIndex<'i>, locality: &'i Locality<'i>, catalog: &'a QuestCatalog, params: AbsenceParams) -> Self {
+impl<'i> BlockedCollector<'i> {
+    pub fn new(index: &'i OfferIndex<'i>, locality: &'i Locality<'i>, catalog: &'i QuestCatalog, params: AbsenceParams) -> Self {
         let mut quests_by_requirements: FxHashMap<Requirements, Vec<QuestId>> = FxHashMap::default();
         for &quest_id in index.quests.keys() {
             if let Some(quest) = catalog.quest(quest_id).filter(|quest| has_untracked_requirements(quest)) {
@@ -175,11 +177,12 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
         }
     }
 
-    pub fn finish(self) -> Blocked<'a> {
+    pub fn finish(self) -> Blocked {
         self.found
     }
 
-    pub fn add(&mut self, episode: &'a QuestEpisode) {
+    /// The blocked moments of one episode of `character`.
+    pub fn add(&mut self, episode: &QuestEpisode, character: Character) {
         if episode.completed.is_none() {
             return self.skip(SkipReason::NoCompletedHistory);
         }
@@ -187,6 +190,7 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
             return self.skip(SkipReason::NoQuestLog);
         }
         let mut states = EpisodeStates::new(episode, &self.params);
+        let reference: Rc<str> = Rc::from(episode.key.as_str());
         let offered_here = offer_times_of(episode);
         let mut last_state: FxHashMap<QuestId, (Rc<QuestSet>, Vec<QuestId>)> = FxHashMap::default();
         let mut last_list_with_quests: FxHashMap<GiverRef, SessionTime> = FxHashMap::default();
@@ -219,7 +223,7 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
                     continue;
                 }
                 let offers = &index.quests[&quest_id];
-                if let Some(reason) = self.gate(episode, &mut states, quest_id, offers, snapshot.t) {
+                if let Some(reason) = self.gate(episode, character, &mut states, quest_id, offers, snapshot.t) {
                     self.skip(reason);
                     continue;
                 }
@@ -246,13 +250,21 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
                     log,
                     offered_here: offered_here.get(&quest_id).map_or(&[], Vec::as_slice),
                 };
-                self.record(episode, &states, quest_id, offers, read);
+                self.record(character, &reference, &states, quest_id, offers, read);
             }
         }
     }
 
     /// Why the character might not have been able to take the quest anyway; None if eligible.
-    fn gate(&mut self, episode: &'a QuestEpisode, states: &mut EpisodeStates, quest_id: QuestId, offers: &QuestOffers, t: SessionTime) -> Option<SkipReason> {
+    fn gate(
+        &mut self,
+        episode: &QuestEpisode,
+        character: Character,
+        states: &mut EpisodeStates,
+        quest_id: QuestId,
+        offers: &QuestOffers,
+        t: SessionTime,
+    ) -> Option<SkipReason> {
         let Some(quest) = self.catalog.quest(quest_id) else {
             return Some(SkipReason::Uncataloged);
         };
@@ -290,7 +302,7 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
         // character of a quest with the very same requirements (often a zone copy of this quest)
         // shows they met them; skills and reputation rarely go back down.
         if has_untracked_requirements(quest) {
-            let first = self.first_offer_with_requirements(Requirements::of(quest), &episode.character_key);
+            let first = self.first_offer_with_requirements(Requirements::of(quest), character);
             if !first.is_some_and(|first| first.is_earlier(Moment::of(episode, t))) {
                 return Some(SkipReason::UntrackedRequirements);
             }
@@ -310,7 +322,7 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
     }
 
     /// The character's earliest offer of any quest with these untracked requirements.
-    fn first_offer_with_requirements(&mut self, requirements: Requirements, character: Character<'a>) -> Option<Moment> {
+    fn first_offer_with_requirements(&mut self, requirements: Requirements, character: Character) -> Option<Moment> {
         let index = self.index;
         let quests = &self.quests_by_requirements;
         *self.first_offer_by_requirements.entry((character, requirements)).or_insert_with(|| {
@@ -318,7 +330,7 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
                 .get(&requirements)
                 .into_iter()
                 .flatten()
-                .filter_map(|quest_id| index.quests.get(quest_id)?.first_offered_at.get(character).copied())
+                .filter_map(|quest_id| index.quests.get(quest_id)?.first_offered_at.get(&character).copied())
                 .fold(None, |first, offered| match first {
                     Some(first) if !offered.is_earlier(first) => Some(first),
                     _ => Some(offered),
@@ -326,11 +338,10 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
         })
     }
 
-    fn record(&mut self, episode: &'a QuestEpisode, states: &EpisodeStates, quest_id: QuestId, offers: &QuestOffers, read: ListRead) {
+    fn record(&mut self, character: Character, reference: &Rc<str>, states: &EpisodeStates, quest_id: QuestId, offers: &QuestOffers, read: ListRead) {
         let index = self.index;
         let t = read.t;
         let suspects = suspects_at(index, offers, quest_id, &read, self.params.max_contradictions);
-        let character = episode.character_key.as_str();
         if suspects.is_empty() {
             let blocked = self.found.quests.entry(quest_id).or_default();
             blocked.characters.insert(character);
@@ -375,13 +386,13 @@ impl<'i, 'a> BlockedCollector<'i, 'a> {
         }
         let moment = BlockedMoment {
             character,
-            reference: &episode.key,
+            reference: Rc::clone(reference),
             t,
             what,
             transition: offers
                 .first_offered_at
-                .get(character)
-                .is_some_and(|first| first.is_earlier(Moment::of(episode, t))),
+                .get(&character)
+                .is_some_and(|first| first.is_earlier(Moment::of(states.episode, t))),
             suspects: kept,
             residual_weight,
         };
