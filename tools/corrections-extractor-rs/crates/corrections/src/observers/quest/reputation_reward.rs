@@ -22,8 +22,9 @@
 //!   and spills over from the same decided reward in at least MIN_AMOUNT_SHARE of its turn-ins;
 //!   its amount is that reward / 4, unrounded.
 //! - A faction is kept when it shows up in at least half of the quest's turn-ins with
-//!   reputation, in at least MIN_SESSIONS sessions, and one amount covers at least
-//!   MIN_AMOUNT_SHARE of those sessions.
+//!   reputation, in at least MIN_SESSIONS sessions, and exactly one amount is seen in at least
+//!   MIN_SESSIONS sessions and covers at least MIN_AMOUNT_SHARE of those sessions; with two such
+//!   amounts it is ambiguous and skipped.
 //! - Turn-ins without any change are ignored: every faction was capped.
 //! - A quest is dropped when both Alliance and Horde turned it in and their results differ,
 //!   including when one side has too little data to decide.
@@ -423,12 +424,12 @@ fn merge_for_player_faction(observations: &[&Observation<ReputationTurnInValue>]
         if all_sessions.len() < MIN_SESSIONS {
             continue;
         }
-        let Some((amount, sessions)) = first_largest(amounts, IndexSet::len) else {
+        let mut qualifying = amounts
+            .iter()
+            .filter(|(_, sessions)| sessions.len() >= MIN_SESSIONS && sessions.len() as f64 >= all_sessions.len() as f64 * MIN_AMOUNT_SHARE);
+        let (Some((amount, _)), None) = (qualifying.next(), qualifying.next()) else {
             continue;
         };
-        if sessions.len() < MIN_SESSIONS || (sessions.len() as f64) < all_sessions.len() as f64 * MIN_AMOUNT_SHARE {
-            continue;
-        }
         rewards.push((faction_id.0, amount.0));
     }
 
@@ -885,6 +886,14 @@ mod tests {
             merge(&[vote(1, H, [(68.0, 100.0)], []), vote(2, H, [(68.0, 100.0)], []), vote(3, H, [(68.0, 50.0)], [])]),
             None
         );
+    }
+
+    #[test]
+    fn merge_drops_a_faction_when_two_amounts_both_reach_the_session_thresholds() {
+        let observations: Vec<_> = (1..=3)
+            .flat_map(|session| [vote(session, H, [(68.0, 100.0)], []), vote(session, H, [(68.0, 110.0)], [])])
+            .collect();
+        assert_eq!(merge(&observations), None);
     }
 
     #[test]
