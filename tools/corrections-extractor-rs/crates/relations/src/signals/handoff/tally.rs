@@ -4,6 +4,7 @@
 use super::counter::{CounterKind, CounterObservation};
 use super::detect::{HandoffKind, HandoffObservation};
 use crate::model::{Evidence, QuestId};
+use crate::signals::CharacterId;
 use crate::text::to_fixed;
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
@@ -16,8 +17,7 @@ pub struct Pair {
 }
 
 /// Characters by their pseudonymous character key.
-/// Characters, as [`crate::signals::CharacterIds`].
-pub type Characters = FxHashSet<u32>;
+pub type Characters = FxHashSet<CharacterId>;
 
 /// For another observed prerequisite Q of X: the characters for whom Q was already completed, or
 /// not, when they turned in P and got X.
@@ -133,7 +133,7 @@ impl HandoffTally {
     }
 
     /// Adds a handoff `character` saw in episode `episode_key`; only its first per pair is evidence.
-    pub fn add_handoff(&mut self, character: u32, episode_key: &str, observation: &HandoffObservation) {
+    pub fn add_handoff(&mut self, character: CharacterId, episode_key: &str, observation: &HandoffObservation) {
         let stats = self.stats_for(Pair {
             prerequisite: observation.turned_in,
             quest: observation.offered,
@@ -158,7 +158,7 @@ impl HandoffTally {
 
     /// Records, for each of `states`' quests, whether it was completed when the character turned
     /// in the pair's prerequisite and got its quest.
-    pub fn add_companion_states(&mut self, character: u32, pair: Pair, states: impl IntoIterator<Item = (QuestId, bool)>) {
+    pub fn add_companion_states(&mut self, character: CharacterId, pair: Pair, states: impl IntoIterator<Item = (QuestId, bool)>) {
         let Some(stats) = self.pairs.get_mut(&pair) else { return };
         for (quest_id, completed) in states {
             let entry = stats.companions.entry(quest_id).or_default();
@@ -167,7 +167,7 @@ impl HandoffTally {
         }
     }
 
-    pub fn add_counter(&mut self, character: u32, episode_key: &str, observation: &CounterObservation) {
+    pub fn add_counter(&mut self, character: CharacterId, episode_key: &str, observation: &CounterObservation) {
         let Some(stats) = self.pairs.get_mut(&observation.pair) else { return };
         let bucket = match observation.kind {
             CounterKind::NotStarted => &mut stats.not_started,

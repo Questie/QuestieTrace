@@ -39,11 +39,11 @@ pub fn make_episode() -> QuestEpisode {
 
 /// A character id for `episode` in tests that feed tallies directly: the same for every episode
 /// of a character (a hash of its key; signals intern keys with `CharacterIds` instead).
-pub fn character_id(episode: &QuestEpisode) -> u32 {
+pub fn character_id(episode: &QuestEpisode) -> crate::signals::CharacterId {
     use std::hash::Hasher;
     let mut hasher = rustc_hash::FxHasher::default();
     hasher.write(episode.character_key.as_bytes());
-    hasher.finish() as u32
+    crate::signals::CharacterId::new(hasher.finish() as u32)
 }
 
 pub fn npc(id: i64) -> GiverRef {

@@ -95,18 +95,31 @@ pub(crate) fn forever_episodes(episodes: &[QuestEpisode]) -> Vec<&QuestEpisode> 
     episodes.iter().filter(|episode| is_forever_interface(episode.interface_version)).collect()
 }
 
-/// Small ids for character keys, so what a signal keeps across buckets does not hold the keys
-/// themselves (episodes are read one bucket at a time) nor copies of them.
+/// A character, by the id [`CharacterIds`] gives its pseudonymous `QuestEpisode::character_key`.
+/// What a signal keeps across buckets names characters this way: it cannot borrow the key from an
+/// episode whose bucket is gone, and copies of the key would cost far more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CharacterId(u32);
+
+#[cfg(test)]
+impl CharacterId {
+    /// Any id, for tests that feed tallies directly.
+    pub fn new(id: u32) -> CharacterId {
+        CharacterId(id)
+    }
+}
+
+/// Every character met so far, by key: one id per `character_key` across buckets and passes.
 #[derive(Default)]
-pub(crate) struct CharacterIds(rustc_hash::FxHashMap<String, u32>);
+pub(crate) struct CharacterIds(rustc_hash::FxHashMap<String, CharacterId>);
 
 impl CharacterIds {
-    /// The id of `character_key`, the same for every episode of the character.
-    pub fn id(&mut self, character_key: &str) -> u32 {
+    /// The character's id, new when the key is first met.
+    pub fn id(&mut self, character_key: &str) -> CharacterId {
         if let Some(&id) = self.0.get(character_key) {
             return id;
         }
-        let id = u32::try_from(self.0.len()).expect("fewer than 2^32 characters");
+        let id = CharacterId(u32::try_from(self.0.len()).expect("fewer than 2^32 characters"));
         self.0.insert(character_key.to_owned(), id);
         id
     }

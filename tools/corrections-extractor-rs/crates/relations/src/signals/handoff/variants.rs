@@ -7,6 +7,7 @@ use super::tally::Pair;
 use crate::eligibility::{class_allowed, is_forever_quest_id, race_allowed};
 use crate::model::{CatalogQuest, QuestCatalog, QuestEpisode, QuestId, SessionTime};
 use crate::race_masks::race_bit;
+use crate::signals::CharacterId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Quest id -> the other quest ids with exactly the same name, ascending. Quests without a name
@@ -151,7 +152,7 @@ struct Moment {
 /// at separate turn-ins.
 pub struct CompletionMoments {
     /// Quest id -> character id -> the first delta that flagged it. Only tracked quests.
-    by_quest: FxHashMap<QuestId, FxHashMap<u32, Moment>>,
+    by_quest: FxHashMap<QuestId, FxHashMap<CharacterId, Moment>>,
 }
 
 impl CompletionMoments {
@@ -163,7 +164,7 @@ impl CompletionMoments {
 
     /// Episodes must come in the same order every run: a character's first delta wins.
     /// Adds `episode`, the `position`th episode read, of `character`.
-    pub fn add(&mut self, character: u32, position: u32, episode: &QuestEpisode) {
+    pub fn add(&mut self, character: CharacterId, position: u32, episode: &QuestEpisode) {
         for change in episode.completed.iter().flat_map(|completed| &completed.changes) {
             let added = change.add.as_deref().unwrap_or_default();
             if added.len() > MAX_TURN_IN_DELTA {

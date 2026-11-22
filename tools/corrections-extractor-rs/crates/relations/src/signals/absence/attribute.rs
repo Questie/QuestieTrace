@@ -8,9 +8,9 @@
 //! players usually do right after the real blocker.
 
 use super::blocked::{BlockedMoment, BlockedQuest, Explanation};
-use super::offers::Character;
 use super::params::AbsenceParams;
 use crate::model::Evidence;
+use crate::signals::CharacterId;
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
@@ -25,7 +25,7 @@ pub struct Share {
 
 /// Character -> the character's most convincing moment for one explanation; characters in the
 /// order of their first moment naming it.
-pub type SharesByCharacter = IndexMap<Character, Share, FxBuildHasher>;
+pub type SharesByCharacter = IndexMap<CharacterId, Share, FxBuildHasher>;
 
 /// Explanation -> its shares, explanations in the order the moments first name them.
 pub type Explanations = IndexMap<Explanation, SharesByCharacter, FxBuildHasher>;
@@ -39,7 +39,7 @@ struct Propensity {
 pub fn attribute(blocked: &BlockedQuest, params: &AbsenceParams) -> Explanations {
     let moments = &blocked.moments;
     // Every character counts once, however many moments they contributed.
-    let mut moments_per_character: FxHashMap<Character, usize> = FxHashMap::default();
+    let mut moments_per_character: FxHashMap<CharacterId, usize> = FxHashMap::default();
     for moment in moments {
         *moments_per_character.entry(moment.character).or_default() += 1;
     }
@@ -121,9 +121,9 @@ fn responsibilities(moment: &BlockedMoment, propensity: &Propensity, unknown_wei
 mod tests {
     use super::*;
     use crate::signals::absence::blocked::{BlockKind, Suspect};
-    use crate::signals::absence::offers::Characters;
+    use crate::signals::CharacterIds;
 
-    fn moment(character: Character, suspects: &[Explanation], residual_weight: f64) -> BlockedMoment {
+    fn moment(character: CharacterId, suspects: &[Explanation], residual_weight: f64) -> BlockedMoment {
         BlockedMoment {
             character,
             reference: "episode".into(),
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn gives_the_blame_to_the_suspect_that_explains_every_character_not_to_its_proxies() {
         // completed 7 is the real blocker; 8 and 9 are quests players usually do right after it.
-        let mut characters = Characters::default();
+        let mut characters = CharacterIds::default();
         let [a, b, c] = ["a", "b", "c"].map(|key| characters.id(key));
         let quest = blocked(vec![
             moment(a, &[completed(7), completed(8)], 0.0),
@@ -179,7 +179,7 @@ mod tests {
             kind: BlockKind::InLog,
             quest: 5,
         };
-        let mut characters = Characters::default();
+        let mut characters = CharacterIds::default();
         let [a, b, c] = ["a", "b", "c"].map(|key| characters.id(key));
         let quest = blocked(vec![moment(a, &[in_log], 3.0), moment(b, &[], 3.0), moment(c, &[], 3.0)]);
         assert!(attribute(&quest, &AbsenceParams::default())[&in_log][&a].share < 0.3);

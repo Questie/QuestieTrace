@@ -5,6 +5,7 @@
 use super::links::{FxIndexMap, Pair};
 use super::observe::{Observation, ObservationKind};
 use crate::model::{Evidence, QuestCatalog, QuestId, RelationCandidate, RelationField};
+use crate::signals::CharacterId;
 use rustc_hash::FxHashSet;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -40,8 +41,8 @@ pub const MIN_COVERAGE_CHARACTERS: usize = 2;
 /// Everything the episodes said about one pair.
 pub struct PairTally {
     pub pair: Pair,
-    /// Characters per observation kind, as [`crate::signals::CharacterIds`].
-    pub characters: BTreeMap<ObservationKind, FxHashSet<u32>>,
+    /// Characters per observation kind.
+    pub characters: BTreeMap<ObservationKind, FxHashSet<CharacterId>>,
     /// The first observation of each kind, as the example a reviewer sees.
     pub examples: BTreeMap<ObservationKind, Evidence>,
 }
@@ -53,7 +54,7 @@ impl PairTally {
 
     /// Distinct characters with an observation of any of `kinds`.
     fn characters_of(&self, kinds: impl IntoIterator<Item = ObservationKind>) -> usize {
-        let characters: FxHashSet<u32> = kinds.into_iter().flat_map(|kind| self.characters.get(&kind)).flatten().copied().collect();
+        let characters: FxHashSet<CharacterId> = kinds.into_iter().flat_map(|kind| self.characters.get(&kind)).flatten().copied().collect();
         characters.len()
     }
 }
@@ -67,7 +68,7 @@ pub struct Tally {
 
 impl Tally {
     /// Adds one episode's observations; `character` is its character's id.
-    pub fn add(&mut self, character: u32, observations: Vec<Observation>) {
+    pub fn add(&mut self, character: CharacterId, observations: Vec<Observation>) {
         for Observation { pair, kind, evidence } in observations {
             let tally = self.pairs.entry(pair).or_insert_with(|| PairTally {
                 pair,

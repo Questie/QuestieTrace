@@ -9,11 +9,12 @@
 //! little); attribute.rs then decides who takes the blame across all moments of X.
 
 use super::locality::Locality;
-use super::offers::{Character, Moment, OfferIndex, QuestOffers};
+use super::offers::{Moment, OfferIndex, QuestOffers};
 use super::params::AbsenceParams;
 use super::states::{EpisodeStates, QuestSet};
 use crate::eligibility::{has_untracked_requirements, is_statically_eligible};
 use crate::model::{CatalogQuest, GiverRef, OfferSource, QuestCatalog, QuestEpisode, QuestEventKind, QuestId, SessionTime};
+use crate::signals::CharacterId;
 use crate::text::to_fixed;
 use crate::timeline::Completion;
 use indexmap::IndexMap;
@@ -53,7 +54,7 @@ pub struct Suspect {
 }
 
 pub struct BlockedMoment {
-    pub character: Character,
+    pub character: CharacterId,
     /// QuestEpisode::key, shared by the episode's moments.
     pub reference: Rc<str>,
     pub t: SessionTime,
@@ -69,9 +70,9 @@ pub struct BlockedMoment {
 #[derive(Default)]
 pub struct BlockedQuest {
     /// Characters with at least one blocked moment that passed gating.
-    pub characters: FxHashSet<Character>,
+    pub characters: FxHashSet<CharacterId>,
     /// Characters with a blocked moment nothing consistent explains (an unmodelled gate).
-    pub unexplained: FxHashSet<Character>,
+    pub unexplained: FxHashSet<CharacterId>,
     pub moments: Vec<BlockedMoment>,
 }
 
@@ -155,7 +156,7 @@ pub struct BlockedCollector<'i> {
     catalog: &'i QuestCatalog,
     params: AbsenceParams,
     quests_by_requirements: FxHashMap<Requirements, Vec<QuestId>>,
-    first_offer_by_requirements: FxHashMap<(Character, Requirements), Option<Moment>>,
+    first_offer_by_requirements: FxHashMap<(CharacterId, Requirements), Option<Moment>>,
 }
 
 impl<'i> BlockedCollector<'i> {
@@ -182,7 +183,7 @@ impl<'i> BlockedCollector<'i> {
     }
 
     /// The blocked moments of one episode of `character`.
-    pub fn add(&mut self, episode: &QuestEpisode, character: Character) {
+    pub fn add(&mut self, episode: &QuestEpisode, character: CharacterId) {
         if episode.completed.is_none() {
             return self.skip(SkipReason::NoCompletedHistory);
         }
@@ -259,7 +260,7 @@ impl<'i> BlockedCollector<'i> {
     fn gate(
         &mut self,
         episode: &QuestEpisode,
-        character: Character,
+        character: CharacterId,
         states: &mut EpisodeStates,
         quest_id: QuestId,
         offers: &QuestOffers,
@@ -322,7 +323,7 @@ impl<'i> BlockedCollector<'i> {
     }
 
     /// The character's earliest offer of any quest with these untracked requirements.
-    fn first_offer_with_requirements(&mut self, requirements: Requirements, character: Character) -> Option<Moment> {
+    fn first_offer_with_requirements(&mut self, requirements: Requirements, character: CharacterId) -> Option<Moment> {
         let index = self.index;
         let quests = &self.quests_by_requirements;
         *self.first_offer_by_requirements.entry((character, requirements)).or_insert_with(|| {
@@ -338,7 +339,7 @@ impl<'i> BlockedCollector<'i> {
         })
     }
 
-    fn record(&mut self, character: Character, reference: &Rc<str>, states: &EpisodeStates, quest_id: QuestId, offers: &QuestOffers, read: ListRead) {
+    fn record(&mut self, character: CharacterId, reference: &Rc<str>, states: &EpisodeStates, quest_id: QuestId, offers: &QuestOffers, read: ListRead) {
         let index = self.index;
         let t = read.t;
         let suspects = suspects_at(index, offers, quest_id, &read, self.params.max_contradictions);
