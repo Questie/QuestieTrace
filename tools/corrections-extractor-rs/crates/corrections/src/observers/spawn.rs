@@ -10,6 +10,7 @@ use crate::observation::Observation;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 /// Where a spawn position came from. Merges rank positions by it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -99,10 +100,14 @@ pub(crate) fn find_exclusive_token(observations: &[Observation<SpawnObservation>
 /// token: identical ones are kept once.
 pub(crate) fn distinct_coordinates_by_zone<'o>(spawns: impl Iterator<Item = &'o SpawnObservation>) -> IndexMap<Num, Vec<[f64; 2]>> {
     let mut by_zone: IndexMap<Num, Vec<[f64; 2]>> = IndexMap::new();
+    // TS scans the zone's coordinates (`c[0] === x && c[1] === y`), which is quadratic in the
+    // loots of an object; a set gives the same answer: -0 equals 0, and NaN equals nothing.
+    let mut seen: HashSet<(Num, u64, u64)> = HashSet::new();
     for &SpawnObservation { zone_id, x, y, .. } in spawns {
         // A JS Map stores a -0 key as +0.
-        let coords = by_zone.entry(Num(zone_id + 0.0)).or_default();
-        if !coords.iter().any(|c| c[0] == x && c[1] == y) {
+        let zone = Num(zone_id + 0.0);
+        let coords = by_zone.entry(zone).or_default();
+        if x.is_nan() || y.is_nan() || seen.insert((zone, (x + 0.0).to_bits(), (y + 0.0).to_bits())) {
             coords.push([x, y]);
         }
     }
