@@ -306,8 +306,10 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
 
     let mut items = Records::default();
     items.field("name", &acc.item_name.aggregate_newest(), |name| Js::str(name));
-    items.field("npcDrops", &acc.npc_drops.merge(drops_merge::merge_npc_drops), |drops| ids(drops));
-    items.field("objectDrops", &acc.object_drops.merge(drops_merge::merge_object_drops), |drops| ids(drops));
+    let npc_drops = drops_merge::without_world_drops(acc.npc_drops.merge(drops_merge::merge_npc_drops));
+    let object_drops = drops_merge::without_world_drops(acc.object_drops.merge(drops_merge::merge_object_drops));
+    items.field("npcDrops", &npc_drops, |drops| ids(drops));
+    items.field("objectDrops", &object_drops, |drops| ids(drops));
 
     let object_spawns = merge_with_extra(&acc.object_spawns, &object_turn_in, |id, obs| {
         object_spawns_merge::merge_spawns(obs, quest_object_ids.contains(&id))
