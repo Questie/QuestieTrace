@@ -138,8 +138,9 @@ const MAX_TURN_IN_DELTA: usize = 20;
 
 /// The completed-quest delta that first flagged a quest: an episode and a time in it.
 #[derive(Clone, Copy, PartialEq)]
-struct Moment<'e> {
-    episode: &'e str,
+struct Moment {
+    /// The episode's position among the episodes read, which tells episodes apart.
+    episode: u32,
     t: SessionTime,
 }
 
@@ -148,12 +149,12 @@ struct Moment<'e> {
 /// appear in the same completed-quest delta (1,830 of 1,830 authored same-name OR pairs), while
 /// same-name steps of one chain, such as Classic's seven "The Defias Brotherhood" quests, complete
 /// at separate turn-ins.
-pub struct CompletionMoments<'e> {
-    /// Quest id -> character key -> the first delta that flagged it. Only tracked quests.
-    by_quest: FxHashMap<QuestId, FxHashMap<&'e str, Moment<'e>>>,
+pub struct CompletionMoments {
+    /// Quest id -> character id -> the first delta that flagged it. Only tracked quests.
+    by_quest: FxHashMap<QuestId, FxHashMap<u32, Moment>>,
 }
 
-impl<'e> CompletionMoments<'e> {
+impl CompletionMoments {
     pub fn new(tracked: impl IntoIterator<Item = QuestId>) -> Self {
         CompletionMoments {
             by_quest: tracked.into_iter().map(|quest_id| (quest_id, FxHashMap::default())).collect(),
@@ -161,7 +162,8 @@ impl<'e> CompletionMoments<'e> {
     }
 
     /// Episodes must come in the same order every run: a character's first delta wins.
-    pub fn add(&mut self, episode: &'e QuestEpisode) {
+    /// Adds `episode`, the `position`th episode read, of `character`.
+    pub fn add(&mut self, character: u32, position: u32, episode: &QuestEpisode) {
         for change in episode.completed.iter().flat_map(|completed| &completed.changes) {
             let added = change.add.as_deref().unwrap_or_default();
             if added.len() > MAX_TURN_IN_DELTA {
@@ -169,8 +171,8 @@ impl<'e> CompletionMoments<'e> {
             }
             for quest_id in added {
                 if let Some(characters) = self.by_quest.get_mut(quest_id) {
-                    characters.entry(&episode.character_key).or_insert(Moment {
-                        episode: &episode.key,
+                    characters.entry(character).or_insert(Moment {
+                        episode: position,
                         t: change.t,
                     });
                 }
@@ -215,6 +217,7 @@ pub fn is_parallel_copy(edge: &VariantEdge, moments: &CompletionMoments) -> bool
 mod tests {
     use super::*;
     use crate::model::{CompletedChange, CompletedSource, CompletedTimeline};
+    use crate::test_support::character_id;
     use crate::test_support::{catalog, catalog_quest, make_episode};
 
     const ALLIANCE: u64 = 1 + 4 + 8 + 64;
@@ -287,9 +290,9 @@ mod tests {
         let together = flagged(&[(10.0, vec![1, 2])]);
         let apart = flagged(&[(10.0, vec![1]), (50.0, vec![2])]);
         let mut moments = CompletionMoments::new([1, 2]);
-        moments.add(&together);
+        moments.add(character_id(&together), 0, &together);
         assert!(is_parallel_copy(&EDGE, &moments));
-        moments.add(&apart);
+        moments.add(character_id(&apart), 1, &apart);
         assert!(!is_parallel_copy(&EDGE, &moments));
     }
 
@@ -297,7 +300,7 @@ mod tests {
     fn bulk_catch_up_deltas_which_flag_whole_chains_at_once_are_ignored() {
         let catch_up = flagged(&[(10.0, [1, 2].into_iter().chain(100..130).collect())]);
         let mut moments = CompletionMoments::new([1, 2]);
-        moments.add(&catch_up);
+        moments.add(character_id(&catch_up), 2, &catch_up);
         assert!(!is_parallel_copy(&EDGE, &moments));
     }
 }

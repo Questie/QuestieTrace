@@ -275,6 +275,7 @@ mod tests {
     use crate::model::QuestEpisode;
     use crate::signals::handoff::counter::{CounterKind, CounterObservation};
     use crate::signals::handoff::detect::{Confounder, HandoffKind, HandoffObservation};
+    use crate::test_support::character_id;
     use crate::test_support::{make_episode, npc};
 
     fn handoff(kind: HandoffKind, turned_in: QuestId, offered: QuestId, confounders: Vec<Confounder>) -> HandoffObservation {
@@ -312,8 +313,8 @@ mod tests {
     fn next_quest_in_chain_comes_only_from_pops_and_pre_quest_single_from_pops_and_lists() {
         let episodes = [make_episode(), make_episode()];
         let mut tally = HandoffTally::default();
-        tally.add_handoff(&episodes[0], &handoff(POP, 1, 2, vec![]));
-        tally.add_handoff(&episodes[1], &handoff(LIST, 1, 3, vec![]));
+        tally.add_handoff(character_id(&episodes[0]), &episodes[0].key, &handoff(POP, 1, 2, vec![]));
+        tally.add_handoff(character_id(&episodes[1]), &episodes[1].key, &handoff(LIST, 1, 3, vec![]));
         assert_eq!(
             fields(&tally),
             [
@@ -337,7 +338,7 @@ mod tests {
         let bob = make_episode();
         let mut tally = HandoffTally::default();
         for episode in [&alice, &alice_again, &bob] {
-            tally.add_handoff(episode, &handoff(POP, 1, 2, vec![]));
+            tally.add_handoff(character_id(episode), &episode.key, &handoff(POP, 1, 2, vec![]));
         }
         let candidates = [prerequisite_candidates(&tally, &FxHashSet::default()), next_in_chain_candidates(&tally)].concat();
         assert_eq!(candidates.iter().map(|c| c.support).collect::<Vec<_>>(), [2, 2]);
@@ -348,10 +349,14 @@ mod tests {
     fn clean_evidence_scores_above_confounded_and_contradicted_prerequisites_are_dropped() {
         let episodes: Vec<QuestEpisode> = (0..4).map(|_| make_episode()).collect();
         let mut tally = HandoffTally::default();
-        tally.add_handoff(&episodes[0], &handoff(LIST, 1, 2, vec![]));
-        tally.add_handoff(&episodes[1], &handoff(LIST, 1, 3, vec![Confounder::LevelUp { from: 10, to: 11 }]));
-        tally.add_handoff(&episodes[2], &handoff(LIST, 1, 4, vec![]));
-        tally.add_counter(&episodes[3], &not_started(1, 4));
+        tally.add_handoff(character_id(&episodes[0]), &episodes[0].key, &handoff(LIST, 1, 2, vec![]));
+        tally.add_handoff(
+            character_id(&episodes[1]),
+            &episodes[1].key,
+            &handoff(LIST, 1, 3, vec![Confounder::LevelUp { from: 10, to: 11 }]),
+        );
+        tally.add_handoff(character_id(&episodes[2]), &episodes[2].key, &handoff(LIST, 1, 4, vec![]));
+        tally.add_counter(character_id(&episodes[3]), &episodes[3].key, &not_started(1, 4));
         let scores: Vec<(QuestId, f64)> = prerequisite_candidates(&tally, &FxHashSet::default())
             .iter()
             .map(|c| (c.quest_id, c.score))
@@ -366,10 +371,10 @@ mod tests {
         let fields_with = |second_done_after_first: bool| {
             let (first, second) = (make_episode(), make_episode());
             let mut tally = HandoffTally::default();
-            tally.add_handoff(&first, &handoff(POP, 1, 9, vec![]));
-            tally.add_handoff(&second, &handoff(POP, 2, 9, vec![]));
-            tally.add_companion_states(&first, Pair { prerequisite: 1, quest: 9 }, [(2, second_done_after_first)]);
-            tally.add_companion_states(&second, Pair { prerequisite: 2, quest: 9 }, [(1, true)]);
+            tally.add_handoff(character_id(&first), &first.key, &handoff(POP, 1, 9, vec![]));
+            tally.add_handoff(character_id(&second), &second.key, &handoff(POP, 2, 9, vec![]));
+            tally.add_companion_states(character_id(&first), Pair { prerequisite: 1, quest: 9 }, [(2, second_done_after_first)]);
+            tally.add_companion_states(character_id(&second), Pair { prerequisite: 2, quest: 9 }, [(1, true)]);
             prerequisite_candidates(&tally, &all_of_members(&tally))
                 .into_iter()
                 .map(|c| c.field)
@@ -386,10 +391,10 @@ mod tests {
         let episodes: Vec<QuestEpisode> = (0..5).map(|_| make_episode()).collect();
         let mut tally = HandoffTally::default();
         for episode in &episodes[..3] {
-            tally.add_handoff(episode, &handoff(POP, 1, 2, vec![]));
+            tally.add_handoff(character_id(episode), &episode.key, &handoff(POP, 1, 2, vec![]));
         }
-        tally.add_handoff(&episodes[3], &handoff(POP, 1, 3, vec![]));
-        tally.add_counter(&episodes[4], &not_started(1, 3));
+        tally.add_handoff(character_id(&episodes[3]), &episodes[3].key, &handoff(POP, 1, 3, vec![]));
+        tally.add_counter(character_id(&episodes[4]), &episodes[4].key, &not_started(1, 3));
         let chain: Vec<_> = next_in_chain_candidates(&tally).iter().map(|c| (c.target, c.score, c.contradict)).collect();
         assert_eq!(
             chain,
@@ -403,10 +408,10 @@ mod tests {
         let episodes: Vec<QuestEpisode> = (0..5).map(|_| make_episode()).collect();
         let mut tally = HandoffTally::default();
         for episode in &episodes[..3] {
-            tally.add_handoff(episode, &handoff(POP, 1, 2, vec![]));
+            tally.add_handoff(character_id(episode), &episode.key, &handoff(POP, 1, 2, vec![]));
         }
         for episode in &episodes[3..] {
-            tally.add_handoff(episode, &handoff(POP, 1, 3, vec![]));
+            tally.add_handoff(character_id(episode), &episode.key, &handoff(POP, 1, 3, vec![]));
         }
         let chain: Vec<_> = next_in_chain_candidates(&tally)
             .iter()
@@ -420,9 +425,9 @@ mod tests {
     fn a_quest_usually_listed_rather_than_popped_is_no_likely_next_quest_in_chain() {
         let episodes: Vec<QuestEpisode> = (0..6).map(|_| make_episode()).collect();
         let mut tally = HandoffTally::default();
-        tally.add_handoff(&episodes[0], &handoff(POP, 1, 2, vec![]));
+        tally.add_handoff(character_id(&episodes[0]), &episodes[0].key, &handoff(POP, 1, 2, vec![]));
         for episode in &episodes[1..] {
-            tally.add_handoff(episode, &handoff(LIST, 1, 2, vec![]));
+            tally.add_handoff(character_id(episode), &episode.key, &handoff(LIST, 1, 2, vec![]));
         }
         let chain: Vec<_> = next_in_chain_candidates(&tally).iter().map(|c| c.score).collect();
         assert_eq!(chain, [SCORES.next_quest_in_chain.mostly_listed]);
@@ -432,7 +437,7 @@ mod tests {
     fn pops_with_confounders_still_claim_next_quest_in_chain_at_a_lower_score() {
         let episode = make_episode();
         let mut tally = HandoffTally::default();
-        tally.add_handoff(&episode, &handoff(POP, 1, 2, vec![Confounder::AlsoTurnedIn(3)]));
+        tally.add_handoff(character_id(&episode), &episode.key, &handoff(POP, 1, 2, vec![Confounder::AlsoTurnedIn(3)]));
         let chain: Vec<_> = next_in_chain_candidates(&tally).iter().map(|c| (c.target, c.score, c.support)).collect();
         assert_eq!(chain, [(2, SCORES.next_quest_in_chain.confounded_only, 1)]);
     }

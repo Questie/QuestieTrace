@@ -26,9 +26,9 @@ use self::detect::{find_handoffs, EpisodeHandoffs, HandoffObservation};
 use self::tally::{HandoffTally, Pair, PairStats};
 use self::timing::TimingHistogram;
 use self::variants::{quests_in_variant_edges, variant_edges, CompletionMoments, SameNameVariants};
-use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
+use super::{forever_episodes, to_json, CharacterIds, Findings, Signal, SignalInput};
 use crate::eligibility::is_forever_quest_id;
-use crate::model::{QuestEpisode, QuestId, RelationCandidate};
+use crate::model::{QuestId, RelationCandidate};
 use crate::timeline::EpisodeTimeline;
 use anyhow::Result;
 use indexmap::IndexMap;
@@ -60,9 +60,7 @@ impl Signal for Handoff {
     }
 
     fn run(&self, input: &SignalInput) -> Result<Findings> {
-        // Every episode at once, until this signal reads one bucket at a time.
-        let all = input.episodes.load_all()?;
-        Ok(run(&all, input))
+        run(input)
     }
 }
 
@@ -119,30 +117,39 @@ struct PairsReport<'a> {
 /// Quests other observed prerequisites of X were completed or not at one hand-off to X.
 type CompanionStates = (Pair, Vec<(QuestId, bool)>);
 
-fn run(all: &[QuestEpisode], input: &SignalInput) -> Findings {
+/// Two passes over the episodes, one bucket at a time: the handoffs first, then the
+/// counter-evidence and companion states for the pairs they claim.
+fn run(input: &SignalInput) -> Result<Findings> {
     let catalog = input.catalog;
-    let episodes = forever_episodes(all);
+    let mut characters = CharacterIds::default();
+    let (mut read, mut skipped) = (0, 0);
 
-    let found: Vec<EpisodeHandoffs> = episodes
-        .par_iter()
-        .map(|episode| find_handoffs(&EpisodeTimeline::new(episode, true), catalog, &PARAMS))
-        .collect();
     let mut tally = HandoffTally::default();
     let mut timing = TimingHistogram::default();
     let mut covered: BTreeSet<QuestId> = BTreeSet::new();
-    for (&episode, handoffs) in episodes.iter().zip(&found) {
-        covered.extend(&handoffs.compared_quests);
-        for turn_in in &handoffs.turn_ins {
-            timing.add(turn_in);
-            if turn_in.giver.is_some() && (turn_in.timing.next_list.is_some() || turn_in.timing.next_detail.is_some()) {
-                covered.insert(turn_in.quest_id);
+    input.episodes.for_each_bucket(&mut |bucket| {
+        let episodes = forever_episodes(bucket);
+        (read, skipped) = (read + episodes.len(), skipped + bucket.len() - episodes.len());
+        let found: Vec<EpisodeHandoffs> = episodes
+            .par_iter()
+            .map(|episode| find_handoffs(&EpisodeTimeline::new(episode, true), catalog, &PARAMS))
+            .collect();
+        for (&episode, handoffs) in episodes.iter().zip(&found) {
+            covered.extend(&handoffs.compared_quests);
+            for turn_in in &handoffs.turn_ins {
+                timing.add(turn_in);
+                if turn_in.giver.is_some() && (turn_in.timing.next_list.is_some() || turn_in.timing.next_detail.is_some()) {
+                    covered.insert(turn_in.quest_id);
+                }
+            }
+            let character = characters.id(&episode.character_key);
+            for observation in &handoffs.observations {
+                tally.add_handoff(character, &episode.key, observation);
+                covered.insert(observation.offered);
             }
         }
-        for observation in &handoffs.observations {
-            tally.add_handoff(episode, observation);
-            covered.insert(observation.offered);
-        }
-    }
+        Ok(())
+    })?;
 
     let observed: Vec<Pair> = tally.pairs().map(|stats| stats.pair).collect();
     let variants = SameNameVariants::new(catalog);
@@ -155,29 +162,37 @@ fn run(all: &[QuestEpisode], input: &SignalInput) -> Findings {
     let claimed = claimed_prerequisites(tally.pairs().map(|stats| stats.pair));
     let mut moments = CompletionMoments::new(quests_in_variant_edges(&variant_edges));
 
-    let second_pass: Vec<(Vec<CounterObservation>, Vec<CompanionStates>)> = episodes
-        .par_iter()
-        .zip(&found)
-        .map(|(episode, handoffs)| {
-            let timeline = EpisodeTimeline::new(episode, true);
-            let counters = find_counter_evidence(&timeline, &claimed, &variants, catalog);
-            let companions = handoffs
-                .observations
-                .iter()
-                .map(|observation| companion_states(&timeline, observation, &observed_claims, &variants))
-                .collect();
-            (counters, companions)
-        })
-        .collect();
-    for (&episode, (counters, companions)) in episodes.iter().zip(second_pass) {
-        for counter in &counters {
-            tally.add_counter(episode, counter);
+    let mut position = 0u32;
+    input.episodes.for_each_bucket(&mut |bucket| {
+        let episodes = forever_episodes(bucket);
+        let second_pass: Vec<(Vec<CounterObservation>, Vec<CompanionStates>)> = episodes
+            .par_iter()
+            .map(|episode| {
+                let timeline = EpisodeTimeline::new(episode, true);
+                // Pass 1's handoffs again: recomputing them costs less than keeping every episode's.
+                let handoffs = find_handoffs(&timeline, catalog, &PARAMS);
+                let counters = find_counter_evidence(&timeline, &claimed, &variants, catalog);
+                let companions = handoffs
+                    .observations
+                    .iter()
+                    .map(|observation| companion_states(&timeline, observation, &observed_claims, &variants))
+                    .collect();
+                (counters, companions)
+            })
+            .collect();
+        for (&episode, (counters, companions)) in episodes.iter().zip(second_pass) {
+            let character = characters.id(&episode.character_key);
+            for counter in &counters {
+                tally.add_counter(character, &episode.key, counter);
+            }
+            for (pair, states) in companions {
+                tally.add_companion_states(character, pair, states);
+            }
+            moments.add(character, position, episode);
+            position += 1;
         }
-        for (pair, states) in companions {
-            tally.add_companion_states(episode, pair, states);
-        }
-        moments.add(episode);
-    }
+        Ok(())
+    })?;
 
     let all_of = all_of_members(&tally);
     let mut candidates = prerequisite_candidates(&tally, &all_of);
@@ -199,8 +214,8 @@ fn run(all: &[QuestEpisode], input: &SignalInput) -> Findings {
         .collect();
     eprintln!(
         "handoff: {} episodes ({} non-Forever skipped), {} observed pairs, {} candidates on {} Forever-new quests, {} covered\n  {by_field:?}",
-        episodes.len(),
-        all.len() - episodes.len(),
+        read,
+        skipped,
         observed.len(),
         candidates.len(),
         forever_quests.len(),
@@ -220,8 +235,8 @@ fn run(all: &[QuestEpisode], input: &SignalInput) -> Findings {
         // Observed pairs come first in the tally, before those added for copies.
         pairs: tally.pairs().take(observed.len()).map(PairSummary::of).collect(),
     };
-    Findings {
-        input_count: episodes.len(),
+    Ok(Findings {
+        input_count: read,
         params: to_json(&params),
         covered_quest_ids: covered.into_iter().collect(),
         candidates,
@@ -229,7 +244,7 @@ fn run(all: &[QuestEpisode], input: &SignalInput) -> Findings {
             ("handoff-timing", to_json(&timing.report(input.generated_at, PARAMS))),
             ("handoff-pairs", to_json(&pairs)),
         ],
-    }
+    })
 }
 
 /// For each quest X, the prerequisites the pairs claim for it.
@@ -267,7 +282,7 @@ fn companion_states(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::episode_store::InMemory;
+    use crate::episode_store::{InMemory, PerCharacter};
     use crate::model::{CatalogQuest, CompletedChange, CompletedSource, CompletedTimeline, QuestEpisode, QuestEventKind, RelationField, TimedValue};
     use crate::test_support::{catalog, catalog_quest, event, gossip, make_episode, npc};
 
@@ -301,6 +316,44 @@ mod tests {
                 generated_at: "2026-11-11T00:00:00.000Z",
             })
             .expect("in-memory episodes always read")
+    }
+
+    #[test]
+    fn finds_the_same_with_every_character_in_a_bucket_of_its_own() {
+        // The character offered 10020 without 10001 comes first: its counter-evidence only counts
+        // because later characters' pops claim 10001 -> 10020, so pass 2 needs every bucket's claims.
+        let offered_unearned = QuestEpisode {
+            offers: vec![gossip(50.0, npc(2), &[10020], &[])],
+            ..make_episode()
+        };
+        let mut copy_flagged = popped(10001, 10010);
+        copy_flagged.completed = Some(CompletedTimeline {
+            source: CompletedSource::Modern,
+            initial: vec![],
+            changes: vec![CompletedChange {
+                t: 100.3,
+                add: Some(vec![10001, 10002]),
+                remove: None,
+            }],
+        });
+        let episodes = [offered_unearned, copy_flagged, popped(10001, 10010), popped(10001, 10010), popped(10001, 10020)];
+        let quests = || vec![named(10001, "Intro"), named(10002, "Intro"), named(10010, "Next"), named(10020, "Other")];
+        let one_bucket = run_on(&episodes, quests());
+        let catalog = catalog(quests());
+        let per_character = Handoff
+            .run(&SignalInput {
+                episodes: &PerCharacter(&episodes),
+                catalog: &catalog,
+                generated_at: "2026-11-11T00:00:00.000Z",
+            })
+            .unwrap();
+
+        let pairs = &one_bucket.reports.iter().find(|(name, _)| *name == "handoff-pairs").unwrap().1["pairs"];
+        assert_eq!(pairs[1]["notStarted"], 1, "the first character's counter-evidence counted");
+        assert_eq!(per_character.candidates, one_bucket.candidates);
+        assert_eq!(per_character.covered_quest_ids, one_bucket.covered_quest_ids);
+        assert_eq!(per_character.input_count, one_bucket.input_count);
+        assert_eq!(per_character.reports, one_bucket.reports);
     }
 
     #[test]
