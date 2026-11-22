@@ -18,56 +18,63 @@ function makeSession(functions: SessionRecord["functions"], events: SessionRecor
   };
 }
 
-describe("observeSubName (npc)", () => {
-  it("should observe the subname sampled for the mouseover npc at the same time", () => {
+const LOCALE_EN = { GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] } };
+const nordun = "Creature-0-5208-0-7-268238-000031";
+const isaac = "Creature-0-5208-0-7-258930-000032";
+
+function combatEvent(e: "PLAYER_REGEN_DISABLED" | "PLAYER_REGEN_ENABLED", tp: number): SessionRecord["events"][number] {
+  return { t: tp, tp, e } as SessionRecord["events"][number];
+}
+
+describe("observeSubName (npc) with recorded guids", () => {
+  it("should observe the subname for the guid recorded with it", () => {
     const session = makeSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { mouseover: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      ...LOCALE_EN,
       UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Weapon Vendor" }] },
+      UnitSubNameGUID: { mouseover: [{ t: 3, tp: 3.1, v: "Creature-0-5208-0-7-823-000031" }] },
     });
 
     expect(observeSubName(session)).toEqual([
-      { entityId: 823, value: "Weapon Vendor", confidence: "high", provenance: { session: "test-session", t: 3 } },
+      { entityId: 823, value: "Weapon Vendor", confidence: "high", provenance: { session: "test-session", t: 3 }, token: "mouseover" },
     ]);
   });
 
-  it("should not hand the previous npc's subname to an npc whose tooltip was not sampled", () => {
-    const session = makeSession(
-      {
-        GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-        UnitGUID: {
-          mouseover: [
-            { t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" },
-            { t: 5, tp: 5, v: "Creature-0-5208-0-7-824-000032" },
-          ],
-        },
-        UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Weapon Vendor" }] },
-      },
-      [{ t: 5, tp: 5, e: "UPDATE_MOUSEOVER_UNIT" }] as SessionRecord["events"],
-    );
-
-    expect(observeSubName(session).map((observation) => observation.entityId)).toEqual([823]);
-  });
-
-  it("should pair a subname sampled in the same frame only with the last npc before it", () => {
+  it("should not hand a neighbour's subname to the npc that was sampled at the same time", () => {
     const session = makeSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: {
-        mouseover: [
-          { t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" },
-          { t: 3, tp: 3.2, v: "Creature-0-5208-0-7-824-000032" },
-        ],
-      },
-      UnitSubName: { mouseover: [{ t: 3, tp: 3.3, v: "Weapon Vendor" }] },
+      ...LOCALE_EN,
+      UnitGUID: { mouseover: [{ t: 3, tp: 3, v: nordun }] },
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Isaac Chan's Companion" }] },
+      UnitSubNameGUID: { mouseover: [{ t: 3, tp: 3.1, v: isaac }] },
     });
 
-    expect(observeSubName(session).map((observation) => observation.entityId)).toEqual([824]);
+    expect(observeSubName(session).map((observation) => observation.entityId)).toEqual([258930]);
   });
 
-  it("should skip encounters where no subname was sampled", () => {
+  it("should observe every npc that had the same subname", () => {
     const session = makeSession({
-      GetLocale: { player: [{ t: 0, tp: 0, v: "enUS" }] },
-      UnitGUID: { mouseover: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
+      ...LOCALE_EN,
+      UnitSubName: {
+        mouseover: [
+          { t: 3, tp: 3.1, v: "Innkeeper" },
+          { t: 5, tp: 5.1, v: "Innkeeper" },
+        ],
+      },
+      UnitSubNameGUID: {
+        mouseover: [
+          { t: 3, tp: 3.1, v: "Creature-0-5208-0-7-823-000031" },
+          { t: 5, tp: 5.1, v: "Creature-0-5208-0-7-824-000032" },
+        ],
+      },
+    });
+
+    expect(observeSubName(session).map((observation) => observation.entityId)).toEqual([823, 824]);
+  });
+
+  it("should skip subnames without an npc guid", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Innkeeper" }, { t: 4, tp: 4.1, v: "Innkeeper" }] },
+      UnitSubNameGUID: { mouseover: [{ t: 3, tp: 3.1, v: "GameObject-0-5208-0-7-2843-0000399" }] },
     });
 
     expect(observeSubName(session)).toEqual([]);
@@ -76,8 +83,8 @@ describe("observeSubName (npc)", () => {
   it("should keep the locale for the lookup export and skip it for the enUS export", () => {
     const session = makeSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
-      UnitGUID: { mouseover: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
       UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Waffenhändler" }] },
+      UnitSubNameGUID: { mouseover: [{ t: 3, tp: 3.1, v: "Creature-0-5208-0-7-823-000031" }] },
     });
 
     expect(observeSubName(session)).toEqual([]);
@@ -87,11 +94,90 @@ describe("observeSubName (npc)", () => {
   it("should observe a level line as no subname", () => {
     const session = makeSession({
       GetLocale: { player: [{ t: 0, tp: 0, v: "ruRU" }] },
-      UnitGUID: { mouseover: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-823-000031" }] },
       UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Уровень 11 (элита)" }] },
+      UnitSubNameGUID: { mouseover: [{ t: 3, tp: 3.1, v: "Creature-0-5208-0-7-823-000031" }] },
     });
 
     expect(observeLocalizedSubName(session).map((observation) => observation.value)).toEqual([{ locale: "ruRU", value: "" }]);
+  });
+});
+
+describe("observeSubName (npc) without recorded guids", () => {
+  it("should observe the last subname before the target changes to an npc", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitGUID: { target: [{ t: 3, tp: 3.5, v: nordun }] },
+      UnitSubName: {
+        mouseover: [
+          { t: 1, tp: 1, v: "Isaac Chan's Companion" },
+          { t: 3, tp: 3.1, v: "Traveling Ranged Weapon Salesman" },
+        ],
+      },
+    });
+
+    expect(observeSubName(session)).toEqual([
+      { entityId: 268238, value: "Traveling Ranged Weapon Salesman", confidence: "high", provenance: { session: "test-session", t: 3 }, token: "target" },
+    ]);
+  });
+
+  it("should not pair a subname that was recorded more than a second before the target change", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitGUID: { target: [{ t: 4.2, tp: 4.2, v: nordun }] },
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Traveling Ranged Weapon Salesman" }] },
+    });
+
+    expect(observeSubName(session)).toEqual([]);
+  });
+
+  it("should not pair a subname that was recorded after the target change", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitGUID: { target: [{ t: 3, tp: 3, v: nordun }] },
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Isaac Chan's Companion" }] },
+    });
+
+    expect(observeSubName(session)).toEqual([]);
+  });
+
+  it("should not pair target changes in combat", () => {
+    const events = [combatEvent("PLAYER_REGEN_DISABLED", 2), combatEvent("PLAYER_REGEN_ENABLED", 6)];
+    const session = makeSession(
+      {
+        ...LOCALE_EN,
+        UnitGUID: { target: [{ t: 3.5, tp: 3.5, v: nordun }, { t: 6.5, tp: 6.5, v: isaac }] },
+        UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Traveling Ranged Weapon Salesman" }, { t: 6.2, tp: 6.2, v: "Isaac Chan's Companion" }] },
+      },
+      events,
+    );
+
+    expect(observeSubName(session).map((observation) => observation.entityId)).toEqual([258930]);
+  });
+
+  it("should not pair targets that are not npcs or are cleared", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitGUID: { target: [{ t: 3.5, tp: 3.5, v: "GameObject-0-5208-0-7-2843-0000399" }, { t: 3.6, tp: 3.6 }] },
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Innkeeper" }] },
+    });
+
+    expect(observeSubName(session)).toEqual([]);
+  });
+
+  it("should observe a level line as no subname", () => {
+    const session = makeSession({
+      GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
+      UnitGUID: { target: [{ t: 3.5, tp: 3.5, v: nordun }] },
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Stufe ?? (Boss)" }] },
+    });
+
+    expect(observeLocalizedSubName(session).map((observation) => observation.value)).toEqual([{ locale: "deDE", value: "" }]);
+  });
+
+  it("should skip sessions without a subname stream", () => {
+    const session = makeSession({ ...LOCALE_EN, UnitGUID: { target: [{ t: 3, tp: 3, v: nordun }] } });
+
+    expect(observeSubName(session)).toEqual([]);
   });
 });
 

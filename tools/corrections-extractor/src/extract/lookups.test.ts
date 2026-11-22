@@ -114,12 +114,10 @@ describe("finalizeLookups", () => {
     const bundle = run([
       makeSession({
         GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
-        UnitGUID: {
-          target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-30000-000031" }],
-          mouseover: [{ t: 4, tp: 4, v: "Creature-0-5208-0-7-30000-000031" }],
-        },
+        UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-30000-000031" }] },
         UnitName: { target: [{ t: 3, tp: 3, v: { 1: "Grimm", n: 2 } }] },
         UnitSubName: { mouseover: [{ t: 4, tp: 4.1, v: "Waffenhändler" }] },
+        UnitSubNameGUID: { mouseover: [{ t: 4, tp: 4.1, v: "Creature-0-5208-0-7-30000-000031" }] },
       }),
     ]);
 

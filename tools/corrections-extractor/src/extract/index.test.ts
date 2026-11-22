@@ -104,8 +104,8 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
       [
         makeForeverSession({
           GetLocale: { player: [apiSample(0, 0, "enUS")] },
-          UnitGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
           UnitSubName: { mouseover: [apiSample(3, 3, "Weapon Vendor")] },
+          UnitSubNameGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
         }),
       ],
       { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
@@ -119,8 +119,8 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
       [
         makeForeverSession({
           GetLocale: { player: [apiSample(0, 0, "enUS")] },
-          UnitGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
           UnitSubName: { mouseover: [apiSample(3, 3, "")] },
+          UnitSubNameGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
         }),
       ],
       { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
@@ -134,8 +134,8 @@ describe("extractAll (full chain: observe -> aggregate -> emit -> write)", () =>
       [
         makeForeverSession({
           GetLocale: { player: [apiSample(0, 0, "enUS")] },
-          UnitGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
           UnitSubName: { mouseover: [apiSample(3, 3, "Level 28")] },
+          UnitSubNameGUID: { mouseover: [apiSample(3, 3, creatureGuid(200001))] },
         }),
       ],
       { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } },
