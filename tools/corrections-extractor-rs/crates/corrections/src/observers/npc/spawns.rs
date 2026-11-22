@@ -4,17 +4,28 @@
 //! The player's zone and map position at each NPC encounter: one observation per spawn point
 //! seen, tagged with the unit token it came from. The `questnpc` token is the best source: it
 //! fires on quest interactions, which need the player next to the NPC. `npc` and `target` can
-//! see the NPC from a distance. The merge (spawns_merge.rs) ranks positions by token.
+//! see the NPC from a distance. The merge (spawns_merge.rs) ranks positions by token. A target
+//! further away than ~28 yards is left out, when the session recorded the distance.
 
 use crate::observation::{Confidence, Observation};
 use crate::observers::npc::encounters::npc_encounters;
 use crate::observers::spawn::{SpawnObservation, SpawnToken};
 use crate::probes::{player_pos_at, player_zone_at, to_questie_map_position};
-use trace_data::Session;
+use trace_data::stream::{get_stream, value_at};
+use trace_data::{KeyRef, Session, Value};
+
+/// CheckInteractDistance index for the ~28 yard follow range (see Modules/Trackers/UnitState.lua).
+const FOLLOW_DISTANCE_INDEX: f64 = 4.0;
 
 pub fn observe(session: &Session) -> Vec<Observation<SpawnObservation>> {
     let mut observations = Vec::new();
+    // Sessions recorded before the addon sampled the distance have no stream; their targets are all kept.
+    let target_distance = get_stream(session, "CheckInteractDistance", &[KeyRef::Str("target"), KeyRef::Num(FOLLOW_DISTANCE_INDEX)]);
     for encounter in npc_encounters(session) {
+        // A target further away than ~28 yards, or at an unknown distance, says little about where the npc is.
+        if encounter.token == "target" && target_distance.is_some_and(|stream| value_at(stream, encounter.t).and_then(Value::as_bool) != Some(true)) {
+            continue;
+        }
         let Some(zone_id) = player_zone_at(session, encounter.t) else { continue };
         let Some(pos) = player_pos_at(session, encounter.t) else { continue };
         let questie_pos = to_questie_map_position(pos);
@@ -33,7 +44,7 @@ pub fn observe(session: &Session) -> Vec<Observation<SpawnObservation>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{session_json, with_session};
+    use crate::test_support::{session_json, stream, with_session};
     use serde_json::json;
 
     fn observed(functions: serde_json::Value) -> Vec<(i64, SpawnObservation, Confidence, f64)> {
@@ -118,5 +129,42 @@ mod tests {
             observed(functions),
             [(197, spawn(12.0, 47.46, 62.18, SpawnToken::QuestNpc), Confidence::High, 5.0)]
         );
+    }
+
+    /// Three targets at t 5, 10 and 15, with `distance` as the ~28 yard stream when given.
+    fn target_session(distance: Option<serde_json::Value>) -> serde_json::Value {
+        let mut functions = json!({
+            "UnitGUID": { "target": [
+                { "t": 5, "tp": 5, "v": "Creature-0-5208-0-7-197-000032" },
+                { "t": 10, "tp": 10, "v": "Creature-0-5208-0-7-823-000031" },
+                { "t": 15, "tp": 15, "v": "Creature-0-5208-0-7-299-000033" },
+            ]},
+            "C_Map.GetBestMapForUnit": { "player": [{ "t": 0, "tp": 0, "v": 1429 }] },
+            "C_Map.GetPlayerMapPosition": { "player": [{ "t": 0, "tp": 0, "v": { "x": 0.4746, "y": 0.6218 } }] },
+        });
+        if let Some(distance) = distance {
+            functions["CheckInteractDistance"] = json!({ "target": { "4": distance } });
+        }
+        functions
+    }
+
+    fn observed_ids(functions: serde_json::Value) -> Vec<i64> {
+        observed(functions).into_iter().map(|(id, ..)| id).collect()
+    }
+
+    #[test]
+    fn only_keeps_target_encounters_within_28_yards_when_the_distance_was_recorded() {
+        let distance = stream([
+            (5.0, json!(true)),
+            (10.0, json!(false)),
+            // Unknown, e.g. the player was in combat.
+            (15.0, serde_json::Value::Null),
+        ]);
+        assert_eq!(observed_ids(target_session(Some(distance))), [197]);
+    }
+
+    #[test]
+    fn keeps_all_target_encounters_of_sessions_recorded_without_the_distance() {
+        assert_eq!(observed_ids(target_session(None)), [197, 823, 299]);
     }
 }
