@@ -286,12 +286,17 @@ mod tests {
 
     /// A session that names `quest_id` (above Classic's 9665, so it is exported) `title`.
     fn titled_session(started_at: f64, quest_id: i64, title: &str) -> Json {
+        localized_session(started_at, "enUS", quest_id, title)
+    }
+
+    /// A session recorded with the `locale` client that names `quest_id` `title`.
+    fn localized_session(started_at: f64, locale: &str, quest_id: i64, title: &str) -> Json {
         json!({
             "startedAt": started_at,
             "startedAtPrecise": started_at + 0.5,
             "events": [],
             "functions": {
-                "GetLocale": { "player": stream([(0.0, json!("enUS"))]) },
+                "GetLocale": { "player": stream([(0.0, json!(locale))]) },
                 "GetQuestID": stream([(3.0, json!(quest_id))]),
                 "GetTitleText": stream([(3.0, json!(title))]),
             },
@@ -403,6 +408,22 @@ mod tests {
             "{quests_one}"
         );
         assert!(quests_one.contains("[97000] = {\n            [questKeys.name] = \"Own 0\","));
+    }
+
+    #[test]
+    fn writes_lookups_for_classic_ids_too_but_corrections_only_for_new_ones() {
+        let checkout = Checkout::new();
+        let sessions = [localized_session(1.0, "deDE", 25, "Klassisch"), localized_session(2.0, "deDE", 96659, "Neu")];
+        checkout.submission("2026-10/2026-10-01_000000Z_a.json", &export_string(&sessions));
+        let output = TempDir::new("output");
+
+        checkout.run(&output.0, 2).unwrap();
+
+        let lookup = read(&output.0.join("lookupQuests/deDE.lua"));
+        assert!(lookup.contains("[25] = {\"Klassisch\", nil},"), "{lookup}");
+        assert!(lookup.contains("[96659] = {\"Neu\", nil},"), "{lookup}");
+        let quests = read(&output.0.join("foreverQuestTraces.lua"));
+        assert!(!quests.contains("[25] = {"), "{quests}");
     }
 
     #[test]
