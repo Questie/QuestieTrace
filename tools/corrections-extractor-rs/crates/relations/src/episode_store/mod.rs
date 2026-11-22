@@ -75,6 +75,30 @@ impl Episodes for InMemory<'_> {
     }
 }
 
+/// Episodes in memory with every character in a bucket of its own: for tests that a step reading
+/// bucket by bucket finds what it finds with every episode in one bucket.
+#[cfg(test)]
+pub struct PerCharacter<'e>(pub &'e [QuestEpisode]);
+
+#[cfg(test)]
+impl Episodes for PerCharacter<'_> {
+    fn for_each_bucket(&self, work: &mut dyn FnMut(&[QuestEpisode]) -> Result<()>) -> Result<()> {
+        let same_character = |a: &QuestEpisode, b: &QuestEpisode| a.contributor_id == b.contributor_id && a.character_key == b.character_key;
+        for character in self.0.chunk_by(same_character) {
+            work(character)?;
+        }
+        Ok(())
+    }
+
+    fn episode_count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn load_all(&self) -> Result<Vec<QuestEpisode>> {
+        Ok(self.0.to_vec())
+    }
+}
+
 impl Episodes for EpisodeStore {
     fn for_each_bucket(&self, work: &mut dyn FnMut(&[QuestEpisode]) -> Result<()>) -> Result<()> {
         EpisodeStore::for_each_bucket(self, work)
