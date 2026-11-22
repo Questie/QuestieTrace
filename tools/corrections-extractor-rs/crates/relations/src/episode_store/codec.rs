@@ -114,6 +114,18 @@ impl Decode for u32 {
     }
 }
 
+impl Encode for usize {
+    fn encode(&self, out: &mut Vec<u8>) {
+        write_varint(out, *self as u64);
+    }
+}
+
+impl Decode for usize {
+    fn decode(input: &mut Input) -> Result<Self> {
+        usize::try_from(read_varint(input)?).context("usize out of range")
+    }
+}
+
 impl Encode for i64 {
     fn encode(&self, out: &mut Vec<u8>) {
         write_varint(out, ((*self << 1) ^ (*self >> 63)) as u64);
@@ -275,6 +287,9 @@ macro_rules! codec_enum {
         }
     };
 }
+
+// For the other files written in this format (ingest's spill files).
+pub(crate) use codec_struct;
 
 codec_enum!(GiverKind { Npc = 0, Object = 1, Item = 2 });
 codec_enum!(Faction { Alliance = 0, Horde = 1, Neutral = 2 });

@@ -3,18 +3,23 @@
 //!
 //! 1. Every submission is decoded and its sessions distilled on all cores (`submission`,
 //!    `distill`); only the small distilled values leave a worker, so decoded trees never pile up.
-//! 2. On one thread, as results arrive: the copies of each session are merged (`merge`) and every
-//!    title pairing is indexed (`titles`).
-//! 3. Legacy greeting titles are resolved, sessions without quest data dropped, sessions grouped
-//!    into characters and ordered (`characters`), and the episodes written with
-//!    reports/ingest.json (`report`).
+//!    On one thread, as results arrive, every title pairing is indexed (`titles`) and every
+//!    session copy is written to a spill file, partitioned by session key (`spill`).
+//! 2. Partition by partition, the copies of each session are merged (`merge`), legacy greeting
+//!    titles resolved against the index of every submission, and sessions without quest data
+//!    dropped. The sessions kept are spilled again, partitioned by contributor.
+//! 3. Partition by partition, in contributor order, sessions are grouped into characters and
+//!    ordered (`characters`), and the episodes streamed to episodes.jsonl and the episode store,
+//!    then reports/ingest.json is written (`report`).
 //!
-//! Nothing is cached between runs: every run decodes every submission.
+//! Ingest holds one partition at a time, never every session: memory stays flat as the archive
+//! grows. Nothing is cached between runs: every run decodes every submission.
 
 mod characters;
 mod distill;
 mod merge;
 mod report;
+mod spill;
 mod streams;
 mod submission;
 mod titles;
@@ -23,7 +28,7 @@ mod titles;
 mod test_trace;
 
 use crate::config::Config;
-use crate::episode_store;
+use crate::episode_store::StoreWriter;
 use crate::io;
 use crate::model::QuestEpisode;
 use anyhow::{bail, Context, Result};
@@ -31,10 +36,13 @@ use characters::{assign_characters, order_sessions, CharacterInput};
 use distill::{DistillStats, EpisodeIdentity};
 use merge::{MergedSession, SessionMerger, SubmissionInfo};
 use rayon::prelude::*;
-use report::{IngestReport, Skipped, Tally};
+use report::{EpisodeSummary, IngestReport, Skipped, Tally};
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
+use spill::{contributor_partition, copy_partition, KeptSession, Partitions, SpilledCopy, Written};
+use std::io::Write;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::Path;
 use std::sync::mpsc;
 use std::time::Instant;
 use submission::{distill_submission, DistilledSubmission, SubmissionError};
@@ -42,18 +50,15 @@ use titles::{resolve_greeting, GreetingStats, TitleIndex};
 use trace_data::source::{list_submissions, SubmissionFile};
 use trace_data::{Arena, Inflater};
 
+/// What ingest reports. The episodes themselves are already written by [`run`]: as JSON lines
+/// for people and the TS tools, and as the episode store the steps read.
 pub struct IngestOutput {
-    pub episodes: Vec<QuestEpisode>,
     /// reports/ingest.json
     pub report: serde_json::Value,
 }
 
 impl IngestOutput {
-    /// Writes the episodes twice: as JSON lines for people and the TS tools, and as the episode
-    /// store the steps read.
     pub fn write(&self, config: &Config) -> Result<()> {
-        io::write_episodes(&config.episodes(), &self.episodes)?;
-        episode_store::write(&config.episode_store(), &self.episodes, config.bucket_bytes()?)?;
         io::write_json(&config.report("ingest"), &self.report)
     }
 }
@@ -74,28 +79,64 @@ pub fn run(config: &Config) -> Result<IngestOutput> {
     files.sort_by(|a, b| a.key.cmp(&b.key));
     eprintln!("ingest: decoding {} submissions", files.len());
 
+    let spill_dir = config.relations_dir.join("ingest-spill");
     let mut read = ReadTally::default();
+    let mut copies = Partitions::<SpilledCopy>::create(&spill_dir.join("copies"))?;
+    let mut spill_error = None;
     let require_forever = config.require_forever_version;
     let distill = |file: &SubmissionFile, inflater: &mut Inflater, arena: &mut Arena| distill_submission(&file.path, require_forever, inflater, arena);
     distill_all(&files, distill, |index, submission| {
-        read.add(index, submission);
+        // After a failed write the rest is only drained: the run fails below.
+        if spill_error.is_none() {
+            if let Err(error) = read.add(index, submission, &mut copies) {
+                spill_error = Some(error);
+            }
+        }
         if read.submissions % 1000 == 0 {
             eprintln!("ingest: {}/{} decoded ({:.0}s)", read.submissions, files.len(), started.elapsed().as_secs_f64());
         }
     });
-    eprintln!("ingest: decoded in {:.0}s, building episodes", started.elapsed().as_secs_f64());
+    if let Some(error) = spill_error {
+        return Err(error);
+    }
+    let copies = copies.finish()?;
+    eprintln!("ingest: decoded in {:.0}s, merging copies", started.elapsed().as_secs_f64());
 
-    let (episodes, tally) = build_episodes(read);
+    let (kept, merged) = merge_copies(&copies, &read.titles, &spill_dir.join("kept"))?;
+    copies.remove()?;
+    eprintln!("ingest: merged in {:.0}s, building episodes", started.elapsed().as_secs_f64());
+
+    let summary = write_episodes(config, &kept)?;
+    kept.remove()?;
+    std::fs::remove_dir(&spill_dir).with_context(|| format!("removing {}", spill_dir.display()))?;
+
+    let ReadTally {
+        submissions,
+        mut failures,
+        exports,
+        with_multiple_exports,
+        titles: _,
+    } = read;
+    failures.sort_by_key(|(index, _, _)| *index);
+    let tally = Tally {
+        submissions,
+        failures: failures.into_iter().map(|(_, submission_id, error)| (submission_id, error)).collect(),
+        exports,
+        with_multiple_exports,
+        copies: merged.copies,
+        unique: merged.unique,
+        seen_under_several_contributors: merged.seen_under_several_contributors,
+        skipped: merged.skipped,
+        greetings: merged.greetings,
+        distill: merged.distill,
+    };
     let seconds = started.elapsed().as_secs_f64().round() as u64;
-    let report = IngestReport::new(config.generated_at.clone(), seconds, config.require_forever_version, tally, &episodes);
+    let report = IngestReport::new(config.generated_at.clone(), seconds, config.require_forever_version, tally, summary);
     eprintln!(
         "ingest: {} episodes of {} characters, {} submissions failed",
-        episodes.len(),
-        report.episodes.characters,
-        report.submissions.failed
+        report.sessions.kept, report.episodes.characters, report.submissions.failed
     );
     Ok(IngestOutput {
-        episodes,
         report: serde_json::to_value(&report)?,
     })
 }
@@ -135,7 +176,8 @@ fn distill_all(
     });
 }
 
-/// What phase 2 needs from every submission read.
+/// What the later passes need from every submission read; the sessions themselves go to the
+/// spill files.
 #[derive(Default)]
 struct ReadTally {
     submissions: usize,
@@ -143,39 +185,41 @@ struct ReadTally {
     failures: Vec<(usize, String, SubmissionError)>,
     exports: usize,
     with_multiple_exports: usize,
-    merger: SessionMerger,
     titles: TitleIndex,
 }
 
 impl ReadTally {
-    fn add(&mut self, index: usize, submission: DistilledSubmission) {
+    fn add(&mut self, index: usize, submission: DistilledSubmission, copies: &mut Partitions<SpilledCopy>) -> Result<()> {
         self.submissions += 1;
         if let Some(error) = submission.error {
             self.failures.push((index, submission.submission_id.clone(), error));
         }
         self.exports += submission.exports;
         self.with_multiple_exports += usize::from(submission.exports > 1);
-        let info = SubmissionInfo {
-            submission_id: &submission.submission_id,
-            contributor_id: &submission.contributor_id,
-            received_at: &submission.received_at,
-            index,
-        };
         for (position, mut session) in submission.sessions.into_iter().enumerate() {
             let locale = session.episode.locale.as_deref();
             for observation in &session.titles {
                 self.titles.add(locale, session.episode.player.faction, observation);
-                self.titles.note_sighting(locale, &observation.title, info.contributor_id);
+                self.titles.note_sighting(locale, &observation.title, &submission.contributor_id);
             }
             for pending in &session.pending_greetings {
                 for title in pending.available.iter().chain(&pending.active) {
-                    self.titles.note_sighting(locale, title, info.contributor_id);
+                    self.titles.note_sighting(locale, title, &submission.contributor_id);
                 }
             }
-            // Indexed above; holding them for every kept session only costs memory.
+            // Indexed above; nothing later reads them.
             session.titles = Vec::new();
-            self.merger.add(&info, (index, position), session);
+            let copy = SpilledCopy {
+                submission_id: submission.submission_id.clone(),
+                contributor_id: submission.contributor_id.clone(),
+                received_at: submission.received_at.clone(),
+                index,
+                position,
+                session,
+            };
+            copies.push(copy_partition(&copy.session.key), &copy)?;
         }
+        Ok(())
     }
 }
 
@@ -254,12 +298,12 @@ fn parse_received_at(text: &str) -> Option<f64> {
 /// Approximate epoch start of each session, for ordering a contributor's sessions. GetServerTime
 /// at capture start when recorded (nearly always); otherwise the save stamp shifted by the
 /// contributor's usual local-clock offset, or the first submission's receive time.
-fn session_order_times(sessions: &[MergedSession]) -> Vec<f64> {
+fn session_order_times(sessions: &[KeptSession]) -> Vec<f64> {
     let mut offsets: FxHashMap<&str, Vec<f64>> = FxHashMap::default();
-    for merged in sessions {
-        let (start, episode) = (merged.session.start_server_time, &merged.session.episode);
+    for kept in sessions {
+        let (start, episode) = (kept.start_server_time, &kept.episode);
         if let (Some(start), Some(saved)) = (start, session_name_time(episode.session_name.as_deref())) {
-            offsets.entry(&merged.contributor_id).or_default().push(saved - (start + episode.duration));
+            offsets.entry(&kept.contributor_id).or_default().push(saved - (start + episode.duration));
         }
     }
     let medians: FxHashMap<&str, f64> = offsets
@@ -271,14 +315,13 @@ fn session_order_times(sessions: &[MergedSession]) -> Vec<f64> {
         .collect();
     sessions
         .iter()
-        .map(|merged| {
-            let episode = &merged.session.episode;
-            let order = merged
-                .session
+        .map(|kept| {
+            let episode = &kept.episode;
+            let order = kept
                 .start_server_time
                 .unwrap_or_else(|| match session_name_time(episode.session_name.as_deref()) {
-                    Some(saved) => saved - medians.get(merged.contributor_id.as_str()).copied().unwrap_or(0.0) - episode.duration,
-                    None => parse_received_at(&merged.first_received_at).unwrap_or(f64::NAN) - episode.duration,
+                    Some(saved) => saved - medians.get(kept.contributor_id.as_str()).copied().unwrap_or(0.0) - episode.duration,
+                    None => parse_received_at(&kept.first_received_at).unwrap_or(f64::NAN) - episode.duration,
                 });
             if order.is_finite() {
                 order
@@ -291,52 +334,101 @@ fn session_order_times(sessions: &[MergedSession]) -> Vec<f64> {
 
 /// Phase 2: drops sessions without quest data, resolves greeting titles, groups characters and
 /// builds the sorted episodes.
-fn build_episodes(read: ReadTally) -> (Vec<QuestEpisode>, Tally) {
-    let ReadTally {
-        submissions,
-        mut failures,
-        exports,
-        with_multiple_exports,
-        merger,
-        titles,
-    } = read;
-    let (copies, unique) = (merger.copies, merger.merged.len());
-    let mut merged: Vec<MergedSession> = merger.merged.into_values().collect();
-    merged.sort_by(|a, b| a.session.key.cmp(&b.session.key));
-    let seen_under_several_contributors = merged.iter().filter(|merged| merged.seen_under_several_contributors).count();
+/// What merging the copies counted, for the report.
+#[derive(Default)]
+struct MergeCounts {
+    copies: usize,
+    unique: usize,
+    seen_under_several_contributors: usize,
+    skipped: Skipped,
+    greetings: GreetingStats,
+    distill: DistillStats,
+}
 
-    let mut skipped = Skipped::default();
-    let mut kept: Vec<MergedSession> = Vec::new();
-    for session in merged {
-        if session.session.event_count == 0 {
-            *skipped.no_events.get_or_insert(0) += 1;
-        } else if !has_quest_data(&session) {
-            *skipped.no_quest_data.get_or_insert(0) += 1;
-        } else {
-            kept.push(session);
+/// Pass 2: merges the copies of each session, one copy partition at a time, resolves legacy
+/// greeting titles against `titles` (built from every submission) and spills the sessions kept,
+/// partitioned by contributor.
+fn merge_copies(copies: &Written<SpilledCopy>, titles: &TitleIndex, dir: &Path) -> Result<(Written<KeptSession>, MergeCounts)> {
+    let mut kept = Partitions::<KeptSession>::create(dir)?;
+    let mut counts = MergeCounts::default();
+    for &partition in &copies.partitions {
+        let mut merger = SessionMerger::default();
+        for copy in copies.read(partition)? {
+            let info = SubmissionInfo {
+                submission_id: &copy.submission_id,
+                contributor_id: &copy.contributor_id,
+                received_at: &copy.received_at,
+                index: copy.index,
+            };
+            merger.add(&info, (copy.index, copy.position), copy.session);
+        }
+        counts.copies += merger.copies;
+        counts.unique += merger.merged.len();
+        let mut merged: Vec<MergedSession> = merger.merged.into_values().collect();
+        merged.sort_by(|a, b| a.session.key.cmp(&b.session.key));
+        for mut merged in merged {
+            counts.seen_under_several_contributors += usize::from(merged.seen_under_several_contributors);
+            if merged.session.event_count == 0 {
+                *counts.skipped.no_events.get_or_insert(0) += 1;
+                continue;
+            }
+            if !has_quest_data(&merged) {
+                *counts.skipped.no_quest_data.get_or_insert(0) += 1;
+                continue;
+            }
+            let session = &mut merged.session;
+            let context = (session.episode.locale.as_deref(), session.episode.player.faction);
+            for pending in &session.pending_greetings {
+                resolve_greeting(&mut session.episode.offers[pending.offer], pending, context, titles, &mut counts.greetings);
+            }
+            counts.distill += session.stats;
+            let session = KeptSession {
+                key: merged.session.key,
+                contributor_id: merged.contributor_id,
+                first_received_at: merged.first_received_at,
+                submission_ids: merged.submission_ids.into_iter().collect(),
+                start_server_time: merged.session.start_server_time,
+                episode: merged.session.episode,
+            };
+            kept.push(contributor_partition(&session.contributor_id), &session)?;
         }
     }
+    Ok((kept.finish()?, counts))
+}
 
-    let mut greetings = GreetingStats::default();
-    let mut distill = DistillStats::default();
-    for merged in &mut kept {
-        let session = &mut merged.session;
-        let context = (session.episode.locale.as_deref(), session.episode.player.faction);
-        for pending in &session.pending_greetings {
-            resolve_greeting(&mut session.episode.offers[pending.offer], pending, context, &titles, &mut greetings);
+/// Pass 3: turns each contributor partition into episodes, in contributor order, and streams them
+/// to episodes.jsonl and the episode store.
+fn write_episodes(config: &Config, kept: &Written<KeptSession>) -> Result<EpisodeSummary> {
+    let mut store = StoreWriter::create(&config.episode_store(), config.bucket_bytes()?)?;
+    let mut summary = EpisodeSummary::default();
+    io::write_atomic(&config.episodes(), |out| {
+        for &partition in &kept.partitions {
+            for episode in contributor_episodes(kept.read(partition)?) {
+                summary.add(&episode);
+                serde_json::to_writer(&mut *out, &episode)?;
+                out.write_all(b"\n")?;
+                store.push(&episode)?;
+            }
         }
-        distill += session.stats;
-    }
+        Ok(())
+    })?;
+    store.finish()?;
+    Ok(summary)
+}
 
-    let order = session_order_times(&kept);
-    let inputs: Vec<CharacterInput> = kept
+/// The episodes of every session of a set of whole contributors: grouped into characters,
+/// ordered, and sorted by contributor, character and session order.
+fn contributor_episodes(mut sessions: Vec<KeptSession>) -> Vec<QuestEpisode> {
+    sessions.sort_by(|a, b| a.key.cmp(&b.key));
+    let order = session_order_times(&sessions);
+    let inputs: Vec<CharacterInput> = sessions
         .iter()
         .zip(&order)
-        .map(|(merged, &order)| {
-            let (session, episode) = (&merged.session, &merged.session.episode);
+        .map(|(session, &order)| {
+            let episode = &session.episode;
             CharacterInput {
                 episode_key: &session.key,
-                contributor_id: &merged.contributor_id,
+                contributor_id: &session.contributor_id,
                 player: &episode.player,
                 start: session.start_server_time,
                 duration: episode.duration,
@@ -352,40 +444,26 @@ fn build_episodes(read: ReadTally) -> (Vec<QuestEpisode>, Tally) {
     let session_orders = order_sessions(&inputs, &characters);
     drop(inputs);
 
-    let mut episodes: Vec<QuestEpisode> = kept
+    let mut episodes: Vec<QuestEpisode> = sessions
         .into_iter()
         .zip(characters)
         .zip(session_orders)
-        .map(|((merged, character_key), session_order)| {
+        .map(|((session, character_key), session_order)| {
             let identity = EpisodeIdentity {
-                key: merged.session.key,
-                contributor_id: merged.contributor_id,
+                key: session.key,
+                contributor_id: session.contributor_id,
                 character_key,
-                submission_ids: merged.submission_ids.into_iter().collect(),
+                submission_ids: session.submission_ids,
                 session_order,
             };
-            merged.session.episode.into_episode(identity)
+            session.episode.into_episode(identity)
         })
         .collect();
     // Contributor ids and keys are lowercase hex, so comparing them as text orders them like the
     // TS localeCompare.
     episodes
         .sort_by(|a, b| (&a.contributor_id, &a.character_key, a.session_order, &a.key).cmp(&(&b.contributor_id, &b.character_key, b.session_order, &b.key)));
-
-    failures.sort_by_key(|(index, _, _)| *index);
-    let tally = Tally {
-        submissions,
-        failures: failures.into_iter().map(|(_, submission_id, error)| (submission_id, error)).collect(),
-        exports,
-        with_multiple_exports,
-        copies,
-        unique,
-        seen_under_several_contributors,
-        skipped,
-        greetings,
-        distill,
-    };
-    (episodes, tally)
+    episodes
 }
 
 #[cfg(test)]
