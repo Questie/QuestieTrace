@@ -37,7 +37,7 @@ Aliases: `/questietrace` and `/qlt`.
 
 ## 3) Tracking behavior
 
-Capture starts automatically at `PLAYER_LOGIN` when consent has been granted. The only way to disable data collection is to decline consent via `/qlt consent`.
+Capture starts automatically at `PLAYER_LOGIN` when consent has been granted. Data collection is disabled by declining consent, via `/qlt consent` or by unchecking the consent setting (section 8).
 
 There is no "tracking toggle" command. The consent decision is the sole gate for data collection.
 
@@ -158,3 +158,12 @@ Coordinates are converted to the dialog's effective scale and anchored relative 
 Lua mocks cannot enforce WoW's taint rules or load its XML templates. After a clean reload, show the consent dialog, leave it open, enter Edit Mode, create a new layout, and exit Edit Mode. Verify there is no secret-value error and that `PartyFrame.settingMap` and `CompactPartyFrameMember1.optionTable` remain secure. Also check text wrapping and both consent choices; test No only with disposable capture data.
 
 With the consent dialog visible, show/dismiss a normal Blizzard popup and Edit Mode's new-layout dialog and check that ours moves below each and returns afterward. Repeat in combat where the Blizzard dialog is available, and with multiple popups. Check low-screen-space placement and different UI scales without moving or modifying Blizzard's frames.
+
+---
+
+## 8) Settings panel
+
+`Modules/Settings.lua` registers a "QuestieTrace" category in the Blizzard settings (Options > AddOns) on `PLAYER_LOGIN`, once the saved variables are loaded. Clients without the Settings API get no panel. It holds a single checkbox, "Allow data collection", with no other options.
+
+- The checkbox is checked only when `QuestieTrace.settings.dataCollectionConsent == true`; undecided and declined both show it unchecked.
+- Checking it calls `Core.SetConsent(true)` and unchecking it `Core.SetConsent(false)`, the same as Yes and No in the consent dialog (section 7), including hiding the dialog if it is open.

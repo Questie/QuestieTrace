@@ -699,6 +699,9 @@ local function OnEvent(_, event, ...)
   -- 1. Initialize before login dumps and auto-start on PLAYER_LOGIN.
   if event == "PLAYER_LOGIN" then
     EnsureSavedVariables()
+    if Core.RegisterSettingsPanel then
+      Core.RegisterSettingsPanel()
+    end
   end
 
   -- 2. Event filtering

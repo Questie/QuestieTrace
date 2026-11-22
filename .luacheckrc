@@ -2867,6 +2867,7 @@ globals = {
     "SlashCmdList",
     "SLASH_QUESTIETRACE1",
     "SLASH_QUESTIETRACE2",
+    "Settings",
     -----------------------------------------------------> busted unit testing
     "describe",
     "it",
