@@ -469,6 +469,13 @@ All design decisions are documented in `specs/`. Before implementing significant
 - What was tried on a live Forever client (tooltips, objects, lookups): `docs/forever-client-findings.md`
 - Local: `./Documentation/WoW-API/Functions-AI/` and `./Documentation/WoW-Event/`
 
+## Rust extractor parity
+
+`tools/corrections-extractor-rs` is a Rust port of `tools/corrections-extractor` and must produce
+the same output. When asked to bring it up to parity with the TypeScript extractor, follow
+`tools/corrections-extractor-rs/PARITY.md`. It covers the scope, the reference run, porting rules
+and the gate.
+
 ## Forbidden Patterns
 
 - Never use code from `Trace/` (old unused UI)

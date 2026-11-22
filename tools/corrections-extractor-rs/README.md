@@ -32,6 +32,8 @@ TRACE_DATA_DIR=../../../trace-data scripts/parity.sh 1
 
 runs both tools on the same 1% sample and diffs every output file; only the generation timestamps may differ. Run it after any change to observers, merges or writers.
 
+To port the TypeScript tool's newer changes, follow [PARITY.md](PARITY.md).
+
 ## Development
 
 ```sh
