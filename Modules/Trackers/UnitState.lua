@@ -191,17 +191,32 @@ local function SafeString(value)
   return value
 end
 
----Whether a tooltip line is the localized "Level %s ..." line.
+---Whether the text after a level is a rank such as "(Elite)", with ASCII or full-width brackets.
+---@param text string
+---@return boolean
+local function IsRankText(text)
+  local body = text:gsub("^ ", "")
+  return (body:sub(1, 1) == "(" and body:sub(-1) == ")") or (body:sub(1, 3) == "（" and body:sub(-3) == "）")
+end
+
+---Whether a tooltip line is the localized "Level %s" line: the level (a number or "??"),
+---optionally followed by a rank. Anything else after the level means a title such as "Level 7 Trainer".
 ---@param text string
 ---@return boolean
 local function IsLevelLine(text)
   local template = type(TOOLTIP_UNIT_LEVEL) == "string" and TOOLTIP_UNIT_LEVEL or "Level %s"
   local prefix, suffix = template:match("^(.-)%%s(.*)$")
   if not prefix then return false end
-  if prefix ~= "" then
-    return text:sub(1, #prefix) == prefix
+  if text:sub(1, #prefix) ~= prefix then return false end
+  local rest = text:sub(#prefix + 1)
+  local level = rest:match("^%d+") or rest:match("^%?%?")
+  if not level then return false end
+  rest = rest:sub(#level + 1)
+  if suffix ~= "" then
+    if rest:sub(1, #suffix) ~= suffix then return false end
+    rest = rest:sub(#suffix + 1)
   end
-  return suffix ~= "" and text:find(suffix, 1, true) ~= nil
+  return rest == "" or IsRankText(rest)
 end
 
 ---Extract the NPC title from unit tooltip data.
@@ -217,11 +232,9 @@ local function ExtractSubName(tooltipData)
       if nextLine.type == Enum.TooltipDataLineType.UnitOwner then return "" end
       local text = SafeString(nextLine.leftText)
       if not text then return nil end
-      if Enum.TooltipDataLineType.UnitLevel then
-        if nextLine.type == Enum.TooltipDataLineType.UnitLevel then return "" end
-      elseif IsLevelLine(text) then
-        return ""
-      end
+      -- Forever sends NPC level lines without the UnitLevel line type, so the text is checked as well.
+      if Enum.TooltipDataLineType.UnitLevel and nextLine.type == Enum.TooltipDataLineType.UnitLevel then return "" end
+      if IsLevelLine(text) then return "" end
       return Core.SanitizeText(text)
     end
   end
