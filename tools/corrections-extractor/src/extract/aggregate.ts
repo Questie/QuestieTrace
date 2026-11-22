@@ -1,10 +1,11 @@
 // Merges per-session Observations for a single field into one Fact per entity.
 //
 // Default (scalar) merge policy: highest confidence wins; ties broken by
-// most-frequently-observed value; further ties broken by most-recent
-// observation. Fields whose correct merge isn't "pick one winner" (e.g.
-// `spawns` accumulating per-zone coordinates) can pass a custom `merge`
-// function instead - see decision 21 in the extraction plan.
+// most-frequently-observed value; further ties broken by the newest session
+// (server time), then by the most recent time within a session. Fields whose
+// correct merge isn't "pick one winner" (e.g. `spawns` accumulating per-zone
+// coordinates) can pass a custom `merge` function instead - see decision 21 in
+// the extraction plan.
 
 import type { Confidence, Observation } from "./observation";
 
@@ -114,6 +115,12 @@ function defaultOrder<T>(a: ScalarGroup<T>, b: ScalarGroup<T>): number {
   }
   if (b.count !== a.count) {
     return b.count - a.count;
+  }
+  // `latestT` is relative to the start of its session, so it only compares values of one session.
+  const aTime = a.newestSessionTime ?? -Infinity;
+  const bTime = b.newestSessionTime ?? -Infinity;
+  if (aTime !== bTime) {
+    return bTime - aTime;
   }
   return b.latestT - a.latestT;
 }
