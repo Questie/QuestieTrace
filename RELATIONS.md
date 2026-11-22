@@ -43,6 +43,12 @@ memory settings. Tonight's results were guarded against it (see "How the results
 627 quests, 1,646 relations; for Forever-new quests without authored relations, 394 quests / 820
 relations; against authored Forever relations 1,555 agree, 14 new, 11 conflict.
 
+**Since (2026-11-23):** the archive grew to 199,967 submissions (998,061 episodes, 88,654
+characters) and a run no longer fit next to anything else. Every step now reads the episodes one
+bucket of whole characters at a time from an on-disk episode store, and absence runs on all cores:
+14 min 28 s on 16 threads, peak 4.3 GB (ingest 657 s, signals 193 s, of which absence 52 s), with
+the same values as before on the 5% sample.
+
 The TypeScript side cannot run the full archive as it stands: the Exporters dump ran out of
 JavaScript heap at 4,250 of 133,039 submissions (default 4 GB heap), and the relations signals
 load every episode into memory (episodes.jsonl is 4.9 GB). A TypeScript full-archive reference was
