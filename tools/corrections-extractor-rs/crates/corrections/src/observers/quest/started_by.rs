@@ -17,12 +17,14 @@
 //! always show up on questnpc, so npc never yields an object. "target" is never used: it can
 //! point at anything and is not tied to the interaction.
 //!
-//! Merge: the union of each starter kind across all observations.
+//! Merge: per starter kind, the starters seen in enough sessions (see [`super::givers`]); no value
+//! when there is none.
 
+use super::givers::supported_ids;
 use super::interaction::{quest_event_lookup, InteractionLookup, InteractionValue};
 use crate::guid::{parse_guid, GuidKind};
 use crate::observation::{Confidence, Observation};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use trace_data::{KeyRef, Session, Value};
 
 /// One starter seen for a quest (TS `StartedByStarter`, which sets exactly one of its fields).
@@ -44,22 +46,13 @@ pub struct StartedByValue {
 const GOSSIP_TOKENS: [&str; 2] = ["questnpc", "npc"];
 const QUEST_DIALOG_TOKENS: [&str; 1] = ["questnpc"];
 
-pub fn merge(observations: &[Observation<StartedByStarter>]) -> StartedByValue {
-    let (mut creatures, mut objects, mut items) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
-    for obs in observations {
-        // TS skips falsy ids.
-        match obs.value {
-            StartedByStarter::Creature(id) if id != 0 => creatures.insert(id),
-            StartedByStarter::Object(id) if id != 0 => objects.insert(id),
-            StartedByStarter::Item(id) if id != 0 => items.insert(id),
-            _ => false,
-        };
-    }
-    StartedByValue {
-        creatures: creatures.into_iter().collect(),
-        objects: objects.into_iter().collect(),
-        items: items.into_iter().collect(),
-    }
+pub fn merge(observations: &[Observation<StartedByStarter>]) -> Option<StartedByValue> {
+    let [creatures, objects, items] = supported_ids(observations, |starter| match *starter {
+        StartedByStarter::Creature(id) => (0, id),
+        StartedByStarter::Object(id) => (1, id),
+        StartedByStarter::Item(id) => (2, id),
+    });
+    (!creatures.is_empty() || !objects.is_empty() || !items.is_empty()).then_some(StartedByValue { creatures, objects, items })
 }
 
 /// GetQuestID() during the interaction; 0 and an ambiguous sample are no quest.
@@ -176,10 +169,6 @@ mod tests {
 
     fn quests_and_values(session: &Json) -> Vec<(i64, StartedByStarter)> {
         observed(session).into_iter().map(|(quest, value, _, _)| (quest, value)).collect()
-    }
-
-    fn obs(value: StartedByStarter, confidence: Confidence, t: f64) -> Observation<StartedByStarter> {
-        Observation::new(96659, value, confidence, t)
     }
 
     #[test]
@@ -405,44 +394,8 @@ mod tests {
             }),
             vec![trace_event("GOSSIP_SHOW", 3.0, 3.0, &[]), trace_event("QUEST_DETAIL", 4.0, 4.0, &[json!(0)])],
         );
-        let results = with_session(&session, observe);
-        // One from QUEST_DETAIL, one from gossip; the merge keeps the creature once.
-        assert_eq!(results.iter().filter(|o| matches!(o.value, Creature(_))).count(), 2);
-        assert_eq!(merge(&results).creatures, [197]);
-    }
-
-    #[test]
-    fn merge_keeps_each_creature_starter_once() {
-        let result = merge(&[
-            obs(Creature(197), Confidence::Medium, 3.0),
-            obs(Creature(197), Confidence::Medium, 10.0),
-            obs(Creature(200), Confidence::Medium, 15.0),
-        ]);
-        assert_eq!(
-            result,
-            StartedByValue {
-                creatures: vec![197, 200],
-                objects: vec![],
-                items: vec![]
-            }
-        );
-    }
-
-    #[test]
-    fn merge_sorts_starters_by_kind() {
-        let result = merge(&[
-            obs(Creature(197), Confidence::Medium, 3.0),
-            obs(Object(2843), Confidence::Low, 5.0),
-            obs(Item(750), Confidence::High, 7.0),
-        ]);
-        assert_eq!(
-            result,
-            StartedByValue {
-                creatures: vec![197],
-                objects: vec![2843],
-                items: vec![750]
-            }
-        );
+        // One from QUEST_DETAIL, one from gossip.
+        assert_eq!(values(&session), [Creature(197), Creature(197)]);
     }
 
     // describe("observeStartedBy interaction correlation")

@@ -15,12 +15,14 @@
 //! player last interacted with (a vendor next to the finisher, say), so it is never used there.
 //! Objects are only taken from questnpc.
 //!
-//! Merge: the union of each finisher kind across all observations.
+//! Merge: per finisher kind, the finishers seen in enough sessions (see [`super::givers`]); no
+//! value when there is none.
 
+use super::givers::supported_ids;
 use super::interaction::{quest_event_lookup, InteractionLookup, InteractionValue};
 use crate::guid::{parse_guid, GuidKind};
 use crate::observation::{Confidence, Observation};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use trace_data::{KeyRef, Session, Value};
 
 /// One finisher seen for a quest (TS `FinishedByFinisher`, which sets exactly one of its fields).
@@ -40,20 +42,12 @@ pub struct FinishedByValue {
 const GOSSIP_TOKENS: [&str; 2] = ["questnpc", "npc"];
 const QUEST_DIALOG_TOKENS: [&str; 1] = ["questnpc"];
 
-pub fn merge(observations: &[Observation<FinishedByFinisher>]) -> FinishedByValue {
-    let (mut creatures, mut objects) = (BTreeSet::new(), BTreeSet::new());
-    for obs in observations {
-        // TS skips falsy ids.
-        match obs.value {
-            FinishedByFinisher::Creature(id) if id != 0 => creatures.insert(id),
-            FinishedByFinisher::Object(id) if id != 0 => objects.insert(id),
-            _ => false,
-        };
-    }
-    FinishedByValue {
-        creatures: creatures.into_iter().collect(),
-        objects: objects.into_iter().collect(),
-    }
+pub fn merge(observations: &[Observation<FinishedByFinisher>]) -> Option<FinishedByValue> {
+    let [creatures, objects] = supported_ids(observations, |finisher| match *finisher {
+        FinishedByFinisher::Creature(id) => (0, id),
+        FinishedByFinisher::Object(id) => (1, id),
+    });
+    (!creatures.is_empty() || !objects.is_empty()).then_some(FinishedByValue { creatures, objects })
 }
 
 /// GetQuestID() during the interaction; 0 and an ambiguous sample are no quest.
@@ -150,10 +144,6 @@ mod tests {
 
     fn quests_and_values(session: &Json) -> Vec<(i64, FinishedByFinisher)> {
         observed(session).into_iter().map(|(quest, value, _, _)| (quest, value)).collect()
-    }
-
-    fn obs(value: FinishedByFinisher, confidence: Confidence, t: f64) -> Observation<FinishedByFinisher> {
-        Observation::new(96659, value, confidence, t)
     }
 
     const GAME_OBJECT_2843: &str = "GameObject-0-5208-0-7-2843-0000399";
@@ -341,34 +331,6 @@ mod tests {
             vec![trace_event("GOSSIP_SHOW", 3.0, 3.0, &[])],
         );
         assert_eq!(observed(&session), []);
-    }
-
-    #[test]
-    fn merge_keeps_each_creature_finisher_once() {
-        let result = merge(&[
-            obs(Creature(197), Confidence::Medium, 3.0),
-            obs(Creature(197), Confidence::Medium, 10.0),
-            obs(Creature(200), Confidence::Medium, 15.0),
-        ]);
-        assert_eq!(
-            result,
-            FinishedByValue {
-                creatures: vec![197, 200],
-                objects: vec![]
-            }
-        );
-    }
-
-    #[test]
-    fn merge_sorts_finishers_by_kind() {
-        let result = merge(&[obs(Creature(197), Confidence::Medium, 3.0), obs(Object(2843), Confidence::Low, 5.0)]);
-        assert_eq!(
-            result,
-            FinishedByValue {
-                creatures: vec![197],
-                objects: vec![2843]
-            }
-        );
     }
 
     #[test]

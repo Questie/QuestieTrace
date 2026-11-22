@@ -2,6 +2,7 @@
 
 pub mod encounters;
 pub mod finished_by;
+pub mod givers;
 pub mod interaction;
 pub mod name;
 pub mod objective_count;

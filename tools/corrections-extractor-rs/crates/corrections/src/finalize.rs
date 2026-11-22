@@ -189,7 +189,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     };
 
     let zone_or_sort = acc.zone_or_sort.aggregate();
-    let finished_by = acc.finished_by.merge(finished_by::merge);
+    let finished_by = only_defined(acc.finished_by.merge(finished_by::merge));
     // Quest turn-in POIs are spawns of the quest's single finisher: they join its spawn observations.
     let turn_in = turn_in_poi_spawns(&acc.turn_in_poi, &finished_by);
     let (npc_turn_in, object_turn_in) = (by_entity(turn_in.npcs), by_entity(turn_in.objects));
@@ -203,7 +203,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
         }
     }
 
-    let started_by = acc.started_by.merge(started_by::merge);
+    let started_by = only_defined(acc.started_by.merge(started_by::merge));
     let required_races = required_races(acc, &started_by);
 
     let objective_count = acc.objective_count.aggregate();
