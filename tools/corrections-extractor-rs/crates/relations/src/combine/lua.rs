@@ -18,6 +18,11 @@
 //!   the slot); both override this module.
 //! - prerequisites read as OR where QuestieDB has an AND list: OR is resolution's default, not
 //!   evidence against AND.
+//! - a prerequisite QuestieDB knows as a breadcrumb of the quest: an optional lead-in. Everyone who
+//!   took the breadcrumb is offered the quest right after, so the traces read it as required.
+//! - a prerequisite that comes before the quest's parent quest or before another of its
+//!   prerequisites: the traces see it done whenever the quest is offered, but it is implied, not a
+//!   prerequisite of its own (the Chapter quests of 338 do not need 583 on top of their parent).
 //! - a new nextQuestInChain to a quest whose prerequisites leave this one out. Questie hides a quest
 //!   once its next quest is done or in the log, so characters who reached the next quest another
 //!   way would lose this one.
@@ -25,6 +30,8 @@
 //!   preQuestGroup). QuestieDB's authors only chain into a single or OR prerequisite; with AND, every
 //!   member hands off into the quest, so the traces would chain each of them into it.
 //! - a new nextQuestInChain a signal saw contradicted more often than supported.
+//! - a new nextQuestInChain from a quest that three or more quests require: it opens several
+//!   quests at once, and the handoff only shows which one players took first.
 //!
 //! A quest with nothing to apply is written commented out as a whole, so the module never creates
 //! an empty row for it.
@@ -42,7 +49,7 @@ use super::views::QuestView;
 use crate::model::{QuestCatalog, QuestId, RelationField, RelationSet};
 use crate::text::is_js_whitespace;
 use indexmap::IndexMap;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub const LUA_MODULE_NAME: &str = "ForeverQuestRelationTraces";
 
@@ -65,7 +72,16 @@ pub enum NotApplied {
     NextNeedsAll { next: QuestId, together: Vec<QuestId> },
     /// A new chain one signal saw contradicted more often than supported.
     Contradicted { signal: String },
+    /// Prerequisites QuestieDB knows as breadcrumbs of this quest.
+    Breadcrumbs { breadcrumbs: Vec<QuestId> },
+    /// Prerequisites that come before `before`: this quest's parent quest or other prerequisites.
+    Implied { before: Vec<QuestId> },
+    /// A new chain from a quest that every one of `opens` (three or more quests) requires.
+    OpensSeveral { opens: Vec<QuestId> },
 }
+
+/// A new nextQuestInChain is not applied from a quest this many quests require.
+const MIN_QUESTS_OPENED: usize = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Written {
@@ -154,6 +170,66 @@ impl RecordSources<'_> {
     }
 }
 
+/// Which quests come before which: for each quest, the quests that must be done before it.
+/// Built from QuestieDB and the accepted relations; only links that make a quest necessary count
+/// (an AND list, a one-quest preQuestSingle, QuestieDB's chains), not one option of an OR list.
+struct Lineage {
+    before: HashMap<QuestId, Vec<QuestId>>,
+}
+
+impl Lineage {
+    fn new(sources: &RecordSources) -> Lineage {
+        let mut before: HashMap<QuestId, Vec<QuestId>> = HashMap::new();
+        let sets = sources
+            .truth
+            .iter()
+            .map(|(&quest_id, &set)| (quest_id, set))
+            .chain(sources.relations.iter().map(|(&quest_id, set)| (quest_id, set)));
+        for (quest_id, set) in sets {
+            let single = values_of(Some(set), RelationField::PreQuestSingle);
+            let necessary = values_of(Some(set), RelationField::PreQuestGroup)
+                .iter()
+                .chain(if single.len() == 1 { single } else { &[] });
+            before.entry(quest_id).or_default().extend(necessary);
+        }
+        for (&quest_id, &set) in sources.truth {
+            for &next in values_of(Some(set), RelationField::NextQuestInChain) {
+                before.entry(next).or_default().push(quest_id);
+            }
+        }
+        Lineage { before }
+    }
+
+    /// Whether `earlier` must be done before `quest`, directly or through other quests.
+    fn comes_before(&self, earlier: QuestId, quest: QuestId) -> bool {
+        let mut seen = HashSet::new();
+        let mut pending = vec![quest];
+        while let Some(current) = pending.pop() {
+            for &previous in self.before.get(&current).into_iter().flatten() {
+                if previous == earlier {
+                    return true;
+                }
+                if seen.insert(previous) {
+                    pending.push(previous);
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Whether QuestieDB, or the accepted relations, have `breadcrumb` as a breadcrumb of `quest`.
+fn is_breadcrumb(breadcrumb: QuestId, quest: QuestId, sources: &RecordSources) -> bool {
+    let of = |quest_id: QuestId, field: RelationField| {
+        [
+            values_of(sources.truth.get(&quest_id).copied(), field),
+            values_of(sources.relations.get(&quest_id), field),
+        ]
+    };
+    of(quest, RelationField::Breadcrumbs).iter().any(|list| list.contains(&breadcrumb))
+        || of(breadcrumb, RelationField::BreadcrumbForQuestId).iter().any(|list| list.contains(&quest))
+}
+
 fn values_of(set: Option<&RelationSet>, field: RelationField) -> &[QuestId] {
     set.and_then(|set| set.get(&field)).map_or(&[][..], Vec::as_slice)
 }
@@ -171,19 +247,27 @@ fn union(reference: &[QuestId], accepted: &[QuestId]) -> Vec<QuestId> {
 }
 
 pub fn relation_records(sources: &RecordSources) -> LuaRecords {
+    let lineage = Lineage::new(sources);
     let mut records: LuaRecords = sources
         .relations
         .iter()
-        .map(|(&quest_id, accepted)| (quest_id, quest_fields(quest_id, accepted, sources)))
+        .map(|(&quest_id, accepted)| (quest_id, quest_fields(quest_id, accepted, sources, &lineage)))
         .filter(|(_, fields)| !fields.is_empty())
         .collect();
-    // A chain is judged by the next quest's prerequisites as QuestieDB will load them, so only
-    // once every quest's own fields are decided.
+    // A chain is judged by the prerequisites as QuestieDB will load them, so only once every
+    // quest's own fields are decided.
+    let mut required_by: HashMap<QuestId, BTreeSet<QuestId>> = HashMap::new();
+    for &quest_id in sources.truth.keys().chain(records.keys()) {
+        for previous in loaded_prerequisites(quest_id, &records, sources).1 {
+            required_by.entry(previous).or_default().insert(quest_id);
+        }
+    }
     let mut not_applied = Vec::new();
     for (&quest_id, fields) in &records {
         for (index, field) in fields.iter().enumerate() {
             if field.field == RelationField::NextQuestInChain && field.written == Written::Applied {
-                if let Some(why) = chain_problem(quest_id, field.values[0], &records, sources) {
+                let opens: Vec<QuestId> = required_by.get(&quest_id).map(|opens| opens.iter().copied().collect()).unwrap_or_default();
+                if let Some(why) = chain_problem(quest_id, field.values[0], &records, sources, &opens) {
                     not_applied.push((quest_id, index, why));
                 }
             }
@@ -197,8 +281,8 @@ pub fn relation_records(sources: &RecordSources) -> LuaRecords {
     records
 }
 
-fn quest_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSources) -> Vec<LuaField> {
-    let mut fields = prerequisite_fields(quest_id, accepted, sources);
+fn quest_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSources, lineage: &Lineage) -> Vec<LuaField> {
+    let mut fields = prerequisite_fields(quest_id, accepted, sources, lineage);
     for field in RelationField::ALL.into_iter().filter(|field| !PREREQUISITES.contains(field)) {
         let (accepted, reference) = (values_of(Some(accepted), field), sources.reference(quest_id, field));
         if accepted.is_empty() {
@@ -230,7 +314,92 @@ fn quest_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSourc
 /// - read as AND: extends QuestieDB's AND list; replaces an OR list, clearing preQuestSingle;
 /// - read as OR: extends QuestieDB's OR list or starts one. Against an AND list, one prerequisite
 ///   (the same under either kind) joins it; several are shown, not applied.
-fn prerequisite_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSources) -> Vec<LuaField> {
+///
+/// New targets that are known breadcrumbs of the quest, or that come before its parent quest or
+/// another of its prerequisites, are taken out first and shown on their own.
+fn prerequisite_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSources, lineage: &Lineage) -> Vec<LuaField> {
+    let (ruled_out, accepted) = without_ruled_out_prerequisites(quest_id, accepted, sources, lineage);
+    let mut fields = slot_fields(quest_id, &accepted, sources);
+    fields.extend(ruled_out);
+    fields
+}
+
+/// The accepted prerequisites split into the shown fields of the ruled-out new targets and the
+/// rest.
+fn without_ruled_out_prerequisites(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSources, lineage: &Lineage) -> (Vec<LuaField>, RelationSet) {
+    let (single, group) = (
+        sources.reference(quest_id, RelationField::PreQuestSingle),
+        sources.reference(quest_id, RelationField::PreQuestGroup),
+    );
+    let parents = sources.reference(quest_id, RelationField::ParentQuest);
+    let is_new = |target: QuestId| !single.contains(&target) && !group.contains(&target);
+    let new_targets = |field: RelationField| values_of(Some(accepted), field).iter().copied().filter(|&target| is_new(target));
+    let breadcrumbs: Vec<QuestId> = PREREQUISITES
+        .into_iter()
+        .flat_map(new_targets)
+        .filter(|&target| is_breadcrumb(target, quest_id, sources))
+        .collect();
+    // What a new target can come before: the parent quests and every other prerequisite.
+    let anchors: Vec<QuestId> = parents
+        .iter()
+        .chain(single)
+        .chain(group)
+        .chain(PREREQUISITES.iter().flat_map(|&field| values_of(Some(accepted), field)))
+        .copied()
+        .filter(|anchor| !breadcrumbs.contains(anchor))
+        .collect();
+
+    let mut kept = accepted.clone();
+    let mut ruled_out = Vec::new();
+    for field in PREREQUISITES {
+        let field_breadcrumbs: Vec<QuestId> = new_targets(field).filter(|target| breadcrumbs.contains(target)).collect();
+        let mut implied = Vec::new();
+        let mut before = BTreeSet::new();
+        for target in new_targets(field).filter(|target| !breadcrumbs.contains(target)) {
+            let later: Vec<QuestId> = if parents.contains(&target) {
+                vec![target]
+            } else {
+                anchors
+                    .iter()
+                    .copied()
+                    .filter(|&anchor| anchor != target && lineage.comes_before(target, anchor))
+                    .collect()
+            };
+            if !later.is_empty() {
+                implied.push(target);
+                before.extend(later);
+            }
+        }
+        if !field_breadcrumbs.is_empty() {
+            ruled_out.push(LuaField::shown(
+                field,
+                &field_breadcrumbs,
+                NotApplied::Breadcrumbs {
+                    breadcrumbs: field_breadcrumbs.clone(),
+                },
+            ));
+        }
+        if !implied.is_empty() {
+            ruled_out.push(LuaField::shown(
+                field,
+                &implied,
+                NotApplied::Implied {
+                    before: before.into_iter().collect(),
+                },
+            ));
+        }
+        if let Some(values) = kept.get_mut(&field) {
+            values.retain(|target| !field_breadcrumbs.contains(target) && !implied.contains(target));
+            if values.is_empty() {
+                kept.remove(&field);
+            }
+        }
+    }
+    (ruled_out, kept)
+}
+
+/// The prerequisite slot for the accepted targets that were not ruled out.
+fn slot_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSources) -> Vec<LuaField> {
     let (accepted_single, accepted_group) = (
         values_of(Some(accepted), RelationField::PreQuestSingle),
         values_of(Some(accepted), RelationField::PreQuestGroup),
@@ -275,8 +444,9 @@ fn prerequisite_fields(quest_id: QuestId, accepted: &RelationSet, sources: &Reco
     vec![LuaField::applied(RelationField::PreQuestSingle, union(single, accepted_single))]
 }
 
-/// Why a new chain from `quest_id` to `next` must not apply, if it must not.
-fn chain_problem(quest_id: QuestId, next: QuestId, records: &LuaRecords, sources: &RecordSources) -> Option<NotApplied> {
+/// Why a new chain from `quest_id` to `next` must not apply, if it must not. `opens` are the quests
+/// that require `quest_id` as QuestieDB will load them with this module.
+fn chain_problem(quest_id: QuestId, next: QuestId, records: &LuaRecords, sources: &RecordSources, opens: &[QuestId]) -> Option<NotApplied> {
     let claims = sources
         .views
         .get(&quest_id)
@@ -303,6 +473,8 @@ fn chain_problem(quest_id: QuestId, next: QuestId, records: &LuaRecords, sources
     } else if kind == RelationField::PreQuestGroup && required.len() > 1 {
         let together = required.into_iter().filter(|&other| other != quest_id).collect();
         Some(NotApplied::NextNeedsAll { next, together })
+    } else if opens.len() >= MIN_QUESTS_OPENED {
+        Some(NotApplied::OpensSeveral { opens: opens.to_vec() })
     } else {
         None
     }
@@ -313,9 +485,10 @@ fn chain_problem(quest_id: QuestId, next: QuestId, records: &LuaRecords, sources
 fn loaded_prerequisites(quest_id: QuestId, records: &LuaRecords, sources: &RecordSources) -> (RelationField, Vec<QuestId>) {
     let written = records.get(&quest_id).map_or(&[][..], Vec::as_slice);
     let loaded = |field: RelationField| -> Vec<QuestId> {
+        // Only code lines change what QuestieDB loads; a field can also be shown beside them.
         match written
             .iter()
-            .find(|written| written.field == field)
+            .find(|written| written.field == field && written.written.is_code())
             .map(|written| (&written.written, &written.values))
         {
             Some((Written::Applied, values)) => values.clone(),
@@ -388,6 +561,19 @@ fn not_applied_reason(field: RelationField, why: &NotApplied) -> String {
             joined(together)
         ),
         NotApplied::Contradicted { signal } => format!("not applied: {signal} saw it contradicted more often than supported"),
+        NotApplied::Breadcrumbs { breadcrumbs } => format!(
+            "not applied: QuestieDB has {} as breadcrumbs of this quest, optional lead-ins rather than prerequisites",
+            joined(breadcrumbs)
+        ),
+        NotApplied::Implied { before } => format!(
+            "not applied: implied, as it comes before {}, this quest's parent quest or other prerequisites",
+            joined(before)
+        ),
+        NotApplied::OpensSeveral { opens } => format!(
+            "not applied: {} quests require this one ({}), so it opens several quests rather than leading into one",
+            opens.len(),
+            joined(opens)
+        ),
     }
 }
 
@@ -692,6 +878,106 @@ mod tests {
         assert_eq!(records[&7], [applied(NextQuestInChain, &[8])]);
         assert_eq!(records[&1], [applied(NextQuestInChain, &[2])]);
         assert_eq!(records[&544], [shown(NextQuestInChain, &[545], NotApplied::AlreadyInQuestieDb)]);
+    }
+
+    use RelationField::{BreadcrumbForQuestId, Breadcrumbs, ParentQuest};
+
+    #[test]
+    fn never_makes_a_breadcrumb_questiedb_knows_a_prerequisite_of_its_quest() {
+        let records = records_of(
+            &[
+                // 1070 is the breadcrumb of 1085, known on the target's side.
+                (1085, set(&[(PreQuestSingle, &[1070])])),
+                // Known on the breadcrumb's side only; 5000 is a real new prerequisite.
+                (1799, set(&[(PreQuestSingle, &[4965, 5000])])),
+                // QuestieDB's prerequisite stays; the breadcrumb is not added to it.
+                (1842, set(&[(PreQuestSingle, &[1839])])),
+            ],
+            &[
+                (1085, set(&[(Breadcrumbs, &[1070])])),
+                (4965, set(&[(BreadcrumbForQuestId, &[1799])])),
+                (1842, set(&[(PreQuestSingle, &[1848]), (Breadcrumbs, &[1839])])),
+            ],
+            NONE_OWNED,
+            &IndexMap::new(),
+        );
+
+        let breadcrumbs = |ids: &[QuestId]| NotApplied::Breadcrumbs { breadcrumbs: ids.to_vec() };
+        assert_eq!(records[&1085], [shown(PreQuestSingle, &[1070], breadcrumbs(&[1070]))]);
+        assert_eq!(
+            records[&1799],
+            [applied(PreQuestSingle, &[5000]), shown(PreQuestSingle, &[4965], breadcrumbs(&[4965]))]
+        );
+        assert_eq!(records[&1842], [shown(PreQuestSingle, &[1839], breadcrumbs(&[1839]))]);
+    }
+
+    #[test]
+    fn never_adds_a_prerequisite_that_comes_before_the_parent_quest_or_another_prerequisite() {
+        let records = records_of(
+            &[
+                // Chapter I is a child of 338, which requires 583.
+                (339, set(&[(PreQuestSingle, &[583])])),
+                // 3449, the parent of 3450, follows 3448 in a chain.
+                (3450, set(&[(PreQuestSingle, &[3448])])),
+                // 1119 comes before both 1120 and 1121, which 1122 already accepts.
+                (1122, set(&[(PreQuestSingle, &[1119])])),
+                // 7 is only one way into 8 (7 OR 9), so it is no part of 8's past: it applies.
+                (10, set(&[(PreQuestSingle, &[7])])),
+            ],
+            &[
+                (339, set(&[(ParentQuest, &[338])])),
+                (338, set(&[(PreQuestSingle, &[583])])),
+                (3450, set(&[(ParentQuest, &[3449])])),
+                (3448, set(&[(NextQuestInChain, &[3449])])),
+                (1122, set(&[(PreQuestSingle, &[1120, 1121])])),
+                (1120, set(&[(PreQuestSingle, &[1119])])),
+                (1121, set(&[(PreQuestSingle, &[1119])])),
+                (10, set(&[(PreQuestSingle, &[8])])),
+                (8, set(&[(PreQuestSingle, &[7, 9])])),
+            ],
+            NONE_OWNED,
+            &IndexMap::new(),
+        );
+
+        let implied = |before: &[QuestId]| NotApplied::Implied { before: before.to_vec() };
+        assert_eq!(records[&339], [shown(PreQuestSingle, &[583], implied(&[338]))]);
+        assert_eq!(records[&3450], [shown(PreQuestSingle, &[3448], implied(&[3449]))]);
+        assert_eq!(records[&1122], [shown(PreQuestSingle, &[1119], implied(&[1120, 1121]))]);
+        assert_eq!(records[&10], [applied(PreQuestSingle, &[7, 8])]);
+    }
+
+    #[test]
+    fn applies_a_new_chain_only_from_a_quest_fewer_than_three_quests_require() {
+        let records = records_of(
+            &[
+                // Welcome to the Jungle opens four quests: 194 is only the one taken first.
+                (583, set(&[(NextQuestInChain, &[194])])),
+                // Two quests require 205: the chain holds.
+                (205, set(&[(NextQuestInChain, &[95786])])),
+                (95786, set(&[(PreQuestSingle, &[205])])),
+            ],
+            &[
+                (185, set(&[(PreQuestSingle, &[583])])),
+                (190, set(&[(PreQuestSingle, &[583])])),
+                (194, set(&[(PreQuestSingle, &[583])])),
+                (338, set(&[(PreQuestSingle, &[583])])),
+                (206, set(&[(PreQuestGroup, &[205, 204])])),
+            ],
+            NONE_OWNED,
+            &IndexMap::new(),
+        );
+
+        assert_eq!(
+            records[&583],
+            [shown(
+                NextQuestInChain,
+                &[194],
+                NotApplied::OpensSeveral {
+                    opens: vec![185, 190, 194, 338]
+                }
+            )]
+        );
+        assert_eq!(records[&205], [applied(NextQuestInChain, &[95786])]);
     }
 
     fn claim(signal: &'static str, field: RelationField, score: f64, support: u32, contradict: u32) -> Claim<'static> {
