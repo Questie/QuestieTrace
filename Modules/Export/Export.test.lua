@@ -405,6 +405,55 @@ describe("Export.BuildExportPayload", function()
     assert.is_false(payload.hasExportableData)
     assert.equal(0, #payload.sessions)
   end)
+
+  it("should leave out the live session when asked to skip it", function()
+    env.QuestieTraceCharacter = {
+      sessions = { Encoded({ functions = {} }) },
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+
+    local payload, sourceSessions = Core.BuildExportPayload({ skipLiveSession = true })
+
+    assert.equal(1, #payload.sessions)
+    assert.same({ env.QuestieTraceCharacter.sessions[1] }, sourceSessions)
+  end)
+
+  it("should call yield before decoding each saved session", function()
+    env.QuestieTraceCharacter = { sessions = { Encoded({ functions = {} }), Encoded({ functions = {} }) } }
+    local yields = 0
+
+    Core.BuildExportPayload({ yield = function() yields = yields + 1 end })
+
+    assert.equal(2, yields)
+  end)
+
+  it("should ignore sessions saved or recorded after it started", function()
+    env.QuestieTraceCharacter = {
+      sessions = { Encoded({ functions = {} }) },
+      currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
+    }
+    local characterDb = env.QuestieTraceCharacter
+
+    local payload = Core.BuildExportPayload({
+      yield = function()
+        table.insert(characterDb.sessions, Encoded({ functions = {} }))
+        table.insert(characterDb.currentSession.events, { t = 1, e = "LATER" })
+      end,
+    })
+
+    assert.equal(2, #payload.sessions)
+    assert.equal(1, #payload.sessions[2].events)
+  end)
+
+  it("should export the given saved sessions instead of the stored ones", function()
+    local given = Encoded({ functions = {} })
+    env.QuestieTraceCharacter = { sessions = { Encoded({ functions = {} }), Encoded({ functions = {} }) } }
+
+    local payload, sourceSessions = Core.BuildExportPayload({ savedSessions = { given } })
+
+    assert.equal(1, #payload.sessions)
+    assert.same({ given }, sourceSessions)
+  end)
 end)
 
 ---@param count integer

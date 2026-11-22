@@ -298,6 +298,7 @@ function Core.ShowExportWindow()
     exportFrame = BuildExportFrame()
   end
 
+
   -- Build once: reused for the hasExportableData check, the encoded string,
   -- and deleting reported sessions, so all three agree on the same data.
   local payload, sourceSessions = Core.BuildExportPayload()
