@@ -38,22 +38,22 @@ const MIN_SERVER_DROP_CHARACTERS: usize = 2;
 pub const MIN_COVERAGE_CHARACTERS: usize = 2;
 
 /// Everything the episodes said about one pair.
-pub struct PairTally<'e> {
+pub struct PairTally {
     pub pair: Pair,
-    /// Characters per observation kind.
-    pub characters: BTreeMap<ObservationKind, FxHashSet<&'e str>>,
+    /// Characters per observation kind, as [`crate::signals::CharacterIds`].
+    pub characters: BTreeMap<ObservationKind, FxHashSet<u32>>,
     /// The first observation of each kind, as the example a reviewer sees.
     pub examples: BTreeMap<ObservationKind, Evidence>,
 }
 
-impl PairTally<'_> {
+impl PairTally {
     fn count(&self, kind: ObservationKind) -> usize {
         self.characters.get(&kind).map_or(0, FxHashSet::len)
     }
 
     /// Distinct characters with an observation of any of `kinds`.
     fn characters_of(&self, kinds: impl IntoIterator<Item = ObservationKind>) -> usize {
-        let characters: FxHashSet<&str> = kinds.into_iter().flat_map(|kind| self.characters.get(&kind)).flatten().copied().collect();
+        let characters: FxHashSet<u32> = kinds.into_iter().flat_map(|kind| self.characters.get(&kind)).flatten().copied().collect();
         characters.len()
     }
 }
@@ -61,19 +61,20 @@ impl PairTally<'_> {
 /// Observations of every episode, per pair, in the order pairs were first observed (which decides
 /// ties further on).
 #[derive(Default)]
-pub struct Tally<'e> {
-    pub pairs: FxIndexMap<Pair, PairTally<'e>>,
+pub struct Tally {
+    pub pairs: FxIndexMap<Pair, PairTally>,
 }
 
-impl<'e> Tally<'e> {
-    pub fn add(&mut self, character_key: &'e str, observations: Vec<Observation>) {
+impl Tally {
+    /// Adds one episode's observations; `character` is its character's id.
+    pub fn add(&mut self, character: u32, observations: Vec<Observation>) {
         for Observation { pair, kind, evidence } in observations {
             let tally = self.pairs.entry(pair).or_insert_with(|| PairTally {
                 pair,
                 characters: BTreeMap::new(),
                 examples: BTreeMap::new(),
             });
-            tally.characters.entry(kind).or_default().insert(character_key);
+            tally.characters.entry(kind).or_default().insert(character);
             tally.examples.entry(kind).or_insert(evidence);
         }
     }
@@ -203,15 +204,15 @@ pub fn covered_quests(tally: &Tally, min_characters: usize) -> Vec<QuestId> {
     covered.into_iter().collect()
 }
 
-pub struct BreadcrumbResult<'e> {
-    pub tally: Tally<'e>,
+pub struct BreadcrumbResult {
+    pub tally: Tally,
     /// Judged pairs in the order they were first observed.
     pub judgements: Vec<PairJudgement>,
     pub candidates: Vec<RelationCandidate>,
     pub covered_quest_ids: Vec<QuestId>,
 }
 
-pub fn judge_tally<'e>(tally: Tally<'e>, catalog: &QuestCatalog) -> BreadcrumbResult<'e> {
+pub fn judge_tally(tally: Tally, catalog: &QuestCatalog) -> BreadcrumbResult {
     let judgements: Vec<PairJudgement> = tally.pairs.values().filter_map(judge_pair).collect();
     BreadcrumbResult {
         candidates: to_candidates(&judgements, catalog),

@@ -14,8 +14,9 @@ mod observe;
 use self::infer::{judge_tally, BreadcrumbResult, Tally, MIN_COVERAGE_CHARACTERS};
 use self::links::{BreadcrumbParams, LinkCollector};
 use self::observe::{observe_episode, ObservationKind};
-use super::{forever_episodes, to_json, Findings, Signal, SignalInput};
-use crate::model::{QuestCatalog, QuestEpisode, QuestId};
+use super::{forever_episodes, to_json, CharacterIds, Findings, Signal, SignalInput};
+use crate::episode_store::Episodes;
+use crate::model::{QuestCatalog, QuestId};
 use anyhow::Result;
 use rayon::prelude::*;
 use serde::Serialize;
@@ -34,16 +35,13 @@ impl Signal for Breadcrumbs {
     }
 
     fn run(&self, input: &SignalInput) -> Result<Findings> {
-        // Every episode at once, until this signal reads one bucket at a time.
-        let all = input.episodes.load_all()?;
         let params = BreadcrumbParams::default();
-        let episodes = forever_episodes(&all);
-        let result = infer(&episodes, input.catalog, &params);
+        let (result, read) = infer(input.episodes, input.catalog, &params)?;
         let catalog = input.catalog;
 
         eprintln!(
             "breadcrumbs: {} Forever episodes, {} observed linked pairs, {} optional+dependent, {} edges, {} covered quests",
-            episodes.len(),
+            read,
             result.tally.pairs.len(),
             result.judgements.len(),
             result.candidates.len() / 2,
@@ -71,7 +69,7 @@ impl Signal for Breadcrumbs {
         let report = json!({ "linkedPairs": result.tally.pairs.len(), "judged": review.len(), "pairs": review });
 
         Ok(Findings {
-            input_count: episodes.len(),
+            input_count: read,
             params: to_json(&FileParams {
                 tunables: &params,
                 min_coverage_characters: MIN_COVERAGE_CHARACTERS,
@@ -108,20 +106,32 @@ struct ReviewedPair<'a> {
     counts: &'a BTreeMap<ObservationKind, u32>,
 }
 
-/// The whole signal over `episodes`: links from all of them first, then each episode's
+/// The whole signal over the Forever episodes, and how many it read. Two passes, one bucket at a
+/// time: links from every episode first (observation needs all of them), then each episode's
 /// observations, tallied in episode order (the order pairs are first seen in decides ties).
-pub fn infer<'e>(episodes: &[&'e QuestEpisode], catalog: &QuestCatalog, params: &BreadcrumbParams) -> BreadcrumbResult<'e> {
+pub fn infer(episodes: &dyn Episodes, catalog: &QuestCatalog, params: &BreadcrumbParams) -> Result<(BreadcrumbResult, usize)> {
     let mut collector = LinkCollector::new(catalog, params);
-    for episode in episodes {
-        collector.add(episode);
-    }
+    let mut read = 0;
+    episodes.for_each_bucket(&mut |bucket| {
+        for episode in forever_episodes(bucket) {
+            collector.add(episode);
+            read += 1;
+        }
+        Ok(())
+    })?;
     let links = collector.finish();
-    let observations: Vec<_> = episodes.par_iter().map(|episode| observe_episode(episode, &links, catalog, params)).collect();
+
     let mut tally = Tally::default();
-    for (episode, observations) in episodes.iter().zip(observations) {
-        tally.add(&episode.character_key, observations);
-    }
-    judge_tally(tally, catalog)
+    let mut characters = CharacterIds::default();
+    episodes.for_each_bucket(&mut |bucket| {
+        let bucket = forever_episodes(bucket);
+        let observations: Vec<_> = bucket.par_iter().map(|episode| observe_episode(episode, &links, catalog, params)).collect();
+        for (episode, observations) in bucket.iter().zip(observations) {
+            tally.add(characters.id(&episode.character_key), observations);
+        }
+        Ok(())
+    })?;
+    Ok((judge_tally(tally, catalog), read))
 }
 
 #[cfg(test)]
@@ -129,6 +139,7 @@ mod tests {
     use super::infer::BreadcrumbResult;
     use super::links::{BreadcrumbParams, Pair};
     use super::observe::ObservationKind;
+    use crate::episode_store::{InMemory, PerCharacter};
     use crate::model::*;
     use crate::test_support::{catalog, catalog_quest, event, gossip, make_episode, npc};
 
@@ -199,9 +210,10 @@ mod tests {
         }
     }
 
-    fn run(episodes: &[QuestEpisode], quests: Vec<CatalogQuest>) -> BreadcrumbResult<'_> {
-        let episodes: Vec<&QuestEpisode> = episodes.iter().collect();
-        super::infer(&episodes, &catalog(quests), &BreadcrumbParams::default())
+    fn run(episodes: &[QuestEpisode], quests: Vec<CatalogQuest>) -> BreadcrumbResult {
+        let (result, read) = super::infer(&InMemory(episodes), &catalog(quests), &BreadcrumbParams::default()).unwrap();
+        assert_eq!(read, episodes.len());
+        result
     }
 
     fn edges(result: &BreadcrumbResult) -> Vec<String> {
@@ -224,6 +236,19 @@ mod tests {
         assert!((result.candidates[0].score - 0.92 * 0.9375).abs() <= 0.001, "{}", result.candidates[0].score);
         assert_eq!(result.candidates[0].support, 4);
         assert_eq!(result.covered_quest_ids, [B, T]);
+    }
+
+    #[test]
+    fn finds_the_same_with_every_character_in_a_bucket_of_its_own() {
+        // The skipping characters come first and are observed against links only the later
+        // characters' turn-ins establish: links must come from every bucket before observing.
+        let episodes = [skips_breadcrumb(), does_breadcrumb(), skips_breadcrumb(), does_breadcrumb()];
+        let one_bucket = run(&episodes, base_quests());
+        let (per_character, _) = super::infer(&PerCharacter(&episodes), &catalog(base_quests()), &BreadcrumbParams::default()).unwrap();
+        assert!(!one_bucket.candidates.is_empty());
+        assert_eq!(per_character.candidates, one_bucket.candidates);
+        assert_eq!(per_character.covered_quest_ids, one_bucket.covered_quest_ids);
+        assert_eq!(per_character.judgements.len(), one_bucket.judgements.len());
     }
 
     #[test]
