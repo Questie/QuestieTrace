@@ -2,17 +2,21 @@
 //! `extract/merge/quest/relations.ts`.
 //!
 //! A giver seen in few sessions is more likely a misattributed one (a stale questnpc, say) than a
-//! real one, and a wrong giver does more harm than a missing one.
+//! real one, and a wrong giver does more harm than a missing one. The same holds for a giver seen
+//! in a tiny share of the sessions of the quest's strongest giver, such as an object that only
+//! replaces the real starter after the previous quest was turned in.
 
 use crate::observation::{Observation, SessionId};
 use std::collections::{BTreeMap, HashSet};
 
 /// A giver is exported only once this many sessions saw it.
 pub const MIN_GIVER_SESSIONS: usize = 5;
+/// ... and at least this share of the sessions of the quest's strongest giver, of any kind.
+pub const MIN_GIVER_SHARE: f64 = 0.005;
 
-/// Per giver kind (`KINDS` of them), the ids seen in at least [`MIN_GIVER_SESSIONS`] sessions,
-/// ascending. `giver` gives an observation's kind (an index below `KINDS`) and id; id 0 is no
-/// giver.
+/// Per giver kind (`KINDS` of them), the ids seen in at least [`MIN_GIVER_SESSIONS`] sessions and
+/// in at least [`MIN_GIVER_SHARE`] of the strongest giver's sessions, ascending. `giver` gives an
+/// observation's kind (an index below `KINDS`) and id; id 0 is no giver.
 pub fn supported_ids<T, const KINDS: usize>(observations: &[Observation<T>], giver: impl Fn(&T) -> (usize, i64)) -> [Vec<i64>; KINDS] {
     let mut sessions_by_id: [BTreeMap<i64, HashSet<SessionId>>; KINDS] = std::array::from_fn(|_| BTreeMap::new());
     for obs in observations {
@@ -21,10 +25,11 @@ pub fn supported_ids<T, const KINDS: usize>(observations: &[Observation<T>], giv
             sessions_by_id[kind].entry(id).or_default().insert(obs.session);
         }
     }
+    let strongest = sessions_by_id.iter().flat_map(|by_id| by_id.values().map(HashSet::len)).max().unwrap_or(0);
     sessions_by_id.map(|by_id| {
         by_id
             .into_iter()
-            .filter(|(_, sessions)| sessions.len() >= MIN_GIVER_SESSIONS)
+            .filter(|(_, sessions)| sessions.len() >= MIN_GIVER_SESSIONS && sessions.len() as f64 >= strongest as f64 * MIN_GIVER_SHARE)
             .map(|(id, _)| id)
             .collect()
     })
@@ -112,6 +117,34 @@ mod tests {
     #[test]
     fn gives_no_starter_value_when_no_starter_has_enough_sessions() {
         assert_eq!(starters(&[(S::Item(750), 4, 1)]), None);
+    }
+
+    // describe("quest giver share of the strongest giver")
+
+    #[test]
+    fn drops_a_starter_seen_in_under_half_a_percent_of_the_strongest_starters_sessions() {
+        assert_eq!(
+            starters(&[(S::Creature(265813), 1001, 1), (S::Creature(1252), 5, 1)]),
+            started(&[265813], &[], &[])
+        );
+    }
+
+    #[test]
+    fn keeps_a_starter_seen_in_half_a_percent_of_the_strongest_starters_sessions() {
+        assert_eq!(
+            starters(&[(S::Creature(265813), 1000, 1), (S::Object(2843), 5, 1)]),
+            started(&[265813], &[2843], &[])
+        );
+    }
+
+    #[test]
+    fn drops_a_finisher_seen_in_under_half_a_percent_of_the_strongest_finishers_sessions() {
+        assert_eq!(finishers(&[(F::Creature(4453), 1001, 1), (F::Object(2843), 5, 1)]), finished(&[4453], &[]));
+    }
+
+    #[test]
+    fn compares_a_starter_with_the_strongest_starter_of_any_kind() {
+        assert_eq!(starters(&[(S::Item(750), 1001, 1), (S::Creature(1252), 5, 1)]), started(&[], &[], &[750]));
     }
 
     #[test]
