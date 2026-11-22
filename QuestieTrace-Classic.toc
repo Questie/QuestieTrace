@@ -44,6 +44,7 @@ Widgets/Dialog.lua
 Widgets/Dialog.xml
 Modules/Consent.lua
 Modules/Consent.xml
+Modules/Settings.lua
 
 Modules/Trackers/PlayerIdentity.lua
 Modules/Trackers/UnitLevel.lua

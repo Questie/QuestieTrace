@@ -65,6 +65,30 @@ local consentLocales = {
     ["zhCN"] = "数据收集已停用（之前已拒绝）。使用 \"/qlt consent\" 可重新启用。", -- 🤖
     ["zhTW"] = "資料收集已停用（先前已拒絕）。使用 \"/qlt consent\" 可重新啟用。", -- 🤖
   },
+  ["Allow data collection"] = {
+    ["enUS"] = true,
+    ["deDE"] = "Datensammlung erlauben", -- 🤖
+    ["esES"] = "Permitir la recopilación de datos", -- 🤖
+    ["esMX"] = "Permitir la recopilación de datos", -- 🤖
+    ["frFR"] = "Autoriser la collecte de données", -- 🤖
+    ["koKR"] = "데이터 수집 허용", -- 🤖
+    ["ptBR"] = "Permitir a coleta de dados", -- 🤖
+    ["ruRU"] = "Разрешить сбор данных", -- 🤖
+    ["zhCN"] = "允许收集数据", -- 🤖
+    ["zhTW"] = "允許收集資料", -- 🤖
+  },
+  ["Allow QuestieTrace to collect anonymized gameplay data, such as quest progress, positions, and loot. Your data stays on your machine unless you choose to export and share it."] = {
+    ["enUS"] = true,
+    ["deDE"] = "Erlaube QuestieTrace, anonymisierte Spieldaten wie Questfortschritt, Positionen und Beute zu sammeln. Deine Daten bleiben auf deinem Rechner, es sei denn, du entscheidest dich, sie zu exportieren und zu teilen.", -- 🤖
+    ["esES"] = "Permite que QuestieTrace recopile datos de juego anonimizados, como progreso de misiones, posiciones y botín. Tus datos permanecen en tu computadora a menos que decidas exportarlos y compartirlos.", -- 🤖
+    ["esMX"] = "Permite que QuestieTrace recopile datos de juego anonimizados, como progreso de misiones, posiciones y botín. Tus datos permanecen en tu computadora a menos que decidas exportarlos y compartirlos.", -- 🤖
+    ["frFR"] = "Autorise QuestieTrace à collecter des données de jeu anonymisées, telles que la progression des quêtes, les positions et le butin. Vos données restent sur votre ordinateur, sauf si vous choisissez de les exporter et de les partager.", -- 🤖
+    ["koKR"] = "QuestieTrace가 퀘스트 진행 상황, 위치, 전리품 등의 익명화된 게임 데이터를 수집하도록 허용합니다. 당신의 데이터는 당신의 기기에 보관되며, 당신이 내보내고 공유하기로 선택하지 않는 한 공유되지 않습니다.", -- 🤖
+    ["ptBR"] = "Permite que o QuestieTrace colete dados de jogo anonimizados, como progresso de missões, posições e saques. Seus dados permanecem no seu computador, a menos que você decida exportá-los e compartilhá-los.", -- 🤖
+    ["ruRU"] = "Разрешить QuestieTrace собирать анонимизированные данные игровой сессии, такие как прогресс заданий, позиции и добыча. Ваши данные остаются на вашем компьютере, если вы сами не решите экспортировать и поделиться ими.", -- 🤖
+    ["zhCN"] = "允许 QuestieTrace 收集匿名游戏数据（如任务进度、位置和战利品）。您的数据保留在您的计算机上，除非您选择导出并分享。", -- 🤖
+    ["zhTW"] = "允許 QuestieTrace 收集匿名遊戲資料（如任務進度、位置和戰利品）。您的資料保留在您的電腦上，除非您選擇匯出並分享。", -- 🤖
+  },
 }
 
 

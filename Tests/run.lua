@@ -1516,6 +1516,26 @@ local function TestConsentAcceptImmediatelyStartsCapture()
   assert(runtime.core.GetCaptureState() == "running", "Capture must start immediately when consent is accepted")
 end
 
+local function TestSettingsPanelIsRegisteredOnLoginAfterSavedVariables()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua", "Modules/Settings.lua" })
+  local env = runtime.env
+  local registered = {}
+  MockIsResting(runtime, false)
+  env.Settings = {
+    VarType = { Boolean = "boolean" },
+    RegisterVerticalLayoutCategory = function(name) return { name = name } end,
+    RegisterProxySetting = function(_, _, _, _, _, getValue) registered.getValue = getValue return {} end,
+    CreateCheckbox = function() end,
+    RegisterAddOnCategory = function(category) registered.category = category end,
+  }
+  assert(registered.category == nil, "The settings panel must not be registered before login")
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  assert(registered.category and registered.category.name == "QuestieTrace", "The settings panel must be registered on login")
+  assert(registered.getValue() == true, "The checkbox must reflect the saved consent")
+end
+
 local function TestConsentPromptReopensWithoutChangingConsent()
   local runtime = NewRuntime({})
   runtime.env.QuestieTrace.settings.dataCollectionConsent = false
@@ -3557,6 +3577,7 @@ local tests = {
   { name = "consent accepted prints reminder and allows auto-start", run = TestConsentAcceptedPrintsReminderAndAllowsAutoStart },
   { name = "consent accept immediately starts capture", run = TestConsentAcceptImmediatelyStartsCapture },
   { name = "declining consent stops and discards an active capture", run = TestDecliningConsentStopsAndDiscardsActiveCapture },
+  { name = "should register the settings panel on login", run = TestSettingsPanelIsRegisteredOnLoginAfterSavedVariables },
   { name = "consent prompt reopens without changing consent", run = TestConsentPromptReopensWithoutChangingConsent },
   { name = "accepting consent preserves an active capture", run = TestAcceptingConsentPreservesActiveCapture },
   { name = "dialog uses modern assets when available", run = TestDialogUsesModernAssetsWhenAvailable },
