@@ -1,7 +1,9 @@
 //! Test helpers: sessions described as a few readable facts.
 
-use super::history::{build_histories, unstable_quests, HistoryParams};
+use super::history::HistoryParams;
 use super::population::Population;
+use super::read_histories;
+use crate::episode_store::InMemory;
 use crate::model::*;
 use crate::test_support::{catalog, catalog_quest, event, make_episode};
 
@@ -121,9 +123,7 @@ pub fn catalog_of(ids: impl IntoIterator<Item = QuestId>) -> QuestCatalog {
 }
 
 /// The population the signal would build from `episodes`.
-pub fn population_of<'e>(episodes: &'e [QuestEpisode], catalog: &'e QuestCatalog) -> Population<'e> {
-    let episodes: Vec<&QuestEpisode> = episodes.iter().collect();
-    let ignore = unstable_quests(&episodes, catalog);
-    let (histories, _) = build_histories(&episodes, &HistoryParams { max_initial_loss: 0.1 }, &ignore);
-    Population::new(histories, catalog, &ignore)
+pub fn population_of<'c>(episodes: &[QuestEpisode], catalog: &'c QuestCatalog) -> Population<'c> {
+    let read = read_histories(&InMemory(episodes), catalog, &HistoryParams { max_initial_loss: 0.1 }).expect("episodes in memory always read");
+    Population::new(read.histories, catalog, &read.ignore)
 }

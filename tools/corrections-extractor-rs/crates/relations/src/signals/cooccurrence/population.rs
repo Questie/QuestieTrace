@@ -14,30 +14,30 @@ pub struct Cell {
     pub allows: Vec<bool>,
 }
 
-pub struct Character<'e> {
-    pub history: CharacterHistory<'e>,
+pub struct Character {
+    pub history: CharacterHistory,
     /// Index into [`Population::cells`].
     pub cell: usize,
     /// Quest indexes this character completed, ascending.
     pub done: Vec<usize>,
 }
 
-pub struct Population<'e> {
+pub struct Population<'c> {
     /// Catalog quests the signal reasons about, by ascending id; a quest index points in here.
-    pub quests: Vec<&'e CatalogQuest>,
+    pub quests: Vec<&'c CatalogQuest>,
     index_of: FxHashMap<QuestId, usize>,
     /// In the order their first character appears.
     pub cells: Vec<Cell>,
     /// In history order; a character index points in here.
-    pub characters: Vec<Character<'e>>,
+    pub characters: Vec<Character>,
     /// Per quest index, the characters that took it (held, accepted or completed), ascending.
     pub takers: Vec<Vec<usize>>,
     /// Per quest index, the characters that completed it, ascending.
     pub completers: Vec<Vec<usize>>,
 }
 
-impl<'e> Population<'e> {
-    pub fn new(histories: Vec<CharacterHistory<'e>>, catalog: &'e QuestCatalog, ignore: &FxHashSet<QuestId>) -> Self {
+impl<'c> Population<'c> {
+    pub fn new(histories: Vec<CharacterHistory>, catalog: &'c QuestCatalog, ignore: &FxHashSet<QuestId>) -> Self {
         let quests: Vec<&CatalogQuest> = catalog.quests.values().filter(|quest| !ignore.contains(&quest.id)).collect();
         let index_of: FxHashMap<QuestId, usize> = quests.iter().enumerate().map(|(index, quest)| (quest.id, index)).collect();
 

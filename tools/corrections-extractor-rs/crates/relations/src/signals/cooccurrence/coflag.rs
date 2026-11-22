@@ -17,7 +17,7 @@
 
 use super::history::{held_together, Stamp, When};
 use super::population::{Character, Population};
-use crate::model::{Evidence, QuestEventKind, QuestId, SessionTime};
+use crate::model::{Evidence, QuestId, SessionTime};
 use crate::text::to_fixed;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -175,30 +175,24 @@ fn observations_of(character: &Character, population: &Population, window_second
     let mut result = Vec::new();
     for (session, mut completions) in by_session {
         completions.sort_by(|x, y| x.1.total_cmp(&y.1));
-        let episode = history.sessions[session].episode;
-        let handed_in: FxHashSet<QuestId> = episode
-            .quest_events
-            .iter()
-            .filter(|event| event.kind == QuestEventKind::TurnedIn)
-            .map(|event| event.quest_id)
-            .collect();
+        let session = &history.sessions[session];
         for (i, &(first, first_t)) in completions.iter().enumerate() {
             for &(second, second_t) in completions[i + 1..].iter().take_while(|(_, t)| t - first_t <= window_seconds) {
                 let pair = (first.min(second), first.max(second));
                 let (a, b) = (population.quests[pair.0].id, population.quests[pair.1].id);
-                if handed_in.contains(&a) && handed_in.contains(&b) {
+                if session.turned_in(a) && session.turned_in(b) {
                     continue;
                 }
-                let outcome = match [a, b].into_iter().find(|id| handed_in.contains(id)) {
+                let outcome = match [a, b].into_iter().find(|&id| session.turned_in(id)) {
                     Some(turned_in) => format!(", only {turned_in} turned in"),
                     None => ", neither turned in".to_owned(),
                 };
                 result.push(Observation {
                     pair,
-                    turned_in_a: handed_in.contains(&a),
-                    turned_in_b: handed_in.contains(&b),
+                    turned_in_a: session.turned_in(a),
+                    turned_in_b: session.turned_in(b),
                     evidence: Evidence {
-                        reference: episode.key.clone(),
+                        reference: session.key.clone(),
                         t: Some(first_t),
                         text: format!(
                             "character {}: {a} and {b} became completed {}s apart{outcome}",
