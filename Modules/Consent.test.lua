@@ -167,4 +167,54 @@ describe("Consent", function()
       assert.is_false(remindersStarted)
     end)
   end)
+
+  describe("SetConsent", function()
+    it("should record consent, start capture and share reminders when granted", function()
+      local captureStarted, remindersStarted = false, false
+      Core.StartCapture = function() captureStarted = true end
+      Core.StartShareReminders = function() remindersStarted = true end
+
+      Core.SetConsent(true)
+
+      assert.is_true(env.QuestieTrace.settings.dataCollectionConsent)
+      assert.is_true(captureStarted)
+      assert.is_true(remindersStarted)
+    end)
+
+    it("should not start a second capture when one is already running", function()
+      local captureStarted = false
+      Core.GetCaptureState = function() return "running" end
+      Core.StartCapture = function() captureStarted = true end
+
+      Core.SetConsent(true)
+
+      assert.is_false(captureStarted)
+    end)
+
+    it("should record the decline and discard the capture when revoked", function()
+      env.QuestieTrace.settings.dataCollectionConsent = true
+      local discarded = false
+      Core.DiscardCapture = function() discarded = true end
+
+      Core.SetConsent(false)
+
+      assert.is_false(env.QuestieTrace.settings.dataCollectionConsent)
+      assert.is_true(discarded)
+    end)
+
+    it("should hide the consent prompt", function()
+      local hidden = false
+      local frame = {
+        Text = { SetText = function() end },
+        AcceptButton = { SetText = function() end, SetScript = function() end },
+        DeclineButton = { SetText = function() end, SetScript = function() end },
+        Hide = function() hidden = true end,
+      }
+      Core.OnConsentFrameLoad(frame)
+
+      Core.SetConsent(false)
+
+      assert.is_true(hidden)
+    end)
+  end)
 end)

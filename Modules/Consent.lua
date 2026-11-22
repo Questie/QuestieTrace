@@ -31,22 +31,33 @@ function Core.OnConsentFrameLoad(frame)
   frame.DeclineButton:SetText(NO or "No")
 
   frame.AcceptButton:SetScript("OnClick", function()
-    frame:Hide()
-    QuestieTrace.settings.dataCollectionConsent = true
+    Core.SetConsent(true)
+  end)
+
+  frame.DeclineButton:SetScript("OnClick", function()
+    Core.SetConsent(false)
+  end)
+end
+
+--- Grant or revoke consent, from the prompt or from the settings checkbox.
+---@param granted boolean
+function Core.SetConsent(granted)
+  if consentFrame then
+    consentFrame:Hide()
+  end
+  QuestieTrace.settings.dataCollectionConsent = granted
+
+  if granted then
     Core.PrintConsentReminder()
     if Core.GetCaptureState() == "idle" then
       Core.StartCapture()
     end
     Core.StartShareReminders()
-  end)
-
-  frame.DeclineButton:SetScript("OnClick", function()
-    frame:Hide()
-    QuestieTrace.settings.dataCollectionConsent = false
+  else
     -- Revoking consent discards any active capture, rather than saving it.
     Core.DiscardCapture()
     Core.Print(l10n("You declined data collection. If you change your mind, run \"/qlt consent\"."))
-  end)
+  end
 end
 
 --- Ask for consent without entering Blizzard's shared StaticPopup lists.
