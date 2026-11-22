@@ -57,9 +57,11 @@ for one last comparison.
   (2026-11-22) on the 5% sample, 53 s against 14 min 52 s;
   `tools/corrections-extractor-rs/PARITY.md` holds the parity point and how to catch up again.
   The full archive was last compared as of #129: 7 min 22 s against 101 min.
-- **Rust relations:** natural Rust, same values as Exporters' TypeScript pipeline on a 5% sample;
-  11 min on the full archive. `scripts/relations.sh` checks inputs, fetches the scraper databases
-  into the gitignored `data/scraper/` and runs it.
+- **Rust relations:** natural Rust, same values as Exporters' TypeScript pipeline on a 5% sample.
+  No step holds every episode (an on-disk episode store read one bucket of characters at a time):
+  14.5 min and 4.3 GB on the full archive of November 23 (200k submissions) on 16 threads.
+  `scripts/relations.sh` checks inputs, fetches the scraper databases into the gitignored
+  `data/scraper/` and runs it.
 - **What the TypeScript extractor does that the Rust one does not** (from `docs/data-flow.md`):
   - reads new submissions straight from the OVH bucket (rclone, batches of 500); Rust reads a
     local trace-data checkout;

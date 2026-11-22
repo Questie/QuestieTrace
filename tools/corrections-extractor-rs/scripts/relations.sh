@@ -88,7 +88,7 @@ note "scraper: $scraper"
 
 # --- memory -----------------------------------------------------------------------------------
 available_gb=$(($(awk '/MemAvailable/ {print $2}' /proc/meminfo) / 1024 / 1024))
-[ "$available_gb" -ge 16 ] || note "WARNING: $available_gb GB of memory available; the full archive needs about 15 GB"
+[ "$available_gb" -ge 6 ] || note "WARNING: $available_gb GB of memory available; a full run needs about 4.5 GB"
 
 # --- run --------------------------------------------------------------------------------------
 cargo build --release --quiet --manifest-path "$tool/Cargo.toml" -p relations

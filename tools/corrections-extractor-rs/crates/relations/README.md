@@ -24,7 +24,9 @@ databases, free memory), fetches the latest scraper release into the gitignored 
 (`scripts/fetch-scraper.sh`: the raw Forever and Era page caches, checked against the release
 manifest, kept between runs), builds and runs the pipeline. Trace-data defaults to the checkout next
 to QuestieTrace (`TRACE_DATA_DIR`), the scraper release to the latest (`SCRAPER_TAG`, or
-`SCRAPER_DIR` for a folder of your own); the full archive takes about 11 minutes and 15 GB of memory.
+`SCRAPER_DIR` for a folder of your own). On the full archive of November 23 (200k submissions, 998k
+episodes) a run took 14.5 minutes on 16 threads, most of it decoding submissions, and at most 4.3 GB
+of memory; memory no longer grows with the archive, only the time does.
 
 The binary itself takes everything from the environment:
 
