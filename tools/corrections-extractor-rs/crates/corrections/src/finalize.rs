@@ -416,6 +416,7 @@ fn relations_to_new_entities(starters: Option<Ids>, finishers: Option<Ids>, max:
 /// requiredRaces from the factions that saw each quest, the reactions of its NPC starters, and
 /// the factions that saw the other quests of those starters.
 fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, started_by::StartedByValue>) -> IndexMap<i64, u64> {
+    let non_npc_starter = acc.started_by.merge(started_by::has_non_npc_starter);
     let npc_reactions = acc.npc_friendly_to_faction.merge(summarize_reactions);
     let quest_factions = acc.quest_factions.merge(merge_quest_factions);
     let mut factions_by_starter: IndexMap<i64, IndexMap<i64, &IndexSet<Faction>>> = IndexMap::new();
@@ -428,7 +429,9 @@ fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, started_by::Star
     for (&quest_id, seen_factions) in &quest_factions {
         let starters = started_by.get(&quest_id);
         let npc_starters: Vec<ReactionSummary> = match starters {
-            Some(s) if s.objects.is_empty() && s.items.is_empty() => s.creatures.iter().map(|id| npc_reactions.get(id).copied().unwrap_or_default()).collect(),
+            Some(s) if non_npc_starter.get(&quest_id) != Some(&true) => {
+                s.creatures.iter().map(|id| npc_reactions.get(id).copied().unwrap_or_default()).collect()
+            }
             _ => Vec::new(),
         };
         let mut sibling_factions = IndexSet::new();

@@ -55,6 +55,14 @@ pub fn merge(observations: &[Observation<StartedByStarter>]) -> Option<StartedBy
     (!creatures.is_empty() || !objects.is_empty() || !items.is_empty()).then_some(StartedByValue { creatures, objects, items })
 }
 
+/// Whether any starter is an object or item, however few sessions saw it: it rules out reasoning
+/// about requiredRaces from NPC starters alone.
+pub fn has_non_npc_starter(observations: &[Observation<StartedByStarter>]) -> bool {
+    observations
+        .iter()
+        .any(|obs| matches!(obs.value, StartedByStarter::Object(id) | StartedByStarter::Item(id) if id != 0))
+}
+
 /// GetQuestID() during the interaction; 0 and an ambiguous sample are no quest.
 fn quest_id_at(lookup: &InteractionLookup) -> Option<f64> {
     match lookup.get("GetQuestID", &[]) {

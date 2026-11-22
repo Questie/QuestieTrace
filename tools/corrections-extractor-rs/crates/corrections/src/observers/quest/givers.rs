@@ -147,6 +147,20 @@ mod tests {
         assert_eq!(starters(&[(S::Item(750), 1001, 1), (S::Creature(1252), 5, 1)]), started(&[], &[], &[750]));
     }
 
+    // describe("hasNonNpcStarter")
+
+    #[test]
+    fn has_non_npc_starter_sees_an_item_starter_too_rare_to_be_exported() {
+        let observations: Vec<_> = [seen(S::Creature(1077), 5, 1), seen(S::Item(99), 1, 1)].concat();
+        assert_eq!(started_by::merge(&observations), started(&[1077], &[], &[]));
+        assert!(started_by::has_non_npc_starter(&observations));
+    }
+
+    #[test]
+    fn has_non_npc_starter_is_false_when_only_creatures_started_the_quest() {
+        assert!(!started_by::has_non_npc_starter(&seen(S::Creature(1077), 5, 1)));
+    }
+
     #[test]
     fn lists_the_supported_ids_of_each_kind_ascending() {
         assert_eq!(
