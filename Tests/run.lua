@@ -2292,6 +2292,38 @@ local function TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits()
     "UnitSubName must not record players, player pets, non-npc guids or other units")
 end
 
+local function TestEveryTrackerEventIsRegistered()
+  local files = {}
+  for path in io.open("QuestieTrace-Forever.toc"):read("*a"):gmatch("(Modules/Trackers/[%w]+%.lua)") do
+    files[#files + 1] = path
+  end
+  local runtime = NewRuntime(files)
+  local missing = {}
+  for event in pairs(runtime.core._trackerCallbacks) do
+    if not runtime.frame.registered[event] then missing[#missing + 1] = event end
+  end
+  table.sort(missing)
+  assert(#missing == 0, "Tracker events not registered on the main frame: " .. table.concat(missing, ", "))
+end
+
+local function TestMouseoverEventIsRecordedAndSampled()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local env = runtime.env
+  local guid = "Creature-0-1-1-1-1-000001"
+  env.UnitGUID = function(token) if token == "mouseover" then return guid end end
+  env.UnitName = function(token) if token == "mouseover" then return "Test NPC" end end
+
+  runtime.core.StartCapture("mouseover event test")
+  guid = "Creature-0-1-1-1-2-000002"
+  AdvanceTo(runtime, 1)
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  local session = Session(runtime)
+  local stream = session.functions.UnitGUID.mouseover
+  assert(stream[#stream].v == "Creature-0-1-1-1-2-000002", "mouseover change must be sampled from the event")
+  assert(session.events[#session.events].e == "UPDATE_MOUSEOVER_UNIT", "UPDATE_MOUSEOVER_UNIT must be recorded")
+end
+
 -- Merchant tracker tests
 local function TestMerchantClassicAPIRecordsItems()
   local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
@@ -3603,6 +3635,8 @@ local tests = {
   { name = "should redact player names in npc subname", run = TestUnitStateSanitizesSubName },
   { name = "should detect level lines by line type when UnitLevel exists", run = TestUnitStateUsesUnitLevelLineTypeWhenAvailable },
   { name = "should not record subname for players, player pets or other units", run = TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits },
+  { name = "should register every event a tracker listens to", run = TestEveryTrackerEventIsRegistered },
+  { name = "should record and sample the mouseover unit on UPDATE_MOUSEOVER_UNIT", run = TestMouseoverEventIsRecordedAndSampled },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },
   { name = "Merchant close probes known indices", run = TestMerchantCloseProbesKnownIndices },
