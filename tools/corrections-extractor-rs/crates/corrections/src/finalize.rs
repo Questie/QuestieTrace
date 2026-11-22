@@ -60,6 +60,16 @@ fn zone_coordinates(zones: impl IntoIterator<Item = (f64, Vec<[f64; 2]>)>) -> Js
     )
 }
 
+/// NPCs that can be spawned anywhere in the world, so their spawns and zoneID are never exported
+/// (TS emit/npc.ts).
+const SPAWN_ANYWHERE_NPC_IDS: [i64; 1] = [
+    271929, // Shen'dorei Windwell
+];
+
+fn without_spawn_anywhere<T>(values: IndexMap<i64, T>) -> IndexMap<i64, T> {
+    values.into_iter().filter(|(id, _)| !SPAWN_ANYWHERE_NPC_IDS.contains(id)).collect()
+}
+
 /// The values a merge decided to export (TS `onlyDefinedFacts`).
 fn only_defined<T>(values: IndexMap<i64, Option<T>>) -> IndexMap<i64, T> {
     values.into_iter().filter_map(|(id, value)| value.map(|value| (id, value))).collect()
@@ -287,10 +297,10 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     }
 
     let npc_level = only_defined(acc.npc_level.merge(level::merge));
-    let npc_spawns = merge_with_extra(&acc.npc_spawns, &npc_turn_in, |id, obs| {
+    let npc_spawns = without_spawn_anywhere(merge_with_extra(&acc.npc_spawns, &npc_turn_in, |id, obs| {
         spawns_merge::merge_spawns(obs, quest_npc_ids.contains(&id))
-    });
-    let npc_zones = merge_with_extra(&acc.npc_spawns, &npc_turn_in, |_, obs| spawns_merge::merge_zone_id(obs));
+    }));
+    let npc_zones = without_spawn_anywhere(merge_with_extra(&acc.npc_spawns, &npc_turn_in, |_, obs| spawns_merge::merge_zone_id(obs)));
     let mut npcs = Records::default();
     npcs.field("name", &acc.npc_name.aggregate_newest(), |name| Js::str(name));
     // "" means the NPC has no subname, which is Questie's default.
