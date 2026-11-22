@@ -8,8 +8,7 @@ are identical.
 
 ## Parity point
 
-Master `4dec2ad` (2026-11-22). The NPC and object changes up to it are still being merged on PR
-#137. The next catch-up starts after this commit.
+Master `4dec2ad` (2026-11-22). The next catch-up starts after this commit.
 
 ## 1. Scope the catch-up
 

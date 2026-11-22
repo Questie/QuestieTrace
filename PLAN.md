@@ -25,11 +25,12 @@ for one last comparison.
   style). The workspace's `README.md` and `DESIGN.md` explain the extractor (what must match the
   TypeScript tool, and why), `crates/relations/README.md` the relations pipeline.
 - **Branch and PR:** all of this work goes on `feat/relations-rs`, PR #137 to master: the Rust
-  conversion branch. Commit there, one commit per change. The owner works in this checkout:
-  never rebase or force-push; bring master in with a merge commit, and ask before that too.
-- **Data:** `~/projects/trace-data` (about 140,000 submissions, not a git checkout, synced from the
+  conversion branch. Commit there, one commit per change. The owner works in this checkout: ask
+  before bringing master in (rebase in a scratch worktree and check the trees, as
+  `tools/corrections-extractor-rs/PARITY.md` describes) and before pushing.
+- **Data:** `~/projects/trace-data` (about 200,000 submissions, not a git checkout, synced from the
   bucket). Both extractors take the same 5% sample (SHA-256 of the submission key), so samples
-  are comparable; develop on 5% (about 25 s in Rust), run the full archive at milestones.
+  are comparable; develop on 5% (about 1 min in Rust), run the full archive at milestones.
 - **Commands:**
   - Rust checks: `cd tools/corrections-extractor-rs && cargo fmt --check && cargo clippy
     --all-targets -- -D warnings && cargo test`.
@@ -52,8 +53,10 @@ for one last comparison.
 
 ## Where we start
 
-- **Rust extractor:** byte-identical to the TypeScript extractor as of #129 on the full archive,
-  7 min 22 s against 101 min. Behind master by three changes (below).
+- **Rust extractor:** byte-identical to master's TypeScript extractor as of `4dec2ad`
+  (2026-11-22) on the 5% sample, 53 s against 14 min 52 s;
+  `tools/corrections-extractor-rs/PARITY.md` holds the parity point and how to catch up again.
+  The full archive was last compared as of #129: 7 min 22 s against 101 min.
 - **Rust relations:** natural Rust, same values as Exporters' TypeScript pipeline on a 5% sample;
   11 min on the full archive. `scripts/relations.sh` checks inputs, fetches the scraper databases
   into the gitignored `data/scraper/` and runs it.
@@ -94,25 +97,20 @@ is understood: the commit message says what changed and why, with counts.
 Get answers to the four open decisions below before step 3; steps 0 to 2 do not depend on them.
 
 **0. Reference and gate (small).**
-- Bring master in first: merge `origin/master` into the branch (a merge commit, after asking the
-  owner). The branch's copy of `tools/corrections-extractor` is from before #131; after the merge
-  it is master's, and `scripts/parity.sh`, which archives `HEAD`, runs the right TypeScript.
-- Freeze a reference: the TypeScript extractor's output on the 5% sample (and the full archive,
-  about 100 min, on an idle machine), with the commit recorded next to it.
+- Done (2026-11-22): master is rebased in, and the 5% reference was built from master `4dec2ad`
+  (PARITY.md). Still to do: a reference on the full archive (about 100 min, on an idle machine),
+  with the commit recorded next to it.
 - Move `scripts/parity.sh` from byte comparison to value comparison: Lua modules line by line
   with timestamps masked, JSON by value (the relations compare tool already does both), and
   `meta.json`'s skipped and partial files compared by file name and count, not by reason text.
 
-**1. Catch up with master, written as plain Rust from the start (small).** Do this before
-anything else changes output: until then the Rust extractor knowingly differs from master's
-TypeScript in quest XP and quest finishers, and every later comparison would show these first.
-- #131: `questXp` is kept for every quest seen in Forever, not only Forever-new ids.
-- `8508e3b`: `finishedBy` gets the token rules `startedBy` already has (and the Rust port already
-  follows): `questnpc` at `QUEST_COMPLETE` and `QUEST_TURNED_IN`, `npc` only as the fallback for
-  gossip quest lists, objects only from `questnpc`.
-- `62cad93` (ADR 0005): `startedBy` and `finishedBy` observations record the unit token they came
-  from. TypeScript stores it in a store column; in Rust it feeds the audit output of step 3.
-- Gate: the same values as the step-0 reference.
+**1. Catch up with master. Done (2026-11-22).** Every TypeScript change up to master `4dec2ad`
+is ported in the existing style, one Rust commit per TypeScript commit, and the output is
+byte-identical on the 5% sample. The team keeps changing the TypeScript extractor until the
+switch: catch up again with `tools/corrections-extractor-rs/PARITY.md` before step 2 starts and
+before the switch. Left for step 3: `62cad93` (ADR 0005), the unit token of each startedBy and
+finishedBy observation, which TypeScript keeps in a store column; in Rust it feeds the audit
+output.
 
 **2. Remove the JavaScript layer (medium), one item per commit, most valuable first.**
 - Replace the `Js` model in `lua.rs` with typed records written straight to Lua.
