@@ -2868,6 +2868,7 @@ globals = {
     "SLASH_QUESTIETRACE1",
     "SLASH_QUESTIETRACE2",
     "Settings",
+    "CreateSettingsButtonInitializer",
     -----------------------------------------------------> busted unit testing
     "describe",
     "it",
