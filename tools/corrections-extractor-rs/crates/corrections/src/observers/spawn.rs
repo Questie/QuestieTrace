@@ -19,6 +19,8 @@ pub enum SpawnToken {
     QuestNpc,
     /// A quest turn-in POI attached to the quest's single finisher.
     QuestPoi,
+    /// A loot of an object: the player stood next to it. Only objects are looted.
+    Loot,
 }
 
 impl SpawnToken {
@@ -33,11 +35,12 @@ impl SpawnToken {
         }
     }
 
-    /// How close to the entity the player was: the merges rank positions by it.
+    /// How close to the entity the player was: the merges rank positions by it. (The npc merge's
+    /// table has no loot in TS; npc spawns never carry it.)
     pub fn priority(self) -> u32 {
         match self {
             SpawnToken::QuestPoi => 4,
-            SpawnToken::QuestNpc => 3,
+            SpawnToken::QuestNpc | SpawnToken::Loot => 3,
             SpawnToken::Npc => 2,
             SpawnToken::Target => 1,
         }
@@ -60,7 +63,7 @@ pub struct SpawnObservation {
 /// order `Object.entries` gives the Lua writer.
 pub type Spawns = Vec<(f64, Vec<[f64; 2]>)>;
 
-/// The zone the most observations were made in: questnpc counts 3, npc 2 and target 1. When
+/// The zone the most observations were made in: questnpc and loot count 3, npc 2 and target 1. When
 /// questpoi observations exist only they count. 0 (the schema default) without observations.
 /// The npc and object merges' mergeZoneID are identical.
 pub fn merge_zone_id(observations: &[Observation<SpawnObservation>]) -> f64 {

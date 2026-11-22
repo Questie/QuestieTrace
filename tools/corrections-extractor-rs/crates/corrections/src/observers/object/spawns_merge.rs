@@ -21,16 +21,17 @@ use std::collections::HashMap;
 /// Identical to the npc merge in TS.
 pub use crate::observers::spawn::{merge_zone_id, Spawns};
 
-/// Tokens whose coordinates replace all other sources, in priority order.
-const EXCLUSIVE_TOKENS: [SpawnToken; 2] = [SpawnToken::QuestPoi, SpawnToken::QuestNpc];
+/// Tokens whose coordinates replace all other sources, in priority order. A loot needs the
+/// player next to the object, like questnpc.
+const EXCLUSIVE_TOKENS: [SpawnToken; 3] = [SpawnToken::QuestPoi, SpawnToken::QuestNpc, SpawnToken::Loot];
 
 /// Max distance between all spawns of a zone for them to be one object.
 const OBJECT_COMPACT_EXTENT: f64 = 2.0;
 
 /// Merges spawn observations into the Questie spawns table.
 ///
-/// questpoi observations overrule all others, then questnpc: when present, only that token's
-/// coordinates are kept. Without either, each coordinate keeps its highest-priority token.
+/// questpoi observations overrule all others, then questnpc, then loot: when present, only that
+/// token's coordinates are kept. Without any, each coordinate keeps its highest-priority token.
 ///
 /// With `single_spawn_per_zone` (quest givers and enders, which stand still) only the cluster
 /// with the most observations is kept per zone. Otherwise, when several clusters of a zone all
@@ -111,7 +112,7 @@ fn is_compact(coords: &[[f64; 2]]) -> bool {
 mod tests {
     use super::*;
     use crate::observation::Confidence;
-    use crate::observers::spawn::SpawnToken::{self, Npc, QuestNpc, QuestPoi, Target};
+    use crate::observers::spawn::SpawnToken::{self, Loot, Npc, QuestNpc, QuestPoi, Target};
 
     fn obs(zone_id: f64, x: f64, y: f64, t: f64, token: SpawnToken) -> Observation<SpawnObservation> {
         Observation::new(2843, SpawnObservation { zone_id, x, y, token }, Confidence::High, t)
@@ -124,6 +125,12 @@ mod tests {
             .find(|(id, _)| *id == zone_id)
             .map(|(_, points)| points.clone())
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn only_keeps_loot_coordinates_when_an_object_was_looted() {
+        let observations = [obs(40.0, 30.0, 30.0, 1.0, Loot), obs(40.0, 60.0, 60.0, 2.0, Target)];
+        assert_eq!(merge_spawns(&observations, false), [(40.0, vec![[30.0, 30.0]])]);
     }
 
     #[test]
