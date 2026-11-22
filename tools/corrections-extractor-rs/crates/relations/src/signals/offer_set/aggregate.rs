@@ -110,18 +110,26 @@ pub struct FinisherIndex<'a> {
 
 impl<'a> FinisherIndex<'a> {
     pub fn new<'e>(catalog: &'a QuestCatalog, episodes: impl IntoIterator<Item = &'e QuestEpisode>) -> Self {
-        let mut turn_ins: FxHashMap<QuestId, FxHashSet<GiverRef>> = FxHashMap::default();
+        let mut index = FinisherIndex {
+            catalog,
+            turn_ins: FxHashMap::default(),
+        };
         for episode in episodes {
-            for event in &episode.quest_events {
-                if let Some(giver) = event
-                    .giver
-                    .filter(|giver| event.kind == QuestEventKind::TurnedIn && giver.kind != GiverKind::Item)
-                {
-                    turn_ins.entry(event.quest_id).or_default().insert(giver);
-                }
+            index.add(episode);
+        }
+        index
+    }
+
+    /// Adds the givers `episode` turned quests in at.
+    pub fn add(&mut self, episode: &QuestEpisode) {
+        for event in &episode.quest_events {
+            if let Some(giver) = event
+                .giver
+                .filter(|giver| event.kind == QuestEventKind::TurnedIn && giver.kind != GiverKind::Item)
+            {
+                self.turn_ins.entry(event.quest_id).or_default().insert(giver);
             }
         }
-        FinisherIndex { catalog, turn_ins }
     }
 
     /// Whether `quest_id` is turned in at any of `givers`.
