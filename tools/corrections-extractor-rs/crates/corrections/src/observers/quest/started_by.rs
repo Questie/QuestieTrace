@@ -411,20 +411,26 @@ mod tests {
     #[test]
     fn prefers_a_questnpc_object_over_a_conflicting_npc_creature() {
         let session = session_json(
-            json!({ "UnitGUID": { "questnpc": [sample(3.0, 3.002, object_guid(410369))], "npc": [sample(3.0, 3.002, creature_guid(276172))] } }),
-            vec![trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)])],
+            json!({
+                "GetQuestID": [sample(0.0, 0.0, json!(99196))],
+                "UnitGUID": { "questnpc": [sample(3.0, 3.002, object_guid(410369))], "npc": [sample(3.0, 3.002, creature_guid(276172))] },
+            }),
+            vec![trace_event("QUEST_DETAIL", 3.0, 3.001, &[json!(0)])],
         );
         assert_eq!(values(&session), [Object(410369)]);
     }
 
     #[test]
-    fn does_not_fall_back_to_an_npc_creature_at_quest_accepted_when_questnpc_is_nil() {
+    fn does_not_fall_back_to_an_npc_creature_at_quest_detail_when_questnpc_is_nil() {
         let session = session_json(
-            json!({ "UnitGUID": {
-                "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.002, None)],
-                "npc": [sample(3.0, 3.002, creature_guid(276172))],
-            } }),
-            vec![trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)])],
+            json!({
+                "GetQuestID": [sample(0.0, 0.0, json!(99196))],
+                "UnitGUID": {
+                    "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.002, None)],
+                    "npc": [sample(3.0, 3.002, creature_guid(276172))],
+                },
+            }),
+            vec![trace_event("QUEST_DETAIL", 3.0, 3.001, &[json!(0)])],
         );
         assert_eq!(observed(&session), []);
     }
@@ -483,9 +489,12 @@ mod tests {
     #[test]
     fn uses_the_next_raw_event_as_the_boundary_even_when_it_is_not_a_quest_event() {
         let session = session_json(
-            json!({ "UnitGUID": { "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.012, creature_guid(276172))] } }),
+            json!({
+                "GetQuestID": [sample(0.0, 0.0, json!(99196))],
+                "UnitGUID": { "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.012, creature_guid(276172))] },
+            }),
             vec![
-                trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)]),
+                trace_event("QUEST_DETAIL", 3.0, 3.001, &[json!(0)]),
                 trace_event("MERCHANT_SHOW", 3.0, 3.011, &[]),
             ],
         );
@@ -495,11 +504,14 @@ mod tests {
     #[test]
     fn does_not_let_a_later_same_frame_close_erase_the_giver_or_reuse_it_after_close() {
         let session = session_json(
-            json!({ "UnitGUID": { "questnpc": [sample(1.0, 1.0, object_guid(410369)), sample(3.0, 3.012, None)] } }),
+            json!({
+                "GetQuestID": [sample(0.0, 0.0, json!(99196))],
+                "UnitGUID": { "questnpc": [sample(1.0, 1.0, object_guid(410369)), sample(3.0, 3.012, None)] },
+            }),
             vec![
-                trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)]),
+                trace_event("QUEST_DETAIL", 3.0, 3.001, &[json!(0)]),
                 trace_event("QUEST_FINISHED", 3.0, 3.011, &[]),
-                trace_event("QUEST_ACCEPTED", 3.0, 3.021, &[json!(99197)]),
+                trace_event("QUEST_DETAIL", 3.0, 3.021, &[json!(0)]),
             ],
         );
         assert_eq!(quests_and_values(&session), [(99196, Object(410369))]);
@@ -508,10 +520,10 @@ mod tests {
     #[test]
     fn keeps_an_unchanged_object_giver_during_a_long_dialog() {
         let session = session_json(
-            json!({ "UnitGUID": { "questnpc": [sample(1.0, 1.0, object_guid(410369))] } }),
+            json!({ "GetQuestID": [sample(0.0, 0.0, json!(99196))], "UnitGUID": { "questnpc": [sample(1.0, 1.0, object_guid(410369))] } }),
             vec![
                 trace_event("QUEST_PROGRESS", 1.0, 1.0, &[]),
-                trace_event("QUEST_ACCEPTED", 60.0, 60.0, &[json!(99196)]),
+                trace_event("QUEST_DETAIL", 60.0, 60.0, &[json!(0)]),
             ],
         );
         assert_eq!(values(&session), [Object(410369)]);
@@ -520,10 +532,13 @@ mod tests {
     #[test]
     fn skips_events_with_indistinguishable_timestamps_instead_of_guessing_their_giver() {
         let session = session_json(
-            json!({ "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(276171)), sample(3.0, 3.0, creature_guid(276172))] } }),
+            json!({
+                "GetQuestID": [sample(0.0, 0.0, json!(99196))],
+                "UnitGUID": { "questnpc": [sample(3.0, 3.0, creature_guid(276171)), sample(3.0, 3.0, creature_guid(276172))] },
+            }),
             vec![
-                trace_event("QUEST_ACCEPTED", 3.0, 3.0, &[json!(99196)]),
-                trace_event("QUEST_ACCEPTED", 3.0, 3.0, &[json!(99197)]),
+                trace_event("QUEST_DETAIL", 3.0, 3.0, &[json!(0)]),
+                trace_event("QUEST_DETAIL", 3.0, 3.0, &[json!(0)]),
             ],
         );
         assert_eq!(observed(&session), []);
@@ -533,12 +548,15 @@ mod tests {
     fn does_not_resurrect_an_older_giver_when_a_probe_ties_with_the_next_event() {
         for tied_guid in [None, Some(creature_guid(276172))] {
             let session = session_json(
-                json!({ "UnitGUID": {
-                    "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.002, tied_guid.clone())],
-                    "npc": [sample(1.0, 1.0, creature_guid(276173))],
-                } }),
+                json!({
+                    "GetQuestID": [sample(0.0, 0.0, json!(99196))],
+                    "UnitGUID": {
+                        "questnpc": [sample(1.0, 1.0, creature_guid(276171)), sample(3.0, 3.002, tied_guid.clone())],
+                        "npc": [sample(1.0, 1.0, creature_guid(276173))],
+                    },
+                }),
                 vec![
-                    trace_event("QUEST_ACCEPTED", 3.0, 3.001, &[json!(99196)]),
+                    trace_event("QUEST_DETAIL", 3.0, 3.001, &[json!(0)]),
                     trace_event("MERCHANT_SHOW", 3.0, 3.002, &[]),
                 ],
             );
