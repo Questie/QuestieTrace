@@ -43,15 +43,37 @@ end
 -- Encoding/Decoding
 ---------------------------------------------------------------------------
 
+--- Bytes of compressed data turned into printable text per step. A multiple
+--- of 3, because EncodeForPrint turns every 3 bytes into 4 characters on
+--- their own, so encoding in chunks gives exactly the same text.
+local PRINT_CHUNK_SIZE = 30000
+
+--- Serialize and compress a payload. Kept separate from EncodeForPrint so
+--- that step can yield, which is not possible inside pcall in Lua 5.1.
 ---@param payload table
 ---@return boolean ok
----@return any encodedOrError
-local function TryEncode(payload)
+---@return any compressedOrError
+local function TryCompress(payload)
   return pcall(function()
     local cbor = C_EncodingUtil.SerializeCBOR(payload)
-    local compressed = C_EncodingUtil.CompressString(cbor, Enum.CompressionMethod.Deflate, Enum.CompressionLevel.Default)
-    return LibDeflate:EncodeForPrint(compressed)
+    return C_EncodingUtil.CompressString(cbor, Enum.CompressionMethod.Deflate, Enum.CompressionLevel.Default)
   end)
+end
+
+--- LibDeflate:EncodeForPrint, calling `yield` before each chunk if given.
+---@param compressed string
+---@param yield fun()?
+---@return string
+local function EncodeForPrint(compressed, yield)
+  if (not yield) then
+    return LibDeflate:EncodeForPrint(compressed)
+  end
+  local parts = {}
+  for i = 1, #compressed, PRINT_CHUNK_SIZE do
+    yield()
+    parts[#parts + 1] = LibDeflate:EncodeForPrint(compressed:sub(i, i + PRINT_CHUNK_SIZE - 1))
+  end
+  return table.concat(parts)
 end
 
 --- Maximum number of removed secret value paths to report through Core.Debug.
@@ -132,15 +154,20 @@ end
 ---
 --- If encoding fails and the payload contains secret values, they are removed
 --- from `payload` in place and encoding is retried once (see RemoveSecretValues).
+---
+--- With `yield`, the slow EncodeForPrint step is split into chunks and `yield`
+--- is called before each one, so a coroutine can spread it over several frames.
+--- The result is the same either way.
 ---@param payload table
+---@param yield fun()? Called before each EncodeForPrint chunk.
 ---@return string? encodedPayload Nil if codec support is missing or encoding fails.
 ---@return string? err Failure reason when encoding was attempted but failed. Nil if codec support is missing.
-function Core.EncodeExportPayload(payload)
+function Core.EncodeExportPayload(payload, yield)
   if (not Core.HasCodecSupport()) then
     return nil
   end
 
-  local ok, encoded = TryEncode(payload)
+  local ok, compressed = TryCompress(payload)
 
   if (not ok) and type(issecretvalue) == "function" then
     if (not CanAccessTable(payload)) then
@@ -154,23 +181,23 @@ function Core.EncodeExportPayload(payload)
     end
     if removed > 0 then
       Core.Debug("Removed", removed, "secret value(s) before encoding, e.g.", table.concat(removedPaths, ", "))
-      ok, encoded = TryEncode(payload)
+      ok, compressed = TryCompress(payload)
     end
   end
 
-  if ok and type(encoded) == "string" then
-    return encoded
+  if ok and type(compressed) == "string" then
+    return EncodeForPrint(compressed, yield)
   end
 
   if (not ok) then
-    local stringOk, message = pcall(tostring, encoded)
+    local stringOk, message = pcall(tostring, compressed)
     if stringOk and type(message) == "string" then
       return nil, message
     end
     return nil, "unknown error"
   end
 
-  return nil, "unexpected result type: " .. type(encoded)
+  return nil, "unexpected result type: " .. type(compressed)
 end
 
 --- Decode a string built by Core.EncodeExportPayload back into a table.
