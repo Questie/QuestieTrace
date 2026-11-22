@@ -153,9 +153,19 @@ end
 --- that actually hand the payload off (e.g. by showing it in the export
 --- window) should pass `sourceSessions` to Core.DeleteReportedSessions()
 --- afterwards so that data is not offered again next time.
+---
+--- With `options.yield`, it is called before decoding each saved session, so
+--- a caller running this in a coroutine can spread the decoding over several
+--- frames. The live session and the list of saved sessions are read before
+--- the first `yield`, so data recorded or saved meanwhile never enters the payload.
+---@param options { savedSessions: EncodedSessionRecord[]?, skipLiveSession: boolean?, yield: fun()? }?
+---  savedSessions: Saved sessions to export instead of QuestieTraceCharacter.sessions.
+---  skipLiveSession: Leave out the live session, e.g. because the caller just started it.
+---  yield: Called before decoding each saved session.
 ---@return table payload
 ---@return (EncodedSessionRecord|SessionRecord)[] sourceSessions Stored records backing `payload.sessions`, in the same order.
-function Core.BuildExportPayload()
+function Core.BuildExportPayload(options)
+  options = options or {}
   ---@type SessionRecord[]
   local sessions = {}
   ---@type SessionRecord[]
@@ -164,9 +174,27 @@ function Core.BuildExportPayload()
   ---@type table?
   local characterDb = QuestieTraceCharacter
   ---@type EncodedSessionRecord[]
-  local savedSessions = (type(characterDb) == "table" and type(characterDb.sessions) == "table") and characterDb.sessions or {}
+  local storedSessions = options.savedSessions
+    or (type(characterDb) == "table" and type(characterDb.sessions) == "table") and characterDb.sessions
+    or {}
+  ---@type EncodedSessionRecord[]
+  local savedSessions = {}
+  for i = 1, #storedSessions do
+    savedSessions[i] = storedSessions[i]
+  end
+
+  ---@type SessionRecord?
+  local currentSession = (not options.skipLiveSession) and type(characterDb) == "table" and characterDb.currentSession or nil
+  ---@type SessionRecord?
+  local liveCopy
+  if type(currentSession) == "table" and type(currentSession.events) == "table" and #currentSession.events > 0 then
+    liveCopy = DeepCopy(currentSession)
+  end
 
   for i = 1, #savedSessions do
+    if options.yield then
+      options.yield()
+    end
     local source = savedSessions[i]
     -- Decoding yields a fresh table, so no copy is needed.
     ---@type SessionRecord?
@@ -178,12 +206,9 @@ function Core.BuildExportPayload()
     end
   end
 
-  ---@type SessionRecord?
-  local currentSession = type(characterDb) == "table" and characterDb.currentSession or nil
-  if type(currentSession) == "table" and type(currentSession.events) == "table" and #currentSession.events > 0 then
-    local session = DeepCopy(currentSession)
-    ScrubFunctions(session.functions)
-    sessions[#sessions + 1] = session
+  if liveCopy then
+    ScrubFunctions(liveCopy.functions)
+    sessions[#sessions + 1] = liveCopy
     sourceSessions[#sourceSessions + 1] = currentSession
   end
 
@@ -207,12 +232,12 @@ end
 --- in a new, distinct session rather than one that no longer exists. A stopped
 --- capture stays stopped.
 ---
---- Note: Core.ShowExportWindow() already rotates the live session when encoding
---- succeeds: it saves the live session and replaces it in `sourceSessions` with
---- the saved record, so that record is deleted here like any other saved
---- session. The live session at deletion time is then a fresh one started
---- after the payload snapshot, and DiscardCapture() is usually not called. The
---- live-session check still exists for safety, in case rotation was skipped or failed.
+--- Note: Core.ShowExportWindow() saves the live session before building the
+--- payload, so it is in `sourceSessions` as a saved record and deleted here
+--- like any other saved session. The live session at deletion time is then a
+--- fresh one started after the payload snapshot, and DiscardCapture() is
+--- usually not called. The live-session check still exists for safety, in
+--- case saving was skipped or failed.
 ---@param sourceSessions SessionRecord[] Second return value of Core.BuildExportPayload()
 function Core.DeleteReportedSessions(sourceSessions)
   if type(sourceSessions) ~= "table" then return end
