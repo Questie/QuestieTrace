@@ -293,6 +293,14 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     let npc_zones = merge_with_extra(&acc.npc_spawns, &npc_turn_in, |_, obs| spawns_merge::merge_zone_id(obs));
     let mut npcs = Records::default();
     npcs.field("name", &acc.npc_name.aggregate_newest(), |name| Js::str(name));
+    // "" means the NPC has no subname, which is Questie's default.
+    let npc_sub_names: IndexMap<i64, String> = acc
+        .npc_sub_name
+        .aggregate_newest()
+        .into_iter()
+        .filter(|(_, sub_name)| !sub_name.is_empty())
+        .collect();
+    npcs.field("subName", &npc_sub_names, |sub_name| Js::str(sub_name));
     npcs.field("minLevel", &npc_level, |range| Js::Num(range.min));
     npcs.field("maxLevel", &npc_level, |range| Js::Num(range.max));
     npcs.field("spawns", &npc_spawns, |spawns| zone_coordinates(spawns.iter().cloned()));
@@ -473,10 +481,14 @@ fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) 
 fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, String)>)> {
     let mut npcs = Vec::new();
     for locale in sorted_locales(&acc.npc_name) {
-        // Subnames are not traced, so they are always nil.
+        let sub_names = values_for(&acc.npc_sub_name, &locale, true);
         let entries: Vec<(i64, Js)> = values_for(&acc.npc_name, &locale, true)
             .into_iter()
-            .map(|(id, name)| (id, Js::Array(vec![Js::Str(name), Js::Null])))
+            .map(|(id, name)| {
+                // "" means the NPC has no subname.
+                let sub_name = sub_names.get(&id).filter(|sub_name| !sub_name.is_empty());
+                (id, Js::Array(vec![Js::Str(name), sub_name.map_or(Js::Null, Js::str)]))
+            })
             .collect();
         if !entries.is_empty() {
             npcs.push((locale.clone(), write_lookup(LookupTable::Npc, &locale, &entries)));

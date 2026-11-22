@@ -7,4 +7,5 @@ pub mod name;
 pub mod rank;
 pub mod spawns;
 pub mod spawns_merge;
+pub mod sub_name;
 pub mod unit_state;

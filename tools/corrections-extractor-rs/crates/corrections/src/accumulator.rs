@@ -31,6 +31,7 @@ pub struct Accumulator {
     pub objectives_text: ScalarSummary<QuestObjectivesTextValue>,
     pub objective_count: ScalarSummary<Num>,
     pub npc_name: ScalarSummary<String>,
+    pub npc_sub_name: ScalarSummary<String>,
     pub item_name: ScalarSummary<String>,
     pub object_name: ScalarSummary<String>,
 
@@ -59,6 +60,7 @@ pub struct Accumulator {
 #[derive(Default)]
 pub struct LookupAccumulator {
     pub npc_name: IndexMap<String, ScalarSummary<String>>,
+    pub npc_sub_name: IndexMap<String, ScalarSummary<String>>,
     pub quest_name: IndexMap<String, ScalarSummary<String>>,
     pub objectives_text: IndexMap<String, ScalarSummary<QuestObjectivesTextValue>>,
     pub item_name: IndexMap<String, ScalarSummary<String>>,
@@ -86,6 +88,7 @@ fn add_localized<T: Clone + Eq + Hash>(
 impl LookupAccumulator {
     fn add(&mut self, staged: StagedLookups, session: SessionId, sessions: &Sessions) {
         add_localized(&mut self.npc_name, staged.npc_name, session, sessions);
+        add_localized(&mut self.npc_sub_name, staged.npc_sub_name, session, sessions);
         add_localized(&mut self.quest_name, staged.quest_name, session, sessions);
         add_localized(&mut self.objectives_text, staged.objectives_text, session, sessions);
         add_localized(&mut self.item_name, staged.item_name, session, sessions);
@@ -110,6 +113,7 @@ impl Accumulator {
             objectives_text,
             objective_count,
             npc_name,
+            npc_sub_name,
             item_name,
             object_name,
             required_level,
@@ -138,6 +142,7 @@ impl Accumulator {
         self.objectives_text.add_session(objectives_text, s, sessions);
         self.objective_count.add_session(objective_count, s, sessions);
         self.npc_name.add_session(npc_name, s, sessions);
+        self.npc_sub_name.add_session(npc_sub_name, s, sessions);
         self.item_name.add_session(item_name, s, sessions);
         self.object_name.add_session(object_name, s, sessions);
 
@@ -173,6 +178,7 @@ impl Accumulator {
         add("objectivesText (scalar)", self.objectives_text.memory());
         add("objectiveCount (scalar)", self.objective_count.memory());
         add("npcName (scalar)", self.npc_name.memory());
+        add("npcSubName (scalar)", self.npc_sub_name.memory());
         add("itemName (scalar)", self.item_name.memory());
         add("objectName (scalar)", self.object_name.memory());
         add("requiredLevel", self.required_level.memory());
@@ -194,6 +200,7 @@ impl Accumulator {
         add("objectSpawns", self.object_spawns.memory());
         let lookups = [
             ("lookup npcName", sum_locales(&self.lookups.npc_name)),
+            ("lookup npcSubName", sum_locales(&self.lookups.npc_sub_name)),
             ("lookup questName", sum_locales(&self.lookups.quest_name)),
             ("lookup objectivesText", sum_locales(&self.lookups.objectives_text)),
             ("lookup itemName", sum_locales(&self.lookups.item_name)),
