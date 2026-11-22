@@ -3,7 +3,7 @@
 
 use super::counter::{CounterKind, CounterObservation};
 use super::detect::{HandoffKind, HandoffObservation};
-use crate::model::{Evidence, QuestEpisode, QuestId};
+use crate::model::{Evidence, QuestId};
 use crate::text::to_fixed;
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
@@ -16,28 +16,29 @@ pub struct Pair {
 }
 
 /// Characters by their pseudonymous character key.
-pub type Characters<'e> = FxHashSet<&'e str>;
+/// Characters, as [`crate::signals::CharacterIds`].
+pub type Characters = FxHashSet<u32>;
 
 /// For another observed prerequisite Q of X: the characters for whom Q was already completed, or
 /// not, when they turned in P and got X.
 #[derive(Default)]
-pub struct CompanionStates<'e> {
-    pub done: Characters<'e>,
-    pub not_done: Characters<'e>,
+pub struct CompanionStates {
+    pub done: Characters,
+    pub not_done: Characters,
 }
 
 /// Per (P, X) pair: the characters behind each kind of observation.
-pub struct PairStats<'e> {
+pub struct PairStats {
     pub pair: Pair,
-    pub pop: Characters<'e>,
-    pub pop_confounded: Characters<'e>,
-    pub list: Characters<'e>,
-    pub list_confounded: Characters<'e>,
-    pub not_started: Characters<'e>,
-    pub in_log: Characters<'e>,
-    pub alternative: Characters<'e>,
+    pub pop: Characters,
+    pub pop_confounded: Characters,
+    pub list: Characters,
+    pub list_confounded: Characters,
+    pub not_started: Characters,
+    pub in_log: Characters,
+    pub alternative: Characters,
     /// Per other observed prerequisite of X; tells ALL-of groups from ANY-of lists.
-    pub companions: FxHashMap<QuestId, CompanionStates<'e>>,
+    pub companions: FxHashMap<QuestId, CompanionStates>,
     /// Supporting examples in the order they were met; lower priority is shown first.
     evidence: Vec<(EvidencePriority, Evidence)>,
     counter_evidence: Vec<Evidence>,
@@ -49,7 +50,7 @@ type EvidencePriority = u8;
 const MAX_EVIDENCE: usize = 5;
 const MAX_COUNTER_EVIDENCE: usize = 2;
 
-impl<'e> PairStats<'e> {
+impl PairStats {
     fn new(pair: Pair) -> Self {
         PairStats {
             pair,
@@ -72,7 +73,7 @@ impl<'e> PairStats<'e> {
     }
 
     /// Characters with a pop, clean or not.
-    pub fn pop_characters(&self) -> Characters<'e> {
+    pub fn pop_characters(&self) -> Characters {
         self.pop.union(&self.pop_confounded).copied().collect()
     }
 
@@ -112,26 +113,27 @@ impl<'e> PairStats<'e> {
 /// Every pair, in the order it was first met: observed pairs first, then pairs added for
 /// same-name copies.
 #[derive(Default)]
-pub struct HandoffTally<'e> {
-    pairs: IndexMap<Pair, PairStats<'e>, FxBuildHasher>,
+pub struct HandoffTally {
+    pairs: IndexMap<Pair, PairStats, FxBuildHasher>,
 }
 
-impl<'e> HandoffTally<'e> {
+impl HandoffTally {
     /// The pair's stats, created empty if needed (variant edges are tracked for counter-evidence only).
-    pub fn stats_for(&mut self, pair: Pair) -> &mut PairStats<'e> {
+    pub fn stats_for(&mut self, pair: Pair) -> &mut PairStats {
         self.pairs.entry(pair).or_insert_with(|| PairStats::new(pair))
     }
 
-    pub fn get(&self, pair: Pair) -> Option<&PairStats<'e>> {
+    pub fn get(&self, pair: Pair) -> Option<&PairStats> {
         self.pairs.get(&pair)
     }
 
     /// In the order the pairs were first met.
-    pub fn pairs(&self) -> impl ExactSizeIterator<Item = &PairStats<'e>> {
+    pub fn pairs(&self) -> impl ExactSizeIterator<Item = &PairStats> {
         self.pairs.values()
     }
 
-    pub fn add_handoff(&mut self, episode: &'e QuestEpisode, observation: &HandoffObservation) {
+    /// Adds a handoff `character` saw in episode `episode_key`; only its first per pair is evidence.
+    pub fn add_handoff(&mut self, character: u32, episode_key: &str, observation: &HandoffObservation) {
         let stats = self.stats_for(Pair {
             prerequisite: observation.turned_in,
             quest: observation.offered,
@@ -143,11 +145,11 @@ impl<'e> HandoffTally<'e> {
             (HandoffKind::List { .. }, true) => (&mut stats.list, 2),
             (HandoffKind::List { .. }, false) => (&mut stats.list_confounded, 3),
         };
-        if !bucket.insert(&episode.character_key) {
+        if !bucket.insert(character) {
             return;
         }
         let evidence = Evidence {
-            reference: episode.key.clone(),
+            reference: episode_key.to_owned(),
             t: Some(observation.turn_in_at),
             text: describe_handoff(observation),
         };
@@ -156,28 +158,28 @@ impl<'e> HandoffTally<'e> {
 
     /// Records, for each of `states`' quests, whether it was completed when the character turned
     /// in the pair's prerequisite and got its quest.
-    pub fn add_companion_states(&mut self, episode: &'e QuestEpisode, pair: Pair, states: impl IntoIterator<Item = (QuestId, bool)>) {
+    pub fn add_companion_states(&mut self, character: u32, pair: Pair, states: impl IntoIterator<Item = (QuestId, bool)>) {
         let Some(stats) = self.pairs.get_mut(&pair) else { return };
         for (quest_id, completed) in states {
             let entry = stats.companions.entry(quest_id).or_default();
             let bucket = if completed { &mut entry.done } else { &mut entry.not_done };
-            bucket.insert(&episode.character_key);
+            bucket.insert(character);
         }
     }
 
-    pub fn add_counter(&mut self, episode: &'e QuestEpisode, observation: &CounterObservation) {
+    pub fn add_counter(&mut self, character: u32, episode_key: &str, observation: &CounterObservation) {
         let Some(stats) = self.pairs.get_mut(&observation.pair) else { return };
         let bucket = match observation.kind {
             CounterKind::NotStarted => &mut stats.not_started,
             CounterKind::InLog => &mut stats.in_log,
             CounterKind::Alternative => &mut stats.alternative,
         };
-        if !bucket.insert(&episode.character_key) {
+        if !bucket.insert(character) {
             return;
         }
         if observation.kind != CounterKind::Alternative {
             stats.counter_evidence.push(Evidence {
-                reference: episode.key.clone(),
+                reference: episode_key.to_owned(),
                 t: Some(observation.t),
                 text: describe_counter(observation),
             });
@@ -225,6 +227,7 @@ mod tests {
     use super::*;
     use crate::model::QuestEpisode;
     use crate::signals::handoff::detect::Confounder;
+    use crate::test_support::character_id;
     use crate::test_support::{make_episode, npc};
 
     fn observation(kind: HandoffKind, confounders: Vec<Confounder>) -> HandoffObservation {
@@ -253,13 +256,17 @@ mod tests {
         let episodes: Vec<QuestEpisode> = (0..7).map(|_| make_episode()).collect();
         let list = HandoffKind::List { previous_list_at: 4.0 };
         let mut tally = HandoffTally::default();
-        tally.add_handoff(&episodes[0], &observation(list, vec![]));
-        tally.add_handoff(&episodes[1], &observation(HandoffKind::Pop, vec![Confounder::AlsoCompleted(5)]));
-        tally.add_handoff(&episodes[2], &observation(HandoffKind::Pop, vec![]));
-        tally.add_handoff(&episodes[3], &observation(list, vec![Confounder::LeftLog(6)]));
-        tally.add_counter(&episodes[4], &counter(CounterKind::Alternative));
-        tally.add_counter(&episodes[5], &counter(CounterKind::InLog));
-        tally.add_counter(&episodes[6], &counter(CounterKind::NotStarted));
+        tally.add_handoff(character_id(&episodes[0]), &episodes[0].key, &observation(list, vec![]));
+        tally.add_handoff(
+            character_id(&episodes[1]),
+            &episodes[1].key,
+            &observation(HandoffKind::Pop, vec![Confounder::AlsoCompleted(5)]),
+        );
+        tally.add_handoff(character_id(&episodes[2]), &episodes[2].key, &observation(HandoffKind::Pop, vec![]));
+        tally.add_handoff(character_id(&episodes[3]), &episodes[3].key, &observation(list, vec![Confounder::LeftLog(6)]));
+        tally.add_counter(character_id(&episodes[4]), &episodes[4].key, &counter(CounterKind::Alternative));
+        tally.add_counter(character_id(&episodes[5]), &episodes[5].key, &counter(CounterKind::InLog));
+        tally.add_counter(character_id(&episodes[6]), &episodes[6].key, &counter(CounterKind::NotStarted));
         let stats = tally.get(Pair { prerequisite: 1, quest: 2 }).unwrap();
         let texts: Vec<String> = stats.pick_evidence().into_iter().map(|e| e.text).collect();
         assert_eq!(
@@ -285,9 +292,13 @@ mod tests {
         let other = make_episode();
         let mut tally = HandoffTally::default();
         for episode in [&first, &second, &other] {
-            tally.add_handoff(episode, &observation(HandoffKind::Pop, vec![]));
+            tally.add_handoff(character_id(episode), &episode.key, &observation(HandoffKind::Pop, vec![]));
         }
-        tally.add_handoff(&second, &observation(HandoffKind::Pop, vec![Confounder::AlsoTurnedIn(9)]));
+        tally.add_handoff(
+            character_id(&second),
+            &second.key,
+            &observation(HandoffKind::Pop, vec![Confounder::AlsoTurnedIn(9)]),
+        );
         let stats = tally.get(Pair { prerequisite: 1, quest: 2 }).unwrap();
         assert_eq!((stats.pop.len(), stats.pop_confounded.len(), stats.support()), (2, 1, 2));
         assert_eq!(stats.pick_evidence().len(), 3, "one example per counted observation");
