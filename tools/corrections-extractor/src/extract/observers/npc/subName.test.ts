@@ -186,6 +186,19 @@ describe("observeSubName (npc) without recorded guids", () => {
     expect(observeSubName(session).map((observation) => observation.entityId)).toEqual([258930]);
   });
 
+  it("should not pair target changes before the first combat end of a recording begun mid-fight", () => {
+    const session = makeSession(
+      {
+        ...LOCALE_EN,
+        UnitGUID: { target: [{ t: 3.5, tp: 3.5, v: nordun }, { t: 6.5, tp: 6.5, v: isaac }] },
+        UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Traveling Ranged Weapon Salesman" }, { t: 6.2, tp: 6.2, v: "Isaac Chan's Companion" }] },
+      },
+      [combatEvent("PLAYER_REGEN_ENABLED", 6)],
+    );
+
+    expect(observeSubName(session).map((observation) => observation.entityId)).toEqual([258930]);
+  });
+
   it("should not pair targets that are not npcs or are cleared", () => {
     const session = makeSession({
       ...LOCALE_EN,
