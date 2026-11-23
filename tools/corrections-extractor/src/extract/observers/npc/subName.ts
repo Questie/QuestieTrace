@@ -16,7 +16,8 @@
 //   title was often paired with a neighbouring NPC. Instead, players hover an NPC before they
 //   target it with the mouse, so the last subname before PLAYER_TARGET_CHANGED to an NPC is that
 //   NPC's. It is only trusted when it is recent and the player is not in combat (target changes
-//   in combat are mostly tab targeting). Compared with the Classic NPC database, this was right for
+//   in combat are mostly tab targeting; a recording whose first combat event is the end of a fight
+//   began in combat). Compared with the Classic NPC database, this was right for
 //   99% of the titled NPCs on a sample of 848 recent sessions. Targeting without hovering still pairs
 //   a wrong title now and then, which the agreement between sessions in the merge evens out.
 
@@ -87,7 +88,8 @@ function observeBeforeTargetChange(session: SessionRecord, subNames: FunctionStr
       sample = candidate;
     }
     if (!sample || encounter.tp - sample.tp > MAX_SECONDS_BEFORE_TARGET) continue;
-    let inCombat = false;
+    // The first transition of a recording begun mid-fight is its end, with no start before it.
+    let inCombat = combat[0]?.inCombat === false;
     for (const change of combat) {
       if (change.tp > encounter.tp) break;
       inCombat = change.inCombat;
