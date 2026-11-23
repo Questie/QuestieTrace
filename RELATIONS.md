@@ -55,6 +55,86 @@ load every episode into memory (episodes.jsonl is 4.9 GB). A TypeScript full-arc
 not attempted (it would need well over 20 GB of heap on this 31 GB machine, with the memory errors
 above).
 
+## Review of the November 18 module (2026-11-21/22)
+
+A QuestieDB maintainer reviewed the module QuestieDB had imported on November 18 (846 applied
+relations on 643 quests) and reported three kinds of wrong output on Era quests:
+- breadcrumbs overwritten: 1085 got preQuestSingle {1070}, 1799 its four breadcrumbs 4965, 4967,
+  4968 and 4969, and 1842 got {1839, 1848} where Era had {1848};
+- parent/child relations overwritten: the Chapter quests 339-342 (children of 338) got
+  preQuestSingle {583};
+- nextQuestInChain on a quest that opens several: 583 "Welcome to the Jungle" chained to 194.
+
+Why it is an overwrite: QuestieDB loads Era's corrections, then this module, then the hand-written
+`foreverQuestFixes`, so whatever the module writes for an Era quest replaces Era's value.
+
+**What the hand-written fixes say.** The maintainer's commit `e96afe4` in QuestieDB ("Carry over
+relations and redo overwritten corrections") copied 771 of the module's relations into
+`foreverQuestFixes` and undid 24. "Copied" is not a review (they reviewed up to about quest 1085),
+"undone" is. Of the 24, 20 linked two Era quests and 4 involved a Forever-new quest. In every
+case but two, QuestieDB already held the facts that ruled the relation out:
+
+| Pattern | Undone | Rule now in `combine/lua.rs` |
+|---|---|---|
+| A breadcrumb QuestieDB knows made a prerequisite of its target | 1085, 1799, 1842, 5244, 8234, 8414 | Never applied |
+| A prerequisite implied by the parent quest or by an earlier step of a listed prerequisite | 339-342, 3450, 1122, 4001 | Never applied; only necessary links count (AND lists, one-quest preQuestSingle, QuestieDB's chains), not one option of an OR list |
+| nextQuestInChain from a quest several quests require | 583, 376, 92514, 92679, 93461 (and 379, 92840 with two) | Not applied from a quest three or more quests require |
+| nextQuestInChain into an AND list | 1434 | Already not applied (`never chain into an AND list`) |
+| Not caught | 379, 92840 (two requirers, like 205 and 275, which were kept), 2300 (availableUntilCompleted), 1661 (a breadcrumb list that was right but incomplete) | Need a human |
+
+Measured on the reviewed module: the breadcrumb and implied rules catch 14 of the 24 and nothing
+else; the three-requirer chain rule catches 5 more and 8 relations beyond the reviewed range
+(the same rule at two requirers would also drop 205 and 275, which were reviewed and kept). A
+rejected alternative was to emit nothing between two Era quests: it removes 62 relations, 20 of
+them undone but 30 kept (mostly exclusiveTo between Era quests), while new Forever quests are
+often steps in old Era chains, so Era quests cannot simply be skipped. Rules hold relations back
+as commented-out lines with the reason, so reviewers still see them.
+
+**What it means now.** Since QuestieDB carries the 771 copied relations as hand-written fixes,
+the full run of November 23 applies only 12 relations (exclusiveTo pairs between same-name
+quests and three new prerequisites); against hand-written Forever relations the traces agree
+2,594 times, add 28 and conflict 17 (listed in `relations-review.md`). Improvements on those 771
+only reach the game when someone acts on a conflict. Not done: parent/child relations are never
+proposed (the model can represent parentQuest, but no signal looks for "only offered while quest
+P is in the log").
+
+To redo the check after another review: list the relation fields the hand-written fixes changed
+since the module was imported (`git diff <import commit> -- src/corrections/Forever/foreverQuestFixes.lua`
+in QuestieDB), and for each relation the module applies, whether the fixes kept it, undid it or
+left it alone; the undone ones, next to what the ground truth (`groundtruth.json`) knew about
+both quests, show the pattern.
+
+## Reading the episodes one bucket at a time (2026-11-22/23)
+
+The archive grew to 199,967 submissions and a full run no longer fit in memory next to anything
+else (it was stopped at roughly 15 GB of an expected 24). Now no step holds every episode:
+
+- `src/episode_store`: ingest writes the episodes in a compact binary format (a hand-written
+  codec; every field listed once, so a new model field does not compile until it is encoded) in
+  buckets of about 32 MB that end where a character ends, in ingest's order. 1.9 GB for the full
+  archive against 7.3 GB of `episodes.jsonl` (still written, for people and the TypeScript tools).
+- Ingest spills every session copy to 64 partitions by session key, merges them partition by
+  partition, spills the kept sessions by contributor id, and builds characters one contributor
+  partition at a time, in order (`ingest/spill.rs`). Character assignment only ever looks within a
+  contributor, so the result is byte-identical.
+- Every signal reads `Episodes::for_each_bucket`, in several passes where it needs them, and keeps
+  only owned, compact state: characters as `CharacterId`s, ids or owned copies instead of
+  references into a bucket. Absence also works per character on all cores within each bucket.
+- After ingest and after each signal the process hands freed memory back (`malloc_trim`); before,
+  its footprint only ever grew.
+
+Checked on the 5% sample against the pre-change run, by value, with 1 MB buckets (68 boundaries)
+and default ones, at 1 to 16 threads; each signal has a test that a bucket per character
+(`PerCharacter`) finds what one bucket finds, and each such test was shown to fail on a
+deliberately broken version. Full archive, 16 threads: 14 min 28 s, peak 4.3 GB (ingest 657 s and
+2.2 GB, then each signal on its own: handoff 26 s, offer-set 22 s, absence 52 s instead of 368 s,
+cooccurrence 60 s, breadcrumbs 34 s), with the same values as a 6-thread run.
+
+What still grows with the archive: offer-set's per-quest folds (a few lists per view), absence's
+blocked moments (formatted text per moment and suspect), cooccurrence's example evidence for every
+surviving candidate rather than only emitted edges, and the store decodes each bucket on one
+thread. Decoding the submissions is three quarters of a run.
+
 ## Parity with the TypeScript pipeline
 
 Reference: the TypeScript pipeline (Exporters HEAD 9347a87) on the 5% sample, run exactly as the
@@ -121,8 +201,8 @@ cache: a full run decodes everything (ingest reads on all cores with one arena p
   TypeScript); counting and failing on them would catch a layout drift.
 - **Deliverable wording** still names the TypeScript commands (`npm run relations -- combine`),
   kept for line-for-line parity; reword when the Rust binary is what ships.
-- **absence** is the slowest step at full scale (171 s); its second pass builds evidence texts it
-  could build only for what it outputs.
+- **absence** keeps evidence texts for every blocked moment; building them only for what it
+  outputs would shrink its state (it now runs on all cores: 52 s on the full archive).
 - **Using it from the dump**: the binary reads the same environment variables as the dump's
   `relations pipeline` step, so the dump could spawn it instead; Exporters was not touched.
 - **Simplifying the extract port** the same way (value comparison, fewer JS-compatibility helpers)
@@ -130,12 +210,13 @@ cache: a full run decodes everything (ingest reads on all cores with one arena p
 
 ## Where things are
 
-- Branch `feat/relations-rs`, starting at `f1ab49b` (skeleton) on top of the extractor work; about
-  40 commits, one per area, fix and refactor. `git log f1ab49b..feat/relations-rs`.
+- Branch `feat/relations-rs` (PR #137); the relations work is the `relations-rs` commits.
+- The latest full run's deliverables: `tools/corrections-extractor-rs/relations-output-final/output/`
+  (gitignored, November 23).
 - The binary: `cargo run --release -p relations -- pipeline` (see the crate README for the
   environment). The whole-run comparison: `scripts/relations-compare.sh EXPECTED_DIR ACTUAL_DIR`.
 - Scratch data (references, the scratch Exporters copy with the latest scraper data and QuestieDB,
   trace-data views, full-run outputs) is in
   `/tmp/claude-1000/-home-logon-projects-QuestieTrace/a3c07696-fc63-4b8f-b2c0-4546a87aa2e2/scratchpad/`:
   `ref5/` (TS reference), `rs-final-B/` (full archive, Rust), `exp/` (Exporters copy, ~13 GB of
-  scraper databases). Safe to delete.
+  scraper databases). Safe to delete; the scratch directory may be gone after a reboot.
