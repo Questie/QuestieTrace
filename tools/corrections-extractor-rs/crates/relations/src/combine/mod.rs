@@ -11,6 +11,7 @@
 //! ported (the pipeline never passes it).
 
 mod assumptions;
+mod contradicted;
 mod crossval;
 mod edges;
 mod features;
@@ -30,6 +31,7 @@ use crate::episode_store::Episodes;
 use crate::io;
 use crate::model::{CandidateFile, GroundTruth, QuestCatalog, QuestId, RelationField, RelationSet};
 use anyhow::{Context, Result};
+use contradicted::contradicted_prerequisites;
 use crossval::{ModelParams, ScoredEdge, DEFAULT_MODEL_PARAMS};
 use edges::{Claim, Domain, EdgeKey, EdgeKind, QuestDomains, Reference, Truth};
 use indexmap::IndexMap;
@@ -55,7 +57,7 @@ pub struct CombineInput<'a> {
     pub candidate_files: Vec<CandidateFile>,
     pub catalog: &'a QuestCatalog,
     pub ground_truth: &'a GroundTruth,
-    /// For counts only.
+    /// For counts, and for recordings that contradict what QuestieDB knows (see `contradicted`).
     pub episodes: &'a dyn Episodes,
 }
 
@@ -164,6 +166,13 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
 
     let metrics_markdown = format_metrics(&metrics, min_score, REVIEW_SCORE);
     let context_files: Vec<(&str, usize)> = inputs.context_files.iter().map(|file| (file.signal.as_str(), file.candidates.len())).collect();
+    let contradicted = contradicted_prerequisites(input.episodes, &inputs.truth)?;
+    if !contradicted.is_empty() {
+        eprintln!(
+            "combine: WARNING: known prerequisites a few characters contradict: {} (recordings from another game, or the game changed; see {REVIEW_FILE}, section 6)",
+            contradicted.len()
+        );
+    }
     let misses = classic_misses(&shipped.scored, &shipped.accepted.decisions, &inputs.truth, &inputs.domains);
     let review = render_review(&ReviewInput {
         views: &views,
@@ -180,6 +189,7 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         lua_file: LUA_FILE,
         lua_quests: lua_quest_count(&records),
         classic_misses: &misses,
+        contradicted: &contradicted,
         generated_at: &config.generated_at,
     });
 

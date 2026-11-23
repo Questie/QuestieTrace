@@ -3,6 +3,7 @@
 //! where the evidence adds or disagrees; then Classic disagreements; then the numbers. Wowhead
 //! claims appear only as labelled context lines (see [`super::inputs`] for why).
 
+use super::contradicted::Contradicted;
 use super::crossval::{FittedKind, ScoredEdge};
 use super::edges::{Claim, Domain, EdgeKey, Reference};
 use super::meta::InputSummary;
@@ -39,6 +40,7 @@ pub struct ReviewInput<'r, 's> {
     pub lua_file: &'r str,
     pub lua_quests: usize,
     pub classic_misses: &'r [ClassicMiss<'s>],
+    pub contradicted: &'r [Contradicted],
     pub generated_at: &'r str,
 }
 
@@ -355,6 +357,7 @@ pub fn render_review(input: &ReviewInput) -> String {
         format!("- Inputs: {}.", inputs.join(", ")),
         format!("- Context only, untrusted: {}.", or_none(context.join(", "))),
         format!("- AND (preQuestGroup) evidence trusted from: {}.", or_none(input.and_sources.join(", "))),
+        format!("- Known prerequisites a few characters contradict (section 6): {}.", input.contradicted.len()),
         String::new(),
         "## 1. Forever-new quests without authored relations".into(),
         String::new(),
@@ -518,7 +521,56 @@ pub fn render_review(input: &ReviewInput) -> String {
         ));
     }
     lines.push(String::new());
+    lines.extend(contradicted_section(input));
     lines.join("\n")
+}
+
+/// Characters listed per contradicted prerequisite.
+const LISTED_CHARACTERS: usize = 5;
+
+fn contradicted_section(input: &ReviewInput) -> Vec<String> {
+    let mut lines = vec![
+        "## 6. Recordings to check".into(),
+        String::new(),
+        "Prerequisites QuestieDB has that nearly every character did first, and a few (at most 2%) did not. The game does not let a character \
+         skip a prerequisite, so either these recordings come from another game (a test realm, a private server: ingest should leave them out) \
+         or the game changed while traces were recorded. The signals drop such a prerequisite."
+            .into(),
+        String::new(),
+    ];
+    if input.contradicted.is_empty() {
+        lines.extend(["None.".into(), String::new()]);
+        return lines;
+    }
+    let mut contradictions: IndexMap<&str, usize> = IndexMap::new();
+    for found in input.contradicted {
+        let mut listed: Vec<&str> = found.without.iter().map(String::as_str).collect();
+        for &character in &listed {
+            *contradictions.entry(character).or_default() += 1;
+        }
+        let more = listed.len().saturating_sub(LISTED_CHARACTERS);
+        listed.truncate(LISTED_CHARACTERS);
+        lines.push(format!(
+            "- {} without {}: {} of {} characters ({}{})",
+            quest_label(found.quest, input.catalog),
+            quest_label(found.prerequisite, input.catalog),
+            found.without.len(),
+            found.characters,
+            listed.join(", "),
+            if more > 0 { format!(" and {more} more") } else { String::new() }
+        ));
+    }
+    let mut repeated: Vec<(&str, usize)> = contradictions.into_iter().filter(|&(_, count)| count > 1).collect();
+    repeated.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    if !repeated.is_empty() {
+        let listed: Vec<String> = repeated.iter().take(20).map(|(character, count)| format!("{character} ({count})")).collect();
+        lines.extend([
+            String::new(),
+            format!("Characters in several of these, the likeliest bad recordings: {}.", listed.join(", ")),
+        ]);
+    }
+    lines.push(String::new());
+    lines
 }
 
 #[cfg(test)]

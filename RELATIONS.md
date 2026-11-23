@@ -185,6 +185,13 @@ it would hide the next case of bad recordings.
 Every run logs what it left out, as a WARNING where somebody should look (another server, no server
 time), and `reports/ingest.json` has the counts (`sessions.skipped`, `sessions.otherServers`).
 
+The date and the server id only catch what is known today. For the rest, combine compares the
+recordings with QuestieDB (`combine/contradicted.rs`): it lists every prerequisite QuestieDB has
+that a few characters (at most 2%) got the quest without, and which characters, under "Recordings
+to check" in `relations-review.md`, and logs a WARNING with the count. On the archive with the beta
+and the other servers in it lists nine, the character on server 70 in four of them; without them
+one (1719 "The Affray", 2 of 420 characters, not looked into).
+
 ## Reading the episodes one bucket at a time (2026-11-22/23)
 
 The archive grew to 199,967 submissions and a full run no longer fit in memory next to anything
