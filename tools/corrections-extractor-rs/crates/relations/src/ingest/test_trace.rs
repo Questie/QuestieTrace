@@ -92,8 +92,9 @@ fn write(out: &mut Vec<u8>, value: &Json) {
     }
 }
 
+/// The GUID of a creature on a live server.
 pub fn creature(id: i64) -> String {
-    format!("Creature-0-1-2-3-{id}-0000AB")
+    format!("Creature-0-6823-2-3-{id}-0000AB")
 }
 
 /// A gossip list entry as C_GossipInfo returns it.

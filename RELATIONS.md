@@ -163,6 +163,28 @@ for who accepted, turned in or completed what (`review-scripts/zephras.py`, `rod
 and the scripts are in `tools/corrections-extractor-rs/relations-output-questiedb/` (gitignored;
 keep it until this is done).
 
+## Beta and other servers (2026-11-23/24)
+
+Ingest leaves out sessions that are not from the live game (`ingest/origin.rs`):
+- **Beta sessions**, by GetServerTime: before 2026-11-04. The archive's last beta session is from
+  October 23, the first one on the live realms from November 4, 23:05 UTC. 24,866 sessions of the
+  November 23 run's 998,061.
+- **Sessions without a server time** (29): the beta cannot be told from the live game.
+- **Characters met on a server that is not Blizzard's**, by the server id in their NPC GUIDs
+  (`Creature-0-<server>-...`): 1 and 70, where Blizzard's had four digits. Six characters, 45
+  sessions. All their sessions go, since a session that met no NPC does not show its server.
+
+Why: a signal drops a prerequisite when one character lacked it, so a handful of such sessions
+hides relations that thousands of characters confirm. Checked on 2026-11-23: of the hand-written
+prerequisites with a small share of contradictions, all seven had none left without these sessions
+(91743 "Rascally Rodents", 91724, 99129: one character on server 70; 92840, 96261, 95216, 92422:
+beta only). A tolerance ("0.1% of the characters may contradict") was measured and not built: on
+the clean data it would let 263 more pairs through, none of them a prerequisite QuestieDB has, and
+it would hide the next case of bad recordings.
+
+Every run logs what it left out, as a WARNING where somebody should look (another server, no server
+time), and `reports/ingest.json` has the counts (`sessions.skipped`, `sessions.otherServers`).
+
 ## Reading the episodes one bucket at a time (2026-11-22/23)
 
 The archive grew to 199,967 submissions and a full run no longer fit in memory next to anything

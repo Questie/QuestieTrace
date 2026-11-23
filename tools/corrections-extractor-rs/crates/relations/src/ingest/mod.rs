@@ -6,10 +6,12 @@
 //!    On one thread, as results arrive, every title pairing is indexed (`titles`) and every
 //!    session copy is written to a spill file, partitioned by session key (`spill`).
 //! 2. Partition by partition, the copies of each session are merged (`merge`), legacy greeting
-//!    titles resolved against the index of every submission, and sessions without quest data
-//!    dropped. The sessions kept are spilled again, partitioned by contributor.
+//!    titles resolved against the index of every submission, and sessions without quest data or
+//!    from the beta (`origin`) dropped. The sessions kept are spilled again, partitioned by
+//!    contributor.
 //! 3. Partition by partition, in contributor order, sessions are grouped into characters and
-//!    ordered (`characters`), and the episodes streamed to episodes.jsonl and the episode store,
+//!    ordered (`characters`), characters met on a server that is not Blizzard's (`origin`) are
+//!    dropped, and the episodes of the others streamed to episodes.jsonl and the episode store,
 //!    then reports/ingest.json is written (`report`).
 //!
 //! Ingest holds one partition at a time, never every session: memory stays flat as the archive
@@ -18,6 +20,7 @@
 mod characters;
 mod distill;
 mod merge;
+mod origin;
 mod report;
 mod spill;
 mod streams;
@@ -35,11 +38,13 @@ use anyhow::{bail, Context, Result};
 use characters::{assign_characters, order_sessions, CharacterInput};
 use distill::{DistillStats, EpisodeIdentity};
 use merge::{MergedSession, SessionMerger, SubmissionInfo};
+use origin::Era;
 use rayon::prelude::*;
-use report::{EpisodeSummary, IngestReport, Skipped, Tally};
+use report::{EpisodeSummary, IngestReport, OtherServerCharacter, Skipped, Tally};
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 use spill::{contributor_partition, copy_partition, KeptSession, Partitions, SpilledCopy, Written};
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
@@ -102,11 +107,12 @@ pub fn run(config: &Config) -> Result<IngestOutput> {
     let copies = copies.finish()?;
     eprintln!("ingest: decoded in {:.0}s, merging copies", started.elapsed().as_secs_f64());
 
-    let (kept, merged) = merge_copies(&copies, &read.titles, &spill_dir.join("kept"))?;
+    let (kept, mut merged) = merge_copies(&copies, &read.titles, &spill_dir.join("kept"))?;
     copies.remove()?;
     eprintln!("ingest: merged in {:.0}s, building episodes", started.elapsed().as_secs_f64());
 
-    let summary = write_episodes(config, &kept)?;
+    let (summary, other_servers) = write_episodes(config, &kept)?;
+    merged.skipped.other_server = Some(other_servers.iter().map(|character| character.sessions).sum()).filter(|&sessions| sessions > 0);
     kept.remove()?;
     std::fs::remove_dir(&spill_dir).with_context(|| format!("removing {}", spill_dir.display()))?;
 
@@ -127,6 +133,7 @@ pub fn run(config: &Config) -> Result<IngestOutput> {
         unique: merged.unique,
         seen_under_several_contributors: merged.seen_under_several_contributors,
         skipped: merged.skipped,
+        other_servers,
         greetings: merged.greetings,
         distill: merged.distill,
     };
@@ -136,6 +143,7 @@ pub fn run(config: &Config) -> Result<IngestOutput> {
         "ingest: {} episodes of {} characters, {} submissions failed",
         report.sessions.kept, report.episodes.characters, report.submissions.failed
     );
+    report.sessions.log_left_out();
     Ok(IngestOutput {
         report: serde_json::to_value(&report)?,
     })
@@ -197,14 +205,17 @@ impl ReadTally {
         self.exports += submission.exports;
         self.with_multiple_exports += usize::from(submission.exports > 1);
         for (position, mut session) in submission.sessions.into_iter().enumerate() {
-            let locale = session.episode.locale.as_deref();
-            for observation in &session.titles {
-                self.titles.add(locale, session.episode.player.faction, observation);
-                self.titles.note_sighting(locale, &observation.title, &submission.contributor_id);
-            }
-            for pending in &session.pending_greetings {
-                for title in pending.available.iter().chain(&pending.active) {
-                    self.titles.note_sighting(locale, title, &submission.contributor_id);
+            // Only sessions that can become episodes say which quest a title names.
+            if origin::era(session.start_server_time) == Era::Live && session.other_server.is_none() {
+                let locale = session.episode.locale.as_deref();
+                for observation in &session.titles {
+                    self.titles.add(locale, session.episode.player.faction, observation);
+                    self.titles.note_sighting(locale, &observation.title, &submission.contributor_id);
+                }
+                for pending in &session.pending_greetings {
+                    for title in pending.available.iter().chain(&pending.active) {
+                        self.titles.note_sighting(locale, title, &submission.contributor_id);
+                    }
                 }
             }
             // Indexed above; nothing later reads them.
@@ -376,6 +387,17 @@ fn merge_copies(copies: &Written<SpilledCopy>, titles: &TitleIndex, dir: &Path) 
                 *counts.skipped.no_quest_data.get_or_insert(0) += 1;
                 continue;
             }
+            match origin::era(merged.session.start_server_time) {
+                Era::Live => {}
+                Era::Beta => {
+                    *counts.skipped.beta.get_or_insert(0) += 1;
+                    continue;
+                }
+                Era::Undated => {
+                    *counts.skipped.undated.get_or_insert(0) += 1;
+                    continue;
+                }
+            }
             let session = &mut merged.session;
             let context = (session.episode.locale.as_deref(), session.episode.player.faction);
             for pending in &session.pending_greetings {
@@ -388,6 +410,7 @@ fn merge_copies(copies: &Written<SpilledCopy>, titles: &TitleIndex, dir: &Path) 
                 first_received_at: merged.first_received_at,
                 submission_ids: merged.submission_ids.into_iter().collect(),
                 start_server_time: merged.session.start_server_time,
+                other_server: merged.session.other_server,
                 episode: merged.session.episode,
             };
             kept.push(contributor_partition(&session.contributor_id), &session)?;
@@ -397,13 +420,16 @@ fn merge_copies(copies: &Written<SpilledCopy>, titles: &TitleIndex, dir: &Path) 
 }
 
 /// Pass 3: turns each contributor partition into episodes, in contributor order, and streams them
-/// to episodes.jsonl and the episode store.
-fn write_episodes(config: &Config, kept: &Written<KeptSession>) -> Result<EpisodeSummary> {
+/// to episodes.jsonl and the episode store. Also the characters left out.
+fn write_episodes(config: &Config, kept: &Written<KeptSession>) -> Result<(EpisodeSummary, Vec<OtherServerCharacter>)> {
     let mut store = StoreWriter::create(&config.episode_store(), config.bucket_bytes()?)?;
     let mut summary = EpisodeSummary::default();
+    let mut other_servers = Vec::new();
     io::write_atomic(&config.episodes(), |out| {
         for &partition in &kept.partitions {
-            for episode in contributor_episodes(kept.read(partition)?) {
+            let (episodes, left_out) = contributor_episodes(kept.read(partition)?);
+            other_servers.extend(left_out);
+            for episode in episodes {
                 summary.add(&episode);
                 serde_json::to_writer(&mut *out, &episode)?;
                 out.write_all(b"\n")?;
@@ -413,12 +439,14 @@ fn write_episodes(config: &Config, kept: &Written<KeptSession>) -> Result<Episod
         Ok(())
     })?;
     store.finish()?;
-    Ok(summary)
+    Ok((summary, other_servers))
 }
 
 /// The episodes of every session of a set of whole contributors: grouped into characters,
-/// ordered, and sorted by contributor, character and session order.
-fn contributor_episodes(mut sessions: Vec<KeptSession>) -> Vec<QuestEpisode> {
+/// ordered, and sorted by contributor, character and session order. A character met on a server
+/// that is not Blizzard's is left out with all its sessions: those without an NPC do not show
+/// their server.
+fn contributor_episodes(mut sessions: Vec<KeptSession>) -> (Vec<QuestEpisode>, Vec<OtherServerCharacter>) {
     sessions.sort_by(|a, b| a.key.cmp(&b.key));
     let order = session_order_times(&sessions);
     let inputs: Vec<CharacterInput> = sessions
@@ -443,11 +471,13 @@ fn contributor_episodes(mut sessions: Vec<KeptSession>) -> Vec<QuestEpisode> {
     let characters = assign_characters(&inputs);
     let session_orders = order_sessions(&inputs, &characters);
     drop(inputs);
+    let left_out = other_server_characters(&sessions, &characters);
 
     let mut episodes: Vec<QuestEpisode> = sessions
         .into_iter()
         .zip(characters)
         .zip(session_orders)
+        .filter(|((_, character_key), _)| !left_out.iter().any(|character| character.character_key == *character_key))
         .map(|((session, character_key), session_order)| {
             let identity = EpisodeIdentity {
                 key: session.key,
@@ -463,11 +493,31 @@ fn contributor_episodes(mut sessions: Vec<KeptSession>) -> Vec<QuestEpisode> {
     // TS localeCompare.
     episodes
         .sort_by(|a, b| (&a.contributor_id, &a.character_key, a.session_order, &a.key).cmp(&(&b.contributor_id, &b.character_key, b.session_order, &b.key)));
-    episodes
+    (episodes, left_out)
+}
+
+/// The characters met on a server that is not Blizzard's, with how many sessions each has.
+/// `characters` holds each session's character key.
+fn other_server_characters(sessions: &[KeptSession], characters: &[String]) -> Vec<OtherServerCharacter> {
+    let mut servers: BTreeMap<&str, u32> = BTreeMap::new();
+    for (session, character_key) in sessions.iter().zip(characters) {
+        if let Some(server_id) = session.other_server {
+            servers.entry(character_key).or_insert(server_id);
+        }
+    }
+    servers
+        .into_iter()
+        .map(|(character_key, server_id)| OtherServerCharacter {
+            character_key: character_key.to_owned(),
+            server_id,
+            sessions: characters.iter().filter(|key| *key == character_key).count(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
+    use super::test_trace::{gossip_quest, TraceBuilder};
     use super::*;
 
     #[test]
@@ -483,6 +533,108 @@ mod tests {
         assert_eq!(session_name_time(Some("2026-10-01_12-00-00")), Some(1790856000.0));
         assert_eq!(session_name_time(Some("2026-13-31_24-00-00")), Some(1801440000.0));
         assert_eq!(session_name_time(Some("raid night")), None);
+    }
+
+    /// A minute before and after the live realms opened (see `origin`).
+    const IN_BETA: f64 = origin::LIVE_SINCE - 60.0;
+    const LIVE: f64 = origin::LIVE_SINCE + 86_400.0;
+
+    /// A session that saw one offer, as distilled.
+    fn session(key: &str, start_server_time: Option<f64>) -> distill::DistilledSession {
+        distill::DistilledSession {
+            key: key.into(),
+            start_server_time,
+            ..TraceBuilder::new().gossip(951, &[gossip_quest(91743)], &[]).build()
+        }
+    }
+
+    #[test]
+    fn sessions_from_the_beta_and_undated_ones_are_left_out_and_counted() {
+        let dir = std::env::temp_dir().join(format!("ingest-origin-test-{}", std::process::id()));
+        let mut copies = Partitions::<SpilledCopy>::create(&dir.join("copies")).unwrap();
+        let sessions = [session("live", Some(LIVE)), session("beta", Some(IN_BETA)), session("undated", None)];
+        for (position, session) in sessions.into_iter().enumerate() {
+            let copy = SpilledCopy {
+                submission_id: "s1".into(),
+                contributor_id: "c1".into(),
+                received_at: "2026-11-06T00:00:00Z".into(),
+                index: 0,
+                position,
+                session,
+            };
+            copies.push(copy_partition(&copy.session.key), &copy).unwrap();
+        }
+        let (kept, counts) = merge_copies(&copies.finish().unwrap(), &TitleIndex::default(), &dir.join("kept")).unwrap();
+
+        let keys: Vec<String> = kept
+            .partitions
+            .iter()
+            .flat_map(|&partition| kept.read(partition).unwrap())
+            .map(|session| session.key)
+            .collect();
+        assert_eq!(keys, ["live"]);
+        assert_eq!((counts.unique, counts.skipped.beta, counts.skipped.undated), (3, Some(1), Some(1)));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_character_met_on_another_server_loses_all_its_sessions_and_no_other_character_does() {
+        let kept = |key: &str, hours: f64, race_id: i64, other_server: Option<u32>| {
+            let mut session = session(key, Some(LIVE + hours * 3600.0));
+            session.episode.player.race_id = Some(race_id);
+            KeptSession {
+                key: session.key,
+                contributor_id: "c1".into(),
+                first_received_at: "2026-11-06T00:00:00Z".into(),
+                submission_ids: vec!["s1".into()],
+                start_server_time: session.start_server_time,
+                other_server,
+                episode: session.episode,
+            }
+        };
+        // The contributor's orc was met on server 70; a later session of its saw no NPC. The
+        // troll's two sessions are on a live server.
+        let (episodes, left_out) = contributor_episodes(vec![
+            kept("orc-1", 0.0, 2, Some(70)),
+            kept("troll-1", 1.0, 8, None),
+            kept("orc-2", 2.0, 2, None),
+            kept("troll-2", 3.0, 8, None),
+        ]);
+
+        assert_eq!(episodes.iter().map(|episode| episode.key.as_str()).collect::<Vec<_>>(), ["troll-1", "troll-2"]);
+        assert_eq!(left_out.len(), 1);
+        assert_eq!((left_out[0].server_id, left_out[0].sessions), (70, 2));
+        assert_ne!(left_out[0].character_key, episodes[0].character_key);
+    }
+
+    #[test]
+    fn titles_of_beta_and_other_server_sessions_name_no_quest() {
+        let with_title = |start, other_server| distill::DistilledSession {
+            other_server,
+            titles: vec![distill::TitleObservation {
+                title: "Rascally Rodents".into(),
+                quest_id: 91743,
+                giver: None,
+            }],
+            ..session("titles", start)
+        };
+        let resolved = |session: distill::DistilledSession| {
+            let dir = std::env::temp_dir().join(format!("ingest-titles-test-{}", std::process::id()));
+            let mut copies = Partitions::<SpilledCopy>::create(&dir).unwrap();
+            let mut read = ReadTally::default();
+            let submission = DistilledSubmission {
+                sessions: vec![session],
+                error: None,
+                ..DistilledSubmission::crashed(Path::new("s1.json"))
+            };
+            read.add(0, submission, &mut copies).unwrap();
+            copies.finish().unwrap().remove().unwrap();
+            // The builder's player is a Horde orc on an enUS client.
+            read.titles.resolve(Some("enUS"), Some(crate::model::Faction::Horde), None, "Rascally Rodents")
+        };
+        assert_eq!(resolved(with_title(Some(LIVE), None)), Some(91743));
+        assert_eq!(resolved(with_title(Some(IN_BETA), None)), None);
+        assert_eq!(resolved(with_title(Some(LIVE), Some(70))), None);
     }
 
     #[test]

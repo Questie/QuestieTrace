@@ -83,6 +83,41 @@ pub struct SessionCounts {
     pub seen_under_several_contributors: usize,
     pub kept: usize,
     pub skipped: Skipped,
+    /// The characters `skipped.other_server` counts the sessions of.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub other_servers: Vec<OtherServerCharacter>,
+}
+
+impl SessionCounts {
+    /// Says what was left out because of where it was recorded. Beta sessions are expected;
+    /// anything else here means somebody should look at the recordings.
+    pub fn log_left_out(&self) {
+        if let Some(beta) = self.skipped.beta {
+            eprintln!("ingest: left out {beta} beta sessions");
+        }
+        if let Some(undated) = self.skipped.undated {
+            eprintln!("ingest: WARNING: left out {undated} sessions without a server time, so the beta cannot be told from the live game");
+        }
+        for OtherServerCharacter {
+            character_key,
+            server_id,
+            sessions,
+        } in &self.other_servers
+        {
+            eprintln!(
+                "ingest: WARNING: left out character {character_key} ({sessions} sessions): recorded on server {server_id}, which is not one of Blizzard's"
+            );
+        }
+    }
+}
+
+/// A character recorded on a server that is not Blizzard's; none of its sessions became episodes.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherServerCharacter {
+    pub character_key: String,
+    pub server_id: u32,
+    pub sessions: usize,
 }
 
 /// Unique sessions left out of the episodes; a reason only appears once it was counted.
@@ -93,6 +128,14 @@ pub struct Skipped {
     pub no_events: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_quest_data: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beta: Option<usize>,
+    /// Without a server time, so from the beta or the live game.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub undated: Option<usize>,
+    /// Every session of the characters met on a server that is not Blizzard's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other_server: Option<usize>,
 }
 
 #[derive(Default, Serialize)]
@@ -158,6 +201,7 @@ pub struct Tally {
     pub unique: usize,
     pub seen_under_several_contributors: usize,
     pub skipped: Skipped,
+    pub other_servers: Vec<OtherServerCharacter>,
     pub greetings: GreetingStats,
     /// Summed over the kept sessions.
     pub distill: DistillStats,
@@ -281,6 +325,7 @@ impl IngestReport {
                 seen_under_several_contributors: tally.seen_under_several_contributors,
                 kept: episodes,
                 skipped: tally.skipped,
+                other_servers: tally.other_servers,
             },
             episodes: EpisodeCounts {
                 builds,

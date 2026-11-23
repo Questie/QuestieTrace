@@ -3,8 +3,9 @@
 Infers Questie quest relationship fields for WoW Forever (`preQuestSingle`, `preQuestGroup`,
 `exclusiveTo`, `nextQuestInChain`, breadcrumbs, ...) from QuestieTrace recordings. It is a Rust
 version of the Exporters pipeline in `tools/corrections-extractor/src/relations` (see the README
-there for the reasoning behind each signal): the same inputs, steps, files and deliverables, with
-outputs that match it by value.
+there for the reasoning behind each signal): the same inputs, steps, files and deliverables. Its
+outputs matched it by value until November 24, 2026; since then ingest leaves out beta sessions and
+servers that are not Blizzard's (RELATIONS.md, "Beta and other servers").
 
 A wrong relationship hides quests from players, and a wrong breadcrumb can make Questie
 auto-abandon a quest, so precision beats recall. The output is a reviewable candidate set, never an
@@ -92,7 +93,9 @@ scraper --wowhead--> context candidates ----------------------+--combine--> Lua,
   after each submission) and distills each session to an episode, spilling every copy to a partition
   by session key. Each partition then merges the copies of a session and resolves legacy greeting
   titles, spilling the sessions kept to a partition by contributor; each of those, in order, is
-  grouped into characters and streamed to the episode store (see `ingest/spill.rs`).
+  grouped into characters and streamed to the episode store (see `ingest/spill.rs`). Sessions
+  from the beta, and characters met on a server that is not Blizzard's, are left out and logged
+  (`ingest/origin.rs`).
 - Signals never read the ground truth; combine uses it to calibrate a logistic model per relation
   kind and to measure itself. Wowhead claims are context for reviewers only: they never decide.
 
