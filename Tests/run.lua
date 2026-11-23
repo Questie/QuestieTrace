@@ -1946,6 +1946,8 @@ local function TestUnitInteractionMouseover()
 
   -- Mock WoW API for mouseover unit
   env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
   env.UnitGUID = function(token)
     if token == "mouseover" then return "Creature-0-1-1-1-12345-000001" end
     return nil
@@ -1979,6 +1981,8 @@ local function TestUnitInteractionMouseoverPlayerIsSkipped()
 
   -- Mock WoW API for a mouseover unit that is another player
   env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return true end
+  env.UnitPlayerControlled = function(_token) return true end
   env.UnitGUID = function(token)
     if token == "mouseover" then return "Player-4620-00572164" end
     return nil
@@ -1989,7 +1993,8 @@ local function TestUnitInteractionMouseoverPlayerIsSkipped()
   end
 
   runtime.core.StartCapture("mouseover player privacy")
-  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+  -- The mouseover event itself is filtered, other events still sample the mouseover token.
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
 
   local session = Session(runtime)
   local functions = session.functions
@@ -2025,6 +2030,7 @@ local function TestUnitStateTracker()
     return nil
   end
   env.UnitAffectingCombat = function(token) return token == "target" end
+  env.UnitGUID = function(_token) return "Creature-0-1-1-1-1-000001" end
 
   runtime.core.StartCapture("unitstate test")
   SendEvent(runtime, "PLAYER_TARGET_CHANGED")
@@ -2417,6 +2423,9 @@ local function TestMouseoverEventIsRecordedAndSampled()
   local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
   local env = runtime.env
   local guid = "Creature-0-1-1-1-1-000001"
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return false end
+  env.UnitPlayerControlled = function(_token) return false end
   env.UnitGUID = function(token) if token == "mouseover" then return guid end end
   env.UnitName = function(token) if token == "mouseover" then return "Test NPC" end end
 
@@ -2429,6 +2438,37 @@ local function TestMouseoverEventIsRecordedAndSampled()
   local stream = session.functions.UnitGUID.mouseover
   assert(stream[#stream].v == "Creature-0-1-1-1-2-000002", "mouseover change must be sampled from the event")
   assert(session.events[#session.events].e == "UPDATE_MOUSEOVER_UNIT", "UPDATE_MOUSEOVER_UNIT must be recorded")
+end
+
+local function TestMouseoverEventIsFilteredForPlayersPetsAndOtherUnits()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local env = runtime.env
+  local guid = "Player-4620-00572164"
+  local isPlayer, controlled = true, true
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return isPlayer end
+  env.UnitPlayerControlled = function(_token) return controlled end
+  env.UnitGUID = function(token) if token == "mouseover" then return guid end end
+  env.UnitName = function(token) if token == "mouseover" then return "Somebody" end end
+
+  runtime.core.StartCapture("mouseover filter test")
+  local session = Session(runtime)
+  local eventsBefore = #session.events
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+  isPlayer = false
+  guid = "Pet-0-1-1-1-1-000001"
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+  guid = "Creature-0-1-1-1-1-000002"
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+  guid = "GameObject-0-1-1-1-1-000003"
+  controlled = false
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+  guid = "Creature-0-1-1-1-1-000004"
+  env.UnitExists = function(_token) return false end
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  assert(#session.events == eventsBefore, "UPDATE_MOUSEOVER_UNIT must not be recorded for players, pets, player controlled units, objects or no unit")
+  assert(#session.functions.UnitGUID.mouseover == 1, "UnitGUID[mouseover] must not be sampled for them")
 end
 
 -- Merchant tracker tests
@@ -3748,6 +3788,7 @@ local tests = {
   { name = "should not record subname for players, player pets or other units", run = TestUnitStateSkipsSubNameForPlayersPetsAndOtherUnits },
   { name = "should register every event a tracker listens to", run = TestEveryTrackerEventIsRegistered },
   { name = "should record and sample the mouseover unit on UPDATE_MOUSEOVER_UNIT", run = TestMouseoverEventIsRecordedAndSampled },
+  { name = "should not record or sample UPDATE_MOUSEOVER_UNIT for players, pets and other units", run = TestMouseoverEventIsFilteredForPlayersPetsAndOtherUnits },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },
   { name = "Merchant close probes known indices", run = TestMerchantCloseProbesKnownIndices },

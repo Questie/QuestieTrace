@@ -227,6 +227,12 @@ local EVENT_FILTERS = {
   CHAT_MSG_SYSTEM = function(text)
     return Core.IsAllowedSystemMessage(text)
   end,
+  -- Hovering players, pets and party frames fires this on every mouse move. Only NPCs are of interest, so
+  -- the rest is neither recorded nor sampled.
+  ---@return boolean
+  UPDATE_MOUSEOVER_UNIT = function()
+    return Core.IsNpcUnit("mouseover")
+  end,
 }
 
 ---------------------------------------------------------------------------

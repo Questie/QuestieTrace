@@ -46,6 +46,25 @@ function Core.IsPlayerGUID(guid)
   return Core.ParseGUIDKind(guid) == "player"
 end
 
+--- Whether `token` is a world NPC: not a player, not a pet or minion, and not controlled by a player.
+--- Restricted (secret) answers cannot be compared, so such units count as not being an NPC.
+---@param token string
+---@return boolean
+function Core.IsNpcUnit(token)
+  if (not UnitExists(token)) or UnitIsPlayer(token) then
+    return false
+  end
+  local guid = UnitGUID(token)
+  if Core.ParseGUIDKind(guid) ~= "npc" or guid:sub(1, 4) == "Pet-" then
+    return false
+  end
+  local controlled = UnitPlayerControlled(token)
+  if issecretvalue and issecretvalue(controlled) then
+    return false
+  end
+  return controlled ~= true
+end
+
 --- Escape Lua pattern-magic characters so a literal string can be used as a gsub pattern.
 ---@param str string
 ---@return string
