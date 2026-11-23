@@ -82,8 +82,9 @@ case but two, QuestieDB already held the facts that ruled the relation out:
 | nextQuestInChain into an AND list | 1434 | Already not applied (`never chain into an AND list`) |
 | Not caught | 379, 92840 (two requirers, like 205 and 275, which were kept), 2300 (availableUntilCompleted), 1661 (a breadcrumb list that was right but incomplete) | Need a human |
 
-Measured on the reviewed module: the breadcrumb and implied rules catch 14 of the 24 and nothing
-else; the three-requirer chain rule catches 5 more and 8 relations beyond the reviewed range
+Measured on the reviewed module: 13 of the 24 match the breadcrumb and implied rules (the module now
+holds back 12 of them; 4001 is already in QuestieDB), and neither rule touches a relation that was
+kept; the three-requirer chain rule catches 5 more and 8 relations beyond the reviewed range
 (the same rule at two requirers would also drop 205 and 275, which were reviewed and kept). A
 rejected alternative was to emit nothing between two Era quests: it removes 62 relations, 20 of
 them undone but 30 kept (mostly exclusiveTo between Era quests), while new Forever quests are
@@ -91,9 +92,10 @@ often steps in old Era chains, so Era quests cannot simply be skipped. Rules hol
 as commented-out lines with the reason, so reviewers still see them.
 
 **What it means now.** Since QuestieDB carries the 771 copied relations as hand-written fixes,
-the full run of November 23 applies only 12 relations (exclusiveTo pairs between same-name
-quests and three new prerequisites); against hand-written Forever relations the traces agree
-2,594 times, add 28 and conflict 17 (listed in `relations-review.md`). Improvements on those 771
+the full runs of November 23 apply 12 relations, or 14 against that day's QuestieDB master
+(exclusiveTo pairs between same-name quests, a breadcrumb pair and new prerequisites); against
+hand-written Forever relations the traces agree 2,594 times, add 28 and differ 16 times (listed in
+`relations-review.md`; see "Next" for why those are not mistakes in the fixes). Improvements on those 771
 only reach the game when someone acts on a conflict. Not done: parent/child relations are never
 proposed (the model can represent parentQuest, but no signal looks for "only offered while quest
 P is in the log").
@@ -103,6 +105,63 @@ since the module was imported (`git diff <import commit> -- src/corrections/Fore
 in QuestieDB), and for each relation the module applies, whether the fixes kept it, undid it or
 left it alone; the undone ones, next to what the ground truth (`groundtruth.json`) knew about
 both quests, show the pattern.
+
+## Next: why the traces accept wrong extra prerequisites (written 2026-11-23)
+
+State: QuestieDB PR #238 (branch `fix/relation-traces-review`) holds the regenerated module and waits
+for the maintainer's validation; its description is corrected and no longer claims that any
+hand-written fix is wrong. Nothing below is implemented yet.
+
+**Start from this principle: where the traces and a hand-written fix differ, assume the traces are
+wrong until shown otherwise.** Of the run's 16 "conflict" rows (9 quests), none was shown to be a
+mistake in the fixes, and these were checked against the data:
+- 93836 (Horde) and 94369 (Alliance), "The Fate of Zephras": the fixes are right (92646 -> 93836,
+  93835 -> 94369; the traces accept both with score 1.000). The extra prerequisite is the other
+  faction's version: about 3,300 Horde characters have 93835 completed, but nobody of that faction
+  ever accepted it or turned it in. Turning in one version seems to flag both.
+- 91743 "Rascally Rodents": the maintainer says the fix is right (91741 -> 92124 -> 91743). In the
+  traces, only absence finds 92124 (score 0.94); cooccurrence, offer-set and handoff all propose
+  91741, two steps back, which the implied rule then holds back because QuestieDB has the chain.
+- The rest is not checked one by one: 94050 accepts the fix's value plus an extra (6063), 94490's
+  fix already contains the named quest, 98362 and 98397 read the fix's OR list as AND, 98890 rests
+  on three characters, 92840 is held back as implied.
+
+Why it matters beyond the hand-written quests: the implied rule only works where QuestieDB already
+has the chain. On Forever-new quests nobody has written by hand, the same mistakes reach the module.
+
+Work, in order:
+
+1. **Rule: never a prerequisite no character of the quest can take.** Drop P -> Q when the required
+   races (or classes) of P and Q exclude each other (93835 is Alliance, 93836 Horde). Cheap, uses
+   QuestieDB's masks. Verify first: that the masks can be trusted (the catalog has requiredRaces 32,
+   Tauren only, for 92646, although 1,423 Horde characters were shown it: check the races of the
+   characters that accepted it), and count what the rule drops from all accepted relations, not
+   only the conflicts.
+2. **Why the three signals prefer 91741 over 92124.** Likely (not verified): offer-set and
+   cooccurrence favour a prerequisite turned in at the quest's own giver ("link=true"): 91741 is
+   turned in at npc 951, where 91743 starts, while 92124 is turned in at npc 247229. Test it: take
+   91743 as the fixture, find what keeps 92124 from being emitted by cooccurrence and offer-set
+   (see `signals/offer_set/infer.rs` and `signals/cooccurrence/prerequisites.rs`), and check how many
+   accepted prerequisites on Forever-new quests have an ancestor turned in at the quest's giver
+   while a nearer step is turned in elsewhere.
+3. **Measure before changing anything.** Use the hand-written prerequisites as truth: for each one
+   with evidence, count agree, extra and missing, per signal and combined (`relations score` and
+   `reports/combine-metrics.json` do part of it), so each change shows what it wins and loses.
+   Gate the same way as the streaming work (`RELATIONS_BUCKET_BYTES=1000000` and the default).
+4. **Parent/child and breadcrumb proposals** stay as listed under the review section.
+
+Mistakes to avoid (made on 2026-11-23): reading only the `conflict` rows of `relations-review.md`
+hides the `agree` rows of the same quest, which made correct fixes look swapped; "had it completed"
+counted over a whole capture says nothing about order, so use the event order (`questEvents`,
+`completed.changes` times) for anything about before and after; and recompute every number quoted
+to someone else from the data first (583 is required by four quests in QuestieDB, not eight: the
+other four were this module's own wrong output).
+
+How to look at a quest: `relations-review.md` section `### <quest id>` for the evidence,
+`candidates/<signal>.json` for what each signal proposed, and a scan of `episodes.jsonl` by faction
+for who accepted, turned in or completed what (`review-scripts/zephras.py`, `rodents.py`). The run
+and the scripts are in `tools/corrections-extractor-rs/relations-output-questiedb/` (gitignored;
+keep it until this is done).
 
 ## Reading the episodes one bucket at a time (2026-11-22/23)
 
