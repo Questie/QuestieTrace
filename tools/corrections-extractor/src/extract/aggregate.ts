@@ -43,6 +43,8 @@ export interface ScalarGroup<T> {
   lastSessionKey: string | undefined;
   /** Newest provenance.sessionTime among those sessions, null when none had one. */
   newestSessionTime: number | null;
+  /** Latest provenance.t among the observations of the sessions at newestSessionTime, null when newestSessionTime is. */
+  newestSessionT: number | null;
 }
 
 /**
@@ -88,6 +90,7 @@ export function addToScalarSummary<T>(summary: ScalarSummary<T>, observations: O
         timedSessionCount: sessionTime === null ? 0 : 1,
         lastSessionKey: sessionKey,
         newestSessionTime: sessionTime,
+        newestSessionT: sessionTime === null ? null : obs.provenance.t,
       });
       continue;
     }
@@ -103,8 +106,13 @@ export function addToScalarSummary<T>(summary: ScalarSummary<T>, observations: O
       existing.timedSessionCount++;
     }
     existing.lastSessionKey = sessionKey;
-    if (sessionTime !== null && (existing.newestSessionTime === null || sessionTime > existing.newestSessionTime)) {
-      existing.newestSessionTime = sessionTime;
+    if (sessionTime !== null) {
+      if (existing.newestSessionTime === null || sessionTime > existing.newestSessionTime) {
+        existing.newestSessionTime = sessionTime;
+        existing.newestSessionT = obs.provenance.t;
+      } else if (sessionTime === existing.newestSessionTime) {
+        existing.newestSessionT = Math.max(existing.newestSessionT ?? -Infinity, obs.provenance.t);
+      }
     }
   }
 }
@@ -121,6 +129,10 @@ function defaultOrder<T>(a: ScalarGroup<T>, b: ScalarGroup<T>): number {
   const bTime = b.newestSessionTime ?? -Infinity;
   if (aTime !== bTime) {
     return bTime - aTime;
+  }
+  // Only the observations of the newest session are comparable; untimed groups fall back to the overall latestT.
+  if (a.newestSessionT !== null && b.newestSessionT !== null) {
+    return b.newestSessionT - a.newestSessionT;
   }
   return b.latestT - a.latestT;
 }

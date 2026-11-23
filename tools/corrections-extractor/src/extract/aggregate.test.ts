@@ -191,6 +191,18 @@ describe("aggregateScalarSummary tie-break", () => {
     expect(aggregateScalarSummary(summary).get(1)?.value).toBe("Timed");
   });
 
+  it("should compare the time within the newest session, not the latest time of any session", () => {
+    const summary: ScalarSummary<string> = new Map();
+    const at = (value: string, key: number, sessionTime: number, t: number): Observation<string> => ({
+      ...sessionObs(1, value, key, sessionTime),
+      provenance: { session: `s${key}`, sessionKey: `k${key}`, sessionTime, t },
+    });
+    addToScalarSummary(summary, [at("A", 1, 100, 3000), at("A", 2, 200, 10)]);
+    addToScalarSummary(summary, [at("B", 3, 150, 5), at("B", 4, 200, 50)]);
+
+    expect(aggregateScalarSummary(summary).get(1)?.value).toBe("B");
+  });
+
   it("should still use the time within a session when no session has a server time", () => {
     const summary: ScalarSummary<string> = new Map();
     addToScalarSummary(summary, [{ ...sessionObs(1, "Early", 1, null), provenance: { session: "s1", sessionKey: "k1", sessionTime: null, t: 10 } }]);
