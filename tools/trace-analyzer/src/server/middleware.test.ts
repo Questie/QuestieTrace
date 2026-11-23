@@ -191,7 +191,7 @@ describe("traceApiPlugin middleware", () => {
       `#!/bin/sh
 case "$1" in
   lsf) cd "${bucketDir}/submissions" && find . -type f | sed 's|^./||' ;;
-  copy) while read -r key; do mkdir -p "$(dirname "$9/$key")"; cp "${bucketDir}/submissions/$key" "$9/$key"; done < "$3" ;;
+  copy) while read -r key; do mkdir -p "$(dirname "\${10}/$key")"; cp "${bucketDir}/submissions/$key" "\${10}/$key"; done < "$3" ;;
 esac
 `,
     );

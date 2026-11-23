@@ -34,7 +34,8 @@ export function localSource(traceDataDir: string): SubmissionSource {
 
 /**
  * An rclone remote holding the archive, e.g. `ovhcloud-de:trace-intake-ovh`: `<remote>/submissions/<key>`.
- * Fetched keys are copied into a temporary directory, which release removes.
+ * Fetched keys are copied into a temporary directory, which release removes. They are looked up one by
+ * one (--no-traverse): measured on 200 keys, that took 8s where a plain copy took 115-260s.
  */
 export function rcloneSource(remote: string, rclone = "rclone"): SubmissionSource {
   const submissions = `${remote.replace(/\/+$/, "")}/submissions`;
@@ -54,7 +55,7 @@ export function rcloneSource(remote: string, rclone = "rclone"): SubmissionSourc
       try {
         const list = join(dir, ".files");
         writeFileSync(list, keys.join("\n") + "\n");
-        await run(rclone, ["copy", "--files-from-raw", list, "--transfers", "64", "--checkers", "64", submissions, dir], { maxBuffer: 64 * 1024 * 1024 });
+        await run(rclone, ["copy", "--files-from-raw", list, "--no-traverse", "--transfers", "64", "--checkers", "64", submissions, dir], { maxBuffer: 64 * 1024 * 1024 });
         return dir;
       } catch (e) {
         rmSync(dir, { recursive: true, force: true });
