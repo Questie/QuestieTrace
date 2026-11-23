@@ -68,13 +68,40 @@ type Envelope<'a> = HashMap<String, &'a RawValue>;
 /// do not) makes it unreadable: "no export_string" where the TS tool would decode on.
 /// Borrowed when the string has no escapes, as an export string never has: the raw JSON was
 /// validated, so the text between the quotes is the value.
-fn json_string(raw: Option<&RawValue>) -> Option<Cow<'_, str>> {
+fn json_string<'a>(raw: Option<&'a RawValue>) -> Option<Cow<'a, str>> {
     let json = raw?.get();
     let inner = json.strip_prefix('"').and_then(|rest| rest.strip_suffix('"'));
     match inner {
         Some(inner) if !inner.contains('\\') => Some(Cow::Borrowed(inner)),
         _ => serde_json::from_str::<String>(json).ok().map(Cow::Owned),
     }
+}
+
+/// Where the export string sits in a submission file's text: the bytes between the quotes of
+/// its `export_string` value. None when the file does not parse, has no such string, or the
+/// string has escapes (an export string never has). A pack stores what is around this range
+/// as it is, and the exports themselves inflated.
+pub fn export_string_span(text: &str) -> Option<std::ops::Range<usize>> {
+    let envelope = serde_json::from_str::<Envelope>(text).ok()?;
+    match json_string(envelope.get("export_string").copied())? {
+        // Borrowed means it is a slice of `text`, so its address gives its position.
+        Cow::Borrowed(export_string) => {
+            let start = export_string.as_ptr() as usize - text.as_ptr() as usize;
+            Some(start..start + export_string.len())
+        }
+        Cow::Owned(_) => None,
+    }
+}
+
+/// Inflates every export of an export string, in order of their start markers. `Err` when the
+/// string holds no export at all; an export that cannot be inflated keeps its own reason.
+pub fn inflate_exports(export_string: &str, inflater: &mut Inflater) -> Result<Vec<Result<Inflated, String>>, String> {
+    let exports = find_exports(export_string)?;
+    Ok(exports
+        .iter()
+        .enumerate()
+        .map(|(index, export)| inflate_export(index, export, inflater))
+        .collect())
 }
 
 /// The submission id in a file name: trace-data names files `<received stamp>_<submission id>.json`.
@@ -101,49 +128,68 @@ impl Submission {
 
     /// A submission file's content; `fallback_id` is used when the file has no `id`.
     pub fn from_json(bytes: &[u8], fallback_id: String, inflater: &mut Inflater) -> Submission {
-        let mut submission = Submission {
+        // Read as UTF-8 like Node does: invalid bytes become U+FFFD instead of failing the file.
+        let text = String::from_utf8_lossy(bytes);
+        let mut submission = Submission::unread(fallback_id);
+        let Some(export_string) = submission.read_envelope(&text) else {
+            return submission;
+        };
+        match inflate_exports(&export_string, inflater) {
+            Err(message) => submission.error = Some(message),
+            Ok(exports) => submission.exports = exports,
+        }
+        submission
+    }
+
+    /// A submission whose exports are already inflated, as a pack stores them. `envelope` is
+    /// the submission file with its export string emptied: the ids are read from it exactly as
+    /// [`Self::from_json`] reads them from the file.
+    pub fn from_inflated(envelope: &[u8], fallback_id: String, exports: Vec<Vec<u8>>) -> Submission {
+        let text = String::from_utf8_lossy(envelope);
+        let mut submission = Submission::unread(fallback_id);
+        if submission.read_envelope(&text).is_some() {
+            submission.exports = exports.into_iter().map(|cbor| Ok(Inflated::from_cbor(cbor))).collect();
+        }
+        submission
+    }
+
+    fn unread(fallback_id: String) -> Submission {
+        Submission {
             submission_id: fallback_id,
             contributor_id: String::new(),
             received_at: String::new(),
             error: None,
             exports: Vec::new(),
-        };
-        // Read as UTF-8 like Node does: invalid bytes become U+FFFD instead of failing the file.
-        let text = String::from_utf8_lossy(bytes);
-        let envelope = match serde_json::from_str::<Envelope>(&text) {
+        }
+    }
+
+    /// Reads the ids of a submission file's text and returns its export string. None, with
+    /// `error` set, when the file cannot be read or has no export string.
+    fn read_envelope<'t>(&mut self, text: &'t str) -> Option<Cow<'t, str>> {
+        let envelope = match serde_json::from_str::<Envelope<'t>>(text) {
             Ok(envelope) => envelope,
             // An array is a JS object too: it parses, but has no export_string.
-            Err(_) if serde_json::from_str::<Vec<&RawValue>>(&text).is_ok() => {
-                submission.error = Some("no export_string".into());
-                return submission;
+            Err(_) if serde_json::from_str::<Vec<&RawValue>>(text).is_ok() => {
+                self.error = Some("no export_string".into());
+                return None;
             }
             // Never pass serde's message on: it can quote the input, which holds free text.
             Err(_) => {
-                submission.error = Some("unreadable submission JSON".into());
-                return submission;
+                self.error = Some("unreadable submission JSON".into());
+                return None;
             }
         };
         if let Some(id) = json_string(envelope.get("id").copied()).filter(|id| !id.is_empty()) {
-            submission.submission_id = id.into_owned();
+            self.submission_id = id.into_owned();
         }
         let text_field = |name: &str| json_string(envelope.get(name).copied()).map(Cow::into_owned).unwrap_or_default();
-        submission.contributor_id = text_field("contributor_id");
-        submission.received_at = text_field("received_at");
-        let Some(export_string) = json_string(envelope.get("export_string").copied()) else {
-            submission.error = Some("no export_string".into());
-            return submission;
-        };
-        match find_exports(&export_string) {
-            Err(message) => submission.error = Some(message),
-            Ok(exports) => {
-                submission.exports = exports
-                    .iter()
-                    .enumerate()
-                    .map(|(index, export)| inflate_export(index, export, inflater))
-                    .collect();
-            }
+        self.contributor_id = text_field("contributor_id");
+        self.received_at = text_field("received_at");
+        let export_string = json_string(envelope.get("export_string").copied());
+        if export_string.is_none() {
+            self.error = Some("no export_string".into());
         }
-        submission
+        export_string
     }
 
     /// Hands the inflated exports' buffers back to `inflater` for the next submission.
@@ -377,5 +423,55 @@ mod tests {
         assert_eq!(read("not json").as_deref(), Some("unreadable submission JSON"));
         assert_eq!(read("[1, 2]").as_deref(), Some("no export_string"));
         assert_eq!(read(r#"{"export_string": 5}"#).as_deref(), Some("no export_string"));
+    }
+
+    #[test]
+    fn the_export_string_span_is_the_last_export_string_value_between_its_quotes() {
+        let text = r#"{"id": "1", "export_string": "first", "note": "export_string", "export_string": "second"}"#;
+        let span = export_string_span(text).unwrap();
+        assert_eq!(span.start, text.rfind("second").unwrap());
+        assert_eq!(&text[span.clone()], "second");
+        assert_eq!((text.as_bytes()[span.start - 1], text.as_bytes()[span.end]), (b'"', b'"'));
+        // A string with an escape, a missing or non-string value, and text that is no JSON.
+        assert_eq!(export_string_span(r#"{"export_string": "a\nb"}"#), None);
+        assert_eq!(export_string_span(r#"{"id": "1"}"#), None);
+        assert_eq!(export_string_span(r#"{"export_string": 5}"#), None);
+        assert_eq!(export_string_span("not json"), None);
+    }
+
+    #[test]
+    fn a_submission_built_from_inflated_exports_reads_like_its_file() {
+        let file = serde_json::json!({
+            "id": "abc", "contributor_id": "c0ffee", "received_at": "2026-10-01T00:05:00Z", "export_string": tiny_export(),
+        })
+        .to_string();
+        let mut inflater = Inflater::new();
+        let from_file = Submission::from_json(file.as_bytes(), "fallback".into(), &mut inflater);
+
+        let span = export_string_span(&file).unwrap();
+        let inflated: Vec<Vec<u8>> = inflate_exports(&file[span.clone()], &mut inflater)
+            .unwrap()
+            .into_iter()
+            .map(|export| export.unwrap().bytes().to_vec())
+            .collect();
+        let envelope = [&file[..span.start], &file[span.end..]].concat();
+        let from_parts = Submission::from_inflated(envelope.as_bytes(), "fallback".into(), inflated);
+
+        let read = |submission: &Submission| {
+            let arena = Arena::new();
+            let decoded = submission.decode(&arena);
+            let ids = (
+                submission.submission_id.clone(),
+                submission.contributor_id.clone(),
+                submission.received_at.clone(),
+            );
+            (ids, decoded.error.clone(), traces_json(&decoded))
+        };
+        assert_eq!(read(&from_parts), read(&from_file));
+        assert_eq!(read(&from_parts).0, ("abc".to_owned(), "c0ffee".to_owned(), "2026-10-01T00:05:00Z".to_owned()));
+        assert_eq!(read(&from_parts).2.len(), 1);
+        // An envelope that cannot be read fails like such a file, whatever exports come with it.
+        let unreadable = Submission::from_inflated(b"[]", "fallback".into(), vec![vec![0xa0]]);
+        assert_eq!(read(&unreadable).1.as_deref(), Some("no export_string"));
     }
 }

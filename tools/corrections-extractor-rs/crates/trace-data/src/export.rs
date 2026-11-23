@@ -197,6 +197,12 @@ impl Inflated {
     pub fn bytes(&self) -> &[u8] {
         &self.buffer[..self.size]
     }
+
+    /// An export's CBOR that was not inflated here: a pack stores exports already inflated.
+    pub fn from_cbor(cbor: Vec<u8>) -> Inflated {
+        let size = cbor.len();
+        Inflated { buffer: cbor, size }
+    }
 }
 
 /// Inflate buffers an [`Inflater`] keeps between submissions.
