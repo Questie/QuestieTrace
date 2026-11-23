@@ -404,10 +404,11 @@ export class ObservedStore {
                max(t) AS latest_t,
                count(DISTINCT session) FILTER (WHERE session_time IS NOT NULL) AS timed_sessions,
                max(session_time) AS newest_session_time,
+               max([session_time, t]) FILTER (WHERE session_time IS NOT NULL)[2] AS newest_session_t,
                min(seen) AS seen
         FROM rows GROUP BY ALL
       )
-      SELECT kind, field, locale, entity, value, confidence, count, latest_t, timed_sessions, newest_session_time
+      SELECT kind, field, locale, entity, value, confidence, count, latest_t, timed_sessions, newest_session_time, newest_session_t
       FROM groups
       ORDER BY kind, field,
                min(seen) OVER (PARTITION BY kind, field, locale),
@@ -427,6 +428,7 @@ export class ObservedStore {
             latestT: row.latest_t as number,
             timedSessionCount: Number(row.timed_sessions),
             newestSessionTime: (row.newest_session_time as number | null) ?? null,
+            newestSessionT: (row.newest_session_t as number | null) ?? null,
           },
         });
       }
