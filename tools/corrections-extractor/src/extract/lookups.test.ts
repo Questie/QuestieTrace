@@ -141,6 +141,27 @@ describe("finalizeLookups", () => {
     });
   });
 
+  describe("object names", () => {
+    const sighting = (name: string, serverTime: number) =>
+      makeSession({
+        GetServerTime: [{ t: 0, tp: 0, v: serverTime }],
+        GetBuildInfo: { player: [{ t: 0, tp: 0, v: 16001 }] },
+        GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
+        UnitGUID: { target: [{ t: 3, tp: 3, v: "GameObject-0-5208-0-7-2843-0000399" }] },
+        UnitName: { target: [{ t: 3, tp: 3, v: { 1: name, n: 1 } }] },
+      });
+
+    it("should write the object name most sessions agree on, not the newest", () => {
+      const bundle = run([sighting("Verdächtige Truhe", 1000), sighting("Verdächtige Truhe", 2000), sighting("Stuhl", 3000)]);
+
+      expect(bundle.lookupObjects.deDE).toContain('[2843] = "Verdächtige Truhe",');
+    });
+
+    it("should not write an object name seen in only one session", () => {
+      expect(run([sighting("Verdächtige Truhe", 1000)]).lookupObjects).toEqual({});
+    });
+  });
+
   it("should leave the accumulator untouched when an observer throws for a later session", () => {
     const broken = itemSession("frFR", ITEM_LINK_FR);
     broken.functions = new Proxy(broken.functions, {
