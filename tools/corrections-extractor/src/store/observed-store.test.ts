@@ -406,7 +406,7 @@ describe("rcloneSource", () => {
     await expect(rcloneSource("missing:bucket", script).list()).rejects.toThrow(/missing:bucket\/submissions.*TRACE_REMOTE.*TRACE_DATA_DIR[\s\S]*didn't find section/);
   });
 
-  /** A stand-in for rclone that serves `remoteDir` for lsf and copy. */
+  /** A stand-in for rclone that serves `remoteDir` for lsf and copy, and writes the arguments of copy to `<remoteDir>/copy-args`. */
   function fakeRclone(remoteDir: string): string {
     const script = join(tempDir(), "rclone");
     writeFileSync(
@@ -414,13 +414,27 @@ describe("rcloneSource", () => {
       `#!/bin/sh
 case "$1" in
   lsf) cd "${remoteDir}/submissions" && find . -type f | sed 's|^./||' ;;
-  copy) while read -r key; do mkdir -p "$(dirname "$9/$key")"; cp "${remoteDir}/submissions/$key" "$9/$key"; done < "$3" ;;
+  copy)
+    echo "$@" > "${remoteDir}/copy-args"
+    for dest; do :; done
+    while read -r key; do mkdir -p "$(dirname "$dest/$key")"; cp "${remoteDir}/submissions/$key" "$dest/$key"; done < "$3" ;;
 esac
 `,
     );
     chmodSync(script, 0o755);
     return script;
   }
+
+  it("should fetch without traversing the remote", async () => {
+    const remoteDir = tempDir();
+    mkdirSync(join(remoteDir, "submissions", "2026-10"), { recursive: true });
+    writeFileSync(join(remoteDir, "submissions", "2026-10", "a.json"), "{}");
+    const source = rcloneSource("remote:trace-data", fakeRclone(remoteDir));
+
+    source.release(await source.fetch(["2026-10/a.json"]));
+
+    expect(readFileSync(join(remoteDir, "copy-args"), "utf8").split(" ")).toContain("--no-traverse");
+  });
 
   it("should list the remote's submissions and fetch them into a directory that release removes", async () => {
     const remoteDir = tempDir();
