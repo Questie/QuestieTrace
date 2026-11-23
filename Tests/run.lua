@@ -2471,6 +2471,71 @@ local function TestMouseoverEventIsFilteredForPlayersPetsAndOtherUnits()
   assert(#session.functions.UnitGUID.mouseover == 1, "UnitGUID[mouseover] must not be sampled for them")
 end
 
+local function TestMouseoverLeavingNpcIsRecordedOnce()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local env = runtime.env
+  local unit = { exists = true, isPlayer = false, guid = "Creature-0-1-1-1-1-000001", name = "Test NPC" }
+  env.UnitExists = function(token) return token == "mouseover" and unit.exists end
+  env.UnitIsPlayer = function(_token) return unit.isPlayer end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" and unit.exists then return unit.guid end end
+  env.UnitName = function(token) if token == "mouseover" and unit.exists then return unit.name end end
+
+  local function Last(stream) return stream[#stream].v end
+  local function CountEvents(session)
+    local n = 0
+    for _, e in ipairs(session.events) do if e.e == "UPDATE_MOUSEOVER_UNIT" then n = n + 1 end end
+    return n
+  end
+
+  local transitions = {
+    { isPlayer = true, guid = "Player-4620-00572164", name = "Somebody" },
+    { guid = "Pet-0-1-1-1-1-000002", name = "Rex" },
+    { exists = false },
+  }
+  for _, target in ipairs(transitions) do
+    unit = { exists = true, isPlayer = false, guid = "Creature-0-1-1-1-1-000001", name = "Test NPC" }
+    runtime.core.StopCapture()
+    runtime.core.StartCapture("mouseover leave test")
+    local session = Session(runtime)
+    SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+    assert(CountEvents(session) == 1, "NPC hover must be recorded")
+
+    unit = target
+    if unit.exists == nil then unit.exists = true end
+    SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+    assert(CountEvents(session) == 2, "leaving the NPC must be recorded")
+    assert(Last(session.functions.UnitGUID.mouseover) == nil, "UnitGUID[mouseover] must end with no unit")
+    assert(Last(session.functions.UnitName.mouseover)[1] == nil, "UnitName[mouseover] must end empty")
+
+    SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+    assert(CountEvents(session) == 2, "further non-NPC hovers must not be recorded")
+  end
+end
+
+local function TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local env = runtime.env
+  local unit = { guid = "Creature-0-1-1-1-1-000001", name = "Test NPC", isPlayer = false }
+  env.UnitExists = function(token) return token == "mouseover" end
+  env.UnitIsPlayer = function(_token) return unit.isPlayer end
+  env.UnitPlayerControlled = function(_token) return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return unit.guid end end
+  env.UnitName = function(token) if token == "mouseover" then return unit.name end end
+
+  runtime.core.StartCapture("mouseover at start test")
+  local session = Session(runtime)
+  local guids = session.functions.UnitGUID.mouseover
+  assert(guids[#guids].v == unit.guid, "the initial sample must hold the hovered NPC")
+
+  unit = { guid = "Player-4620-00572164", name = "Somebody", isPlayer = true }
+  SendEvent(runtime, "UPDATE_MOUSEOVER_UNIT")
+
+  assert(guids[#guids].v == nil, "UnitGUID[mouseover] must be cleared when leaving the NPC")
+  local names = session.functions.UnitName.mouseover
+  assert(names[#names].v[1] == nil, "UnitName[mouseover] must be cleared when leaving the NPC")
+end
+
 -- Merchant tracker tests
 local function TestMerchantClassicAPIRecordsItems()
   local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
@@ -3789,6 +3854,8 @@ local tests = {
   { name = "should register every event a tracker listens to", run = TestEveryTrackerEventIsRegistered },
   { name = "should record and sample the mouseover unit on UPDATE_MOUSEOVER_UNIT", run = TestMouseoverEventIsRecordedAndSampled },
   { name = "should not record or sample UPDATE_MOUSEOVER_UNIT for players, pets and other units", run = TestMouseoverEventIsFilteredForPlayersPetsAndOtherUnits },
+  { name = "should record leaving an npc once and clear the mouseover streams", run = TestMouseoverLeavingNpcIsRecordedOnce },
+  { name = "should record leaving an npc that was hovered at capture start", run = TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },
   { name = "Merchant close probes known indices", run = TestMerchantCloseProbesKnownIndices },

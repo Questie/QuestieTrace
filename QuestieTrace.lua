@@ -211,6 +211,9 @@ Core.TRACKED_EVENT_CATEGORIES = TRACKED_EVENT_CATEGORIES
 -- Event filters (skip events that don't match criteria)
 ---------------------------------------------------------------------------
 
+---@type boolean Whether the last recorded mouseover was an NPC.
+local mouseoverWasNpc = false
+
 local EVENT_FILTERS = {
   ---@param addonName string
   ---@return boolean
@@ -228,10 +231,14 @@ local EVENT_FILTERS = {
     return Core.IsAllowedSystemMessage(text)
   end,
   -- Hovering players, pets and party frames fires this on every mouse move. Only NPCs are of interest, so
-  -- the rest is neither recorded nor sampled.
+  -- the rest is neither recorded nor sampled. The first transition from an NPC to a non-NPC is let through
+  -- so the mouseover streams get their "no unit" sample.
   ---@return boolean
   UPDATE_MOUSEOVER_UNIT = function()
-    return Core.IsNpcUnit("mouseover")
+    local isNpc = Core.IsNpcUnit("mouseover")
+    local wasNpc = mouseoverWasNpc
+    mouseoverWasNpc = isNpc
+    return isNpc or wasNpc
   end,
 }
 
@@ -470,6 +477,7 @@ function Core.StartCapture(sessionName)
     return
   end
 
+  mouseoverWasNpc = false
   capture.token = capture.token + 1
   capture.startedAt = GetTime()
   capture.startedAtPrecise = GetTimePreciseSec()
@@ -503,6 +511,10 @@ function Core.StartCapture(sessionName)
       tracker.Init(capture)
     end
   end
+
+  -- The initial sample may already hold an NPC that the next non-NPC hover has to clear.
+  local mouseoverGuids = capture.session.functions.UnitGUID and capture.session.functions.UnitGUID.mouseover
+  mouseoverWasNpc = mouseoverGuids ~= nil and #mouseoverGuids > 0 and mouseoverGuids[#mouseoverGuids].v ~= nil
 end
 
 --- Stop the active capture session.
