@@ -144,7 +144,7 @@ export class ObservedStore {
     // Left behind by a run that was killed.
     rmSync(join(dir, ".tmp"), { recursive: true, force: true });
     for (const name of readdirSync(join(dir, "batches"))) if (name.endsWith(".tmp")) rmSync(join(dir, "batches", name));
-    const instance = await DuckDBInstance.create(":memory:", { temp_directory: join(dir, ".tmp"), memory_limit: "4GB", max_temp_directory_size: "20GB" });
+    const instance = await DuckDBInstance.create(":memory:", { temp_directory: join(dir, ".tmp"), memory_limit: "12GB", max_temp_directory_size: "20GB" });
     try {
       return new ObservedStore(dir, manifest, instance, await instance.connect());
     } catch (e) {
