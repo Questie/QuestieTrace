@@ -338,21 +338,48 @@ describe("extractAll (quest/item/object entities)", () => {
     expect(itemFixes).toContain('[itemKeys.name] = "Tough Wolf Meat",');
   });
 
-  it("should produce a paste-ready foreverObjectTraces.lua correction for a GameObject encountered in the session", () => {
-    const session = makeForeverSession({
-      GetLocale: { player: [apiSample(0, 0, "enUS")] },
-      UnitGUID: { target: [apiSample(3, 3, "GameObject-0-5208-0-7-2843-0000399")] },
-      UnitName: { target: [apiSample(3, 3, { 1: "Suspicious Chest", n: 1 })] },
-      "C_Map.GetBestMapForUnit": { player: [apiSample(3, 3, 1436)] }, // uiMapID 1436 = Westfall (area 40),
-      "C_Map.GetPlayerMapPosition": { player: [apiSample(3, 3, { x: 0.3001, y: 0.8602 })] },
+  describe("object names", () => {
+    const sighting = (name: string, serverTime: number, objectId = 2843) =>
+      makeForeverSession({
+        GetLocale: { player: [apiSample(0, 0, "enUS")] },
+        GetServerTime: [apiSample(0, 0, serverTime)],
+        UnitGUID: { target: [apiSample(3, 3, `GameObject-0-5208-0-7-${objectId}-0000399`)] },
+        UnitName: { target: [apiSample(3, 3, { 1: name, n: 1 })] },
+        "C_Map.GetBestMapForUnit": { player: [apiSample(3, 3, 1436)] }, // uiMapID 1436 = Westfall (area 40),
+        "C_Map.GetPlayerMapPosition": { player: [apiSample(3, 3, { x: 0.3001, y: 0.8602 })] },
+      });
+    const run = (sessions: SessionRecord[]) =>
+      extractAll(sessions, { sourceFileNames: ["test.lua"], now: new Date("2020-01-01T00:00:00.000Z"), maxIds: { npc: 0, quest: 0, item: 0, object: 0 } }).objectFixes;
+
+    it("should produce a paste-ready foreverObjectTraces.lua correction for a GameObject encountered in two sessions", () => {
+      const objectFixes = run([sighting("Suspicious Chest", 1000), sighting("Suspicious Chest", 2000)]);
+
+      expect(objectFixes).toContain("function ForeverObjectTraces:Load()");
+      expect(objectFixes).toContain("[2843] = {");
+      expect(objectFixes).toContain('[objectKeys.name] = "Suspicious Chest",');
+      expect(objectFixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");
     });
 
-    const { objectFixes } = extractAll([session], { sourceFileNames: ["test.lua"], maxIds: { npc: 0, quest: 0, item: 0, object: 0 } });
+    it("should not export an object name seen in only one session", () => {
+      const fixes = run([sighting("Suspicious Chest", 1000)]);
 
-    expect(objectFixes).toContain("function ForeverObjectTraces:Load()");
-    expect(objectFixes).toContain("[2843] = {");
-    expect(objectFixes).toContain('[objectKeys.name] = "Suspicious Chest",');
-    expect(objectFixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");
+      expect(fixes).not.toContain("objectKeys.name");
+      expect(fixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");
+    });
+
+    it("should export the name most sessions agree on, not the newest", () => {
+      const fixes = run([sighting("Dalaran Digest", 1000), sighting("Dalaran Digest", 2000), sighting("Dalaran Digest", 3000), sighting("Dalaran Digest", 4000), sighting("Leyline Focus", 5000), sighting("Leyline Focus", 6000)]);
+
+      expect(fixes).toContain('[objectKeys.name] = "Dalaran Digest",');
+      expect(fixes).not.toContain("Leyline Focus");
+    });
+
+    it("should not export an object name without a clear majority", () => {
+      const fixes = run([sighting("Relic Coffer", 1000), sighting("Relic Coffer", 2000), sighting("Relic Coffer", 3000), sighting("Relic Coffer Door", 4000), sighting("Relic Coffer Door", 5000)]);
+
+      expect(fixes).not.toContain("objectKeys.name");
+      expect(fixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");
+    });
   });
 
   it("should export triggerEnd for the quest's zoneOrSort zone with a single coordinate pair", () => {

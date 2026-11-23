@@ -13,10 +13,13 @@ import { writeLookupLua } from "./schema/lookup-writer";
 export { observeLookupSession, type StagedLookupSession } from "./observe-lookups";
 
 /** Names can change over time (e.g. a renamed NPC), so the newest one wins. */
-const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName", "objectName"]);
+const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName"]);
 
-/** Subnames rarely change but are sometimes attached to the wrong NPC, so they need agreement between sessions. */
-const AGREEMENT_NEEDED = new Set<ObserverKey>(["npcSubName"]);
+/**
+ * Subnames rarely change but are sometimes attached to the wrong NPC, so they need agreement between sessions.
+ * Object names never change, but a looted object can be named after a neighbour whose tooltip was last shown.
+ */
+const AGREEMENT_NEEDED = new Set<ObserverKey>(["npcSubName", "objectName"]);
 
 /** Per field, a scalar summary per locale. */
 export interface LookupAccumulator {
