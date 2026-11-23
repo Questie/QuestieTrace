@@ -49,7 +49,19 @@ for one last comparison.
   hold several GB in comparison tools (Claude Code stops background jobs under memory pressure).
 - **Working style that worked:** a gate after every change, one commit per change, subagents in
   worktrees for independent parts with a shared brief, fresh reviewer subagents before calling a
-  step done (see CLAUDE.md).
+  step done (see CLAUDE.md). Learned along the way:
+  - A subagent's worktree can start at `origin/master` instead of the branch: tell it which commit
+    to check `git log -1` against and to `git reset --hard` its own worktree to it.
+  - Mutation-check new tests: break the code on purpose and see the test fail (revert only the
+    code line; `git stash` would take the test with it).
+  - The owner plays games on this machine: then run at `nice -n 19 ionice -c3` with
+    `RAYON_NUM_THREADS` and `CARGO_BUILD_JOBS` around 4-6; otherwise half the cores is fine.
+  - Measure memory per step, not only the peak: sample the process's RSS every few seconds next to
+    the step times. glibc keeps freed memory, so RSS can mislead without `malloc_trim`.
+  - Relations gates run with `RELATIONS_BUCKET_BYTES=1000000` as well as the default, so they
+    cross many bucket boundaries.
+  - Claude Code stops background jobs when memory runs low; a stopped job is restarted only when
+    the owner says so.
 
 ## Where we start
 
