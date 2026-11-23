@@ -6,7 +6,7 @@
 //
 // NPCs without a subname show their level line there instead ("Level 28", "Stufe ?? (Boss)",
 // "等级 10（精英）"), which older versions of the tracker did not tell apart. Such a value means
-// "no subname".
+// "no subname". A subname with a redacted player name ("<name>'s Escort") is not observed at all.
 //
 // Which NPC a subname belongs to depends on the tracker version:
 // - With UnitSubNameGUID.mouseover (schema 21+), every subname has the GUID of the NPC its tooltip
@@ -31,6 +31,9 @@ import { guidEncounters } from "../_guidEncounters";
 // brackets. Titles with a number elsewhere ("SI:7 Operative", "제2대 칸") do not match.
 const LEVEL_LINE = /^\S+ (\d+|\?\?)( ?[(（][^)）]*[)）])?$/u;
 
+/** What the tracker's privacy filter replaces player names with (Core.SanitizeText). */
+const REDACTED_NAME = "<name>";
+
 /** Longest time (seconds) between a subname and the target change it is inferred for. */
 const MAX_SECONDS_BEFORE_TARGET = 1;
 
@@ -40,11 +43,14 @@ export function isLevelLine(subName: string): boolean {
 
 function toObservation(session: SessionRecord, entityId: number, sample: FunctionStreamEntry, token: string): Observation<Localized<string>> | undefined {
   if (typeof sample.v !== "string") return undefined;
+  const noSubName = isLevelLine(sample.v);
+  // The tracker redacts player names to "<name>", so such a title belongs to a player-related unit (e.g. an escort).
+  if (!noSubName && sample.v.includes(REDACTED_NAME)) return undefined;
   const locale = getLocaleAt(session, sample.t);
   if (locale === null) return undefined;
   return {
     entityId,
-    value: { locale, value: isLevelLine(sample.v) ? "" : sample.v },
+    value: { locale, value: noSubName ? "" : sample.v },
     confidence: "high",
     provenance: { session: sessionLabel(session), t: sample.t },
     token,

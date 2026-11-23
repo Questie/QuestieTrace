@@ -102,6 +102,38 @@ describe("observeSubName (npc) with recorded guids", () => {
   });
 });
 
+describe("observeSubName (npc) with redacted player names", () => {
+  it("should not observe a subname that contains a redacted player name", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "<name> Trainer" }] },
+      UnitSubNameGUID: { mouseover: [{ t: 3, tp: 3.1, v: "Creature-0-5208-0-7-823-000031" }] },
+    });
+
+    expect(observeSubName(session)).toEqual([]);
+  });
+
+  it("should not observe such a subname when inferring the npc from the target either", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitGUID: { target: [{ t: 3.5, tp: 3.5, v: nordun }] },
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "<name>'s Escort" }] },
+    });
+
+    expect(observeSubName(session)).toEqual([]);
+  });
+
+  it("should still observe a level line with a redacted rank as no subname", () => {
+    const session = makeSession({
+      ...LOCALE_EN,
+      UnitSubName: { mouseover: [{ t: 3, tp: 3.1, v: "Level 11 (<name>)" }] },
+      UnitSubNameGUID: { mouseover: [{ t: 3, tp: 3.1, v: "Creature-0-5208-0-7-823-000031" }] },
+    });
+
+    expect(observeSubName(session).map((observation) => observation.value)).toEqual([""]);
+  });
+});
+
 describe("observeSubName (npc) without recorded guids", () => {
   it("should observe the last subname before the target changes to an npc", () => {
     const session = makeSession({
