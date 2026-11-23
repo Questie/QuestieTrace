@@ -112,6 +112,78 @@ describe("Privacy", function()
     end)
   end)
 
+  describe("IsNpcUnit", function()
+    ---@param unit {exists: boolean?, isPlayer: boolean?, guid: any, controlled: any}
+    local function MockUnit(unit)
+      env.UnitExists = function() return unit.exists ~= false end
+      env.UnitIsPlayer = function() return unit.isPlayer == true end
+      env.UnitGUID = function() return unit.guid end
+      env.UnitPlayerControlled = function() return unit.controlled == true end
+    end
+
+    it("should accept a creature that is not player controlled", function()
+      MockUnit({ guid = "Creature-0-1-1-1-1-000001" })
+
+      assert.is_true(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should accept a vehicle", function()
+      MockUnit({ guid = "Vehicle-0-1-1-1-1-000001" })
+
+      assert.is_true(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should reject a missing unit", function()
+      MockUnit({ exists = false, guid = "Creature-0-1-1-1-1-000001" })
+
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should reject a player", function()
+      MockUnit({ isPlayer = true, guid = "Player-1-00000001" })
+
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should reject a pet", function()
+      MockUnit({ guid = "Pet-0-1-1-1-1-000001" })
+
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should reject a creature controlled by a player", function()
+      MockUnit({ guid = "Creature-0-1-1-1-1-000001", controlled = true })
+
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should reject game objects and unrecognized guids", function()
+      MockUnit({ guid = "GameObject-0-1-1-1-1-000001" })
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+
+      MockUnit({ guid = "Corpse-0-1-1-1-1-000001" })
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+
+      MockUnit({ guid = nil })
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should reject a unit whose guid is restricted", function()
+      MockUnit({ guid = "Creature-0-1-1-1-1-000001" })
+      env.issecretvalue = function(value) return value == "Creature-0-1-1-1-1-000001" end
+
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+    end)
+
+    it("should reject a unit whose player control answer is restricted", function()
+      MockUnit({ guid = "Creature-0-1-1-1-1-000001" })
+      env.UnitPlayerControlled = function() return "secret" end
+      env.issecretvalue = function(value) return value == "secret" end
+
+      assert.is_false(Core.IsNpcUnit("mouseover"))
+    end)
+  end)
+
   describe("IsPlayerGUID", function()
     it("should return true for Player- GUID", function()
       assert.is_true(Core.IsPlayerGUID("Player-4618-0053656F"))

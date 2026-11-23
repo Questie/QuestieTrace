@@ -351,7 +351,9 @@ to trackers for login-time data sampling (see tracker sections above).
 - `MODIFIER_STATE_CHANGED`
 - `PLAYER_REGEN_DISABLED`
 - `PLAYER_REGEN_ENABLED`
-- `UPDATE_MOUSEOVER_UNIT` *(also UnitInteraction + UnitState)*
+- `UPDATE_MOUSEOVER_UNIT` *(also UnitInteraction + UnitState)* -- only recorded and dispatched
+  while the mouseover unit is a world NPC (`Core.IsNpcUnit`); hovering players, pets, player
+  controlled units, objects or party frames is dropped by the event filter.
 - `PLAYER_EQUIPMENT_CHANGED`
 - `SKILL_LINES_CHANGED`
 - `NEW_RECIPE_LEARNED`
