@@ -96,7 +96,7 @@ impl SessionCounts {
             eprintln!("ingest: left out {beta} beta sessions");
         }
         if let Some(undated) = self.skipped.undated {
-            eprintln!("ingest: WARNING: left out {undated} sessions without a server time, so the beta cannot be told from the live game");
+            eprintln!("ingest: WARNING: left out {undated} sessions without a server time, which tells the beta from the live game");
         }
         for OtherServerCharacter {
             character_key,
@@ -105,13 +105,14 @@ impl SessionCounts {
         } in &self.other_servers
         {
             eprintln!(
-                "ingest: WARNING: left out character {character_key} ({sessions} sessions): recorded on server {server_id}, which is not one of Blizzard's"
+                "ingest: WARNING: left out {sessions} sessions of character {character_key}: recorded on server {server_id}, which is not one of Blizzard's"
             );
         }
     }
 }
 
-/// A character recorded on a server that is not Blizzard's; none of its sessions became episodes.
+/// A character recorded on a server that is not Blizzard's, with how many of its sessions did not
+/// become episodes: all but those met on one of Blizzard's servers.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OtherServerCharacter {
@@ -130,10 +131,10 @@ pub struct Skipped {
     pub no_quest_data: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub beta: Option<usize>,
-    /// Without a server time, so from the beta or the live game.
+    /// Without a server time, which tells the beta from the live game.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub undated: Option<usize>,
-    /// Every session of the characters met on a server that is not Blizzard's.
+    /// Sessions of characters met on a server that is not Blizzard's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_server: Option<usize>,
 }
@@ -203,7 +204,7 @@ pub struct Tally {
     pub skipped: Skipped,
     pub other_servers: Vec<OtherServerCharacter>,
     pub greetings: GreetingStats,
-    /// Summed over the kept sessions.
+    /// Summed over the live sessions, those of characters met on another server included.
     pub distill: DistillStats,
 }
 

@@ -106,73 +106,76 @@ in QuestieDB), and for each relation the module applies, whether the fixes kept 
 left it alone; the undone ones, next to what the ground truth (`groundtruth.json`) knew about
 both quests, show the pattern.
 
-## Next: why the traces accept wrong extra prerequisites (written 2026-11-23)
+## Why the traces get prerequisites wrong (2026-11-23/24)
 
-State: QuestieDB PR #238 (branch `fix/relation-traces-review`) holds the regenerated module and waits
-for the maintainer's validation; its description is corrected and no longer claims that any
-hand-written fix is wrong. Nothing below is implemented yet.
+State: QuestieDB PR #238 (branch `fix/relation-traces-review`) holds the module regenerated on
+November 23 and waits for the maintainer's validation.
 
 **Start from this principle: where the traces and a hand-written fix differ, assume the traces are
-wrong until shown otherwise.** Of the run's 16 "conflict" rows (9 quests), none was shown to be a
-mistake in the fixes, and these were checked against the data:
-- 93836 (Horde) and 94369 (Alliance), "The Fate of Zephras": the fixes are right (92646 -> 93836,
-  93835 -> 94369; the traces accept both with score 1.000). The extra prerequisite is the other
-  faction's version: about 3,300 Horde characters have 93835 completed, but nobody of that faction
-  ever accepted it or turned it in. Turning in one version seems to flag both.
-- 91743 "Rascally Rodents": the maintainer says the fix is right (91741 -> 92124 -> 91743). In the
-  traces, only absence finds 92124 (score 0.94); cooccurrence, offer-set and handoff all propose
-  91741, two steps back, which the implied rule then holds back because QuestieDB has the chain.
-- The rest is not checked one by one: 94050 accepts the fix's value plus an extra (6063), 94490's
-  fix already contains the named quest, 98362 and 98397 read the fix's OR list as AND, 98890 rests
-  on three characters, 92840 is held back as implied.
+wrong until shown otherwise.** Of that run's 16 "conflict" rows (9 quests), none was shown to be a
+mistake in the fixes.
 
-Why it matters beyond the hand-written quests: the implied rule only works where QuestieDB already
-has the chain. On Forever-new quests nobody has written by hand, the same mistakes reach the module.
+Measured against the prerequisites in `foreverQuestFixes.lua` (QuestieDB `47a4756`: 1,495 on 798
+quests). 499 of them were in our own module before they were in the fixes, so only the other 996 say
+something. 499 of those were turned in before their quest by three or more characters; 380 more are
+OR-list entries nobody turned in (mostly copies that complete together). Combined found 410 of the
+499; of 794 claims on those quests 783 were right. What they got wrong has two causes:
 
-Work, in order:
+1. **Recordings that are not from the live game** contradict correct prerequisites, and one
+   contradiction is enough for the signals to drop one. "Rascally Rodents" (91743) got "Nibbled-On
+   Book" (91741), one step too early, because one character on another server got it before "Book
+   Inventory" (92124). Fixed in ingest, see "Beta and other servers". The guess that signals prefer
+   a prerequisite turned in at the quest's own giver was wrong for it.
+2. **Versions of a quest that complete together.** Turning in one flags all of them (Alliance and
+   Horde, per race, per level bracket), so the traces accept a version nobody on the quest ever
+   turned in: "The Fate of Zephras" (93836, 94369), "The Great Cat Spirit", "Call of Earth". Not
+   fixed. Measured on the filtered data: dropping the claims whose target no character turned in
+   before the quest, before the model sees them, takes the prerequisites that differ from QuestieDB
+   from 41 to 26 and finds 434 of the 496 solid independent ones instead of 428, and drops 345
+   claims that agree with QuestieDB, which lists such copies in OR lists (343 of their quests keep
+   another accepted prerequisite someone did turn in). Whether prerequisites should name every
+   version is the maintainer's choice, so this waits for the answer.
 
-1. **Rule: never a prerequisite no character of the quest can take.** Drop P -> Q when the required
-   races (or classes) of P and Q exclude each other (93835 is Alliance, 93836 Horde). Cheap, uses
-   QuestieDB's masks. Verify first: that the masks can be trusted (the catalog has requiredRaces 32,
-   Tauren only, for 92646, although 1,423 Horde characters were shown it: check the races of the
-   characters that accepted it), and count what the rule drops from all accepted relations, not
-   only the conflicts.
-2. **Why the three signals prefer 91741 over 92124.** Likely (not verified): offer-set and
-   cooccurrence favour a prerequisite turned in at the quest's own giver ("link=true"): 91741 is
-   turned in at npc 951, where 91743 starts, while 92124 is turned in at npc 247229. Test it: take
-   91743 as the fixture, find what keeps 92124 from being emitted by cooccurrence and offer-set
-   (see `signals/offer_set/infer.rs` and `signals/cooccurrence/prerequisites.rs`), and check how many
-   accepted prerequisites on Forever-new quests have an ancestor turned in at the quest's giver
-   while a nearer step is turned in elsewhere.
-3. **Measure before changing anything.** Use the hand-written prerequisites as truth: for each one
-   with evidence, count agree, extra and missing, per signal and combined (`relations score` and
-   `reports/combine-metrics.json` do part of it), so each change shows what it wins and loses.
-   Gate the same way as the streaming work (`RELATIONS_BUCKET_BYTES=1000000` and the default).
-4. **Parent/child and breadcrumb proposals** stay as listed under the review section.
+Found on the way, not done:
+- **Race masks in QuestieDB are wrong on 87 quests** (three or more characters of an excluded race
+  accepted the quest): 51 from the base data (Wowhead's Race and Side), 30 from the Classic data
+  (no Skyborne and none of Forever's new class combinations), 4 hand-written, 2 guessed from the
+  giver. So no rule may rest on the masks (the planned "never a prerequisite no character of the
+  quest can take" is dropped), and signals that use them to decide who could take a quest are
+  misled there. A task of its own; list in `relations-output-live/measure/race-masks.txt`.
+- **Claims only cooccurrence makes** score 0.67 to 0.80 and are not accepted, also when thousands
+  of characters back them. With 1,000 or more takers they were right 37 of 39 times. They are the
+  largest group of misses with clean order (11 quests).
+- **OR lists of real alternatives** (33 prerequisites on 11 quests) cannot be found: the signals
+  look for one quest every taker had done.
 
 Mistakes to avoid (made on 2026-11-23): reading only the `conflict` rows of `relations-review.md`
 hides the `agree` rows of the same quest, which made correct fixes look swapped; "had it completed"
 counted over a whole capture says nothing about order, so use the event order (`questEvents`,
-`completed.changes` times) for anything about before and after; and recompute every number quoted
-to someone else from the data first (583 is required by four quests in QuestieDB, not eight: the
-other four were this module's own wrong output).
+`completed.changes` times) for anything about before and after; finding a field with grep over
+QuestieDB's layers picks up the next quest's lines, so load the layers; and recompute every number
+quoted to someone else from the data first (583 is required by four quests in QuestieDB, not eight:
+the other four were this module's own wrong output).
 
 How to look at a quest: `relations-review.md` section `### <quest id>` for the evidence,
-`candidates/<signal>.json` for what each signal proposed, and a scan of `episodes.jsonl` by faction
-for who accepted, turned in or completed what (`review-scripts/zephras.py`, `rodents.py`). The run
-and the scripts are in `tools/corrections-extractor-rs/relations-output-questiedb/` (gitignored;
-keep it until this is done).
+`candidates/<signal>.json` for what each signal proposed, and a scan of `episodes.jsonl` for who
+accepted, turned in or completed what. The runs and scripts are gitignored in
+`tools/corrections-extractor-rs/`: `relations-output-questiedb/` (the November 23 run, with the beta;
+`measure/` holds the scripts of this section, e.g. `versions.py` for a family of versions),
+`relations-output-live/` (the same episodes without the beta and the other servers) and
+`relations-output-clean/` (a full run with the filter).
 
 ## Beta and other servers (2026-11-23/24)
 
 Ingest leaves out sessions that are not from the live game (`ingest/origin.rs`):
 - **Beta sessions**, by GetServerTime: before 2026-11-04. The archive's last beta session is from
-  October 23, the first one on the live realms from November 4, 23:05 UTC. 24,866 sessions of the
-  November 23 run's 998,061.
-- **Sessions without a server time** (29): the beta cannot be told from the live game.
+  October 23, the first one on the live realms from November 4, 23:05 UTC. 24,849 sessions of the
+  November 23 archive's 998,061 (the full run with this filter keeps 973,119).
+- **Sessions without a server time** (48), which tells the beta from the live game.
 - **Characters met on a server that is not Blizzard's**, by the server id in their NPC GUIDs
   (`Creature-0-<server>-...`): 1 and 70, where Blizzard's had four digits. Six characters, 45
-  sessions. All their sessions go, since a session that met no NPC does not show its server.
+  sessions. Their sessions that met no NPC, and so do not show their server, go too; one on a
+  server of Blizzard's stays, since grouping can put two characters together.
 
 Why: a signal drops a prerequisite when one character lacked it, so a handful of such sessions
 hides relations that thousands of characters confirm. Checked on 2026-11-23: of the hand-written
@@ -185,12 +188,22 @@ it would hide the next case of bad recordings.
 Every run logs what it left out, as a WARNING where somebody should look (another server, no server
 time), and `reports/ingest.json` has the counts (`sessions.skipped`, `sessions.otherServers`).
 
+What it changed on the full archive (accepted relations, before -> after): prerequisites 2,839 ->
+2,905 (the same as QuestieDB 2,795 -> 2,839, different 27 -> 41), chains 1,456 -> 1,474, breadcrumbs
+41 -> 42, `exclusiveTo` 1,602 -> 1,548. The last one is not evidence lost: 30 new claims between the
+versions of "Call of Earth" (1516-1521, 92466-92468, 94373-94375, which complete together) count as
+wrong because QuestieDB has no such relation, and refitting the model on them lowers the others just
+below the acceptance score. Without those 30 claims it is 1,620, all 18 new ones as in QuestieDB.
+Waiting for the maintainer's answer on them, and on whether a prerequisite should name every version
+that completes together or only the one a character does (21 of the 41 differing prerequisites are
+quests nobody on that quest ever turned in).
+
 The date and the server id only catch what is known today. For the rest, combine compares the
 recordings with QuestieDB (`combine/contradicted.rs`): it lists every prerequisite QuestieDB has
-that a few characters (at most 2%) got the quest without, and which characters, under "Recordings
-to check" in `relations-review.md`, and logs a WARNING with the count. On the archive with the beta
-and the other servers in it lists nine, the character on server 70 in four of them; without them
-one (1719 "The Affray", 2 of 420 characters, not looked into).
+that a few characters (at most 2%) could get or had the quest without, and which characters, under
+"Recordings to check" in `relations-review.md`, and logs a WARNING with the count. Repeatable quests
+and quests a signal sees as an optional lead-in are not checked. On the archive with the beta and
+the other servers in it lists 15, naming five of the six characters; without them none.
 
 ## Reading the episodes one bucket at a time (2026-11-22/23)
 

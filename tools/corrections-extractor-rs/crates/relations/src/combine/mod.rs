@@ -29,9 +29,9 @@ mod views;
 use crate::config::Config;
 use crate::episode_store::Episodes;
 use crate::io;
-use crate::model::{CandidateFile, GroundTruth, QuestCatalog, QuestId, RelationField, RelationSet};
+use crate::model::{CandidateFile, CatalogQuest, GroundTruth, QuestCatalog, QuestId, RelationField, RelationSet};
 use anyhow::{Context, Result};
-use contradicted::contradicted_prerequisites;
+use contradicted::{contradicted_prerequisites, Unchecked};
 use crossval::{ModelParams, ScoredEdge, DEFAULT_MODEL_PARAMS};
 use edges::{Claim, Domain, EdgeKey, EdgeKind, QuestDomains, Reference, Truth};
 use indexmap::IndexMap;
@@ -166,7 +166,12 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
 
     let metrics_markdown = format_metrics(&metrics, min_score, REVIEW_SCORE);
     let context_files: Vec<(&str, usize)> = inputs.context_files.iter().map(|file| (file.signal.as_str(), file.candidates.len())).collect();
-    let contradicted = contradicted_prerequisites(input.episodes, &inputs.truth)?;
+    let lead_ins = claimed_lead_ins(&inputs.files);
+    let unchecked = Unchecked {
+        is_repeatable: &|quest_id| input.catalog.quest(quest_id).is_some_and(CatalogQuest::is_repeatable),
+        is_lead_in: &|quest_id, lead_in| lead_ins.contains(&(quest_id, lead_in)),
+    };
+    let contradicted = contradicted_prerequisites(input.episodes, &inputs.truth, &unchecked)?;
     if !contradicted.is_empty() {
         eprintln!(
             "combine: WARNING: known prerequisites a few characters contradict: {} (recordings from another game, or the game changed; see {REVIEW_FILE}, section 6)",
@@ -226,6 +231,20 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         meta,
         summary,
     })
+}
+
+/// (quest, lead-in) for every breadcrumb a trace signal claims at [`MIN_SCORE`] or more.
+fn claimed_lead_ins(files: &[&CandidateFile]) -> FxHashSet<(QuestId, QuestId)> {
+    files
+        .iter()
+        .flat_map(|file| &file.candidates)
+        .filter(|candidate| candidate.score >= MIN_SCORE)
+        .filter_map(|candidate| match candidate.field {
+            RelationField::Breadcrumbs => Some((candidate.quest_id, candidate.target)),
+            RelationField::BreadcrumbForQuestId => Some((candidate.target, candidate.quest_id)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Classic edges the model leaves out although at least two signals claim them at 0.8 or more,

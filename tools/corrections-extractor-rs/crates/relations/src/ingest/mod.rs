@@ -205,8 +205,9 @@ impl ReadTally {
         self.exports += submission.exports;
         self.with_multiple_exports += usize::from(submission.exports > 1);
         for (position, mut session) in submission.sessions.into_iter().enumerate() {
-            // Only sessions that can become episodes say which quest a title names.
-            if origin::era(session.start_server_time) == Era::Live && session.other_server.is_none() {
+            // Only sessions that can become episodes say which quest a title names, as far as this
+            // copy of the session shows it: a copy that met no NPC does not show its server.
+            if origin::era(session.start_server_time) == Era::Live && session.server_id.is_none_or(origin::is_blizzard) {
                 let locale = session.episode.locale.as_deref();
                 for observation in &session.titles {
                     self.titles.add(locale, session.episode.player.faction, observation);
@@ -410,7 +411,7 @@ fn merge_copies(copies: &Written<SpilledCopy>, titles: &TitleIndex, dir: &Path) 
                 first_received_at: merged.first_received_at,
                 submission_ids: merged.submission_ids.into_iter().collect(),
                 start_server_time: merged.session.start_server_time,
-                other_server: merged.session.other_server,
+                server_id: merged.session.server_id,
                 episode: merged.session.episode,
             };
             kept.push(contributor_partition(&session.contributor_id), &session)?;
@@ -443,9 +444,9 @@ fn write_episodes(config: &Config, kept: &Written<KeptSession>) -> Result<(Episo
 }
 
 /// The episodes of every session of a set of whole contributors: grouped into characters,
-/// ordered, and sorted by contributor, character and session order. A character met on a server
-/// that is not Blizzard's is left out with all its sessions: those without an NPC do not show
-/// their server.
+/// ordered, and sorted by contributor, character and session order. Of a character met on a server
+/// that is not Blizzard's, only sessions met on one of Blizzard's stay (grouping can put two
+/// characters together): those without an NPC do not show their server.
 fn contributor_episodes(mut sessions: Vec<KeptSession>) -> (Vec<QuestEpisode>, Vec<OtherServerCharacter>) {
     sessions.sort_by(|a, b| a.key.cmp(&b.key));
     let order = session_order_times(&sessions);
@@ -471,13 +472,27 @@ fn contributor_episodes(mut sessions: Vec<KeptSession>) -> (Vec<QuestEpisode>, V
     let characters = assign_characters(&inputs);
     let session_orders = order_sessions(&inputs, &characters);
     drop(inputs);
-    let left_out = other_server_characters(&sessions, &characters);
+    let met_elsewhere = characters_met_elsewhere(&sessions, &characters);
+    let left_out =
+        |session: &KeptSession, character_key: &String| met_elsewhere.contains_key(character_key) && !session.server_id.is_some_and(origin::is_blizzard);
+    let left_out_characters: Vec<OtherServerCharacter> = met_elsewhere
+        .iter()
+        .map(|(character_key, &server_id)| OtherServerCharacter {
+            character_key: character_key.clone(),
+            server_id,
+            sessions: sessions
+                .iter()
+                .zip(&characters)
+                .filter(|(session, key)| *key == character_key && left_out(session, key))
+                .count(),
+        })
+        .collect();
 
     let mut episodes: Vec<QuestEpisode> = sessions
         .into_iter()
         .zip(characters)
         .zip(session_orders)
-        .filter(|((_, character_key), _)| !left_out.iter().any(|character| character.character_key == *character_key))
+        .filter(|((session, character_key), _)| !left_out(session, character_key))
         .map(|((session, character_key), session_order)| {
             let identity = EpisodeIdentity {
                 key: session.key,
@@ -493,26 +508,19 @@ fn contributor_episodes(mut sessions: Vec<KeptSession>) -> (Vec<QuestEpisode>, V
     // TS localeCompare.
     episodes
         .sort_by(|a, b| (&a.contributor_id, &a.character_key, a.session_order, &a.key).cmp(&(&b.contributor_id, &b.character_key, b.session_order, &b.key)));
-    (episodes, left_out)
+    (episodes, left_out_characters)
 }
 
-/// The characters met on a server that is not Blizzard's, with how many sessions each has.
-/// `characters` holds each session's character key.
-fn other_server_characters(sessions: &[KeptSession], characters: &[String]) -> Vec<OtherServerCharacter> {
-    let mut servers: BTreeMap<&str, u32> = BTreeMap::new();
+/// The characters met on a server that is not Blizzard's, with the server's id. `characters` holds
+/// each session's character key.
+fn characters_met_elsewhere(sessions: &[KeptSession], characters: &[String]) -> BTreeMap<String, u32> {
+    let mut met: BTreeMap<String, u32> = BTreeMap::new();
     for (session, character_key) in sessions.iter().zip(characters) {
-        if let Some(server_id) = session.other_server {
-            servers.entry(character_key).or_insert(server_id);
+        if let Some(server_id) = session.server_id.filter(|&id| !origin::is_blizzard(id)) {
+            met.entry(character_key.clone()).or_insert(server_id);
         }
     }
-    servers
-        .into_iter()
-        .map(|(character_key, server_id)| OtherServerCharacter {
-            character_key: character_key.to_owned(),
-            server_id,
-            sessions: characters.iter().filter(|key| *key == character_key).count(),
-        })
-        .collect()
+    met
 }
 
 #[cfg(test)]
@@ -577,26 +585,28 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A session of contributor "c1" to become an episode.
+    fn kept(key: &str, hours: f64, race_id: i64, server_id: Option<u32>) -> KeptSession {
+        let mut session = session(key, Some(LIVE + hours * 3600.0));
+        session.episode.player.race_id = Some(race_id);
+        KeptSession {
+            key: session.key,
+            contributor_id: "c1".into(),
+            first_received_at: "2026-11-06T00:00:00Z".into(),
+            submission_ids: vec!["s1".into()],
+            start_server_time: session.start_server_time,
+            server_id,
+            episode: session.episode,
+        }
+    }
+
     #[test]
-    fn a_character_met_on_another_server_loses_all_its_sessions_and_no_other_character_does() {
-        let kept = |key: &str, hours: f64, race_id: i64, other_server: Option<u32>| {
-            let mut session = session(key, Some(LIVE + hours * 3600.0));
-            session.episode.player.race_id = Some(race_id);
-            KeptSession {
-                key: session.key,
-                contributor_id: "c1".into(),
-                first_received_at: "2026-11-06T00:00:00Z".into(),
-                submission_ids: vec!["s1".into()],
-                start_server_time: session.start_server_time,
-                other_server,
-                episode: session.episode,
-            }
-        };
+    fn a_character_met_on_another_server_loses_its_sessions_and_no_other_character_does() {
         // The contributor's orc was met on server 70; a later session of its saw no NPC. The
-        // troll's two sessions are on a live server.
+        // troll's sessions are on a live server or show none.
         let (episodes, left_out) = contributor_episodes(vec![
             kept("orc-1", 0.0, 2, Some(70)),
-            kept("troll-1", 1.0, 8, None),
+            kept("troll-1", 1.0, 8, Some(6823)),
             kept("orc-2", 2.0, 2, None),
             kept("troll-2", 3.0, 8, None),
         ]);
@@ -608,9 +618,24 @@ mod tests {
     }
 
     #[test]
+    fn a_session_on_a_live_server_stays_when_grouping_put_it_with_one_from_another() {
+        // Two orcs of one contributor, one of them on server 70, taken for one character.
+        let (episodes, left_out) = contributor_episodes(vec![
+            kept("other-1", 0.0, 2, Some(70)),
+            kept("unknown", 1.0, 2, None),
+            kept("live-1", 2.0, 2, Some(6823)),
+            kept("other-2", 3.0, 2, Some(70)),
+            kept("live-2", 4.0, 2, Some(6901)),
+        ]);
+
+        assert_eq!(episodes.iter().map(|episode| episode.key.as_str()).collect::<Vec<_>>(), ["live-1", "live-2"]);
+        assert_eq!((left_out.len(), left_out[0].sessions), (1, 3), "what is left out and what stays adds up");
+    }
+
+    #[test]
     fn titles_of_beta_and_other_server_sessions_name_no_quest() {
-        let with_title = |start, other_server| distill::DistilledSession {
-            other_server,
+        let with_title = |start, server_id| distill::DistilledSession {
+            server_id,
             titles: vec![distill::TitleObservation {
                 title: "Rascally Rodents".into(),
                 quest_id: 91743,
@@ -632,8 +657,9 @@ mod tests {
             // The builder's player is a Horde orc on an enUS client.
             read.titles.resolve(Some("enUS"), Some(crate::model::Faction::Horde), None, "Rascally Rodents")
         };
-        assert_eq!(resolved(with_title(Some(LIVE), None)), Some(91743));
-        assert_eq!(resolved(with_title(Some(IN_BETA), None)), None);
+        assert_eq!(resolved(with_title(Some(LIVE), Some(6823))), Some(91743));
+        assert_eq!(resolved(with_title(Some(LIVE), None)), Some(91743), "a session that met no NPC");
+        assert_eq!(resolved(with_title(Some(IN_BETA), Some(6823))), None);
         assert_eq!(resolved(with_title(Some(LIVE), Some(70))), None);
     }
 

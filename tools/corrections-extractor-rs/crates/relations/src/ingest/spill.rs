@@ -58,7 +58,7 @@ codec_struct!(DistilledSession {
     event_count,
     saved,
     start_server_time,
-    other_server,
+    server_id,
     episode,
     pending_greetings,
     titles,
@@ -96,8 +96,8 @@ pub struct KeptSession {
     pub submission_ids: Vec<String>,
     /// GetServerTime at capture start; orders a contributor's sessions.
     pub start_server_time: Option<f64>,
-    /// The server's id when it is not one of Blizzard's.
-    pub other_server: Option<u32>,
+    /// The server's id, when the session met an NPC.
+    pub server_id: Option<u32>,
     pub episode: EpisodeDraft,
 }
 
@@ -107,7 +107,7 @@ codec_struct!(KeptSession {
     first_received_at,
     submission_ids,
     start_server_time,
-    other_server,
+    server_id,
     episode,
 });
 

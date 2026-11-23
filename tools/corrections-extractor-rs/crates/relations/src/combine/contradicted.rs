@@ -1,9 +1,10 @@
 //! Prerequisites QuestieDB has that nearly every character did first, and a few did not. The game
-//! does not let a character skip a prerequisite, so either those few were recorded somewhere else
-//! (a test realm, a private server) or the game changed while traces were recorded. Both hide
-//! relations, as the signals drop a prerequisite one character lacked, so a person has to look:
-//! this is what the beta and the other servers looked like before ingest left them out (see
-//! [`crate::ingest`] and RELATIONS.md, "Beta and other servers").
+//! does not let a character skip a prerequisite, so those few were recorded somewhere else (a test
+//! realm, a private server), or the game changed while traces were recorded, or QuestieDB is wrong
+//! and the prerequisite is optional. The first two hide relations, as the signals drop a
+//! prerequisite one character lacked, so a person has to look: this is what the beta and the other
+//! servers looked like before ingest left them out (see [`crate::ingest`] and RELATIONS.md, "Beta
+//! and other servers").
 
 use super::edges::Truth;
 use crate::episode_store::Episodes;
@@ -21,21 +22,29 @@ const MAX_SHARE: f64 = 0.02;
 /// after the dialog.
 const TOLERANCE_SECONDS: SessionTime = 2.0;
 
-/// A prerequisite of QuestieDB that a few characters got the quest without.
+/// A prerequisite of QuestieDB that a few characters could get the quest without.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Contradicted {
     pub quest: QuestId,
     pub prerequisite: QuestId,
-    /// Characters seen getting the quest.
+    /// Characters seen able to get the quest, or having it.
     pub characters: usize,
     /// Those of them that had not done the prerequisite, by pseudonymous key.
     pub without: Vec<String>,
 }
 
+/// What is left out of the check: prerequisites the traces cannot show, or see as optional.
+pub struct Unchecked<'a> {
+    /// Repeatable quests never show as completed.
+    pub is_repeatable: &'a dyn Fn(QuestId) -> bool,
+    /// Whether a signal sees the second quest as an optional lead-in (breadcrumb) to the first.
+    pub is_lead_in: &'a dyn Fn(QuestId, QuestId) -> bool,
+}
+
 /// Every prerequisite of QuestieDB that some characters contradict, but at most [`MAX_SHARE`] of
 /// them; the rarest contradictions first.
-pub fn contradicted_prerequisites(episodes: &dyn Episodes, truth: &Truth) -> Result<Vec<Contradicted>> {
-    let required = required_quests(truth);
+pub fn contradicted_prerequisites(episodes: &dyn Episodes, truth: &Truth, unchecked: &Unchecked) -> Result<Vec<Contradicted>> {
+    let required = required_quests(truth, unchecked);
     let tracked: FxHashSet<QuestId> = required.values().flatten().copied().collect();
     let mut found: FxHashMap<(QuestId, QuestId), Contradicted> = FxHashMap::default();
     episodes.for_each_bucket(&mut |bucket| {
@@ -73,8 +82,9 @@ pub fn contradicted_prerequisites(episodes: &dyn Episodes, truth: &Truth) -> Res
 }
 
 /// Per quest, the quests QuestieDB says must all be done before it: a one-quest preQuestSingle, or
-/// the AND list. A quest an exclusiveTo sibling can stand in for is left out.
-fn required_quests(truth: &Truth) -> FxHashMap<QuestId, Vec<QuestId>> {
+/// the AND list. A quest an exclusiveTo sibling can stand in for is left out, and what `unchecked`
+/// names.
+fn required_quests(truth: &Truth, unchecked: &Unchecked) -> FxHashMap<QuestId, Vec<QuestId>> {
     let values = |quest: QuestId, field: RelationField| truth.get(&quest).and_then(|set| set.get(&field)).map_or(&[][..], Vec::as_slice);
     truth
         .keys()
@@ -88,13 +98,14 @@ fn required_quests(truth: &Truth) -> FxHashMap<QuestId, Vec<QuestId>> {
                 .iter()
                 .copied()
                 .filter(|&prerequisite| values(prerequisite, RelationField::ExclusiveTo).is_empty())
+                .filter(|&prerequisite| !(unchecked.is_repeatable)(prerequisite) && !(unchecked.is_lead_in)(quest, prerequisite))
                 .collect();
             (!required.is_empty()).then_some((quest, required))
         })
         .collect()
 }
 
-/// A quest one character was seen getting, and whether it had done one of its prerequisites.
+/// A quest one character could get or had, and whether it had done one of its prerequisites.
 struct Got {
     quest: QuestId,
     prerequisite: QuestId,
@@ -112,30 +123,28 @@ fn keep_first(moments: &mut FxHashMap<QuestId, Moment>, quest: QuestId, at: Mome
         .or_insert(at);
 }
 
-/// What one character's sessions (oldest first) show about the quests in `required`: those it was
-/// seen getting, from a giver's list, an accept dialog or an accept, while its completed quests
-/// were known. A quest that was in its log before that was got where nobody saw it.
+/// What one character's sessions (oldest first) show about the quests in `required`: those it could
+/// get (a giver listed it, its accept dialog opened, it was accepted) or already had (in its log, or
+/// completed), at the first moment that shows it, when its completed quests were known then.
 fn quests_got(sessions: &[QuestEpisode], required: &FxHashMap<QuestId, Vec<QuestId>>, tracked: &FxHashSet<QuestId>) -> Vec<Got> {
-    let (mut got, mut in_log, mut done) = (FxHashMap::default(), FxHashMap::default(), FxHashMap::default());
+    let (mut got, mut done) = (FxHashMap::default(), FxHashMap::default());
     let sessions = forever_episodes(sessions);
     for (index, session) in sessions.iter().enumerate() {
         let offered = session.offers.iter().flat_map(|offer| offer.available.iter().map(|quest| (quest.id, offer.t)));
         let events = session.quest_events.iter();
         let opened = events.filter(|event| matches!(event.kind, QuestEventKind::Detail | QuestEventKind::Accepted));
-        for (quest, t) in offered.chain(opened.map(|event| (event.quest_id, event.t))) {
+        let in_log = session.quest_log.iter().flat_map(|entry| entry.v.iter().map(|&quest| (quest, entry.t)));
+        let completed = session.completed.iter();
+        // Completed before the recording: before anything in it.
+        let initial = completed
+            .clone()
+            .flat_map(|completed| completed.initial.iter().map(|&quest| (quest, f64::NEG_INFINITY)));
+        let opened = opened.map(|event| (event.quest_id, event.t));
+        for (quest, t) in offered.chain(opened).chain(in_log).chain(initial.clone()) {
             if required.contains_key(&quest) {
                 keep_first(&mut got, quest, (index, t));
             }
         }
-        for entry in &session.quest_log {
-            for &quest in entry.v.iter().filter(|quest| required.contains_key(quest)) {
-                keep_first(&mut in_log, quest, (index, entry.t));
-            }
-        }
-        let completed = session.completed.iter();
-        let initial = completed
-            .clone()
-            .flat_map(|completed| completed.initial.iter().map(|&quest| (quest, f64::NEG_INFINITY)));
         let changes = completed.flat_map(|completed| {
             completed
                 .changes
@@ -156,8 +165,7 @@ fn quests_got(sessions: &[QuestEpisode], required: &FxHashMap<QuestId, Vec<Quest
     };
     let mut result = Vec::new();
     for (&quest, &(index, t)) in &got {
-        let in_log_before = in_log.get(&quest).is_some_and(|&first| first < (index, t - TOLERANCE_SECONDS));
-        if in_log_before || !knows_completed(sessions[index]) {
+        if !knows_completed(sessions[index]) {
             continue;
         }
         for &prerequisite in &required[&quest] {
@@ -208,14 +216,16 @@ mod tests {
             sets.entry(*quest).or_default().insert(*field, values.clone());
         }
         let truth: Truth = sets.iter().map(|(&quest, set)| (quest, set)).collect();
-        let one_bucket = contradicted_prerequisites(&InMemory(episodes), &truth).unwrap();
-        assert_eq!(
-            contradicted_prerequisites(&PerCharacter(episodes), &truth).unwrap(),
-            one_bucket,
-            "whatever the buckets"
-        );
+        let check = |episodes: &dyn Episodes| contradicted_prerequisites(episodes, &truth, &EVERYTHING_CHECKED).unwrap();
+        let one_bucket = check(&InMemory(episodes));
+        assert_eq!(check(&PerCharacter(episodes)), one_bucket, "whatever the buckets");
         one_bucket
     }
+
+    const EVERYTHING_CHECKED: Unchecked = Unchecked {
+        is_repeatable: &|_| false,
+        is_lead_in: &|_, _| false,
+    };
 
     fn single() -> Vec<(QuestId, RelationField, Vec<QuestId>)> {
         vec![(QUEST, RelationField::PreQuestSingle, vec![PREREQUISITE])]
@@ -288,18 +298,55 @@ mod tests {
     }
 
     #[test]
-    fn quests_in_the_log_before_and_unknown_completed_lists_say_nothing() {
-        let mut in_log = character(50.0);
+    fn a_quest_in_the_log_or_completed_without_its_prerequisite_is_found() {
+        let mut in_log = character(200.0);
         in_log.quest_log = vec![crate::model::TimedValue { t: 0.0, v: vec![QUEST] }];
+        let mut completed = character(200.0);
+        completed.completed.as_mut().unwrap().initial = vec![7, QUEST];
+        // One at a time: two of 62 would be above the share that is reported.
+        for (what, episode) in [("in the log", in_log), ("completed", completed)] {
+            let (episodes, keys) = with_others(vec![episode]);
+            assert_eq!(found(&episodes, &single())[0].without, keys, "{what}");
+        }
+        let mut both_completed = character(200.0);
+        both_completed.completed.as_mut().unwrap().initial = vec![PREREQUISITE, QUEST];
+        let (episodes, _) = with_others(vec![both_completed]);
+        assert_eq!(found(&episodes, &single()), []);
+    }
+
+    #[test]
+    fn a_character_whose_completed_quests_are_not_known_says_nothing() {
         let mut no_list = character(50.0);
         no_list.completed = None;
         let mut not_loaded = character(50.0);
         not_loaded.completed.as_mut().unwrap().initial.clear();
-        // One at a time: two of 62 would be above the share that is reported.
-        for (what, episode) in [("in the log before", in_log), ("no completed list", no_list), ("list not loaded", not_loaded)] {
+        for (what, episode) in [("no completed list", no_list), ("list not loaded", not_loaded.clone())] {
             let (episodes, _) = with_others(vec![episode]);
             assert_eq!(found(&episodes, &single()), [], "{what}");
         }
+        // A new character's list really is empty.
+        not_loaded.levels[0].v = 1;
+        let (episodes, keys) = with_others(vec![not_loaded]);
+        assert_eq!(found(&episodes, &single())[0].without, keys);
+    }
+
+    #[test]
+    fn repeatable_quests_and_lead_ins_are_not_checked() {
+        let (episodes, _) = with_others(vec![character(50.0)]);
+        let set = RelationSet::from([(RelationField::PreQuestSingle, vec![PREREQUISITE])]);
+        let truth: Truth = BTreeMap::from([(QUEST, &set)]);
+        let found = |unchecked: &Unchecked| contradicted_prerequisites(&InMemory(&episodes), &truth, unchecked).unwrap().len();
+        assert_eq!(found(&EVERYTHING_CHECKED), 1);
+        let repeatable = Unchecked {
+            is_repeatable: &|quest| quest == PREREQUISITE,
+            ..EVERYTHING_CHECKED
+        };
+        assert_eq!(found(&repeatable), 0);
+        let lead_in = Unchecked {
+            is_lead_in: &|quest, lead_in| (quest, lead_in) == (QUEST, PREREQUISITE),
+            ..EVERYTHING_CHECKED
+        };
+        assert_eq!(found(&lead_in), 0);
     }
 
     #[test]

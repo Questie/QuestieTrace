@@ -533,8 +533,8 @@ fn contradicted_section(input: &ReviewInput) -> Vec<String> {
         "## 6. Recordings to check".into(),
         String::new(),
         "Prerequisites QuestieDB has that nearly every character did first, and a few (at most 2%) did not. The game does not let a character \
-         skip a prerequisite, so either these recordings come from another game (a test realm, a private server: ingest should leave them out) \
-         or the game changed while traces were recorded. The signals drop such a prerequisite."
+         skip a prerequisite, so these recordings come from another game (a test realm, a private server: ingest should leave them out), or the \
+         game changed while traces were recorded, or the prerequisite is optional. The signals drop it either way."
             .into(),
         String::new(),
     ];

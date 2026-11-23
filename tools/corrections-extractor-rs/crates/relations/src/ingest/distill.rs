@@ -222,8 +222,8 @@ pub struct DistilledSession {
     /// GetServerTime at capture start (epoch seconds). Orders a contributor's sessions; never
     /// written to episodes.
     pub start_server_time: Option<f64>,
-    /// The server's id when it is not one of Blizzard's (see [`super::origin`]).
-    pub other_server: Option<u32>,
+    /// The server's id, when the session met an NPC (see [`super::origin`]).
+    pub server_id: Option<u32>,
     pub episode: EpisodeDraft,
     pub pending_greetings: Vec<PendingGreeting>,
     pub titles: Vec<TitleObservation>,
@@ -1428,7 +1428,7 @@ pub fn distill_session(session: &Session, key: String) -> DistilledSession {
         event_count: reader.events.len(),
         saved: name.is_some(),
         start_server_time,
-        other_server: origin::other_server(session),
+        server_id: origin::server_of(session),
         episode,
         pending_greetings,
         titles: titles.seen.into_iter().collect(),
