@@ -160,6 +160,13 @@ export function aggregateScalarSummary<T>(summary: ScalarSummary<T>): Map<number
 /** Sessions a value needs before it can win by being the newest. */
 const NEWEST_MIN_SESSIONS = 2;
 
+function newestWinner<T>(all: ScalarGroup<T>[]): ScalarGroup<T> {
+  const candidates = all
+    .filter((group) => group.timedSessionCount >= NEWEST_MIN_SESSIONS)
+    .sort((a, b) => (b.newestSessionTime as number) - (a.newestSessionTime as number) || defaultOrder(a, b));
+  return candidates[0] ?? [...all].sort(defaultOrder)[0];
+}
+
 /**
  * Like aggregateScalarSummary, but for values that change over time (e.g. a
  * renamed NPC): among the values seen in at least NEWEST_MIN_SESSIONS sessions
@@ -171,10 +178,51 @@ export function aggregateNewestScalarSummary<T>(summary: ScalarSummary<T>): Map<
   const facts = new Map<number, Fact<T>>();
   for (const [entityId, groups] of summary) {
     const all = [...groups.values()];
-    const candidates = all
-      .filter((group) => group.timedSessionCount >= NEWEST_MIN_SESSIONS)
-      .sort((a, b) => (b.newestSessionTime as number) - (a.newestSessionTime as number) || defaultOrder(a, b));
-    facts.set(entityId, toFact(entityId, candidates[0] ?? all.sort(defaultOrder)[0], all));
+    facts.set(entityId, toFact(entityId, newestWinner(all), all));
+  }
+  return facts;
+}
+
+/** Sessions a name needs to count as a variant, and its share of the sessions of the best supported name. */
+const VARIANT_MIN_SESSIONS = 5;
+const VARIANT_MIN_SHARE = 0.25;
+/** Gendered forms of one name differ by an ending or two ("Kanonier"/"Kanonierin"). */
+const VARIANT_MAX_EDIT_DISTANCE = 3;
+
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = row;
+  }
+  return previous[b.length];
+}
+
+/**
+ * Like aggregateNewestScalarSummary, for names that exist in several variants at once (a creature
+ * spawning as male and as female is named "Nachtläufer" or "Nachtläuferin"): when the newest name
+ * has well supported near-identical variants, the shortest of them wins (alphabetically on equal
+ * length), so the result does not change with whichever session is newest. A name without such
+ * variants, such as a rename, is decided as in aggregateNewestScalarSummary.
+ */
+export function aggregateNewestNameScalarSummary(summary: ScalarSummary<string>): Map<number, Fact<string>> {
+  const facts = new Map<number, Fact<string>>();
+  for (const [entityId, groups] of summary) {
+    const all = [...groups.values()];
+    const best = Math.max(...all.map((group) => group.timedSessionCount));
+    const isStrong = (group: ScalarGroup<string>) => group.timedSessionCount >= VARIANT_MIN_SESSIONS && group.timedSessionCount >= best * VARIANT_MIN_SHARE;
+    const winner = newestWinner(all);
+    if (!isStrong(winner)) {
+      facts.set(entityId, toFact(entityId, winner, all));
+      continue;
+    }
+    const variants = all.filter((group) => isStrong(group) && editDistance(group.value, winner.value) <= VARIANT_MAX_EDIT_DISTANCE);
+    variants.sort((a, b) => a.value.length - b.value.length || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+    facts.set(entityId, toFact(entityId, variants[0], all));
   }
   return facts;
 }
