@@ -150,7 +150,7 @@ recorded, since that reflects a state transition rather than PII.
 - `QUEST_COMPLETE`
 - `QUEST_GREETING`
 - `QUEST_FINISHED`
-- `QUEST_ACCEPT_CONFIRM`
+- `QUEST_ACCEPT_CONFIRM` *(without the name of the player who shares the quest)*
 - `GOSSIP_SHOW`
 - `GOSSIP_CLOSED`
 
@@ -357,7 +357,7 @@ to trackers for login-time data sampling (see tracker sections above).
 - `PLAYER_EQUIPMENT_CHANGED`
 - `SKILL_LINES_CHANGED`
 - `NEW_RECIPE_LEARNED`
-- `UI_INFO_MESSAGE`
+- `UI_INFO_MESSAGE` *(names redacted)*
 - `CURRENCY_DISPLAY_UPDATE`
 
 ### Map/zone (not used by position tracker)
@@ -397,8 +397,8 @@ dropped and never recorded or dispatched to trackers.
 
 ### Group/world
 
-- `GROUP_JOINED`
-- `GROUP_LEFT`
+- `GROUP_JOINED` *(without the party GUID)*
+- `GROUP_LEFT` *(without the party GUID)*
 - `GROUP_ROSTER_UPDATE`
 - `NAME_PLATE_UNIT_ADDED` *(also UnitInteraction nameplate sampling)*
 - `NAME_PLATE_UNIT_REMOVED`

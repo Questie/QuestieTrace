@@ -135,6 +135,31 @@ local function ScrubFunctions(functions)
   PruneEmptyTokens(nameStream)
 end
 
+--- Sessions saved by versions before schema 22 hold these events' personal
+--- arguments: a group member's name, the party's GUID.
+---@type table<string, fun(args: PackedArgs): PackedArgs>
+local EVENT_SCRUBBERS = {
+  QUEST_ACCEPT_CONFIRM = Core.SanitizeQuestAcceptConfirmArgs,
+  GROUP_JOINED = Core.SanitizeGroupArgs,
+  GROUP_LEFT = Core.SanitizeGroupArgs,
+}
+
+--- Remove personal event arguments from a copied session's events, in place.
+---@param events EventRecord[]?
+local function ScrubEvents(events)
+  if type(events) ~= "table" then
+    return
+  end
+
+  for i = 1, #events do
+    local event = events[i]
+    local scrub = EVENT_SCRUBBERS[event.e]
+    if scrub and type(event.a) == "table" then
+      event.a = scrub(event.a)
+    end
+  end
+end
+
 --- Build a scrubbed, exportable copy of sessions for this character, plus the
 --- current unsaved session (if any), so users don't have to Save before
 --- exporting. If there is nothing to export, the payload will have an empty
@@ -201,6 +226,7 @@ function Core.BuildExportPayload(options)
     local session = Core.DecodeExportPayload(source.encoded)
     if session then
       ScrubFunctions(session.functions)
+      ScrubEvents(session.events)
       sessions[#sessions + 1] = session
       sourceSessions[#sourceSessions + 1] = source
     end
@@ -208,6 +234,7 @@ function Core.BuildExportPayload(options)
 
   if liveCopy then
     ScrubFunctions(liveCopy.functions)
+    ScrubEvents(liveCopy.events)
     sessions[#sessions + 1] = liveCopy
     sourceSessions[#sourceSessions + 1] = currentSession
   end
