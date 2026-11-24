@@ -190,7 +190,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetSpellBookItemName(slot)` | `functions["GetSpellBookItemName"][slot]` |
 | `GetSpellBookItemInfo(slot)` | `functions["GetSpellBookItemInfo"][slot]` |
 | `IsPassiveSpell(slot)` | `functions["IsPassiveSpell"][slot]` |
-| `C_SpellBook.IsSpellKnown(spellID)` (Forever) | `PlayerKnownSpells` holds `spellID` (spells in the book, and riding spells) |
+| `C_SpellBook.IsSpellKnown(spellID)` (Forever) | `PlayerKnownSpells` holds `spellID` (spells in the book, riding spells and the recipes QuestieDB uses in `requiredSpell`) |
 
 Notes:
 

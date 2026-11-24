@@ -573,7 +573,7 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 |---|---|
 | `C_QuestLog.GetAllCompletedQuestIDs` | Completed quest IDs; only grows in practice |
 | `GetQuestsCompleted` | Legacy global; independent completed-quest-ID stream, tracked whenever this global exists (not only as a fallback) |
-| `PlayerKnownSpells` | Known player spell IDs discovered by enumerating spellbook slots. Empty on Forever before schema 22; since then also the known riding spells, and spells are removed only once unlearned |
+| `PlayerKnownSpells` | Known player spell IDs discovered by enumerating spellbook slots. Empty on Forever before schema 22; since then also known riding spells and the recipes QuestieDB uses in `requiredSpell`, and spells are removed only once unlearned |
 
 ---
 

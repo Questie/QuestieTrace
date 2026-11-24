@@ -375,8 +375,9 @@ Forever, without the spell ID the tracker reads.
   spells come after the slots the skill lines count). Spells not learned yet (`FutureSpell`) are left
   out, and so are flyouts, whose spells have slots of their own. The stored ID is the base spell's
   (`actionID`), so a temporary override changes nothing.
-- The riding spells are passive and the book may not list them, so `C_SpellBook.IsSpellKnown` is
-  asked about each of them and known ones are added to `PlayerKnownSpells` (not to `SpellBook`).
+- The book does not list every spell quests depend on: riding spells (passive, not confirmed either way) and
+  recipes. `C_SpellBook.IsSpellKnown` is asked about the riding spells and the recipes QuestieDB uses in
+  `requiredSpell`, and known ones are added to `PlayerKnownSpells` (not to `SpellBook`).
 - A spell that leaves the book is recorded as removed only when `IsSpellKnown` says it is not
   known: the book can list fewer spells than the player knows, e.g. while it loads.
 - **Skills** are keyed by skill ID: a row's index changes when a skill is learned or a header

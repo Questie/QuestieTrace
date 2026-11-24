@@ -182,11 +182,11 @@ describe("SpellBook tracker", function()
       assert.are.equal(1, #KnownSpells().delta)
     end)
 
-    it("should record riding spells the book does not list", function()
-      local known = { [10906] = true }
+    it("should record riding spells and recipes the book does not list", function()
+      local known = { [10906] = true, [1230117] = true }
       MockForeverSpellBook(env, { { SPELL, 6603 } }, known)
       local tracker = StartCapture()
-      assert.are.same({ 6603, 10906 }, KnownSpells().initial)
+      assert.are.same({ 6603, 10906, 1230117 }, KnownSpells().initial)
 
       env.now = 3
       known[825] = true

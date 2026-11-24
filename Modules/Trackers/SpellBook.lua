@@ -31,10 +31,11 @@ local DeepCompare = Core.DeepCompare
 ---@type string
 local BOOK_TYPE = "spell"
 
---- The riding spells are passive and the spell book may not list them, so
+--- Spells quests depend on that the spell book does not or may not list:
 --- C_SpellBook clients are asked about each of them.
 ---@type number[]
-local RIDING_SPELL_IDS = {
+local UNLISTED_SPELL_IDS = {
+  -- Riding, which is passive
   824, -- Horse Riding
   825, -- Wolf Riding
   826, -- Ram Riding
@@ -46,6 +47,19 @@ local RIDING_SPELL_IDS = {
   33388, -- Apprentice Riding
   33391, -- Journeyman Riding
   1285849, -- Galestrider Riding
+  -- Recipes: QuestieDB hides the quests that teach them from players who know them (requiredSpell)
+  1229432, -- Camp Tent
+  1229504, -- Faction Banner
+  1229517, -- Camp Chair
+  1229705, -- Incense Candle
+  1229745, -- Fish Bowl
+  1230117, -- First Aid Kit
+  1230161, -- Lodestone
+  1230171, -- Sharpening Wheel
+  1230564, -- Mana Well
+  1230643, -- Enchanted Lute
+  1230656, -- Reagent Bot
+  1263425, -- Faction Banner
 }
 
 ---@type table<string, FunctionStreamEntry[]|table<string|number, FunctionStreamEntry[]>>
@@ -230,9 +244,9 @@ local function SampleSpellBookApi(capture)
     itemType, spellID = C_SpellBook.GetSpellBookItemType(slot, playerBank)
   end
 
-  for i = 1, #RIDING_SPELL_IDS do
-    if C_SpellBook.IsSpellKnown(RIDING_SPELL_IDS[i]) then
-      newKnownSpells[RIDING_SPELL_IDS[i]] = true
+  for i = 1, #UNLISTED_SPELL_IDS do
+    if C_SpellBook.IsSpellKnown(UNLISTED_SPELL_IDS[i]) then
+      newKnownSpells[UNLISTED_SPELL_IDS[i]] = true
     end
   end
   -- The book can list fewer spells than the player knows, e.g. while it loads.
