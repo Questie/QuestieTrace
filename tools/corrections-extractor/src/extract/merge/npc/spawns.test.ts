@@ -380,6 +380,47 @@ describe("mergeSpawns", () => {
     expect(mergeSpawns([...sessions("a", 1992, 20), ...sessions("b", 5, 60)])).toEqual({ 40: [[20, 50], [60, 50]] });
   });
 
+  it("should drop a zone an NPC was only seen in by a stray session once many sessions saw it elsewhere", () => {
+    const seen = (zoneID: number, count: number, x: number): TaggedSpawnObservation[] =>
+      Array.from({ length: count }, (_, i) => ({
+        ...obs(823, { zoneID, x, y: 50 }, i, "target"),
+        provenance: { session: "s", sessionKey: `${zoneID}-${i}`, t: i },
+      }));
+
+    expect(mergeSpawns([...seen(40, 30, 20), ...seen(12, 1, 60)])).toEqual({ 40: [[20, 50]] });
+    expect(mergeSpawns([...seen(40, 3, 20), ...seen(12, 1, 60)])).toEqual({ 40: [[20, 50]], 12: [[60, 50]] });
+  });
+
+  it("should only drop single-session clusters once 20 sessions saw the NPC", () => {
+    const seen = (key: string, count: number, x: number): TaggedSpawnObservation[] =>
+      Array.from({ length: count }, (_, i) => ({
+        ...obs(823, { zoneID: 40, x, y: 50 }, i, "target"),
+        provenance: { session: "s", sessionKey: `${key}${i}`, t: i },
+      }));
+
+    expect(mergeSpawns([...seen("a", 18, 20), ...seen("b", 1, 60)])[40]).toHaveLength(2);
+    expect(mergeSpawns([...seen("a", 19, 20), ...seen("b", 1, 60)])[40]).toHaveLength(1);
+  });
+
+  it("should leave no kept observation further than the radius from a spawn", () => {
+    // 10 sessions only, so no cluster is dropped; zone 40 is 35 x 23.3 yards per unit
+    const observations: TaggedSpawnObservation[] = [];
+    let seed = 7;
+    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 400; i++) {
+      observations.push({
+        ...obs(823, { zoneID: 40, x: Math.round((20 + random() * 8) * 1000) / 1000, y: Math.round((40 + random() * 8) * 1000) / 1000 }, i, "target"),
+        provenance: { session: "s", sessionKey: `k${i % 10}`, t: i },
+      });
+    }
+
+    const spawns = mergeSpawns(observations)[40]!;
+    for (const { value } of observations) {
+      const nearest = Math.min(...spawns.map(([x, y]) => Math.hypot((x - value.x) * 35, (y - value.y) * 23.33)));
+      expect(nearest).toBeLessThanOrEqual(20.5);
+    }
+  });
+
   it("should not let one session's many positions outweigh the sessions of another cluster", () => {
     const observations: TaggedSpawnObservation[] = [];
     for (let i = 0; i < 25; i++) {

@@ -20,7 +20,7 @@ const TOKEN_PRIORITY: Record<string, number> = {
 const SPAWN_CLUSTER_RADIUS_YARDS = 20;
 // Zones without a known size use 40 yards per map unit, which makes the radius 0.5 map units.
 const FALLBACK_YARDS_PER_UNIT = 40;
-// A cluster must be seen in at least this share of the sessions that saw the NPC in the zone, which drops
+// A cluster must be seen in at least this share of the sessions that saw the NPC, which drops
 // stray points from players passing by. Once 20 sessions saw it, single-session clusters are dropped too.
 // The strongest cluster is always kept, so NPCs seen only a few times keep all their spawns.
 const MIN_CLUSTER_SESSION_SHARE = 0.0025;
@@ -184,17 +184,25 @@ function coverClusters(points: WeightedPoint[], radius: number): Cluster[] {
       continue;
     }
 
-    for (let round = 0; round < 3 && members.length > 0; round++) {
-      x = weightedMedian(members.map((i) => ({ value: points[i].x, weight: points[i].weight })));
-      y = weightedMedian(members.map((i) => ({ value: points[i].y, weight: points[i].weight })));
-      members = alivePointsNear(x, y);
+    for (let round = 0; round < 3; round++) {
+      const refinedX = weightedMedian(members.map((i) => ({ value: points[i].x, weight: points[i].weight })));
+      const refinedY = weightedMedian(members.map((i) => ({ value: points[i].y, weight: points[i].weight })));
+      const refined = alivePointsNear(refinedX, refinedY);
+      // The medians of an uneven spread can sit away from every member: keep the last centre that covers some
+      if (refined.length === 0) break;
+      x = refinedX;
+      y = refinedY;
+      members = refined;
     }
-    if (members.length === 0) continue;
     for (const i of members) alive[i] = 0;
     uncovered -= members.length;
     clusters.push({ x, y, members });
   }
   return clusters;
+}
+
+function coordKey(zoneID: number, x: number, y: number): string {
+  return `${zoneID}:${x.toFixed(4)},${y.toFixed(4)}`;
 }
 
 /**
@@ -208,33 +216,42 @@ function clusterByZone(
   coordSessions: Map<string, Set<string>>,
   singleSpawnPerZone: boolean,
 ): Record<number, Array<[number, number]>> {
-  const result: Record<number, Array<[number, number]>> = {};
-  for (const [zoneID, coords] of byZone) {
+  const zones = [...byZone].map(([zoneID, coords]) => {
     const size = ZONE_SIZE_YARDS[zoneID];
     const yardsPerX = size ? size[0] / 100 : FALLBACK_YARDS_PER_UNIT;
     const yardsPerY = size ? size[1] / 100 : FALLBACK_YARDS_PER_UNIT;
     const points = coords.map(([x, y]) => ({
       x: x * yardsPerX,
       y: y * yardsPerY,
-      weight: coordSessions.get(coordKey(zoneID, x, y))?.size ?? 1,
+      weight: Math.max(1, coordSessions.get(coordKey(zoneID, x, y))?.size ?? 1),
     }));
-
     const sessionsOf = (members: number[]) => {
       const sessions = new Set<string>();
       for (const i of members) {
         for (const session of coordSessions.get(coordKey(zoneID, coords[i][0], coords[i][1])) ?? []) sessions.add(session);
       }
-      return sessions.size;
+      return sessions;
     };
-    const candidates = coverClusters(points, SPAWN_CLUSTER_RADIUS_YARDS).map((c) => ({ ...c, sessions: sessionsOf(c.members) }));
-    if (candidates.length === 0) continue;
-    const zoneSessions = sessionsOf(coords.map((_, i) => i));
-    const strongest = Math.max(...candidates.map((c) => c.sessions));
-    const minSessions = Math.min(
-      strongest,
-      Math.max(zoneSessions * MIN_CLUSTER_SESSION_SHARE, zoneSessions >= MIN_SESSIONS_TO_DROP_SINGLE_SESSION_CLUSTERS ? 2 : 1),
-    );
+    const candidates = coverClusters(points, SPAWN_CLUSTER_RADIUS_YARDS).map((c) => ({ ...c, sessions: sessionsOf(c.members).size }));
+    return { zoneID, coords, yardsPerX, yardsPerY, candidates, sessions: sessionsOf(coords.map((_, i) => i)) };
+  });
+
+  // The support is relative to all sessions that saw the NPC, so a zone only a stray session passed through is dropped
+  const npcSessions = new Set<string>();
+  let strongest = 0;
+  for (const zone of zones) {
+    for (const session of zone.sessions) npcSessions.add(session);
+    for (const c of zone.candidates) strongest = Math.max(strongest, c.sessions);
+  }
+  const minSessions = Math.min(
+    strongest,
+    Math.max(npcSessions.size * MIN_CLUSTER_SESSION_SHARE, npcSessions.size >= MIN_SESSIONS_TO_DROP_SINGLE_SESSION_CLUSTERS ? 2 : 1),
+  );
+
+  const result: Record<number, Array<[number, number]>> = {};
+  for (const { zoneID, coords, yardsPerX, yardsPerY, candidates } of zones) {
     let clusters = candidates.filter((c) => c.sessions >= minSessions);
+    if (clusters.length === 0) continue;
     if (singleSpawnPerZone) {
       const weight = (c: Cluster) =>
         c.members.reduce((sum, i) => sum + (observationCounts.get(coordKey(zoneID, coords[i][0], coords[i][1])) ?? 1), 0);
@@ -249,10 +266,6 @@ function clusterByZone(
     result[zoneID] = spawns;
   }
   return result;
-}
-
-function coordKey(zoneID: number, x: number, y: number): string {
-  return `${zoneID}:${x.toFixed(4)},${y.toFixed(4)}`;
 }
 
 /**
