@@ -176,7 +176,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestLogRewardMoney(questId)` | `functions["GetQuestLogRewardMoney"][questId]` |
 | `GetQuestLogRewardInfo(rewardIndex, questId)` | `functions["GetQuestLogRewardInfo"][rewardIndex][questId]` |
 | `GetQuestTagInfo(questId)` | `functions["GetQuestTagInfo"][questId]` |
-| `IsBreadcrumbQuest(questId)` | `functions["IsBreadcrumbQuest"][questId]` |
+| `IsBreadcrumbQuest(questId)` | `functions["IsBreadcrumbQuest"][questId]` while `C_QuestLog.IsOnQuest(questId)` is true, else false |
+| `IsQuestSequenced(questId)` | `functions["IsQuestSequenced"][questId]`; recorded only while on the quest |
 | `C_QuestLine.GetQuestLineInfo(questId)` | `functions["C_QuestLine.GetQuestLineInfo"][questId]` (recorded without `uiMapID`/`displayableOnly`) |
 | `C_QuestInfoSystem.GetQuestClassification(questId)` | `functions["C_QuestInfoSystem.GetQuestClassification"][questId]` |
 | `GetLootSlotInfo(slot)` | `functions["GetLootSlotInfo"][slot]` |

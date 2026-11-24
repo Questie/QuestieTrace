@@ -46,7 +46,6 @@ local C_After = C_Timer.After
 --   read for index 1..GetMaxRewardCurrencies(); stored as functions[key]["reward"][index].
 --
 -- Quest flags, keyed by quest ID (Forever only):
--- IsBreadcrumbQuest(questID)                        -> isBreadcrumb (undocumented)
 -- C_QuestLine.GetQuestLineInfo(questID)             -> QuestLineInfo?
 -- C_QuestInfoSystem.GetQuestClassification(questID) -> Enum.QuestClassification
 ---------------------------------------------------------------------------
@@ -340,9 +339,6 @@ end
 local function BuildQuestFlagDefs()
   ---@type QuestFlagStreamDef[]
   local defs = {}
-  if type(IsBreadcrumbQuest) == "function" then
-    defs[#defs + 1] = { key = "IsBreadcrumbQuest", fn = IsBreadcrumbQuest }
-  end
   if HasMethod(C_QuestLine, "GetQuestLineInfo") then
     defs[#defs + 1] = { key = "C_QuestLine.GetQuestLineInfo", fn = C_QuestLine.GetQuestLineInfo }
   end

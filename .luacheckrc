@@ -1720,6 +1720,7 @@ globals = {
     "IsQuestFlaggedCompleted",
     "IsQuestHardWatched",
     "IsQuestItemHidden",
+    "IsQuestSequenced",
     "IsQuestWatched",
     "IsRangedWeapon",
     "IsRecognizedName",
