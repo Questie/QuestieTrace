@@ -3773,8 +3773,6 @@ local function TestFrameHeartbeatRecordsFirstFramesAndGaps()
   assert(newUpdates ~= updates and #newUpdates == 1 and math.abs(newUpdates[1].v - 0.02) < 1e-9,
     "Each capture starts its own first frame updates, timed from its own start")
 end
-
----@type { name: string, run: fun() }[]
 --- Tracked events whose arguments were checked against Blizzard's API documentation of every client: no player or guild
 --- name, no player or party GUID and no free text that can hold one.
 local EVENTS_WITHOUT_PERSONAL_ARGUMENTS = {
@@ -3877,6 +3875,7 @@ local function TestSecretInfoMessageIsNotRecorded()
   assert(recorded.a[1] == 216 and recorded.a[2] == nil, "A restricted message is dropped")
 end
 
+---@type { name: string, run: fun() }[]
 local tests = {
   { name = "every tracked event is reviewed for personal arguments", run = TestEveryTrackedEventIsReviewedForPersonalArguments },
   { name = "personal event arguments are not recorded", run = TestPersonalEventArgumentsAreNotRecorded },
