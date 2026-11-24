@@ -3748,6 +3748,409 @@ local function TestFrameHeartbeatRecordsFirstFramesAndGaps()
     "Each capture starts its own first frame updates, timed from its own start")
 end
 
+-- Tooltip lines as Forever's tooltip data has them. The client owns these tables, so a tracker that writes into
+-- one fails the test.
+local tooltipLine = {}
+
+---@param line table<string, any>
+---@return table<string, any>
+function tooltipLine.Any(line)
+  return setmetatable({}, { __index = line, __newindex = function() error("tooltip data belongs to the client") end })
+end
+
+---@param questID any
+---@return table<string, any>
+function tooltipLine.QuestTitle(questID)
+  return tooltipLine.Any({ type = 17, id = questID, leftText = "Quest title" })
+end
+
+---@param text any
+---@return table<string, any>
+function tooltipLine.QuestObjective(text)
+  return tooltipLine.Any({ type = 8, leftText = text, completed = false, numFulfilled = 0, numRequired = 7, wrapText = true })
+end
+
+---@param name string
+---@return table<string, any>
+function tooltipLine.QuestPlayer(name)
+  return tooltipLine.Any({ type = 18, leftText = name, guid = "Player-1-" .. name })
+end
+
+---@class TooltipTestRuntime : TestRuntime
+---@field HoverUnit fun(guid: string, ...: table) Show the tooltip of the unit under the mouse, with these lines below its level
+---@field HoverObject fun(name: string, guid: string?, ...: table) Show an object's tooltip, with these lines below its name
+---@field postCalls table<number, function> Registered TooltipDataProcessor post-calls by tooltip type
+
+---Both tooltip trackers on Forever's tooltip pipeline. Every hover takes place a second after the last one.
+---@return TooltipTestRuntime
+local function NewTooltipRuntime()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitState.lua", "Modules/Trackers/GameObject.lua" }) --[[@as TooltipTestRuntime]]
+  local env = runtime.env
+  runtime.postCalls = {}
+  env.TooltipDataProcessor = {
+    AddTooltipPostCall = function(tooltipType, callback) runtime.postCalls[tooltipType] = callback end,
+  }
+  env.Enum = {
+    TooltipDataType = { Unit = 2, Object = 4 },
+    TooltipDataLineType = { None = 0, UnitName = 2, QuestObjective = 8, UnitOwner = 16, QuestTitle = 17, QuestPlayer = 18, UnitLevel = 47 },
+  }
+  -- The client takes a number as text as well.
+  local questLog = { [747] = true, [844] = true, [845] = true, [4402] = true, [97279] = true, [98321] = true }
+  env.C_QuestLog = { IsOnQuest = function(questID) return questLog[tonumber(questID)] == true end }
+  local mouseoverGUID
+  env.UnitExists = function(token) return token == "mouseover" and mouseoverGUID ~= nil end
+  env.UnitIsPlayer = function() return false end
+  env.UnitPlayerControlled = function() return false end
+  env.UnitGUID = function(token) if token == "mouseover" then return mouseoverGUID end end
+
+  -- The tooltip itself is passed as nil: a tracker that touches it fails the test.
+  function runtime.HoverUnit(guid, ...)
+    AdvanceTo(runtime, runtime.now + 1)
+    mouseoverGUID = guid
+    local name = tooltipLine.Any({ type = 2, leftText = "Plainstrider", unitToken = "mouseover" })
+    local level = tooltipLine.Any({ type = 0, leftText = "Level 1" })
+    runtime.postCalls[2](nil, { type = 2, guid = guid, healthGUID = guid, dataInstanceID = 501, lines = { name, level, ... } })
+  end
+
+  function runtime.HoverObject(name, guid, ...)
+    AdvanceTo(runtime, runtime.now + 1)
+    local nameLine = tooltipLine.Any({ type = 0, leftText = name })
+    runtime.postCalls[4](nil, { type = 4, guid = guid, dataInstanceID = 248, lines = { nameLine, ... } })
+  end
+  return runtime
+end
+
+---Assert that parallel streams hold exactly these rows, each written at one t and tp.
+---@param streams (FunctionStreamEntry[]|nil)[] The streams; all missing when nothing was recorded
+---@param expected any[][] One row per entry, with one value per stream
+local function AssertParallelRows(streams, expected)
+  for row = 1, #expected do
+    for column, value in ipairs(expected[row]) do
+      local entry = (streams[column] or {})[row]
+      local where = string.format("row %d, column %d: expected %s", row, column, tostring(value))
+      assert(entry, where .. ", got no entry")
+      assert(entry.v == value, where .. ", got " .. tostring(entry.v))
+      assert(entry.t == streams[1][row].t and entry.tp == streams[1][row].tp, where .. " at the time of its row")
+    end
+  end
+  for column = 1, #(expected[1] or { true }) do
+    local entries = #(streams[column] or {})
+    assert(entries == #expected, string.format("column %d: expected %d entries, got %d", column, #expected, entries))
+  end
+end
+
+---@param runtime TestRuntime
+---@param expected any[][] { GUID, quest ID, objective } of each recorded quest objective
+local function AssertUnitQuestObjectives(runtime, expected)
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local function Mouseover(key) return functions[key] and functions[key].mouseover end
+  AssertParallelRows(
+    { Mouseover("UnitQuestObjectiveGUID"), Mouseover("UnitQuestObjectiveQuestID"), Mouseover("UnitQuestObjective") }, expected)
+end
+
+---@param runtime TestRuntime
+---@param expected any[][] { name, GUID, quest ID, objective } of each recorded quest objective
+local function AssertObjectQuestObjectives(runtime, expected)
+  local functions = Session(runtime).functions
+  AssertParallelRows({ functions.GameObjectQuestObjectiveName, functions.GameObjectQuestObjectiveGUID,
+    functions.GameObjectQuestObjectiveQuestID, functions.GameObjectQuestObjective }, expected)
+end
+
+local PLAINSTRIDER = "Creature-0-5251-0-12-2955-000012345"
+local PLAINSTRIDER_OTHER_SPAWN = "Creature-0-5251-0-12-2955-000067890"
+local GREATER_PLAINSTRIDER = "Creature-0-5251-0-12-3244-000012345"
+local STALLION = "Vehicle-0-5251-0-12-28605-000012345"
+
+local function TestUnitTooltipQuestObjectivesAreRecorded()
+  local runtime = NewTooltipRuntime()
+  runtime.core.StartCapture("unit tooltip quest objectives")
+  runtime.HoverUnit(PLAINSTRIDER,
+    tooltipLine.Any({ type = 0, leftText = "Beast" }),
+    tooltipLine.QuestTitle(747),
+    tooltipLine.QuestObjective("0/7 Plainstrider Meat"),
+    tooltipLine.QuestObjective("0/7 Plainstrider Feather"),
+    tooltipLine.QuestTitle(844),
+    tooltipLine.QuestObjective("0/7 Plainstrider Beak"),
+    tooltipLine.Any({ type = 7, leftText = "100% Threat" }))
+
+  AssertUnitQuestObjectives(runtime, {
+    { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" },
+    { PLAINSTRIDER, 747, "0/7 Plainstrider Feather" },
+    { PLAINSTRIDER, 844, "0/7 Plainstrider Beak" },
+  })
+end
+
+local function TestUnitTooltipQuestObjectivesAreRecordedOncePerNpc()
+  local runtime = NewTooltipRuntime()
+  runtime.core.StartCapture("unit tooltip quest objectives once")
+  local title = tooltipLine.QuestTitle(747)
+  runtime.HoverUnit(PLAINSTRIDER, title, tooltipLine.QuestObjective("0/7 Plainstrider Meat"))
+  local expected = { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } }
+  runtime.HoverUnit(PLAINSTRIDER, title, tooltipLine.QuestObjective("0/7 Plainstrider Meat"))
+  runtime.HoverUnit(PLAINSTRIDER, title, tooltipLine.QuestObjective("6/7 Plainstrider Meat"))
+  runtime.HoverUnit(PLAINSTRIDER_OTHER_SPAWN, title, tooltipLine.QuestObjective("7/7 Plainstrider Meat"))
+  -- Not every language has the progress first.
+  runtime.HoverUnit(PLAINSTRIDER, title, tooltipLine.QuestObjective("Plainstrider slain: 9/10"))
+  runtime.HoverUnit(PLAINSTRIDER, title, tooltipLine.QuestObjective("Plainstrider slain: 10/10"))
+  expected[2] = { PLAINSTRIDER, 747, "Plainstrider slain: 9/10" }
+  AssertUnitQuestObjectives(runtime, expected)
+
+  -- Each of these is a new fact: another NPC, another objective (also when only a number differs), another quest.
+  runtime.HoverUnit(GREATER_PLAINSTRIDER, title, tooltipLine.QuestObjective("6/7 Plainstrider Meat"))
+  runtime.HoverUnit(STALLION, title, tooltipLine.QuestObjective("6/7 Plainstrider Meat"))
+  runtime.HoverUnit(PLAINSTRIDER, title, tooltipLine.QuestObjective("0/1 Nest 1 searched"))
+  runtime.HoverUnit(PLAINSTRIDER, title, tooltipLine.QuestObjective("0/1 Nest 2 searched"))
+  runtime.HoverUnit(PLAINSTRIDER, tooltipLine.QuestTitle(844), tooltipLine.QuestObjective("6/7 Plainstrider Meat"))
+  expected[3] = { GREATER_PLAINSTRIDER, 747, "6/7 Plainstrider Meat" }
+  expected[4] = { STALLION, 747, "6/7 Plainstrider Meat" }
+  expected[5] = { PLAINSTRIDER, 747, "0/1 Nest 1 searched" }
+  expected[6] = { PLAINSTRIDER, 747, "0/1 Nest 2 searched" }
+  expected[7] = { PLAINSTRIDER, 844, "6/7 Plainstrider Meat" }
+  AssertUnitQuestObjectives(runtime, expected)
+end
+
+local function TestTooltipQuestObjectivesAreRecordedAgainInTheNextCapture()
+  local runtime = NewTooltipRuntime()
+  local lines = { tooltipLine.QuestTitle(747), tooltipLine.QuestObjective("0/7 Plainstrider Meat") }
+  local function HoverBoth()
+    runtime.HoverUnit(PLAINSTRIDER, unpack(lines))
+    runtime.HoverObject("Plainstrider Nest", nil, unpack(lines))
+  end
+  for _ = 1, 2 do
+    runtime.core.StartCapture("next capture")
+    HoverBoth()
+    AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } })
+    AssertObjectQuestObjectives(runtime, { { "Plainstrider Nest", "", 747, "0/7 Plainstrider Meat" } })
+    local functions = Session(runtime).functions --[[@as table<string, any>]]
+    local unitEntry, objectEntry = functions.UnitQuestObjective.mouseover[1], functions.GameObjectQuestObjective[1]
+    assert(unitEntry.t == 1 and unitEntry.tp == 1 and objectEntry.t == 2 and objectEntry.tp == 2,
+      "times must be relative to the capture start")
+
+    runtime.core.StopCapture()
+    runtime.HoverUnit(GREATER_PLAINSTRIDER, unpack(lines))
+    runtime.HoverObject("Other Nest", nil, unpack(lines))
+    AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } })
+    AssertObjectQuestObjectives(runtime, { { "Plainstrider Nest", "", 747, "0/7 Plainstrider Meat" } })
+  end
+end
+
+local function TestTooltipQuestObjectivesOfPartyMembersAreNeverRecorded()
+  local runtime = NewTooltipRuntime()
+  runtime.core.StartCapture("party members' tooltip lines")
+  local lines = {
+    -- In a group the player's own progress is below a name as well.
+    tooltipLine.QuestTitle(747),
+    tooltipLine.QuestPlayer("Cruxdruid"),
+    tooltipLine.QuestObjective("1/7 Grouped own progress"),
+    tooltipLine.QuestPlayer("Bobmember"),
+    tooltipLine.QuestObjective("2/7 Grouped member progress"),
+    tooltipLine.QuestObjective("3/7 Grouped member progress, next objective"),
+    -- The next quest is the player's alone again.
+    tooltipLine.QuestTitle(844),
+    tooltipLine.QuestObjective("4/7 Own progress"),
+    tooltipLine.QuestPlayer("Bobmember"),
+    tooltipLine.QuestObjective("5/7 Member progress below own"),
+    -- A name in a line of another type (Forever sends several lines without their own type) is no different.
+    tooltipLine.QuestTitle(845),
+    tooltipLine.Any({ type = 0, leftText = "Bobmember" }),
+    tooltipLine.QuestObjective("6/7 Member progress below an untyped name"),
+    -- A quest only a member has, should the client list it without the member's name.
+    tooltipLine.QuestTitle(999),
+    tooltipLine.QuestObjective("7/7 Progress of a member alone"),
+  }
+  runtime.HoverUnit(PLAINSTRIDER, unpack(lines))
+  runtime.HoverObject("Plainstrider Nest", nil, unpack(lines))
+
+  AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 844, "4/7 Own progress" } })
+  AssertObjectQuestObjectives(runtime, { { "Plainstrider Nest", "", 844, "4/7 Own progress" } })
+  for _, text in ipairs({ "Cruxdruid", "Bobmember", "Player-1", "Grouped", "below", "alone" }) do
+    assert(not ContainsString(Session(runtime), text), "the session must not contain " .. text)
+  end
+end
+
+local function TestTooltipQuestObjectivesRedactPlayerNames()
+  local runtime = NewTooltipRuntime()
+  local env = runtime.env
+  env.IsInGroup = function() return true end
+  env.UnitName = function(token) return ({ player = "Cruxdruid", party1 = "Bobmember" })[token] end
+  runtime.core.StartCapture("player names in tooltip objectives")
+  local lines = { tooltipLine.QuestTitle(747), tooltipLine.QuestObjective("0/1 Cruxdruid follows Bobmember") }
+  runtime.HoverUnit(PLAINSTRIDER, unpack(lines))
+  runtime.HoverObject("Bobmember's Nest", nil, unpack(lines))
+
+  AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 747, "0/1 <name> follows <name>" } })
+  AssertObjectQuestObjectives(runtime, { { "<name>'s Nest", "", 747, "0/1 <name> follows <name>" } })
+end
+
+local function TestTooltipQuestObjectivesSkipUnreadableLines()
+  local runtime = NewTooltipRuntime()
+  local secrets = {}
+  runtime.env.issecretvalue = function(value) return value ~= nil and secrets[value] == true end
+  runtime.core.StartCapture("unreadable tooltip quest lines")
+
+  -- A secret title line below the name leaves the subname unknown, not the quest lines. A secret objective is
+  -- skipped, the next one is still the same quest's. A secret quest ID never leaves its objectives to the quest above.
+  secrets["Secret subname"], secrets["0/7 Secret objective"], secrets[98321] = true, true, true
+  local lines = {
+    tooltipLine.QuestTitle(747),
+    tooltipLine.QuestObjective("0/7 Secret objective"),
+    tooltipLine.QuestObjective("0/7 Plainstrider Meat"),
+    tooltipLine.QuestTitle(98321),
+    tooltipLine.QuestObjective("0/7 Objective of a secret quest"),
+  }
+  AdvanceTo(runtime, 1)
+  runtime.HoverUnit(PLAINSTRIDER, unpack(lines))
+  local unitExpected = { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } }
+  AssertUnitQuestObjectives(runtime, unitExpected)
+  runtime.postCalls[2](nil, { type = 2, guid = PLAINSTRIDER, lines = {
+    tooltipLine.Any({ type = 2, leftText = "Plainstrider" }),
+    tooltipLine.Any({ type = 0, leftText = "Secret subname" }),
+    tooltipLine.QuestTitle(844),
+    tooltipLine.QuestObjective("0/7 Plainstrider Beak"),
+  } })
+  unitExpected[2] = { PLAINSTRIDER, 844, "0/7 Plainstrider Beak" }
+  AssertUnitQuestObjectives(runtime, unitExpected)
+
+  runtime.HoverObject("Plainstrider Nest", nil, unpack(lines))
+  local objectExpected = { { "Plainstrider Nest", "", 747, "0/7 Plainstrider Meat" } }
+  AssertObjectQuestObjectives(runtime, objectExpected)
+
+  -- In instances the GUID is secret, in combat an object's name is.
+  secrets[GREATER_PLAINSTRIDER], secrets["Secret Nest"] = true, true
+  lines = { tooltipLine.QuestTitle(845), tooltipLine.QuestObjective("0/7 Readable") }
+  runtime.HoverUnit(GREATER_PLAINSTRIDER, unpack(lines))
+  runtime.HoverObject("Secret Nest", nil, unpack(lines))
+
+  -- A line whose type is secret or missing can be a member's name, and a secret objective type is no objective.
+  secrets[18] = true
+  for _, nameLine in ipairs({ tooltipLine.QuestPlayer("Bobmember"), tooltipLine.Any({ leftText = "Bobmember" }) }) do
+    runtime.HoverUnit(PLAINSTRIDER, lines[1], nameLine, lines[2])
+    runtime.HoverObject("Plainstrider Nest", nil, lines[1], nameLine, lines[2])
+  end
+  secrets[8] = true
+  runtime.HoverUnit(PLAINSTRIDER, unpack(lines))
+  runtime.HoverObject("Plainstrider Nest", nil, unpack(lines))
+  AssertUnitQuestObjectives(runtime, unitExpected)
+  AssertObjectQuestObjectives(runtime, objectExpected)
+end
+
+local function TestTooltipQuestObjectivesNeedAQuestAndAText()
+  local runtime = NewTooltipRuntime()
+  runtime.core.StartCapture("tooltip objectives without a quest")
+  runtime.HoverUnit(PLAINSTRIDER,
+    tooltipLine.QuestObjective("0/7 Objective without a title"),
+    tooltipLine.QuestTitle(747),
+    tooltipLine.QuestObjective("0/7 Plainstrider Meat"),
+    tooltipLine.QuestObjective(""),
+    tooltipLine.QuestObjective(nil),
+    tooltipLine.QuestTitle(nil),
+    tooltipLine.QuestObjective("0/7 Objective of a title without an ID"),
+    tooltipLine.QuestTitle(0),
+    tooltipLine.QuestObjective("0/7 Objective of a title with ID 0"),
+    tooltipLine.QuestTitle("747"),
+    tooltipLine.QuestObjective("0/7 Objective of a title with a text ID"),
+    tooltipLine.QuestTitle(844))
+  AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } })
+end
+
+local function TestUnitTooltipQuestObjectivesSkipPlayersPetsAndOtherUnits()
+  local runtime = NewTooltipRuntime()
+  local env = runtime.env
+  runtime.core.StartCapture("tooltip objectives of players and pets")
+  local lines = { tooltipLine.QuestTitle(747), tooltipLine.QuestObjective("0/7 Plainstrider Meat") }
+  local function Hover(guid) runtime.HoverUnit(guid, unpack(lines)) end
+
+  Hover("Player-1-00000001")
+  Hover("Pet-0-5251-0-12-165189-0100000001")
+  Hover("Corpse-0-5251-0-12-2955-000012345")
+  Hover("Creature-2955") -- no NPC ID where GUIDs have it
+  local secret = {}
+  env.issecretvalue = function(value) return value == secret end
+  local unit = {}
+  env.UnitIsPlayer = function() return unit.player or false end
+  env.UnitPlayerControlled = function() return unit.controlled or false end
+  for _, case in ipairs({ { player = true }, { controlled = true }, { controlled = secret } }) do
+    unit = case
+    Hover(PLAINSTRIDER)
+  end
+  unit = {}
+  -- A tooltip of another unit than the one under the mouse, such as an addon's scanning tooltip.
+  local mouseoverGUID = env.UnitGUID
+  env.UnitGUID = function() return GREATER_PLAINSTRIDER end
+  Hover(PLAINSTRIDER)
+  AssertUnitQuestObjectives(runtime, {})
+  local subNameGUIDs = Session(runtime).functions.UnitSubNameGUID --[[@as table<string, FunctionStreamEntry[]>]]
+  assert(#subNameGUIDs.mouseover == 1 and subNameGUIDs.mouseover[1].v == "Creature-2955",
+    "subnames must follow the same unit checks")
+
+  env.UnitGUID = mouseoverGUID
+  Hover(PLAINSTRIDER)
+  AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } })
+end
+
+local function TestObjectTooltipQuestObjectivesAreRecorded()
+  local runtime = NewTooltipRuntime()
+  runtime.core.StartCapture("object tooltip quest objectives")
+  local title = tooltipLine.QuestTitle(4402)
+  -- The same object again after accepting the quest: its name is no news, the quest is.
+  runtime.HoverObject("Cactus Apple", nil)
+  runtime.HoverObject("Cactus Apple", nil, title, tooltipLine.QuestObjective("0/10 Cactus Apple"))
+  runtime.HoverObject("Cactus Apple", nil, title, tooltipLine.QuestObjective("4/10 Cactus Apple"))
+  runtime.HoverObject("Cactus", nil, title, tooltipLine.QuestObjective("4/10 Cactus Apple"),
+    tooltipLine.QuestTitle(97279), tooltipLine.QuestObjective("0/6 Abandoned Training Weapon"))
+  AssertObjectQuestObjectives(runtime, {
+    { "Cactus Apple", "", 4402, "0/10 Cactus Apple" },
+    { "Cactus", "", 4402, "4/10 Cactus Apple" },
+    { "Cactus", "", 97279, "0/6 Abandoned Training Weapon" },
+  })
+end
+
+local function TestObjectTooltipQuestObjectivesUseAReadableGUID()
+  local runtime = NewTooltipRuntime()
+  runtime.core.StartCapture("object tooltip quest objectives with GUIDs")
+  local lines = { tooltipLine.QuestTitle(4402), tooltipLine.QuestObjective("0/10 Cactus Apple") }
+  local apple, sameApple = "GameObject-0-5251-0-12-171938-000012345", "GameObject-0-5251-0-12-171938-000067890"
+  local otherApple = "GameObject-0-5251-0-12-171939-000012345"
+  for _, guid in ipairs({ apple, sameApple, otherApple, "Player-1-00000001", "Pet-0-5251-0-12-416-0100000001" }) do
+    runtime.HoverObject("Cactus Apple", guid, unpack(lines))
+  end
+  -- A unit's tooltip handed to the object hook.
+  runtime.postCalls[4](nil, { type = 2, lines = { tooltipLine.Any({ type = 2, leftText = "Someplayer" }), unpack(lines) } })
+  AssertObjectQuestObjectives(runtime, {
+    { "Cactus Apple", apple, 4402, "0/10 Cactus Apple" },
+    { "Cactus Apple", otherApple, 4402, "0/10 Cactus Apple" },
+  })
+end
+
+local function TestTooltipsWithoutQuestLinesAddNoStreams()
+  local function AssertNoStreams(runtime)
+    for key in pairs(Session(runtime).functions) do
+      assert(not key:find("QuestObjective", 1, true), key .. " must not exist without a recorded quest objective")
+    end
+  end
+  local runtime = NewTooltipRuntime()
+  runtime.core.StartCapture("tooltips without quest lines")
+  runtime.HoverUnit(PLAINSTRIDER)
+  runtime.HoverObject("Cactus Apple", nil)
+  runtime.postCalls[2](nil, { type = 2, guid = PLAINSTRIDER })
+  AssertNoStreams(runtime)
+
+  -- A client without one of the line types: lines without a type must not be mistaken for it.
+  for _, missing in ipairs({ "QuestTitle", "QuestObjective" }) do
+    runtime = NewTooltipRuntime()
+    local lineTypes = runtime.env.Enum.TooltipDataLineType
+    lineTypes[missing] = nil
+    local lines = {
+      tooltipLine.Any({ type = lineTypes.QuestTitle, id = 747 }),
+      tooltipLine.Any({ type = lineTypes.QuestObjective, leftText = "0/7 Plainstrider Meat" }),
+    }
+    runtime.core.StartCapture("client without " .. missing)
+    runtime.HoverUnit(PLAINSTRIDER, unpack(lines))
+    runtime.HoverObject("Cactus Apple", nil, unpack(lines))
+    AssertNoStreams(runtime)
+  end
+end
+
 ---@type { name: string, run: fun() }[]
 local tests = {
   { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
@@ -3871,6 +4274,17 @@ local tests = {
   { name = "should record the object GUID together with the object name", run = TestGameObjectTrackerRecordsObjectGUID },
   { name = "should not record names from unit, player or pet tooltips", run = TestGameObjectTrackerSkipsNonObjectTooltips },
   { name = "should redact player names in object names", run = TestGameObjectTrackerRedactsPlayerNamesInObjectNames },
+  { name = "should record the quest objectives an npc tooltip lists", run = TestUnitTooltipQuestObjectivesAreRecorded },
+  { name = "should record a quest objective once per npc, whatever its progress or spawn", run = TestUnitTooltipQuestObjectivesAreRecordedOncePerNpc },
+  { name = "should record tooltip quest objectives again in the next capture", run = TestTooltipQuestObjectivesAreRecordedAgainInTheNextCapture },
+  { name = "should never record party members' tooltip quest progress", run = TestTooltipQuestObjectivesOfPartyMembersAreNeverRecorded },
+  { name = "should redact player names in tooltip quest objectives", run = TestTooltipQuestObjectivesRedactPlayerNames },
+  { name = "should skip unreadable tooltip quest lines", run = TestTooltipQuestObjectivesSkipUnreadableLines },
+  { name = "should skip tooltip quest objectives without a quest or a text", run = TestTooltipQuestObjectivesNeedAQuestAndAText },
+  { name = "should not record tooltip quest objectives of players, pets and other units", run = TestUnitTooltipQuestObjectivesSkipPlayersPetsAndOtherUnits },
+  { name = "should record the quest objectives an object tooltip lists", run = TestObjectTooltipQuestObjectivesAreRecorded },
+  { name = "should record object tooltip quest objectives per object ID when the GUID is readable", run = TestObjectTooltipQuestObjectivesUseAReadableGUID },
+  { name = "should add no quest objective streams without quest lines", run = TestTooltipsWithoutQuestLinesAddNoStreams },
 }
 
 local failures = 0

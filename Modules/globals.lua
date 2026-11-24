@@ -337,6 +337,82 @@ function Core.CreateSampleScheduler(sample)
 end
 
 ---------------------------------------------------------------------------
+-- Quest objectives in tooltips
+---------------------------------------------------------------------------
+
+---@class TooltipDataLine
+---@field id number? Quest ID of a QuestTitle line
+
+---@param value any
+---@param valueType "number"|"string"
+---@return any value nil when it is restricted (secret) or of another type
+local function Readable(value, valueType)
+  if issecretvalue and issecretvalue(value) then return nil end
+  return type(value) == valueType and value or nil
+end
+
+---@param parent table
+---@param key string|number
+---@return table child
+local function GetOrCreate(parent, key)
+  local child = parent[key]
+  if (not child) then
+    child = {}
+    parent[key] = child
+  end
+  return child
+end
+
+--- Create a reader for the quest objectives the client itself lists in NPC and object
+--- tooltips (Forever): a QuestTitle line with the quest ID, directly followed by the
+--- QuestObjective lines. `record` is called once per NPC or object, quest and objective.
+--- Progress ("3/8") makes no new objective and another spawn no new NPC, so hovering the
+--- same kind of NPC again records nothing.
+---
+--- Privacy: in a group the client lists each member's progress below a QuestPlayer line
+--- with that member's name. Any line that is not a quest objective ends the quest here, so
+--- no name is read and no progress below one is taken for the player's, whatever the type
+--- of the line with the name. Quests that are not in the player's log are skipped.
+---@param record fun(questID: number, objective: string, guid: string, objectName: string?)
+---@return (fun(lines: TooltipDataLine[]?, guid: string, objectName: string?))? read nil on clients without these line types
+function Core.CreateTooltipQuestReader(record)
+  local lineTypes = Enum and Enum.TooltipDataLineType
+  if (not lineTypes) or (not lineTypes.QuestTitle) or (not lineTypes.QuestObjective) then return nil end
+
+  ---@type table<string, table<number, table<string, boolean>>> [NPC or object][questID][objective without progress]
+  local seen = {}
+
+  return function(lines, guid, objectName)
+    -- The ID every spawn of an NPC or object shares. Forever's object tooltips have no GUID:
+    -- there the name stands in for it.
+    local entity = guid:match("^%a+%-%d+%-%d+%-%d+%-%d+%-(%d+)%-") or objectName
+    if (not entity) or (not lines) then return end
+
+    ---@type number?
+    local questID
+    for _, line in ipairs(lines) do
+      local lineType = Readable(line.type, "number")
+      if lineType == lineTypes.QuestObjective then
+        local text = Readable(line.leftText, "string")
+        if questID and text and text ~= "" then
+          local objectives = GetOrCreate(GetOrCreate(seen, entity), questID)
+          local objective = text:gsub("%d+/%d+", "")
+          if (not objectives[objective]) then
+            objectives[objective] = true
+            record(questID, Core.SanitizeText(text), guid, objectName)
+          end
+        end
+      elseif lineType == lineTypes.QuestTitle then
+        local id = Readable(line.id, "number")
+        questID = id and C_QuestLog.IsOnQuest(id) and id or nil
+      else
+        questID = nil
+      end
+    end
+  end
+end
+
+---------------------------------------------------------------------------
 -- Dump registration
 ---------------------------------------------------------------------------
 

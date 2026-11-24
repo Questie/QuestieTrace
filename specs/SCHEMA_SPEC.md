@@ -412,6 +412,10 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration |
 | `GameObjectName` | scalar (string) | *(synthetic)* game object name extracted from TooltipDataProcessor Object tooltips (UnitName line, else the first line); player names redacted |
 | `GameObjectGUID` | scalar (string) | *(synthetic)* object GUID of the tooltip each `GameObjectName` sample came from, written together with it at the same `t`; `""` when the tooltip has no readable object GUID (always on Forever). Schema 19+ |
+| `GameObjectQuestObjective` | scalar (string) | *(synthetic)* objective text of a quest an Object tooltip lists, as the client showed it at that moment (progress included); player names redacted. One entry per object, quest and objective, see TRACKER_SPEC section 19; absent when none was seen. Forever only. Schema 22+ |
+| `GameObjectQuestObjectiveQuestID` | scalar (number) | *(synthetic)* quest of the `GameObjectQuestObjective` entry at the same index; all four streams are written together (same length, `t` and `tp`). Schema 22+ |
+| `GameObjectQuestObjectiveName` | scalar (string) | *(synthetic)* object name of that tooltip, as in `GameObjectName`. Schema 22+ |
+| `GameObjectQuestObjectiveGUID` | scalar (string) | *(synthetic)* object GUID of that tooltip, as in `GameObjectGUID` (`""` on Forever). Schema 22+ |
 
 ### Parameterized by `"player"`
 
@@ -512,6 +516,9 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | `CheckInteractDistance` | scalar (boolean) | Whether the NPC target is within ~28 yards; only `CheckInteractDistance["target"][4]`; nil while the player is in combat or when the answer is unavailable; UnitState tracker |
 | `UnitSubName` | scalar (string) | *(synthetic)* NPC title line (e.g. "Innkeeper") from the Unit TooltipDataProcessor callback; only `UnitSubName["mouseover"]`, recorded when the tooltip GUID matches the mouseover NPC (players and player-controlled units skipped); written when the title or the NPC changes; `""` = NPC without title; UnitState tracker; Modern/Forever only |
 | `UnitSubNameGUID` | scalar (string) | *(synthetic)* GUID of the NPC the `UnitSubName` entry at the same index was shown for; only `UnitSubNameGUID["mouseover"]`, written together with `UnitSubName` (same length, `t` and `tp`); UnitState tracker; Modern/Forever only |
+| `UnitQuestObjective` | scalar (string) | *(synthetic)* objective text of a quest the NPC's tooltip lists, as the client showed it at that moment (progress included); player names redacted; only `UnitQuestObjective["mouseover"]`. One entry per NPC ID, quest and objective, see TRACKER_SPEC section 19; absent when none was seen; UnitState tracker; Forever only. Schema 22+ |
+| `UnitQuestObjectiveQuestID` | scalar (number) | *(synthetic)* quest of the `UnitQuestObjective` entry at the same index; only `UnitQuestObjectiveQuestID["mouseover"]`; all three streams are written together (same length, `t` and `tp`); UnitState tracker. Schema 22+ |
+| `UnitQuestObjectiveGUID` | scalar (string) | *(synthetic)* GUID of the NPC that tooltip was shown for; only `UnitQuestObjectiveGUID["mouseover"]`; UnitState tracker. Schema 22+ |
 
 ### Nested parameterized by native arguments (UnitReaction)
 

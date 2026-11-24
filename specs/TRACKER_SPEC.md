@@ -232,7 +232,7 @@ successful observed returns.
 | QuestLog | `Trackers/QuestLog.lua` | `QuestLog`, `C_QuestLog.GetMaxNumQuestsCanAccept`, `IsQuestComplete[qid]`, `HaveQuestData[qid]`, `C_QuestLog.IsOnQuest[qid]`, `C_QuestLog.IsQuestFlaggedCompleted[qid]`, `C_QuestLog.GetQuestObjectives[qid]`, `C_QuestLog.GetInfo[qid]`, `C_QuestLog.GetQuestTagInfo[qid]`, `C_QuestLog.IsComplete[qid]`, `C_QuestLog.IsFailed[qid]`, `C_QuestLog.GetLogIndexForQuestID[qid]`, `GetQuestLogTitle[qid]`, `GetQuestLogIndexByID[qid]`, `GetQuestLogQuestText[qid]`, `GetQuestLogCompletionText[qid]`, `GetQuestLogSpecialItemInfo[qid]`, `C_QuestLog.GetRequiredMoney[qid]`, `QuestLogZone[qid]`, timer streams (`C_QuestLog.GetQuestTimers`, raw `GetQuestIndexForTimer[slot]` and the legacy derived ones), reward streams, `GetQuestTagInfo[qid]` | Event + coalesced re-samples + index iteration | 14 quest events + `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | CompletedQuests | `Trackers/CompletedQuests.lua` | `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted` (independent functionsDelta streams) | Event + coalesced re-samples, also following up on the start snapshot; full set comparison skipped while the count is unchanged, except while a follow-up chain started by `QUEST_TURNED_IN`/`PLAYER_ENTERING_WORLD` (or restarted by later events during it) is running. A removal and an addition between two samples outside that window go unrecorded until the next full comparison | `QUEST_LOG_UPDATE`, `QUEST_REMOVED`, `QUEST_TURNED_IN`, `PLAYER_ENTERING_WORLD` |
 | UnitInteraction | `Trackers/UnitInteraction.lua` | `UnitGUID`/`UnitName` for `target`, `npc`, `questnpc`, `mouseover`; `UnitGUID` only for the `nameplateN` token of each added nameplate; `C_GossipInfo.GetAvailableQuests`; `C_GossipInfo.GetActiveQuests` | Event-driven fixed unit-token fanout; nameplates per event token | target, quest dialog, selected quest state, loot-open, NPC interaction, login-time events, `UPDATE_MOUSEOVER_UNIT`, `NAME_PLATE_UNIT_ADDED` |
-| UnitState | `Trackers/UnitState.lua` | `UnitLevel`/`UnitClassification`/`UnitReaction`/`UnitAffectingCombat` for `target`, `mouseover`; `CheckInteractDistance` (index 4) for `target`; `UnitSubName` and `UnitSubNameGUID` (synthetic) for `mouseover` | Event-driven fixed unit-token fanout (NPC-only); `UnitSubName` via TooltipDataProcessor Unit callback (Modern/Forever only) | `PLAYER_TARGET_CHANGED`, `UPDATE_MOUSEOVER_UNIT` |
+| UnitState | `Trackers/UnitState.lua` | `UnitLevel`/`UnitClassification`/`UnitReaction`/`UnitAffectingCombat` for `target`, `mouseover`; `CheckInteractDistance` (index 4) for `target`; `UnitSubName`, `UnitSubNameGUID`, `UnitQuestObjective`, `UnitQuestObjectiveQuestID` and `UnitQuestObjectiveGUID` (synthetic) for `mouseover` | Event-driven fixed unit-token fanout (NPC-only); the synthetic streams via TooltipDataProcessor Unit callback (Modern/Forever only) | `PLAYER_TARGET_CHANGED`, `UPDATE_MOUSEOVER_UNIT` |
 | GroupState | `Trackers/GroupState.lua` | `IsInGroup`, `GetNumGroupMembers` | Event-driven | `GROUP_JOINED`, `GROUP_LEFT`, `GROUP_ROSTER_UPDATE`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | SkillLines | `Trackers/SkillLines.lua` | `GetNumSkillLines[?]`, `GetSkillLineInfo[index]` (legacy, when present), `GetProfessions`, `GetProfessionInfo[index]`, `C_TradeSkillUI.GetAllProfessionTradeSkillLines`, `C_TradeSkillUI.GetTradeSkillLineInfoByID[skillLineID]` | Event + index iteration | `SKILL_LINES_CHANGED`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | SpellBook | `Trackers/SpellBook.lua` | `SpellBook`, `GetSpellBookItemName[slot]`, `GetSpellBookItemInfo[slot]`, `IsPassiveSpell[slot]`, `PlayerKnownSpells` (functionsDelta) | Event + slot iteration | `SPELLS_CHANGED`, `PLAYER_ENTERING_WORLD` |
@@ -243,7 +243,7 @@ successful observed returns.
 | PlayerProgress | `Trackers/PlayerProgress.lua` | `UnitXP["player"]`, `UnitXPMax["player"]`, `GetXPExhaustion`, `GetMoney` | Init + event-driven | `PLAYER_ENTERING_WORLD`, `PLAYER_XP_UPDATE`, `PLAYER_LEVEL_UP`, `UPDATE_EXHAUSTION`, `PLAYER_MONEY` |
 | ItemInfo | `Trackers/ItemInfo.lua` | `C_Item.IsItemDataCachedByID[itemID]` for items an addon asked about while uncached | `hooksecurefunc` post-hook on item data requests + private triggers | None; `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` are private triggers and are not recorded |
 | FrameHeartbeat | `Trackers/FrameHeartbeat.lua` | None; writes `session.frameUpdates` | `OnUpdate` while capturing | None |
-| GameObject | `Trackers/GameObject.lua` | `GameObjectName`, `GameObjectGUID` (synthetic) | TooltipDataProcessor callback (Modern/Forever only) | None (uses `TooltipDataProcessor.AddTooltipPostCall`) |
+| GameObject | `Trackers/GameObject.lua` | `GameObjectName`, `GameObjectGUID`, `GameObjectQuestObjective`, `GameObjectQuestObjectiveQuestID`, `GameObjectQuestObjectiveName`, `GameObjectQuestObjectiveGUID` (synthetic) | TooltipDataProcessor callback (Modern/Forever only) | None (uses `TooltipDataProcessor.AddTooltipPostCall`) |
 
 ---
 
@@ -420,7 +420,17 @@ The FrameHeartbeat tracker shows a frame whose `OnUpdate` script runs on every c
 
 ---
 
-## 19) Change detection
+## 19) Tooltip quest objectives (UnitState, GameObject)
+
+On Forever the tooltip data of an NPC or object lists the quests in the player's log it counts for: a `QuestTitle` line whose `id` is the quest ID, directly followed by the quest's `QuestObjective` lines. UnitState and GameObject hand the lines of the tooltips they accept to `Core.CreateTooltipQuestReader`, which reports each NPC or object, quest and objective once per capture. NPCs are told apart by the NPC ID in the GUID; objects by the object ID, or by name while Forever gives their tooltips no GUID. An objective is its text without the progress (`3/8`), so progress, other spawns and tooltip refreshes add nothing. The lines carry neither an objective index nor an item ID, so the text is stored with the progress it had: the client repeats its `C_QuestLog.GetQuestObjectives[questID]` text there, which tells the objective at that `t`.
+
+Privacy: in a group the client lists each member's progress below a `QuestPlayer` line with that member's name (Questie reads the lines this way, the player's own progress included). Any line that is not a `QuestObjective` ends the quest until the next `QuestTitle`, so names and the progress below them are never read, and quests listed this way are not recorded. Quests that are not in the player's log (`C_QuestLog.IsOnQuest`) are skipped too. Objective texts go through `Core.SanitizeText`. Only NPCs under the mouse are read, with the checks of `UnitSubName`, and only tooltips `GameObjectName` accepts. Restricted (secret) line types, quest IDs and texts are skipped: in instances nothing is recorded, and objects in combat record nothing.
+
+The streams are created by their first entry, so clients whose tooltips list no quests record the same as before. Cost, measured with Lua 5.1 outside the client: about 1.5 µs for a tooltip without quest lines and 4 µs with three known objectives, without allocating. 10 to 60 entries add 0.9 to 4 KB to an exported recording.
+
+---
+
+## 20) Change detection
 
 Trackers only append entries when values change. The comparison method
 depends on the value type:
