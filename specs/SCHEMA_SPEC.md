@@ -50,7 +50,8 @@ where `encoded` is the `SessionRecord` run through the export pipeline (`Core.En
 encoding is not expected to fail, and keeping them is not worth the extra code.
 
 `lastSavedSession` is only set on explicit save — it is not initialized
-on fresh install or migration.
+on fresh install or migration. It names the newest saved session, so it does not
+change when the session just saved is pruned right away.
 
 The share reminder uses a timestamp watermark: `reminder.lastReminderAt` records
 when the last reminder was shown, and `reminder.sessionStart` records when the
@@ -78,10 +79,11 @@ small in the common case: reported sessions are deleted immediately, not
 retained with a flag.
 
 As a pure size backstop for players who never open the export window,
-`Core.SaveCapture()` also prunes the oldest saved session(s) whenever
-`#sessions` exceeds `MAX_SESSIONS` (10), regardless of report status.
+`Core.SaveCapture()` also prunes the saved session(s) with the fewest events
+(`eventCount`, the oldest of equal ones) whenever `#sessions` exceeds
+`MAX_SESSIONS` (10), regardless of report status.
 This ensures a fixed upper bound on disk usage even for users who ignore
-the export reminder indefinitely.
+the export reminder indefinitely. A session without events is not saved at all.
 
 ### Export and deletion
 

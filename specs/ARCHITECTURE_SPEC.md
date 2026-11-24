@@ -159,7 +159,9 @@ A session is deleted outright by `Core.DeleteReportedSessions()` once the player
 
 ### Session pruning
 
-`Core.SaveCapture()` also enforces `MAX_SESSIONS` (10) as a pure size backstop for players who never open the export window: whenever `#QuestieTraceCharacter.sessions` exceeds this cap, the oldest session(s) are dropped, oldest-first, regardless of report status. Unlike the export-driven deletion above, this is unconditional — it protects against unbounded SavedVariables growth, at the cost of losing the oldest unreported data once the cap is exceeded. There is no "prefer evicting already-reported sessions" tie-break to consider, since reported sessions are already gone by the time pruning runs.
+`Core.SaveCapture()` does not save a session without events, because it has nothing to export.
+
+It also enforces `MAX_SESSIONS` (10) as a pure size backstop for players who never open the export window: whenever `#QuestieTraceCharacter.sessions` exceeds this cap, the session(s) with the fewest events (`EncodedSessionRecord.eventCount`, the oldest of equal ones) are dropped, regardless of report status. That can be the session just saved. Dropping the oldest instead would let a few short sessions, e.g. from reloads, push out a long one. Unlike the export-driven deletion above, this is unconditional — it protects against unbounded SavedVariables growth, at the cost of losing the smallest unreported sessions once the cap is exceeded. `Core.SaveCapture()` returns the encoded session, so the export window can export the live session even if it was dropped here. There is no "prefer evicting already-reported sessions" tie-break to consider, since reported sessions are already gone by the time pruning runs.
 
 ---
 
