@@ -4,7 +4,7 @@
 // field and entity partition instead, so memory use no longer grows with the number of
 // submissions: finalize reads back one partition at a time (see groups).
 
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from "fs";
+import { appendFileSync, closeSync, mkdirSync, openSync, readSync, rmSync } from "fs";
 import { join } from "path";
 import type { Observation } from "./observation";
 
@@ -13,6 +13,8 @@ const DISK_PARTITIONS = 64;
 const UNPARTITIONED_FIELDS = new Set(["turnInPoi"]);
 /** Observations per chunk of stream. */
 const STREAM_CHUNK = 10_000;
+/** Bytes read from a file at a time. Files are never read as one string: V8 caps those at ~512 MB. */
+const READ_BLOCK_BYTES = 8 * 1024 * 1024;
 /** Buffered output is written once it gets this large. */
 const FLUSH_BYTES = 32 * 1024 * 1024;
 
@@ -22,7 +24,7 @@ export class ObservationStore {
   private readonly buffers = new Map<string, string[]>();
   private bufferedBytes = 0;
 
-  constructor(private readonly dir?: string) {
+  constructor(private readonly dir?: string, private readonly readBlockBytes = READ_BLOCK_BYTES) {
     this.partitions = dir === undefined ? 1 : DISK_PARTITIONS;
     if (dir !== undefined) {
       rmSync(dir, { recursive: true, force: true });
@@ -81,38 +83,15 @@ export class ObservationStore {
       for (let start = 0; start < all.length; start += STREAM_CHUNK) yield all.slice(start, start + STREAM_CHUNK);
       return;
     }
-    let fd: number;
-    try {
-      fd = openSync(this.path(field, 0), "r");
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw e;
-    }
-    try {
-      const block = Buffer.alloc(8 * 1024 * 1024);
-      let rest = Buffer.alloc(0);
-      let chunk: Observation<T>[] = [];
-      for (;;) {
-        const bytes = readSync(fd, block, 0, block.length, null);
-        // "\n" is never part of a multi-byte UTF-8 character, so lines can be split on the byte.
-        const data = bytes === 0 ? rest : Buffer.concat([rest, block.subarray(0, bytes)]);
-        let start = 0;
-        for (let end = data.indexOf(10, start); end !== -1 || (bytes === 0 && start < data.length); end = data.indexOf(10, start)) {
-          const lineEnd = end === -1 ? data.length : end;
-          chunk.push(JSON.parse(data.toString("utf8", start, lineEnd)));
-          start = lineEnd + 1;
-          if (chunk.length >= STREAM_CHUNK) {
-            yield chunk;
-            chunk = [];
-          }
-        }
-        if (bytes === 0) break;
-        rest = Buffer.from(data.subarray(start));
+    let chunk: Observation<T>[] = [];
+    for (const line of this.readLines(this.path(field, 0))) {
+      chunk.push(JSON.parse(line));
+      if (chunk.length >= STREAM_CHUNK) {
+        yield chunk;
+        chunk = [];
       }
-      if (chunk.length > 0) yield chunk;
-    } finally {
-      closeSync(fd);
     }
+    if (chunk.length > 0) yield chunk;
   }
 
   clear(field: string): void {
@@ -153,23 +132,40 @@ export class ObservationStore {
 
   private read<T>(field: string, partition: number): Observation<T>[] {
     if (this.dir === undefined) return (this.memory.get(field)?.[partition] ?? []) as Observation<T>[];
-    let text: string;
+    const out: Observation<T>[] = [];
+    for (const line of this.readLines(this.path(field, partition))) out.push(JSON.parse(line));
+    return out;
+  }
+
+  /** The lines of a file in blocks, so a file larger than a string can be is never held as one. A missing file has none. */
+  private *readLines(path: string): Generator<string> {
+    let fd: number;
     try {
-      text = readFileSync(this.path(field, partition), "utf8");
+      fd = openSync(path, "r");
     } catch (e) {
       // Partitions nothing was added to have no file.
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
       throw e;
     }
-    const out: Observation<T>[] = [];
-    let start = 0;
-    while (start < text.length) {
-      let end = text.indexOf("\n", start);
-      if (end === -1) end = text.length;
-      out.push(JSON.parse(text.slice(start, end)));
-      start = end + 1;
+    try {
+      const block = Buffer.alloc(this.readBlockBytes);
+      let rest = Buffer.alloc(0);
+      for (;;) {
+        const bytes = readSync(fd, block, 0, block.length, null);
+        // "\n" is never part of a multi-byte UTF-8 character, so lines can be split on the byte.
+        const data = bytes === 0 ? rest : Buffer.concat([rest, block.subarray(0, bytes)]);
+        let start = 0;
+        for (let end = data.indexOf(10, start); end !== -1 || (bytes === 0 && start < data.length); end = data.indexOf(10, start)) {
+          const lineEnd = end === -1 ? data.length : end;
+          yield data.toString("utf8", start, lineEnd);
+          start = lineEnd + 1;
+        }
+        if (bytes === 0) break;
+        rest = Buffer.from(data.subarray(start));
+      }
+    } finally {
+      closeSync(fd);
     }
-    return out;
   }
 
   private memoryPartitions(field: string): Observation<unknown>[][] {
