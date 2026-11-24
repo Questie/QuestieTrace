@@ -25,7 +25,6 @@ mod pipeline;
 mod recordings;
 mod resolve;
 mod review;
-mod takers;
 mod views;
 
 use crate::config::Config;
@@ -48,7 +47,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use takers::Takers;
 use views::{build_quest_views, QuestView, Status, ViewSources};
 
 const LUA_FILE: &str = "foreverQuestRelationTraces.lua";
@@ -99,7 +97,7 @@ fn relations_path(config: &Config) -> PathBuf {
     config.relations_dir.join("relations.json")
 }
 
-pub fn run(config: &Config, mut input: CombineInput) -> Result<CombineOutput> {
+pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
     let min_score = MIN_SCORE;
     let lead_ins = claimed_lead_ins(&input.candidate_files);
     let unchecked = Unchecked {
@@ -113,8 +111,6 @@ pub fn run(config: &Config, mut input: CombineInput) -> Result<CombineOutput> {
             recordings.contradicted.len()
         );
     }
-    // Before the model, which would otherwise learn from claims no list should hold.
-    let other_faction = drop_other_factions_prerequisites(&mut input.candidate_files, &recordings.takers);
     let inputs = inputs::prepare_inputs(&input.candidate_files, input.catalog, input.ground_truth)?;
     // The same pipeline twice: once as shipped, once without signal-score columns (see METRIC_CAVEATS).
     let shipped = combine(&inputs, min_score, &DEFAULT_MODEL_PARAMS);
@@ -201,7 +197,6 @@ pub fn run(config: &Config, mut input: CombineInput) -> Result<CombineOutput> {
         lua_quests: lua_quest_count(&records),
         classic_misses: &misses,
         contradicted: &recordings.contradicted,
-        other_faction,
         generated_at: &config.generated_at,
     });
 
@@ -237,23 +232,6 @@ pub fn run(config: &Config, mut input: CombineInput) -> Result<CombineOutput> {
         meta,
         summary,
     })
-}
-
-/// Drops every prerequisite a trace signal claims that only the other faction takes; how many
-/// (quest, prerequisite) pairs that were.
-fn drop_other_factions_prerequisites(files: &mut [CandidateFile], takers: &Takers) -> usize {
-    let mut dropped = FxHashSet::default();
-    for file in files.iter_mut().filter(|file| !inputs::is_context_only(&file.signal)) {
-        file.candidates.retain(|candidate| {
-            let other = matches!(candidate.field, RelationField::PreQuestSingle | RelationField::PreQuestGroup)
-                && takers.is_for_the_other_faction(candidate.quest_id, candidate.target);
-            if other {
-                dropped.insert((candidate.quest_id, candidate.target));
-            }
-            !other
-        });
-    }
-    dropped.len()
 }
 
 /// (quest, lead-in) for every breadcrumb a trace signal claims at [`MIN_SCORE`] or more.
@@ -557,83 +535,6 @@ struct MetricsFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::episode_store::InMemory;
-    use crate::model::{Faction, QuestEpisode, QuestEventKind, RelationCandidate};
-    use crate::test_support::{catalog, catalog_quest, event, make_episode};
-
-    fn file(signal: &str, candidates: &[(QuestId, RelationField, QuestId)]) -> CandidateFile {
-        CandidateFile {
-            signal: signal.into(),
-            generated_at: String::new(),
-            input_count: 0,
-            params: serde_json::Value::Null,
-            covered_quest_ids: vec![],
-            candidates: candidates
-                .iter()
-                .map(|&(quest_id, field, target)| RelationCandidate {
-                    quest_id,
-                    field,
-                    target,
-                    score: 0.97,
-                    support: 9,
-                    contradict: 0,
-                    evidence: vec![],
-                    note: None,
-                })
-                .collect(),
-        }
-    }
-
-    /// Three characters of the faction that accepted these quests.
-    fn characters(faction: Faction, quests: &[QuestId]) -> Vec<QuestEpisode> {
-        let episode = |_| {
-            let mut episode = make_episode();
-            episode.player.faction = Some(faction);
-            episode.quest_events = quests.iter().map(|&quest| event(1.0, QuestEventKind::Accepted, quest, None)).collect();
-            episode
-        };
-        (0..3).map(episode).collect()
-    }
-
-    #[test]
-    fn prerequisites_only_the_other_faction_takes_never_reach_the_model() {
-        use RelationField::{ExclusiveTo, NextQuestInChain, PreQuestGroup, PreQuestSingle};
-        // "The Fate of Zephras" for the Horde (93836), which both versions of "Confront Lorthuna"
-        // (92646 Horde, 93835 Alliance) are claimed to open.
-        let episodes = [characters(Faction::Horde, &[93836, 92646]), characters(Faction::Alliance, &[93835])].concat();
-        let claims = [
-            (93836, PreQuestSingle, 92646),
-            (93836, PreQuestSingle, 93835),
-            (93836, PreQuestGroup, 93835),
-            (93835, ExclusiveTo, 92646),
-            (93835, NextQuestInChain, 93836),
-        ];
-        let catalog = catalog([92646, 93835, 93836].map(catalog_quest));
-        let output = run(
-            &Config::from_env("2026-11-24T00:00:00Z".into()),
-            CombineInput {
-                candidate_files: vec![file("offer-set", &claims), file("wowhead-requires", &claims)],
-                catalog: &catalog,
-                ground_truth: &GroundTruth::default(),
-                episodes: &InMemory(&episodes),
-            },
-        )
-        .unwrap();
-
-        assert!(
-            output.review.contains("only the other faction takes the prerequisite (left out): 1."),
-            "{}",
-            &output.review[..3000]
-        );
-        let summary = |signal: &str| output.meta.inputs.iter().find(|input| input.signal == signal).map(|input| input.candidates);
-        // Both prerequisite claims on the Alliance's version are gone, the exclusive pair and the
-        // chain stay, and Wowhead's claims, which decide nothing, are left alone.
-        assert_eq!(summary("offer-set"), Some(3));
-        let mut files = vec![file("wowhead-requires", &claims)];
-        let read = Recordings::read(&InMemory(&episodes), &Truth::new(), &contradicted::EVERYTHING_CHECKED).unwrap();
-        assert_eq!(drop_other_factions_prerequisites(&mut files, &read.takers), 0);
-        assert_eq!(files[0].candidates.len(), claims.len());
-    }
 
     #[test]
     fn rounded_reads_back_what_to_fixed_prints() {

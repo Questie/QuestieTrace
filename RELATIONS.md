@@ -130,18 +130,23 @@ OR-list entries nobody turned in (mostly copies that complete together). Combine
    Horde, per race, per level bracket), so the traces claim versions the quest's characters never
    did: "The Fate of Zephras" (93836, 94369), "The Great Cat Spirit", "Call of Earth". The
    maintainer's answer (2026-11-24, checked in game on "Call of Earth": with 1516 done a troll is
-   offered 1517 and, once that is abandoned, can take 1520): a prerequisite lists every version,
-   at best only those the quest's faction has access to, as preQuestSingle, and all versions of a
-   step are exclusiveTo each other. So combine leaves out a claimed prerequisite that only the other
-   faction takes (`combine/takers.rs`, by who accepted or turned the quests in), before the model
-   sees it: 459 pairs. On the full archive's filtered run 236 accepted prerequisites go (217 of them
-   in QuestieDB, which lists both factions' versions there; the module never removes QuestieDB's own
-   values) and 17 come (16 as in QuestieDB); 30 differ from QuestieDB instead of 41.
+   offered 1517 and, once that is abandoned, can take 1520): a prerequisite lists every version as
+   preQuestSingle, and all versions of a step are exclusiveTo each other. Showing only the versions
+   a player's faction has access to belongs in Questie's Journal, not in the data. So those claims
+   are right, and the pipeline keeps them.
 
-   Not done: the "Call of Earth" values in QuestieDB itself. Its step 2 and 3 have no exclusiveTo,
-   and 92468 (Horde Skyborne) requires only 92467. Measured with the agreed values put into the
-   ground truth: `exclusiveTo` 1,548 -> 1,650 accepted, none conflicting, and 21 prerequisites
-   differ. Until QuestieDB has them, their claims count as wrong in the model and hold other
+   Two rules were tried against them and not kept. Dropping claims no character turned in would drop
+   the versions the maintainer wants listed. Dropping claims only the other faction takes, by which
+   faction's characters accepted or turned the quests in, was built and taken out again: 212 of the
+   224 accepted prerequisites it removed are in QuestieDB's own lists, all 224 are OR lists where the
+   extra version changes nothing in game, and the verdict is wrong too often on few characters (seen
+   in 5% and 20% of the characters and checked against all: 13% and 18% wrong with 3-4 takers, 3% and
+   5% with 5-9, about 1% with 10-19, under 1% above).
+
+   Not done: the "Call of Earth" values in QuestieDB itself (its steps 2 and 3 have no exclusiveTo,
+   and 92468 requires only 92467). Measured with the agreed values put into the ground truth:
+   `exclusiveTo` 1,548 -> 1,650 accepted, none conflicting, and 31 prerequisites differ from QuestieDB
+   instead of 41. Until QuestieDB has them, their claims count as wrong in the model and hold other
    correct pairs back, so the module should not be regenerated for QuestieDB before that.
 
 Found on the way, not done:

@@ -97,9 +97,8 @@ scraper --wowhead--> context candidates ----------------------+--combine--> Lua,
   from the beta, and characters met on a server that is not Blizzard's, are left out and logged
   (`ingest/origin.rs`).
 - Signals never read the ground truth; combine uses it to calibrate a logistic model per relation
-  kind and to measure itself. Before that it reads the recordings once (`combine/recordings.rs`): claimed
-  prerequisites only the other faction takes are left out, and recordings that contradict QuestieDB's
-  prerequisites are listed for a person. Wowhead claims are context for reviewers only: they never decide.
+  kind and to measure itself. It reads the recordings once (`combine/recordings.rs`), to list those that
+  contradict QuestieDB's prerequisites for a person. Wowhead claims are context for reviewers only: they never decide.
 
 ### Adding a signal
 
