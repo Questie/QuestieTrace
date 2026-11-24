@@ -183,6 +183,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetLootSourceInfo(slot)` | `functions["GetLootSourceInfo"][slot]` |
 | `GetLootSlotLink(slot)` | `functions["GetLootSlotLink"][slot]` |
 | `GetLootSlotType(slot)` | `functions["GetLootSlotType"][slot]` |
+| `C_Trainer.GetTrainerType()` / `IsTradeskillTrainer()` | `functions["C_Trainer.GetTrainerType"]` (Forever) / `functions["IsTradeskillTrainer"]` (clients without it) |
+| `GetTrainerServiceTypeFilter(type)` | `functions["GetTrainerServiceTypeFilter"][type]` |
 | `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple, only present when the legacy global exists, independent of whether `C_Reputation.GetFactionDataByID` also exists) |
 | `C_Reputation.GetFactionDataByID(factionID)` | `functions["C_Reputation.GetFactionDataByID"][factionID]` (raw table) |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
@@ -216,6 +218,7 @@ Notes:
 | `functions["QuestLog"]` | Array of active quest IDs in quest-log order |
 | `functions["FactionOrder"]` | Ordered array of known faction IDs |
 | `functions["SpellBook"]` | Ordered unique spell IDs discovered from spellbook slots |
+| `functions["TrainerServices"][npcID][service]` | What a trainer teaches, by service; not by the list index of the `GetTrainerService*` APIs |
 
 ### Derived WoW APIs
 
@@ -246,7 +249,7 @@ end
 
 ## 5) Event replay
 
-Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount), `CVAR_UPDATE` (Display), and `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` (ItemInfo). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams, and the item data events from the switches to `true` in `C_Item.IsItemDataCachedByID`.
+Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount), `CVAR_UPDATE` (Display), `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` (ItemInfo), and `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE` (TrainerServices). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams, and the item data events from the switches to `true` in `C_Item.IsItemDataCachedByID`.
 
 ## 6) Known limits
 

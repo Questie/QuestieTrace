@@ -161,8 +161,8 @@ recorded, since that reflects a state transition rather than PII.
 **From `npc_interaction` (new category):**
 - `MERCHANT_SHOW`
 - `MERCHANT_CLOSED`
-- `TRAINER_SHOW`
-- `TRAINER_CLOSED`
+- `TRAINER_SHOW` *(also TrainerServices)*
+- `TRAINER_CLOSED` *(also TrainerServices)*
 - `MAIL_SHOW`
 - `MAIL_CLOSED`
 - `AUCTION_HOUSE_SHOW`
@@ -309,6 +309,15 @@ TRACKER_SPEC section 17.
   loads requested through `C_Item.RequestLoadItemDataByID`, which do not fire
   `GET_ITEM_INFO_RECEIVED` (Forever 1.60.1).
 
+### TrainerServices tracker
+
+Samples the open trainer's services; see TRACKER_SPEC section 19.
+
+- `TRAINER_SHOW`
+- `TRAINER_CLOSED`
+- `TRAINER_UPDATE`, `TRAINER_SERVICE_INFO_NAME_UPDATE` *(private triggers, not
+  recorded)* -- sample an open window again when its list changes.
+
 ### FrameHeartbeat tracker
 
 No events. An `OnUpdate` frame, shown only while capturing, writes
@@ -433,8 +442,9 @@ dropped and never recorded or dispatched to trackers.
   Private sampling triggers are registered on a tracker's own frame and are
   never recorded in the main event stream: Position's movement transitions
   (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), ItemCount's
-  `BAG_UPDATE_DELAYED`, Display's `CVAR_UPDATE` and ItemInfo's
-  `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`.
+  `BAG_UPDATE_DELAYED`, Display's `CVAR_UPDATE`, ItemInfo's
+  `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`, and TrainerServices'
+  `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE`.
 - `LOOT_OPENED` and `LOOT_READY` are different events. The Loot tracker
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).

@@ -51,6 +51,7 @@ Modules/Trackers/UnitLevel.lua
 Modules/Trackers/Position.lua
 Modules/Trackers/Loot.lua
 Modules/Trackers/Merchant.lua
+Modules/Trackers/TrainerServices.lua
 Modules/Trackers/ItemCount.lua
 Modules/Trackers/Reputation.lua
 Modules/Trackers/QuestLog.lua
