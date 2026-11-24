@@ -215,49 +215,83 @@ describe("mergeSpawns", () => {
     });
   });
 
-  it("should use a larger grouping radius in capital cities", () => {
+  it("should group the same map distance more widely in a small zone than in a large one", () => {
     const spread = (zoneID: number): TaggedSpawnObservation[] => [
       obs(823, { zoneID, x: 50.0, y: 50.0 }, 1, "target"),
       obs(823, { zoneID, x: 50.8, y: 50.0 }, 2, "target"),
     ];
 
+    // Ironforge is ~8 yards per map unit horizontally, the Barrens ~100
     expect(mergeSpawns(spread(1537))).toEqual({ 1537: [[50.4, 50]] });
-    expect(mergeSpawns(spread(40))[40]).toHaveLength(2);
+    expect(mergeSpawns(spread(17))[17]).toHaveLength(2);
   });
 
-  it("should not chain a line of nearby points into a single cluster", () => {
-    const observations: TaggedSpawnObservation[] = [
-      obs(823, { zoneID: 40, x: 10.0, y: 50.0 }, 1, "target"),
-      obs(823, { zoneID: 40, x: 10.4, y: 50.0 }, 2, "target"),
-      obs(823, { zoneID: 40, x: 10.8, y: 50.0 }, 3, "target"),
-      obs(823, { zoneID: 40, x: 11.2, y: 50.0 }, 4, "target"),
-      obs(823, { zoneID: 40, x: 11.6, y: 50.0 }, 5, "target"),
+  it("should measure the grouping radius per axis", () => {
+    const apart = (dx: number, dy: number): TaggedSpawnObservation[] => [
+      obs(823, { zoneID: 17, x: 50.0, y: 50.0 }, 1, "target"),
+      obs(823, { zoneID: 17, x: 50.0 + dx, y: 50.0 + dy }, 2, "target"),
     ];
 
-    expect(mergeSpawns(observations)).toEqual({
-      40: [[10.2, 50], [11, 50], [11.6, 50]],
-    });
+    // The Barrens are ~101 yards per unit horizontally and ~68 vertically: 0.3 units is 30 or 20 yards
+    expect(mergeSpawns(apart(0.3, 0))[17]).toHaveLength(1);
+    expect(mergeSpawns(apart(0.3, 0))[17]).toEqual([[50.15, 50]]);
+    expect(mergeSpawns(apart(0.8, 0))[17]).toHaveLength(2);
+    expect(mergeSpawns(apart(0, 0.8))[17]).toHaveLength(2);
   });
 
-  it("should cluster points exactly at threshold distance", () => {
+  it("should use 40 yards per map unit for zones of unknown size", () => {
+    const apart = (dx: number): TaggedSpawnObservation[] => [
+      obs(823, { zoneID: 99999, x: 50.0, y: 50.0 }, 1, "target"),
+      obs(823, { zoneID: 99999, x: 50.0 + dx, y: 50.0 }, 2, "target"),
+    ];
+
+    expect(mergeSpawns(apart(0.5))[99999]).toHaveLength(1);
+    expect(mergeSpawns(apart(1.3))[99999]).toHaveLength(2);
+  });
+
+  it("should not chain a line of points longer than the radius into a single cluster", () => {
+    // Zone 40 is 35 yards per unit horizontally: six points 17.5 yards apart span 87.5 yards
+    const observations: TaggedSpawnObservation[] = [10.0, 10.5, 11.0, 11.5, 12.0, 12.5].map((x, i) =>
+      obs(823, { zoneID: 40, x, y: 50.0 }, i, "target"),
+    );
+
+    const spawns = mergeSpawns(observations)[40]!;
+    expect(spawns).toHaveLength(2);
+    for (const [x] of observations.map((o) => [o.value.x])) {
+      expect(Math.min(...spawns.map(([sx]) => Math.abs(sx - x) * 35))).toBeLessThanOrEqual(20);
+    }
+  });
+
+  it("should give the same spawns whatever order the observations come in", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 60; i++) {
+      observations.push({
+        ...obs(823, { zoneID: 40, x: 20 + (i % 10) * 0.4, y: 40 + Math.floor(i / 10) * 0.4 }, i, "target"),
+        provenance: { session: "s", sessionKey: `k${i}`, t: i },
+      });
+    }
+
+    expect(mergeSpawns([...observations].reverse())).toEqual(mergeSpawns(observations));
+  });
+
+  it("should cluster two points that are within the radius of their shared centre", () => {
+    // 0.9 units are 31.5 yards in zone 40, so each point is 15.75 yards from the middle
     const observations: TaggedSpawnObservation[] = [
       obs(823, { zoneID: 40, x: 30.0, y: 86.0 }, 1, "questnpc"),
-      obs(823, { zoneID: 40, x: 30.5, y: 86.0 }, 2, "questnpc"),
+      obs(823, { zoneID: 40, x: 30.9, y: 86.0 }, 2, "questnpc"),
     ];
 
-    const result = mergeSpawns(observations);
-    expect(result[40]).toHaveLength(1);
+    expect(mergeSpawns(observations)[40]).toEqual([[30.45, 86]]);
   });
 
-  it("should NOT cluster points just beyond threshold", () => {
+  it("should NOT cluster two points that are further apart than twice the radius", () => {
+    // 1.3 units are 45.5 yards in zone 40
     const observations: TaggedSpawnObservation[] = [
       obs(823, { zoneID: 40, x: 30.0, y: 86.0 }, 1, "questnpc"),
-      obs(823, { zoneID: 40, x: 30.51, y: 86.0 }, 2, "questnpc"),
+      obs(823, { zoneID: 40, x: 31.3, y: 86.0 }, 2, "questnpc"),
     ];
 
-    const result = mergeSpawns(observations);
-    // Should NOT cluster (distance > threshold)
-    expect(result[40]).toHaveLength(2);
+    expect(mergeSpawns(observations)[40]).toHaveLength(2);
   });
 
   it("should round singleton coordinates to 2 decimal places (questnpc branch)", () => {
@@ -315,6 +349,49 @@ describe("mergeSpawns", () => {
     expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]], 12: [[60, 60]] });
   });
 
+  it("should keep a weak cluster for rarely seen NPCs even next to a stronger one", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 5; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "target"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    observations.push({ ...obs(823, { zoneID: 40, x: 60, y: 60 }, 9, "target"), provenance: { session: "s", sessionKey: "other", t: 9 } });
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30], [60, 60]] });
+  });
+
+  it("should always keep the strongest cluster of a zone", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 40; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 2 + (i % 8) * 12, y: 5 + Math.floor(i / 8) * 18 }, i, "target"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+
+    expect(mergeSpawns(observations)[40]).toHaveLength(40);
+  });
+
+  it("should drop a cluster below 0.25% of the sessions seen in the zone", () => {
+    const sessions = (key: string, count: number, x: number): TaggedSpawnObservation[] =>
+      Array.from({ length: count }, (_, i) => ({
+        ...obs(823, { zoneID: 40, x, y: 50 }, i, "target"),
+        provenance: { session: "s", sessionKey: `${key}${i}`, t: i },
+      }));
+
+    // 2,000 sessions: 0.25% is 5 sessions
+    expect(mergeSpawns([...sessions("a", 1992, 20), ...sessions("b", 4, 60)])).toEqual({ 40: [[20, 50]] });
+    expect(mergeSpawns([...sessions("a", 1992, 20), ...sessions("b", 5, 60)])).toEqual({ 40: [[20, 50], [60, 50]] });
+  });
+
+  it("should not let one session's many positions outweigh the sessions of another cluster", () => {
+    const observations: TaggedSpawnObservation[] = [];
+    for (let i = 0; i < 25; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 30, y: 30 }, i, "target"), provenance: { session: "s", sessionKey: `k${i}`, t: i } });
+    }
+    for (let i = 0; i < 50; i++) {
+      observations.push({ ...obs(823, { zoneID: 40, x: 60, y: 60 + i * 0.001 }, 100 + i, "target"), provenance: { session: "s", sessionKey: "one", t: 100 + i } });
+    }
+
+    expect(mergeSpawns(observations)).toEqual({ 40: [[30, 30]] });
+  });
+
   it("should pick the single quest entity spawn among well supported clusters", () => {
     const observations: TaggedSpawnObservation[] = [];
     for (let i = 0; i < 25; i++) {
@@ -355,13 +432,13 @@ describe("mergeSpawns", () => {
     const observations: TaggedSpawnObservation[] = [
       obs(823, { zoneID: 40, x: 30.01, y: 86.02 }, 1, "target"),
       obs(823, { zoneID: 12, x: 47.46, y: 62.18 }, 2, "target"),
-      obs(823, { zoneID: 40, x: 31.0, y: 87.0 }, 3, "target"),
-      obs(823, { zoneID: 12, x: 48.0, y: 63.0 }, 4, "target"),
+      obs(823, { zoneID: 40, x: 34.0, y: 90.0 }, 3, "target"),
+      obs(823, { zoneID: 12, x: 52.0, y: 67.0 }, 4, "target"),
     ];
 
     const result = mergeSpawns(observations);
-    expect(result[40]).toEqual(expect.arrayContaining([[30.01, 86.02], [31.0, 87.0]]));
-    expect(result[12]).toEqual(expect.arrayContaining([[47.46, 62.18], [48.0, 63.0]]));
+    expect(result[40]).toEqual(expect.arrayContaining([[30.01, 86.02], [34.0, 90.0]]));
+    expect(result[12]).toEqual(expect.arrayContaining([[47.46, 62.18], [52.0, 67.0]]));
     expect(result[40]!.length).toBe(2);
     expect(result[12]!.length).toBe(2);
   });
