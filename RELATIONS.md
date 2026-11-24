@@ -127,14 +127,22 @@ OR-list entries nobody turned in (mostly copies that complete together). Combine
    Inventory" (92124). Fixed in ingest, see "Beta and other servers". The guess that signals prefer
    a prerequisite turned in at the quest's own giver was wrong for it.
 2. **Versions of a quest that complete together.** Turning in one flags all of them (Alliance and
-   Horde, per race, per level bracket), so the traces accept a version nobody on the quest ever
-   turned in: "The Fate of Zephras" (93836, 94369), "The Great Cat Spirit", "Call of Earth". Not
-   fixed. Measured on the filtered data: dropping the claims whose target no character turned in
-   before the quest, before the model sees them, takes the prerequisites that differ from QuestieDB
-   from 41 to 26 and finds 434 of the 496 solid independent ones instead of 428, and drops 345
-   claims that agree with QuestieDB, which lists such copies in OR lists (343 of their quests keep
-   another accepted prerequisite someone did turn in). Whether prerequisites should name every
-   version is the maintainer's choice, so this waits for the answer.
+   Horde, per race, per level bracket), so the traces claim versions the quest's characters never
+   did: "The Fate of Zephras" (93836, 94369), "The Great Cat Spirit", "Call of Earth". The
+   maintainer's answer (2026-11-24, checked in game on "Call of Earth": with 1516 done a troll is
+   offered 1517 and, once that is abandoned, can take 1520): a prerequisite lists every version,
+   at best only those the quest's faction has access to, as preQuestSingle, and all versions of a
+   step are exclusiveTo each other. So combine leaves out a claimed prerequisite that only the other
+   faction takes (`combine/takers.rs`, by who accepted or turned the quests in), before the model
+   sees it: 459 pairs. On the full archive's filtered run 236 accepted prerequisites go (217 of them
+   in QuestieDB, which lists both factions' versions there; the module never removes QuestieDB's own
+   values) and 17 come (16 as in QuestieDB); 30 differ from QuestieDB instead of 41.
+
+   Not done: the "Call of Earth" values in QuestieDB itself. Its step 2 and 3 have no exclusiveTo,
+   and 92468 (Horde Skyborne) requires only 92467. Measured with the agreed values put into the
+   ground truth: `exclusiveTo` 1,548 -> 1,650 accepted, none conflicting, and 21 prerequisites
+   differ. Until QuestieDB has them, their claims count as wrong in the model and hold other
+   correct pairs back, so the module should not be regenerated for QuestieDB before that.
 
 Found on the way, not done:
 - **Race masks in QuestieDB are wrong on 87 quests** (three or more characters of an excluded race
@@ -194,9 +202,7 @@ What it changed on the full archive (accepted relations, before -> after): prere
 versions of "Call of Earth" (1516-1521, 92466-92468, 94373-94375, which complete together) count as
 wrong because QuestieDB has no such relation, and refitting the model on them lowers the others just
 below the acceptance score. Without those 30 claims it is 1,620, all 18 new ones as in QuestieDB.
-Waiting for the maintainer's answer on them, and on whether a prerequisite should name every version
-that completes together or only the one a character does (21 of the 41 differing prerequisites are
-quests nobody on that quest ever turned in).
+The maintainer has since confirmed those pairs ("Versions of a quest that complete together" above).
 
 The date and the server id only catch what is known today. For the rest, combine compares the
 recordings with QuestieDB (`combine/contradicted.rs`): it lists every prerequisite QuestieDB has

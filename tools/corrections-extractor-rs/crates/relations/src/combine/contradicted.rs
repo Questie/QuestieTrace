@@ -7,11 +7,7 @@
 //! and other servers").
 
 use super::edges::Truth;
-use crate::episode_store::Episodes;
 use crate::model::{QuestEpisode, QuestEventKind, QuestId, RelationField, SessionTime};
-use crate::signals::forever_episodes;
-use anyhow::Result;
-use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Above this share, a prerequisite is not one everybody needs (several quests open it, or it
@@ -41,44 +37,61 @@ pub struct Unchecked<'a> {
     pub is_lead_in: &'a dyn Fn(QuestId, QuestId) -> bool,
 }
 
-/// Every prerequisite of QuestieDB that some characters contradict, but at most [`MAX_SHARE`] of
-/// them; the rarest contradictions first.
-pub fn contradicted_prerequisites(episodes: &dyn Episodes, truth: &Truth, unchecked: &Unchecked) -> Result<Vec<Contradicted>> {
-    let required = required_quests(truth, unchecked);
-    let tracked: FxHashSet<QuestId> = required.values().flatten().copied().collect();
-    let mut found: FxHashMap<(QuestId, QuestId), Contradicted> = FxHashMap::default();
-    episodes.for_each_bucket(&mut |bucket| {
-        let characters: Vec<&[QuestEpisode]> = bucket
-            .chunk_by(|a, b| a.contributor_id == b.contributor_id && a.character_key == b.character_key)
-            .collect();
-        let seen: Vec<Vec<Got>> = characters.par_iter().map(|sessions| quests_got(sessions, &required, &tracked)).collect();
-        for (sessions, got) in characters.iter().zip(seen) {
-            for Got { quest, prerequisite, had } in got {
-                let counts = found.entry((quest, prerequisite)).or_insert_with(|| Contradicted {
-                    quest,
-                    prerequisite,
-                    characters: 0,
-                    without: Vec::new(),
-                });
-                counts.characters += 1;
-                if !had {
-                    counts.without.push(sessions[0].character_key.clone());
-                }
+/// The check, over every character of the recordings.
+pub struct Check {
+    /// Per quest, the prerequisites checked.
+    required: FxHashMap<QuestId, Vec<QuestId>>,
+    /// Every prerequisite checked.
+    tracked: FxHashSet<QuestId>,
+    found: FxHashMap<(QuestId, QuestId), Contradicted>,
+}
+
+impl Check {
+    pub fn new(truth: &Truth, unchecked: &Unchecked) -> Check {
+        let required = required_quests(truth, unchecked);
+        Check {
+            tracked: required.values().flatten().copied().collect(),
+            required,
+            found: FxHashMap::default(),
+        }
+    }
+
+    /// What one character's sessions (oldest first) show; [`Check::add`] counts it.
+    pub fn shown_by(&self, sessions: &[&QuestEpisode]) -> Vec<Got> {
+        quests_got(sessions, &self.required, &self.tracked)
+    }
+
+    pub fn add(&mut self, character_key: &str, got: Vec<Got>) {
+        for Got { quest, prerequisite, had } in got {
+            let counts = self.found.entry((quest, prerequisite)).or_insert_with(|| Contradicted {
+                quest,
+                prerequisite,
+                characters: 0,
+                without: Vec::new(),
+            });
+            counts.characters += 1;
+            if !had {
+                counts.without.push(character_key.to_owned());
             }
         }
-        Ok(())
-    })?;
-    let share = |found: &Contradicted| found.without.len() as f64 / found.characters as f64;
-    let mut contradicted: Vec<Contradicted> = found
-        .into_values()
-        .filter(|found| !found.without.is_empty() && share(found) <= MAX_SHARE)
-        .collect();
-    contradicted.sort_by(|a, b| {
-        share(a)
-            .total_cmp(&share(b))
-            .then_with(|| (a.quest, a.prerequisite).cmp(&(b.quest, b.prerequisite)))
-    });
-    Ok(contradicted)
+    }
+
+    /// Every prerequisite some characters contradict, but at most [`MAX_SHARE`] of them; the rarest
+    /// contradictions first.
+    pub fn finish(self) -> Vec<Contradicted> {
+        let share = |found: &Contradicted| found.without.len() as f64 / found.characters as f64;
+        let mut contradicted: Vec<Contradicted> = self
+            .found
+            .into_values()
+            .filter(|found| !found.without.is_empty() && share(found) <= MAX_SHARE)
+            .collect();
+        contradicted.sort_by(|a, b| {
+            share(a)
+                .total_cmp(&share(b))
+                .then_with(|| (a.quest, a.prerequisite).cmp(&(b.quest, b.prerequisite)))
+        });
+        contradicted
+    }
 }
 
 /// Per quest, the quests QuestieDB says must all be done before it: a one-quest preQuestSingle, or
@@ -106,7 +119,7 @@ fn required_quests(truth: &Truth, unchecked: &Unchecked) -> FxHashMap<QuestId, V
 }
 
 /// A quest one character could get or had, and whether it had done one of its prerequisites.
-struct Got {
+pub struct Got {
     quest: QuestId,
     prerequisite: QuestId,
     had: bool,
@@ -126,9 +139,8 @@ fn keep_first(moments: &mut FxHashMap<QuestId, Moment>, quest: QuestId, at: Mome
 /// What one character's sessions (oldest first) show about the quests in `required`: those it could
 /// get (a giver listed it, its accept dialog opened, it was accepted) or already had (in its log, or
 /// completed), at the first moment that shows it, when its completed quests were known then.
-fn quests_got(sessions: &[QuestEpisode], required: &FxHashMap<QuestId, Vec<QuestId>>, tracked: &FxHashSet<QuestId>) -> Vec<Got> {
+fn quests_got(sessions: &[&QuestEpisode], required: &FxHashMap<QuestId, Vec<QuestId>>, tracked: &FxHashSet<QuestId>) -> Vec<Got> {
     let (mut got, mut done) = (FxHashMap::default(), FxHashMap::default());
-    let sessions = forever_episodes(sessions);
     for (index, session) in sessions.iter().enumerate() {
         let offered = session.offers.iter().flat_map(|offer| offer.available.iter().map(|quest| (quest.id, offer.t)));
         let events = session.quest_events.iter();
@@ -176,10 +188,18 @@ fn quests_got(sessions: &[QuestEpisode], required: &FxHashMap<QuestId, Vec<Quest
     result
 }
 
+/// For tests that check every prerequisite.
+#[cfg(test)]
+pub const EVERYTHING_CHECKED: Unchecked = Unchecked {
+    is_repeatable: &|_| false,
+    is_lead_in: &|_, _| false,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::episode_store::{InMemory, PerCharacter};
+    use crate::combine::recordings::Recordings;
+    use crate::episode_store::{Episodes, InMemory, PerCharacter};
     use crate::model::{CompletedChange, RelationSet};
     use crate::test_support::{event, gossip, make_episode, npc};
     use std::collections::BTreeMap;
@@ -216,16 +236,11 @@ mod tests {
             sets.entry(*quest).or_default().insert(*field, values.clone());
         }
         let truth: Truth = sets.iter().map(|(&quest, set)| (quest, set)).collect();
-        let check = |episodes: &dyn Episodes| contradicted_prerequisites(episodes, &truth, &EVERYTHING_CHECKED).unwrap();
+        let check = |episodes: &dyn Episodes| Recordings::read(episodes, &truth, &EVERYTHING_CHECKED).unwrap().contradicted;
         let one_bucket = check(&InMemory(episodes));
         assert_eq!(check(&PerCharacter(episodes)), one_bucket, "whatever the buckets");
         one_bucket
     }
-
-    const EVERYTHING_CHECKED: Unchecked = Unchecked {
-        is_repeatable: &|_| false,
-        is_lead_in: &|_, _| false,
-    };
 
     fn single() -> Vec<(QuestId, RelationField, Vec<QuestId>)> {
         vec![(QUEST, RelationField::PreQuestSingle, vec![PREREQUISITE])]
@@ -335,7 +350,7 @@ mod tests {
         let (episodes, _) = with_others(vec![character(50.0)]);
         let set = RelationSet::from([(RelationField::PreQuestSingle, vec![PREREQUISITE])]);
         let truth: Truth = BTreeMap::from([(QUEST, &set)]);
-        let found = |unchecked: &Unchecked| contradicted_prerequisites(&InMemory(&episodes), &truth, unchecked).unwrap().len();
+        let found = |unchecked: &Unchecked| Recordings::read(&InMemory(&episodes), &truth, unchecked).unwrap().contradicted.len();
         assert_eq!(found(&EVERYTHING_CHECKED), 1);
         let repeatable = Unchecked {
             is_repeatable: &|quest| quest == PREREQUISITE,

@@ -41,6 +41,8 @@ pub struct ReviewInput<'r, 's> {
     pub lua_quests: usize,
     pub classic_misses: &'r [ClassicMiss<'s>],
     pub contradicted: &'r [Contradicted],
+    /// Claimed prerequisites left out because only the other faction takes them (see [`super::takers`]).
+    pub other_faction: usize,
     pub generated_at: &'r str,
 }
 
@@ -358,6 +360,10 @@ pub fn render_review(input: &ReviewInput) -> String {
         format!("- Context only, untrusted: {}.", or_none(context.join(", "))),
         format!("- AND (preQuestGroup) evidence trusted from: {}.", or_none(input.and_sources.join(", "))),
         format!("- Known prerequisites a few characters contradict (section 6): {}.", input.contradicted.len()),
+        format!(
+            "- Claims where only the other faction takes the prerequisite (left out): {}.",
+            input.other_faction
+        ),
         String::new(),
         "## 1. Forever-new quests without authored relations".into(),
         String::new(),
