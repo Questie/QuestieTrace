@@ -26,7 +26,7 @@ const FALLBACK_YARDS_PER_UNIT = 40;
 const MIN_CLUSTER_SESSION_SHARE = 0.0025;
 const MIN_SESSIONS_TO_DROP_SINGLE_SESSION_CLUSTERS = 20;
 // Grid cells per radius, which is also how finely a cluster centre can be placed before it is refined
-const CELLS_PER_RADIUS = 10;
+const CELLS_PER_RADIUS = 5;
 
 function tokenPriority(token: string): number {
   return TOKEN_PRIORITY[token] ?? 0;
