@@ -17,6 +17,12 @@ local DeepCompare = Core.DeepCompare
 --
 -- IsPassiveSpell(slot, "spell") -> 1|nil isPassive
 --
+-- C_SpellBook.GetSpellBookItemType(slot, bank) -> Enum.SpellBookItemType itemType,
+--                                                 number actionID,
+--                                                 number? spellID
+--   Forever only, where the three functions above are gone. Not recorded
+--   itself: it feeds the two streams below.
+--
 -- SpellBook (custom stream) -> number[] spellIDs  -- ordered known spell IDs
 --
 -- PlayerKnownSpells (delta stream) -> set<number> spellIDs
@@ -24,6 +30,23 @@ local DeepCompare = Core.DeepCompare
 
 ---@type string
 local BOOK_TYPE = "spell"
+
+--- The riding spells are passive and the spell book may not list them, so
+--- C_SpellBook clients are asked about each of them.
+---@type number[]
+local RIDING_SPELL_IDS = {
+  824, -- Horse Riding
+  825, -- Wolf Riding
+  826, -- Ram Riding
+  828, -- Tiger Riding
+  10861, -- Raptor Riding
+  10906, -- Undead Horsemanship
+  10907, -- Mechanostrider Piloting
+  18995, -- Kodo Riding
+  33388, -- Apprentice Riding
+  33391, -- Journeyman Riding
+  1285849, -- Galestrider Riding
+}
 
 ---@type table<string, FunctionStreamEntry[]|table<string|number, FunctionStreamEntry[]>>
 local functions
@@ -39,6 +62,17 @@ local prevPassive
 local knownSlots
 ---@type table<number, boolean>
 local currentKnownSpells
+---@type boolean
+local hasSpellBookApi
+
+---Whether the client lists its spell book through C_SpellBook. Other clients
+---have a C_SpellBook without GetSpellBookItemType and keep the old functions.
+---Checked before those, since other addons bring them back on Forever without
+---the spell ID this tracker reads.
+---@return boolean
+local function HasSpellBookApi()
+  return type(C_SpellBook) == "table" and type(C_SpellBook.GetSpellBookItemType) == "function"
+end
 
 ---Safely call a function and pack all returned values.
 ---@param fn function?
@@ -170,9 +204,52 @@ local function AppendKnownSpellDelta(capture, newSet)
   currentKnownSpells = newSet
 end
 
---- Enumerate the entire player spellbook, including profession tabs.
+--- Sample the spell book through C_SpellBook. GetSpellBookItemType returns plain
+--- values, where GetSpellBookItemInfo returns a table for each slot.
 ---@param capture CaptureState
-local function SampleSpellBook(capture)
+local function SampleSpellBookApi(capture)
+  local t = GetTime() - capture.startedAt
+  local tp = GetTimePreciseSec() - capture.startedAtPrecise
+  local playerBank = Enum.SpellBookSpellBank.Player
+  local learnedSpell = Enum.SpellBookItemType.Spell
+
+  local orderedSpellIDs = {}
+  local newKnownSpells = {}
+  local slot = 1
+  local itemType, spellID = C_SpellBook.GetSpellBookItemType(slot, playerBank)
+  -- Profession spells come after the slots the skill lines count, so the book
+  -- ends at its first empty slot.
+  while itemType do
+    -- Left out: spells not learned yet, and flyouts, whose spells have slots
+    -- of their own.
+    if itemType == learnedSpell and not newKnownSpells[spellID] then
+      newKnownSpells[spellID] = true
+      orderedSpellIDs[#orderedSpellIDs + 1] = spellID
+    end
+    slot = slot + 1
+    itemType, spellID = C_SpellBook.GetSpellBookItemType(slot, playerBank)
+  end
+
+  for i = 1, #RIDING_SPELL_IDS do
+    if C_SpellBook.IsSpellKnown(RIDING_SPELL_IDS[i]) then
+      newKnownSpells[RIDING_SPELL_IDS[i]] = true
+    end
+  end
+  -- The book can list fewer spells than the player knows, e.g. while it loads.
+  for knownSpellID in pairs(currentKnownSpells) do
+    if not newKnownSpells[knownSpellID] and C_SpellBook.IsSpellKnown(knownSpellID) then
+      newKnownSpells[knownSpellID] = true
+    end
+  end
+
+  AppendSpellBookIfChanged(t, tp, orderedSpellIDs)
+  AppendKnownSpellDelta(capture, newKnownSpells)
+end
+
+--- Enumerate the entire player spellbook, including profession tabs, through
+--- the old slot functions.
+---@param capture CaptureState
+local function SampleSpellBookSlots(capture)
   local t = GetTime() - capture.startedAt
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
 
@@ -238,6 +315,18 @@ local function SampleSpellBook(capture)
   AppendKnownSpellDelta(capture, newKnownSpells)
 end
 
+---@param capture CaptureState
+local function SampleSpellBook(capture)
+  if not hasSpellBookApi then
+    SampleSpellBookSlots(capture)
+    return
+  end
+
+  -- Reported like any Lua error, but the capture and the other trackers go on.
+  local ok, err = pcall(SampleSpellBookApi, capture)
+  if not ok then geterrorhandler()(err) end
+end
+
 Core.RegisterTracker({
   events = {
     "SPELLS_CHANGED",
@@ -249,10 +338,14 @@ Core.RegisterTracker({
     functions = capture.session.functions
     functionsDelta = capture.session.functionsDelta
 
+    hasSpellBookApi = HasSpellBookApi()
+
     functions["SpellBook"] = {}
-    functions["GetSpellBookItemName"] = {}
-    functions["GetSpellBookItemInfo"] = {}
-    functions["IsPassiveSpell"] = {}
+    if not hasSpellBookApi then
+      functions["GetSpellBookItemName"] = {}
+      functions["GetSpellBookItemInfo"] = {}
+      functions["IsPassiveSpell"] = {}
+    end
 
     prevName = {}
     prevInfo = {}

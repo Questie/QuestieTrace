@@ -234,8 +234,8 @@ successful observed returns.
 | UnitInteraction | `Trackers/UnitInteraction.lua` | `UnitGUID`/`UnitName` for `target`, `npc`, `questnpc`, `mouseover`; `UnitGUID` only for the `nameplateN` token of each added nameplate; `C_GossipInfo.GetAvailableQuests`; `C_GossipInfo.GetActiveQuests` | Event-driven fixed unit-token fanout; nameplates per event token | target, quest dialog, selected quest state, loot-open, NPC interaction, login-time events, `UPDATE_MOUSEOVER_UNIT`, `NAME_PLATE_UNIT_ADDED` |
 | UnitState | `Trackers/UnitState.lua` | `UnitLevel`/`UnitClassification`/`UnitReaction`/`UnitAffectingCombat` for `target`, `mouseover`; `CheckInteractDistance` (index 4) for `target`; `UnitSubName` and `UnitSubNameGUID` (synthetic) for `mouseover` | Event-driven fixed unit-token fanout (NPC-only); `UnitSubName` via TooltipDataProcessor Unit callback (Modern/Forever only) | `PLAYER_TARGET_CHANGED`, `UPDATE_MOUSEOVER_UNIT` |
 | GroupState | `Trackers/GroupState.lua` | `IsInGroup`, `GetNumGroupMembers` | Event-driven | `GROUP_JOINED`, `GROUP_LEFT`, `GROUP_ROSTER_UPDATE`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| SkillLines | `Trackers/SkillLines.lua` | `GetNumSkillLines[?]`, `GetSkillLineInfo[index]` (legacy, when present), `GetProfessions`, `GetProfessionInfo[index]`, `C_TradeSkillUI.GetAllProfessionTradeSkillLines`, `C_TradeSkillUI.GetTradeSkillLineInfoByID[skillLineID]` | Event + index iteration | `SKILL_LINES_CHANGED`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
-| SpellBook | `Trackers/SpellBook.lua` | `SpellBook`, `GetSpellBookItemName[slot]`, `GetSpellBookItemInfo[slot]`, `IsPassiveSpell[slot]`, `PlayerKnownSpells` (functionsDelta) | Event + slot iteration | `SPELLS_CHANGED`, `PLAYER_ENTERING_WORLD` |
+| SkillLines | `Trackers/SkillLines.lua` | `GetNumSkillLines[?]`, `GetSkillLineInfo[index]` (legacy, when present), `C_SkillInfo.GetSkillLineInfoByID[skillID]` (Forever), `GetProfessions`, `GetProfessionInfo[index]`, `C_TradeSkillUI.GetAllProfessionTradeSkillLines`, `C_TradeSkillUI.GetTradeSkillLineInfoByID[skillLineID]` | Event + index iteration, at most every 0.1 s | `SKILL_LINES_CHANGED`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
+| SpellBook | `Trackers/SpellBook.lua` | `SpellBook`, `PlayerKnownSpells` (functionsDelta), and where the legacy globals are used `GetSpellBookItemName[slot]`, `GetSpellBookItemInfo[slot]`, `IsPassiveSpell[slot]` | Event + slot iteration | `SPELLS_CHANGED`, `PLAYER_ENTERING_WORLD` |
 | QuestDialog | `Trackers/QuestDialog.lua` | Gossip, greeting, and current quest-dialog APIs, including reward/required counts, money, title, skill points, group size, auto-accept and background material; `GetQuestItemInfo[type][index]`, `GetQuestItemLink[type][index]`, Mists reward currencies (`GetQuestCurrencyInfo`/`GetQuestCurrencyID["reward"][index]`); `GetAvailableQuestInfo[index]`, `GetActiveQuestID[index]`; quest flags `IsBreadcrumbQuest[qid]`, `C_QuestLine.GetQuestLineInfo[qid]`, `C_QuestInfoSystem.GetQuestClassification[qid]` (Forever only) | Event + delayed re-samples + observed close sample | `QUEST_DETAIL`, `QUEST_PROGRESS`, `QUEST_COMPLETE`, `QUEST_FINISHED`, `QUEST_GREETING`, `QUEST_ACCEPT_CONFIRM`, `GOSSIP_SHOW`, `GOSSIP_CLOSED` |
 | ResetTime | `Trackers/ResetTime.lua` | `GetServerTime`, `GetQuestResetTime` (legacy, when present), `C_DateAndTime.GetSecondsUntilDailyReset` and `C_DateAndTime.GetCurrentCalendarTime` (each when present) | Init + low-frequency event snapshots | `PLAYER_LOGIN`, `PLAYER_ENTERING_WORLD`, `PLAYER_LOGOUT` |
 | ItemCount | `Trackers/ItemCount.lua` | `C_Item.GetItemCount[itemID]` | Init snapshot of carried items + event-driven + throttled private rescan | `ITEM_COUNT_CHANGED`; `BAG_UPDATE_DELAYED` is a private trigger and is not recorded |
@@ -361,6 +361,31 @@ count/enumeration, the trackers probe the old index with the represented raw API
 and append only successful observed returns. They do not synthesize nil entries
 for stale indices. `SpellBook` and `PlayerKnownSpells` remain explicit
 synthetic/delta streams derived from observed spellbook enumeration.
+
+### Forever: C_SpellBook and C_SkillInfo
+
+Forever (1.60) has neither `GetSpellBookItemName`/`GetSpellBookItemInfo`/`IsPassiveSpell`
+nor `GetNumSkillLines`/`GetSkillLineInfo`. Both trackers use the namespaced API whenever the
+client has the functions that list spells and skills there (`C_SpellBook.GetSpellBookItemType`,
+`C_SkillInfo.GetSkillLineInfo`). Classic Era, TBC and Mists have neither and keep the legacy
+globals. The namespaced API is checked first because other addons define the legacy globals on
+Forever, without the spell ID the tracker reads.
+
+- **Known spells** are the player bank's learned spells up to the first empty slot (profession
+  spells come after the slots the skill lines count). Spells not learned yet (`FutureSpell`) are left
+  out, and so are flyouts, whose spells have slots of their own. The stored ID is the base spell's
+  (`actionID`), so a temporary override changes nothing.
+- The riding spells are passive and the book may not list them, so `C_SpellBook.IsSpellKnown` is
+  asked about each of them and known ones are added to `PlayerKnownSpells` (not to `SpellBook`).
+- A spell that leaves the book is recorded as removed only when `IsSpellKnown` says it is not
+  known: the book can list fewer spells than the player knows, e.g. while it loads.
+- **Skills** are keyed by skill ID: a row's index changes when a skill is learned or a header
+  collapsed. Only `rank`, `maxRank`, `modifier` and `tempPoints` are stored, since a skill's other
+  fields never change and the description is longer than all of them. A skill whose row is gone is
+  read by ID: under a collapsed header it is still there, an unlearned one is recorded as an entry
+  without a value. Headers are never expanded; a skill under a header that was collapsed for the
+  whole capture is not recorded.
+- A client function that fails is reported to the client's error handler, and the capture goes on.
 
 ---
 

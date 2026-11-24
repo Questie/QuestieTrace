@@ -409,7 +409,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `C_DateAndTime.GetSecondsUntilDailyReset` | scalar (number) | Only present when this API exists |
 | `QuestLog` | object (number[]) | *(synthetic)* active quest IDs in quest-log order |
 | `FactionOrder` | object (number[]) | *(synthetic)* known faction IDs in display order |
-| `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration |
+| `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration; through `C_SpellBook` on Forever (schema 22+) |
 | `GameObjectName` | scalar (string) | *(synthetic)* game object name extracted from TooltipDataProcessor Object tooltips (UnitName line, else the first line); player names redacted |
 | `GameObjectGUID` | scalar (string) | *(synthetic)* object GUID of the tooltip each `GameObjectName` sample came from, written together with it at the same `t`; `""` when the tooltip has no readable object GUID (always on Forever). Schema 19+ |
 
@@ -527,9 +527,9 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | `GetLootSourceInfo` | tuple (n=2) | observed slot API return |
 | `GetLootSlotLink` | scalar (string/nil) | observed slot API return |
 | `GetLootSlotType` | scalar (number/nil) | observed slot API return |
-| `GetSpellBookItemName` | tuple (n varies) | observed spellbook name API return |
-| `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info API return |
-| `IsPassiveSpell` | scalar (number/nil) | observed passive marker return |
+| `GetSpellBookItemName` | tuple (n varies) | observed spellbook name API return; not on Forever (schema 22+) |
+| `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info API return; not on Forever (schema 22+) |
+| `IsPassiveSpell` | scalar (number/nil) | observed passive marker return; not on Forever (schema 22+) |
 
 ### Parameterized by map ID (number)
 
@@ -563,6 +563,7 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | Function key | Return type | Notes |
 |---|---|---|
 | `GetSkillLineInfo` | tuple (n=13) | Legacy global; keyed by visible skill-line row index after header expansion. Only present when `GetNumSkillLines` exists -- no synthesized fallback |
+| `C_SkillInfo.GetSkillLineInfoByID` | object (table) | Forever only (schema 22+); keyed by skill ID. `{ rank, maxRank, modifier, tempPoints }`, the fields that can change; no value when the skill is unlearned |
 | `GetProfessionInfo` | tuple (n=10) | keyed by profession tab index returned by `GetProfessions()` |
 | `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
@@ -572,7 +573,7 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 |---|---|
 | `C_QuestLog.GetAllCompletedQuestIDs` | Completed quest IDs; only grows in practice |
 | `GetQuestsCompleted` | Legacy global; independent completed-quest-ID stream, tracked whenever this global exists (not only as a fallback) |
-| `PlayerKnownSpells` | Known player spell IDs discovered by enumerating spellbook slots |
+| `PlayerKnownSpells` | Known player spell IDs discovered by enumerating spellbook slots. Empty on Forever before schema 22; since then also the known riding spells, and spells are removed only once unlearned |
 
 ---
 

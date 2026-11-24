@@ -562,6 +562,7 @@ globals = {
     "C_SharedCharacterServices.SetCharacterUpgradePopupSeen",
     "C_SharedCharacterServices.SetExpansionTrialPopupSeen",
     "C_SharedCharacterServices.SetPromotionalPopupSeen",
+    "C_SkillInfo",
     "C_Social.GetLastItem",
     "C_Social.GetTweetLength",
     "C_Social.IsSocialEnabled",

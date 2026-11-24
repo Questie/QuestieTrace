@@ -148,8 +148,8 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
   // Only present when the legacy GetNumSkillLines/GetSkillLineInfo globals
   // exist; there is no synthesized fallback derived from professions or
   // C_TradeSkillUI on clients that lack them. C_TradeSkillUI.* streams are
-  // tracked independently and store plain tables, rendered without a tuple
-  // schema.
+  // tracked independently. They and C_SkillInfo.GetSkillLineInfoByID (Forever)
+  // store plain tables, rendered without a tuple schema.
 
   "GetSkillLineInfo": [
     { name: "skillName", type: "string" },
