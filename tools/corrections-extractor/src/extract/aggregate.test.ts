@@ -182,6 +182,13 @@ describe("aggregateNewestNameScalarSummary", () => {
     expect(aggregateNewestNameScalarSummary(summaryOf([["Wache", 10], ["Wachenabc", 10]])).get(1)?.value).toBe("Wachenabc");
   });
 
+  it.each([
+    [[["Wachenab", 10], ["Wache", 10], ["Wachenabcd", 10]]],
+    [[["Wache", 10], ["Wachenabcd", 10], ["Wachenab", 10]]],
+  ] as Array<[Array<[string, number]>]>)("should pick the same variant of a chain of variants whichever end of the chain is newest", (sessions) => {
+    expect(aggregateNewestNameScalarSummary(summaryOf(sessions)).get(1)?.value).toBe("Wache");
+  });
+
   it("should pick the shortest of three variants", () => {
     expect(aggregateNewestNameScalarSummary(summaryOf([["Kanonierin", 10], ["Kanonier", 10], ["Kanoniere", 10]])).get(1)?.value).toBe("Kanonier");
   });
