@@ -357,6 +357,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetXPExhaustion` | scalar (number/nil) | PlayerProgress; rested experience, nil when not rested. Schema 15+ |
 | `GetMoney` | scalar (number) | PlayerProgress; copper. Schema 15+ |
 | `GetNumLootItems` | scalar (number) | 0 when no loot window |
+| `GetMerchantNumItems` | scalar (number) | Merchant; 0 when no merchant window |
+| `GetMerchantFilter` | scalar (number) | Merchant; the filter the recorded slots were listed with. Only present when the API exists (Forever). Schema 22+ |
 | `IsInGroup` | scalar (boolean) | |
 | `GetNumGroupMembers` | scalar (number) | 0 when not in a group |
 | `GetNumSkillLines` | scalar (number) | Legacy global; only present when it exists, no synthesized fallback |
@@ -527,6 +529,10 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | `GetLootSourceInfo` | tuple (n=2) | observed slot API return |
 | `GetLootSlotLink` | scalar (string/nil) | observed slot API return |
 | `GetLootSlotType` | scalar (number/nil) | observed slot API return |
+| `GetMerchantItemInfo` | tuple (n varies) | Merchant; legacy global, observed slot API return |
+| `C_MerchantFrame.GetItemInfo` | tuple (n=1) | Merchant; `MerchantItemInfo` table, without `name` until the client has the item's data |
+| `GetMerchantItemLink` | scalar (string/nil) | Merchant; no entry until the client has the item's data, nil after the window closed |
+| `GetMerchantItemID` | scalar (number/nil) | Merchant; read together with the link. Only present when the API exists. Schema 22+ |
 | `GetSpellBookItemName` | tuple (n varies) | observed spellbook name API return |
 | `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info API return |
 | `IsPassiveSpell` | scalar (number/nil) | observed passive marker return |

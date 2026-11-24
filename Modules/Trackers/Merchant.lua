@@ -5,10 +5,17 @@ local PackArgs = Core.PackArgs
 ---@type fun(t1: any, t2: any, ignore_mt: boolean?, visited: table?): boolean
 local DeepCompare = Core.DeepCompare
 
+local C_After = C_Timer.After
+
 ---------------------------------------------------------------------------
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
+-- The client sends item data after MERCHANT_SHOW: until it arrives, a slot has
+-- a price but neither name nor link. So a window is sampled again on updates.
+--
 -- GetMerchantNumItems() -> number numMerchantItems
+-- GetMerchantFilter() -> number filter  -- LE_LOOT_FILTER_*; it decides which items the slots list
+-- GetMerchantItemID(index) -> number? itemID
 -- GetMerchantItemLink(index) -> string? itemLink  -- carries the item ID
 -- GetMerchantItemInfo(index) ->
 --   string name, number texture, number price, number quantity,
@@ -27,10 +34,23 @@ local functions
 local merchantItemStreams
 ---@type table<number, FunctionStreamEntry[]>? [index] -> stream for modern API
 local merchantModernItemStreams
----@type table<number, FunctionStreamEntry[]>? [index] -> GetMerchantItemLink stream
-local merchantItemLinkStreams
 ---@type boolean?
 local hasModernItemAPI
+
+--- Seconds between an update and the sample it asks for, so a burst of updates
+--- (one per arriving item) costs one sample. Item data arrives within 40 ms for
+--- 9 of 10 items, and 1 window in 100 closes within 0.7 s.
+---@type number
+local SAMPLE_DELAY = 0.1
+
+---@class MerchantWindow
+---@field capture CaptureState
+---@field itemCount number? Slots in the last sample
+---@field isMissingItems boolean Whether a slot of the last sample had no link
+---@field isSamplePending boolean
+
+---@type MerchantWindow? The open window, if any. Each opening gets its own table.
+local openWindow
 
 ---Safely call a function and return the first result.
 ---@param fn function?
@@ -151,10 +171,31 @@ local function SampleMerchantCount(t, tp)
   return nil
 end
 
+---Append a slot's answer to a function that returns one value. A slot without
+---an answer yet gets no stream.
+---@param funcName "GetMerchantItemID"|"GetMerchantItemLink"
+---@param fn function?
+---@param t number
+---@param tp number
+---@param index number
+---@return any value
+local function ProbeSlotScalar(funcName, fn, t, tp, index)
+  -- Clients without the function have no streams, see Init.
+  local streams = functions[funcName]
+  if not streams then return nil end
+
+  local ok, value = SafeScalarCall(fn, index)
+  if ok and (value ~= nil or streams[index]) then
+    AppendScalarIfChanged(GetOrCreateParamStream(funcName, index), t, tp, value)
+  end
+  return value
+end
+
 ---Probe one merchant item index using both legacy and modern APIs when available.
 ---@param t number
 ---@param tp number
 ---@param index number
+---@return boolean hasLink Whether the client has the item's data
 local function ProbeMerchantItem(t, tp, index)
   -- Legacy API: GetMerchantItemInfo
   local legacyOk, legacyValue = SafePackedCall(GetMerchantItemInfo, index)
@@ -163,14 +204,8 @@ local function ProbeMerchantItem(t, tp, index)
     AppendIfChanged(stream, t, tp, legacyValue)
   end
 
-  local linkOk, link = SafeScalarCall(GetMerchantItemLink, index)
-  if linkOk and (link ~= nil or (merchantItemLinkStreams and merchantItemLinkStreams[index])) then
-    merchantItemLinkStreams = merchantItemLinkStreams or {}
-    if (not merchantItemLinkStreams[index]) then
-      merchantItemLinkStreams[index] = GetOrCreateParamStream("GetMerchantItemLink", index)
-    end
-    AppendScalarIfChanged(merchantItemLinkStreams[index], t, tp, link)
-  end
+  ProbeSlotScalar("GetMerchantItemID", GetMerchantItemID, t, tp, index)
+  local link = ProbeSlotScalar("GetMerchantItemLink", GetMerchantItemLink, t, tp, index)
 
   -- Modern API: C_MerchantFrame.GetItemInfo (when available)
   if hasModernItemAPI then
@@ -182,18 +217,27 @@ local function ProbeMerchantItem(t, tp, index)
       AppendIfChanged(stream, t, tp, modernValue)
     end
   end
+
+  return link ~= nil
 end
 
 ---Sample current merchant items by calling raw APIs.
----@param capture CaptureState
-local function SampleMerchantOpen(capture)
+---@param window MerchantWindow
+local function SampleMerchantOpen(window)
+  local capture = window.capture
   local t = GetTime() - capture.startedAt
   local tp = GetTimePreciseSec() - capture.startedAtPrecise
-  local itemCount = SampleMerchantCount(t, tp)
-  if not itemCount or itemCount < 1 then return end
 
-  for index = 1, itemCount do
-    ProbeMerchantItem(t, tp, index)
+  local filterStream = functions["GetMerchantFilter"] --[[@as FunctionStreamEntry[]?]]
+  if filterStream then
+    local ok, filter = SafeScalarCall(GetMerchantFilter)
+    if ok then AppendScalarIfChanged(filterStream, t, tp, filter) end
+  end
+
+  window.itemCount = SampleMerchantCount(t, tp)
+  window.isMissingItems = false
+  for index = 1, window.itemCount or 0 do
+    if not ProbeMerchantItem(t, tp, index) then window.isMissingItems = true end
   end
 end
 
@@ -216,12 +260,40 @@ local function SampleMerchantClose(capture)
       ProbeMerchantItem(t, tp, index)
     end
   end
-  if merchantItemLinkStreams then
-    for index in pairs(merchantItemLinkStreams) do
-      ProbeMerchantItem(t, tp, index)
-    end
+  for index in pairs(functions["GetMerchantItemLink"]) do
+    ---@cast index number
+    ProbeMerchantItem(t, tp, index)
   end
 end
+
+---------------------------------------------------------------------------
+-- Private update frame
+-- MERCHANT_UPDATE is what Blizzard's merchant window redraws an item on when its
+-- data arrives; MERCHANT_FILTER_ITEM_UPDATE names an item. Both are sampling
+-- triggers only and stay out of the recorded event stream.
+---------------------------------------------------------------------------
+
+---@type Frame
+local updateFrame = CreateFrame("Frame")
+updateFrame:RegisterEvent("MERCHANT_UPDATE")
+updateFrame:RegisterEvent("MERCHANT_FILTER_ITEM_UPDATE")
+updateFrame:SetScript("OnEvent", function()
+  local window = openWindow
+  if not window or window.isSamplePending then return end
+
+  -- With every link known, only a list of another length is news.
+  if not window.isMissingItems then
+    local ok, itemCount = SafeScalarCall(GetMerchantNumItems)
+    if not ok or itemCount == window.itemCount then return end
+  end
+
+  window.isSamplePending = true
+  C_After(SAMPLE_DELAY, function()
+    if openWindow ~= window then return end
+    window.isSamplePending = false
+    SampleMerchantOpen(window)
+  end)
+end)
 
 Core.RegisterTracker({
   events = { "MERCHANT_SHOW", "MERCHANT_CLOSED" },
@@ -231,7 +303,6 @@ Core.RegisterTracker({
     functions = capture.session.functions
     merchantItemStreams = nil
     merchantModernItemStreams = nil
-    merchantItemLinkStreams = nil
 
     hasModernItemAPI = (C_MerchantFrame ~= nil and type(C_MerchantFrame.GetItemInfo) == "function")
 
@@ -239,15 +310,27 @@ Core.RegisterTracker({
     functions["GetMerchantItemInfo"] = {}
     functions["C_MerchantFrame.GetItemInfo"] = {}
     functions["GetMerchantItemLink"] = {}
+    if type(GetMerchantItemID) == "function" then
+      functions["GetMerchantItemID"] = {}
+    end
+    if type(GetMerchantFilter) == "function" then
+      functions["GetMerchantFilter"] = {}
+    end
   end,
 
   ---@param capture CaptureState
   ---@param event string
   OnEvent = function(capture, event)
     if event == "MERCHANT_SHOW" then
-      SampleMerchantOpen(capture)
+      openWindow = { capture = capture, isMissingItems = false, isSamplePending = false }
+      SampleMerchantOpen(openWindow)
     elseif event == "MERCHANT_CLOSED" then
+      openWindow = nil
       SampleMerchantClose(capture)
     end
+  end,
+
+  OnCaptureStopped = function()
+    openWindow = nil
   end,
 })
