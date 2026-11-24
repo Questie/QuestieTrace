@@ -297,9 +297,22 @@ pub fn truth_lookup(truth: &GroundTruth) -> Truth<'_> {
         .collect()
 }
 
+/// A claim its own signal scores at least this is one the signal believes.
+const BELIEVED: f64 = 0.5;
+
 /// Whether the ground truth judges this edge at all: one of the quests it writes has reference data.
-pub fn is_judged(key: EdgeKey, truth: &Truth) -> bool {
-    key.quests().any(|quest_id| truth.contains_key(&quest_id))
+///
+/// An exclusive pair a signal believes is not judged where the reference says nothing about either
+/// quest's exclusivity. QuestieDB lists none for many quests that are exclusive (the versions of a
+/// quest's later steps, all completed by turning in one), so its silence is no evidence against
+/// such a pair. Against one the signal doubts itself (two quests nobody was seen completing both
+/// of) it is, and those are most of the wrong examples the model has.
+pub fn is_judged(edge: &Edge, truth: &Truth) -> bool {
+    let mut references = edge.key.quests().filter_map(|quest_id| truth.get(&quest_id));
+    if edge.key.kind != EdgeKind::Exclusive || !edge.claims.iter().any(|claim| claim.score >= BELIEVED) {
+        return references.next().is_some();
+    }
+    references.any(|reference| reference.get(&RelationField::ExclusiveTo).is_some_and(|quests| !quests.is_empty()))
 }
 
 /// Whether the ground truth contains this edge, in either of the fields that can express it.
@@ -419,6 +432,34 @@ mod tests {
         assert!(truth_has(EdgeKey::new(EdgeKind::Exclusive, 3, 5), &truth));
         assert!(truth_has(EdgeKey::new(EdgeKind::Prerequisite, 10, 4), &truth));
         assert!(!truth_has(EdgeKey::new(EdgeKind::Next, 10, 4), &truth));
+    }
+
+    #[test]
+    fn silence_about_exclusivity_judges_only_the_pairs_their_signal_doubts() {
+        use RelationField as F;
+        // Two versions of a later step the reference has in its chain, and nothing about exclusivity.
+        let step = RelationSet::from([(F::NextQuestInChain, vec![1518])]);
+        let empty_list = RelationSet::from([(F::ExclusiveTo, vec![])]);
+        let listed = RelationSet::from([(F::ExclusiveTo, vec![1519])]);
+        let truth: Truth = BTreeMap::from([(1517, &step), (1520, &step), (1521, &empty_list), (1516, &listed)]);
+        let judged = |field: F, quest: QuestId, target: QuestId, score: f64| {
+            let files = [file("cooccurrence", &[(quest, field, target, score)])];
+            let edges = collect_edges(&files);
+            is_judged(&edges[0], &truth)
+        };
+
+        let believed = |quest, target| judged(F::ExclusiveTo, quest, target, 0.97);
+        assert!(!believed(1517, 1520) && !believed(1517, 1521));
+        assert!(believed(1516, 1520) && believed(1500, 1516), "one side is enough, whichever it is");
+        assert!(!believed(1500, 1501), "no reference data at all");
+
+        let doubted = |quest, target| judged(F::ExclusiveTo, quest, target, 0.1);
+        assert!(doubted(1517, 1520) && doubted(1516, 1520));
+        assert!(!doubted(1500, 1501), "no reference data at all");
+
+        // Any reference data judges the other kinds, whatever the score.
+        assert!(judged(F::PreQuestSingle, 1520, 1, 0.97) && judged(F::NextQuestInChain, 1517, 1, 0.97));
+        assert!(!judged(F::NextQuestInChain, 1500, 1501, 0.97));
     }
 
     #[test]

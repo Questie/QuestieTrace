@@ -186,7 +186,7 @@ pub fn score_edges<'a>(
             .map(|&edge| Row {
                 edge,
                 x: space.vector(edge),
-                label: is_judged(edge.key, truth).then(|| truth_has(edge.key, truth)),
+                label: is_judged(edge, truth).then(|| truth_has(edge.key, truth)),
             })
             .collect();
         let judged: Vec<&Row> = rows.iter().filter(|row| row.label.is_some()).collect();
@@ -339,6 +339,35 @@ mod tests {
         assert!(held_out);
         assert!(probability > 0.5, "the probe's fold still learned from the other edges: {probability}");
         assert_eq!(probe(&flipped).1, probability);
+    }
+
+    #[test]
+    fn exclusive_pairs_the_reference_is_silent_about_do_not_lower_the_ones_it_knows() {
+        let claimed_pair = |quest: QuestId, score: f64| claimed(EdgeKind::Exclusive, quest, quest + 1, score);
+        // 30 pairs the reference has. It is silent about the rest: 10 the signal doubts, and 30 as
+        // strong as the known ones (later steps of quests whose versions complete together).
+        let known = (0..30).map(|i| claimed_pair(1000 + 2 * i, 0.97));
+        let doubted = (0..10).map(|i| claimed_pair(2000 + 2 * i, 0.1));
+        let silent = (0..30).map(|i| claimed_pair(3000 + 2 * i, 0.97));
+        let edges: Vec<Edge> = known.chain(doubted).chain(silent).collect();
+        let sets: Vec<RelationSet> = edges
+            .iter()
+            .map(|edge| match edge.key.quest {
+                1000..2000 => RelationSet::from([(RelationField::ExclusiveTo, vec![edge.key.target])]),
+                _ => RelationSet::from([(RelationField::NextQuestInChain, vec![1])]),
+            })
+            .collect();
+        let truth: Truth = edges.iter().zip(&sets).map(|(edge, set)| (edge.key.quest, set)).collect();
+        let family_of = |quest_id: QuestId| format!("family-{quest_id}");
+        let groups = CvGroups::new(edges.iter().map(|edge| edge.key), &family_of);
+
+        let (scored, _) = score_edges(&edges, &truth, &Coverage::default(), &groups, &DEFAULT_MODEL_PARAMS);
+
+        for edge in &scored {
+            let quest = edge.key().quest;
+            assert_eq!(edge.label, if quest < 3000 { Some(quest < 2000) } else { None });
+            assert_eq!(edge.probability >= 0.9, edge.label != Some(false), "{quest}: {}", edge.probability);
+        }
     }
 
     #[test]

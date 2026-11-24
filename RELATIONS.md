@@ -143,11 +143,18 @@ OR-list entries nobody turned in (mostly copies that complete together). Combine
    in 5% and 20% of the characters and checked against all: 13% and 18% wrong with 3-4 takers, 3% and
    5% with 5-9, about 1% with 10-19, under 1% above).
 
-   Not done: the "Call of Earth" values in QuestieDB itself (its steps 2 and 3 have no exclusiveTo,
-   and 92468 requires only 92467). Measured with the agreed values put into the ground truth:
-   `exclusiveTo` 1,548 -> 1,650 accepted, none conflicting, and 31 prerequisites differ from QuestieDB
-   instead of 41. Until QuestieDB has them, their claims count as wrong in the model and hold other
-   correct pairs back, so the module should not be regenerated for QuestieDB before that.
+   The module applies those values itself ("Call of Earth": every version of the step before as
+   preQuestSingle, the other versions of its step as exclusiveTo). One is left: the hand-written
+   preQuestSingle of 92468 (the last step for Horde Skyborne) names only 92467 and overrides ours.
+
+   What held other pairs back was the model counting QuestieDB's silence as "wrong". An exclusive pair
+   a signal believes (0.5 or more) is now not judged where QuestieDB says nothing about either quest's
+   exclusivity (`combine/edges.rs`, `is_judged`). Full archive: `exclusiveTo` 1,548 -> 1,732 accepted,
+   none lost, 1,645 as in QuestieDB, 63 new and 24 where it lists other quests; all but one pair of
+   those 87 are same-name quests that complete together. Not judging any pair it is silent about was
+   tried first and is fragile: nearly all wrong examples are in one group of connected quests, and the
+   cross-validation part that holds it out would train on 8 wrong examples (on none in the 5% sample,
+   which lost 450 correct pairs). As built it trains on 48 or more (11 in the sample).
 
 Found on the way, not done:
 - **Race masks in QuestieDB are wrong on 87 quests** (three or more characters of an excluded race
@@ -206,8 +213,9 @@ What it changed on the full archive (accepted relations, before -> after): prere
 41 -> 42, `exclusiveTo` 1,602 -> 1,548. The last one is not evidence lost: 30 new claims between the
 versions of "Call of Earth" (1516-1521, 92466-92468, 94373-94375, which complete together) count as
 wrong because QuestieDB has no such relation, and refitting the model on them lowers the others just
-below the acceptance score. Without those 30 claims it is 1,620, all 18 new ones as in QuestieDB.
-The maintainer has since confirmed those pairs ("Versions of a quest that complete together" above).
+below the acceptance score. The maintainer has since confirmed
+those pairs, and the model no longer counts them as wrong ("Versions of a quest that complete
+together" above): 1,732 pairs, none lost.
 
 The date and the server id only catch what is known today. For the rest, combine compares the
 recordings with QuestieDB (`combine/contradicted.rs`): it lists every prerequisite QuestieDB has

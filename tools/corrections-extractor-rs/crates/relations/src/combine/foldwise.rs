@@ -40,7 +40,7 @@ impl<'a> AndSources<'a, '_> {
 pub fn and_sources_by_quest<'a, 'c>(edges: &[Edge<'a>], context: &'c FoldContext<'c>) -> AndSources<'a, 'c> {
     let judged: Vec<&Edge<'a>> = edges
         .iter()
-        .filter(|edge| edge.key.kind == EdgeKind::Prerequisite && is_judged(edge.key, context.truth))
+        .filter(|edge| edge.key.kind == EdgeKind::Prerequisite && is_judged(edge, context.truth))
         .collect();
     let measure = |items: &mut dyn Iterator<Item = &&Edge<'a>>| -> IndexSet<Source<'a>> {
         let mut tally: IndexMap<Source<'a>, (usize, usize)> = IndexMap::new();
