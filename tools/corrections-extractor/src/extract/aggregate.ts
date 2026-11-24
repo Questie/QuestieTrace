@@ -205,7 +205,7 @@ function editDistance(a: string, b: string): number {
 /**
  * Like aggregateNewestScalarSummary, for names that exist in several variants at once (a creature
  * spawning as male and as female is named "Nachtläufer" or "Nachtläuferin"): when the newest name
- * has well supported near-identical variants, the shortest of them wins (alphabetically on equal
+ * has well supported near-identical variants (directly or through other such variants), the shortest of them wins (alphabetically on equal
  * length), so the result does not change with whichever session is newest. A name without such
  * variants, such as a rename, is decided as in aggregateNewestScalarSummary.
  */
@@ -220,7 +220,14 @@ export function aggregateNewestNameScalarSummary(summary: ScalarSummary<string>)
       facts.set(entityId, toFact(entityId, winner, all));
       continue;
     }
-    const variants = all.filter((group) => isStrong(group) && editDistance(group.value, winner.value) <= VARIANT_MAX_EDIT_DISTANCE);
+    // The variants connected to the winner through any chain of close strong names, so the group is the same whichever of them is newest.
+    const strong = all.filter(isStrong);
+    const variants = [winner];
+    for (let i = 0; i < variants.length; i++) {
+      for (const group of strong) {
+        if (!variants.includes(group) && editDistance(group.value, variants[i].value) <= VARIANT_MAX_EDIT_DISTANCE) variants.push(group);
+      }
+    }
     variants.sort((a, b) => a.value.length - b.value.length || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
     facts.set(entityId, toFact(entityId, variants[0], all));
   }
