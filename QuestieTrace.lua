@@ -68,6 +68,10 @@ local TRACKED_EVENT_CATEGORIES = {
   {
     name = "npc_interaction",
     events = {
+      -- The argument (Enum.PlayerInteractionType) tells the kind of window. HIDE alone tells when a mailbox was
+      -- closed: MAIL_CLOSED never fires.
+      "PLAYER_INTERACTION_MANAGER_FRAME_SHOW",
+      "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
       "MERCHANT_SHOW",
       "MERCHANT_CLOSED",
       "TRAINER_SHOW",

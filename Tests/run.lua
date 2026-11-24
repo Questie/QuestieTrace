@@ -3246,6 +3246,54 @@ local function TestNameplatesRecordOnlyWorldCreatures()
   end
 end
 
+local function TestInteractionWindowsRecordTheirUnit()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  ---@type table<string, NameplateUnit>
+  local units = {}
+  MockNameplateUnits(runtime, units)
+  runtime.core.StartCapture("interaction windows")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local guids, names = functions.UnitGUID.npc, functions.UnitName.npc
+
+  -- A mailbox (17) has no closing event of its own, so only HIDE clears its unit.
+  runtime.now = 10
+  units.npc = { guid = "GameObject-0-5251-0-12-142075-000001", name = "Mailbox" }
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 17)
+  runtime.now = 15
+  units.npc = nil
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_HIDE", 17)
+  assert(#guids == 3, "The unit is recorded at capture start, SHOW and HIDE, got " .. #guids)
+  assert(guids[2].t == 10 and guids[2].v == "GameObject-0-5251-0-12-142075-000001" and names[2].v[1] == "Mailbox", "SHOW records the window's object")
+  assert(guids[3].t == 15 and guids[3].v == nil and names[3].v[1] == nil, "HIDE clears the window's object")
+
+  -- An innkeeper (20) opens no window with events of its own.
+  runtime.now = 20
+  units.npc = { guid = "Creature-0-5251-0-12-295-000001", name = "Innkeeper Farley" }
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 20)
+  assert(#guids == 4 and guids[4].t == 20 and guids[4].v == units.npc.guid, "SHOW records the window's NPC")
+
+  local events = Session(runtime).events
+  assert(#events == 3 and events[1].e == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and events[1].a[1] == 17, "SHOW is recorded with its type")
+  assert(events[2].e == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and events[2].a[1] == 17, "HIDE is recorded with its type")
+end
+
+local function TestTradePartnerIsNotRecorded()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  ---@type table<string, NameplateUnit>
+  local units = { npc = { guid = "Creature-0-5251-0-12-295-000001", name = "Innkeeper Farley" } }
+  MockNameplateUnits(runtime, units)
+  runtime.core.StartCapture("trade")
+  local session = Session(runtime)
+  local functions = session.functions --[[@as table<string, any>]]
+
+  units.npc = { guid = "Player-4620-00572164", name = "Grimtotem" }
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 1)
+  local guids, names = functions.UnitGUID.npc, functions.UnitName.npc
+  assert(#guids == 2 and guids[2].v == nil and names[2].v[1] == nil, "A trade partner is recorded as no unit, so the last NPC does not linger")
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_HIDE", 1)
+  assert(not ContainsString(session, "Grimtotem") and not ContainsString(session, "Player-"), "A trade partner's name and GUID are never recorded")
+end
+
 local function TestDisplayRecordsOnlyAllowlistedCVars()
   local runtime = NewRuntime({ "Modules/Trackers/Display.lua" })
   local env = runtime.env
@@ -3785,7 +3833,8 @@ local EVENTS_WITHOUT_PERSONAL_ARGUMENTS = {
     "LOADING_SCREEN_DISABLED", "LOADING_SCREEN_ENABLED", "LOOT_CLOSED", "LOOT_OPENED", "LOOT_READY", "MAIL_CLOSED", "MAIL_SHOW",
     "MAP_EXPLORATION_UPDATED", "MERCHANT_CLOSED", "MERCHANT_SHOW", "MODIFIER_STATE_CHANGED", "NAME_PLATE_UNIT_ADDED",
     "NAME_PLATE_UNIT_REMOVED", "NEW_RECIPE_LEARNED", "NEW_WMO_CHUNK", "PETITION_CLOSED", "PETITION_SHOW", "PET_STABLE_CLOSED",
-    "PET_STABLE_SHOW", "PLAYER_ALIVE", "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEAVING_WORLD", "PLAYER_LEVEL_UP",
+    "PET_STABLE_SHOW", "PLAYER_ALIVE", "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
+    "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "PLAYER_LEAVING_WORLD", "PLAYER_LEVEL_UP",
     "PLAYER_LOGIN", "PLAYER_LOGOUT", "PLAYER_MAP_CHANGED", "PLAYER_MONEY", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
     "PLAYER_TARGET_CHANGED", "PLAYER_XP_UPDATE", "QUESTLINE_UPDATE", "QUEST_ACCEPTED", "QUEST_AUTOCOMPLETE", "QUEST_COMPLETE",
     "QUEST_DATA_LOAD_RESULT", "QUEST_DETAIL", "QUEST_FINISHED", "QUEST_GREETING", "QUEST_ITEM_UPDATE", "QUEST_LOG_CRITERIA_UPDATE",
@@ -3987,6 +4036,8 @@ local tests = {
   { name = "should record and sample the mouseover unit on UPDATE_MOUSEOVER_UNIT", run = TestMouseoverEventIsRecordedAndSampled },
   { name = "should not record or sample UPDATE_MOUSEOVER_UNIT for players, pets and other units", run = TestMouseoverEventIsFilteredForPlayersPetsAndOtherUnits },
   { name = "should record leaving an npc once and clear the mouseover streams", run = TestMouseoverLeavingNpcIsRecordedOnce },
+  { name = "interaction windows record their unit at show and hide", run = TestInteractionWindowsRecordTheirUnit },
+  { name = "a trade partner is never recorded", run = TestTradePartnerIsNotRecorded },
   { name = "should record leaving an npc that was hovered at capture start", run = TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },

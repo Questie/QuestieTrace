@@ -209,6 +209,8 @@ Core.RegisterTracker({
     -- player_state (already registered)
     "LOOT_OPENED",
     -- npc_interaction (new category)
+    "PLAYER_INTERACTION_MANAGER_FRAME_SHOW",
+    "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
     "MERCHANT_SHOW",
     "MERCHANT_CLOSED",
     "TRAINER_SHOW",
