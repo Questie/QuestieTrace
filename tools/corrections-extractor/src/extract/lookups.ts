@@ -21,6 +21,9 @@ const NEWEST_WINS = new Set<ObserverKey>(["npcName", "questName", "itemName"]);
  */
 const AGREEMENT_NEEDED = new Set<ObserverKey>(["npcSubName", "objectName"]);
 
+/** Names of rare objects are seen in one session; that is enough when no other name was observed. */
+const UNCONTESTED_ACCEPTED = new Set<ObserverKey>(["objectName"]);
+
 /** Per field, a scalar summary per locale. */
 export interface LookupAccumulator {
   sessionCount: number;
@@ -91,7 +94,9 @@ export function finalizeLookups(acc: LookupAccumulator): LookupBundle {
     const values = new Map<number, unknown>();
     const summary = acc.summaries[key].get(locale);
     if (!summary) return values;
-    const aggregate = AGREEMENT_NEEDED.has(key) ? aggregateAgreedScalarSummary : NEWEST_WINS.has(key) ? aggregateNewestScalarSummary : aggregateScalarSummary;
+    const aggregate = AGREEMENT_NEEDED.has(key)
+      ? (scalars: ScalarSummary<unknown>) => aggregateAgreedScalarSummary(scalars, { acceptUncontested: UNCONTESTED_ACCEPTED.has(key) })
+      : NEWEST_WINS.has(key) ? aggregateNewestScalarSummary : aggregateScalarSummary;
     for (const [id, fact] of aggregate(summary)) {
       values.set(id, fact.value);
     }

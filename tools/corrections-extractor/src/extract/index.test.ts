@@ -360,8 +360,15 @@ describe("extractAll (quest/item/object entities)", () => {
       expect(objectFixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");
     });
 
-    it("should not export an object name seen in only one session", () => {
+    it("should export an object name seen in only one session when no other name was seen", () => {
       const fixes = run([sighting("Suspicious Chest", 1000)]);
+
+      expect(fixes).toContain('[objectKeys.name] = "Suspicious Chest",');
+      expect(fixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");
+    });
+
+    it("should not export an object name when two names were seen in one session each", () => {
+      const fixes = run([sighting("Suspicious Chest", 1000), sighting("Wooden Chair", 2000)]);
 
       expect(fixes).not.toContain("objectKeys.name");
       expect(fixes).toContain("[objectKeys.spawns] = {[40]={{30.01,86.02}}},");

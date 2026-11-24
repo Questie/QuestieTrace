@@ -157,8 +157,12 @@ describe("finalizeLookups", () => {
       expect(bundle.lookupObjects.deDE).toContain('[2843] = "Verdächtige Truhe",');
     });
 
-    it("should not write an object name seen in only one session", () => {
-      expect(run([sighting("Verdächtige Truhe", 1000)]).lookupObjects).toEqual({});
+    it("should write an object name seen in only one session when no other name was seen", () => {
+      expect(run([sighting("Verdächtige Truhe", 1000)]).lookupObjects.deDE).toContain('[2843] = "Verdächtige Truhe",');
+    });
+
+    it("should not write an object name when two names were seen in one session each", () => {
+      expect(run([sighting("Verdächtige Truhe", 1000), sighting("Stuhl", 2000)]).lookupObjects).toEqual({});
     });
   });
 
