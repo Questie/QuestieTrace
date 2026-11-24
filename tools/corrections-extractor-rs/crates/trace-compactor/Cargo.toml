@@ -1,0 +1,26 @@
+[package]
+name = "trace-compactor"
+version = "0.1.0"
+edition.workspace = true
+# File::try_lock (1.89).
+rust-version = "1.89"
+publish.workspace = true
+description = "Turns the loose submissions of the archive bucket into packs, and removes rejected ones"
+
+[[bin]]
+name = "trace-compactor"
+path = "src/main.rs"
+
+[dependencies]
+trace-data.workspace = true
+trace-pack = { path = "../trace-pack" }
+anyhow.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusty-s3 = "0.12.0"
+md-5 = "0.11.0"
+base64 = "0.23.1"
+ureq = "3"
+jiff = "1"
+url = "2"

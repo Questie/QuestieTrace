@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/trace-data", "crates/corrections", "crates/relations", "crates/trace-pack"]
+members = ["crates/trace-data", "crates/corrections", "crates/relations", "crates/trace-pack", "crates/trace-compactor"]
 
 [workspace.package]
 edition = "2021"
