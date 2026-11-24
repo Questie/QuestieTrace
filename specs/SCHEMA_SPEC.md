@@ -362,7 +362,6 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumSkillLines` | scalar (number) | Legacy global; only present when it exists, no synthesized fallback |
 | `GetQuestGreenRange` | scalar (number) | XP threshold; changes with player level |
 | `GetProfessions` | tuple (n=5) | profession tab indices; nil in missing tuple slots |
-| `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object (number[]) | Tracked independently whenever the API exists |
 | `C_GossipInfo.GetAvailableQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetActiveQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar (number) | QuestDialog; when API exists |
@@ -558,14 +557,13 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | `GetFactionInfoByID` | tuple (n=16, or n=0 for a faction the client lacks) | Legacy global; raw tuple, only present when the legacy global is the client's own (independent of whether C_Reputation.GetFactionDataByID also exists). Before schema 22 also another addon's on Forever (n=8). Same factions as below |
 | `C_Reputation.GetFactionDataByID` | object (table)/nil | Raw API result for every `FactionOrder` faction, i.e. the player's reputation panel. A nil answer is recorded once like any other value. The guild faction (1168), named after the player's guild, is never sampled. Factions outside the panel are not recorded and still have their starting values |
 
-### Parameterized by skill index / profession tab index / trade-skill line ID
+### Parameterized by skill index / profession tab index
 
 | Function key | Return type | Notes |
 |---|---|---|
 | `GetSkillLineInfo` | tuple (n=13) | Legacy global; keyed by visible skill-line row index after header expansion. Only present when `GetNumSkillLines` exists -- no synthesized fallback |
 | `C_SkillInfo.GetSkillLineInfoByID` | object (table) | Forever only (schema 22+); keyed by skill ID. `{ rank, maxRank, modifier, tempPoints }`, the fields that can change; no value when the skill is unlearned |
 | `GetProfessionInfo` | tuple (n=10) | keyed by profession tab index returned by `GetProfessions()` |
-| `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
 ### Delta streams (in `functionsDelta`)
 

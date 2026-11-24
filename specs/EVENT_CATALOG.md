@@ -226,13 +226,12 @@ Triggers `IsInGroup` and `GetNumGroupMembers` sampling.
 
 ### SkillLines tracker
 
-Triggers skill window, profession-tab, and trade-skill-line sampling.
+Triggers skill window and profession-tab sampling.
 Expands all skill headers before sampling so hidden child rows are visible
 to `GetSkillLineInfo(index)` when that legacy global exists (no synthesized
 fallback when it doesn't). On Forever the skills are read through
 `C_SkillInfo` instead; headers that are collapsed are opened for the read and
-collapsed again. `C_TradeSkillUI.*` trade-skill-line data is tracked
-independently whenever that API exists.
+collapsed again.
 
 Opening and closing a header fires `SKILL_LINES_CHANGED` during the call. The
 tracker does not sample for those, but they are in the event stream.

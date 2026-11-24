@@ -376,7 +376,6 @@ Called with no arguments. Stream is a flat `{t, tp, v}` array.
 | `C_DateAndTime.GetSecondsUntilDailyReset` | scalar number | Only present when this API exists |
 | `GetNumSkillLines` | scalar number | Legacy global; only present when it exists, no synthesized fallback |
 | `GetProfessions` | tuple (n=5) | Profession tab indices |
-| `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object number[] | Tracked independently whenever the API exists |
 | `QuestLog` | object number[] | Synthetic active quest IDs in quest-log order |
 | `FactionOrder` | object number[] | Synthetic faction IDs in display order |
 | `SpellBook` | object number[] | Synthetic ordered known spell IDs from slots |
@@ -459,14 +458,13 @@ Called with a quest ID as the argument.
 | `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info return |
 | `IsPassiveSpell` | scalar number/nil | observed passive marker return |
 
-### Parameterized by skill/profession index / trade-skill line ID (number)
+### Parameterized by skill/profession index (number)
 
 | Function key | Return type | Description |
 |---|---|---|
 | `GetSkillLineInfo` | tuple (n=13) | Legacy global; only present when `GetNumSkillLines` exists, no synthesized fallback |
 | `C_SkillInfo.GetSkillLineInfoByID` | object (table) | Forever only (schema 22+); `{ rank, maxRank, modifier, tempPoints }` keyed by skill ID, no value when the skill is unlearned |
 | `GetProfessionInfo` | tuple (n=10) | Profession tab information |
-| `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
 ### Parameterized by map ID (number)
 
