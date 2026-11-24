@@ -110,6 +110,31 @@ describe("finalizeLookups", () => {
     expect(bundle.lookupNpcs.deDE).toContain('[30000] = {"Koboldgezücht",nil},');
   });
 
+  describe("npc name variants", () => {
+    const sighting = (name: string, serverTime: number) =>
+      makeSession({
+        GetLocale: { player: [{ t: 0, tp: 0, v: "deDE" }] },
+        GetServerTime: [{ t: 0, tp: 0, v: serverTime }],
+        GetBuildInfo: { player: [{ t: 0, tp: 0, v: 16001 }] },
+        UnitGUID: { target: [{ t: 3, tp: 3, v: "Creature-0-5208-0-7-215-000031" }] },
+        UnitName: { target: [{ t: 3, tp: 3, v: { 1: name, n: 2 } }] },
+      });
+    const sightings = (name: string, count: number, firstTime: number) => Array.from({ length: count }, (_, i) => sighting(name, firstTime + i));
+
+    it.each([
+      ["female", [...sightings("Nachtläufer der Defias", 6, 1000), ...sightings("Nachtläuferin der Defias", 6, 2000)]],
+      ["male", [...sightings("Nachtläuferin der Defias", 6, 1000), ...sightings("Nachtläufer der Defias", 6, 2000)]],
+    ] as const)("should write the shorter variant of a name whose %s form is the newest", (_, sessions) => {
+      expect(run([...sessions]).lookupNpcs.deDE).toContain('[215] = {"Nachtläufer der Defias",nil},');
+    });
+
+    it("should still write the newest name of a renamed npc", () => {
+      const bundle = run([...sightings("Axle Smoothslice", 6, 1000), ...sightings("Edine Sharphorn", 6, 2000)]);
+
+      expect(bundle.lookupNpcs.deDE).toContain('[215] = {"Edine Sharphorn",nil},');
+    });
+  });
+
   describe("npc subnames", () => {
     const sighting = (subName: string, serverTime: number) =>
       makeSession({

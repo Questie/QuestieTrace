@@ -4,6 +4,7 @@ import {
   addToScalarSummary,
   aggregateField,
   aggregateAgreedScalarSummary,
+  aggregateNewestNameScalarSummary,
   aggregateNewestScalarSummary,
   aggregateScalarSummary,
   type ScalarSummary,
@@ -132,6 +133,65 @@ describe("aggregateNewestScalarSummary", () => {
     addToScalarSummary(summary, [sessionObs(1, "New Name", 3, null), sessionObs(1, "New Name", 4, 400)]);
 
     expect(aggregateNewestScalarSummary(summary).get(1)?.value).toBe("Old Name");
+  });
+});
+
+describe("aggregateNewestNameScalarSummary", () => {
+  /** Sessions per name, in the given order; each session is one time step newer than the one before. */
+  function summaryOf(sessions: Array<[string, number]>): ScalarSummary<string> {
+    const summary: ScalarSummary<string> = new Map();
+    let key = 0;
+    for (const [value, count] of sessions) {
+      for (let i = 0; i < count; i++) {
+        key++;
+        addToScalarSummary(summary, [sessionObs(1, value, key, key * 100)]);
+      }
+    }
+    return summary;
+  }
+
+  it.each([
+    [[["Kanonier von Stormwind", 8], ["Kanonierin von Stormwind", 10]]],
+    [[["Kanonierin von Stormwind", 10], ["Kanonier von Stormwind", 8]]],
+  ] as Array<[Array<[string, number]>]>)("should pick the shortest of two well supported variants whichever is newest", (sessions) => {
+    expect(aggregateNewestNameScalarSummary(summaryOf(sessions)).get(1)).toMatchObject({ value: "Kanonier von Stormwind", alternativeCount: 1 });
+  });
+
+  it("should pick the alphabetically first of two variants of equal length", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Magicus", 6], ["Magicum", 6]])).get(1)?.value).toBe("Magicum");
+  });
+
+  it("should pick the newest name when a variant has too little support", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Kanonier", 40], ["Kanonierin", 4]])).get(1)?.value).toBe("Kanonierin");
+  });
+
+  it("should pick the newest name when a variant has too small a share of the best supported name", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Kanonier", 100], ["Kanonierin", 10]])).get(1)?.value).toBe("Kanonierin");
+  });
+
+  it("should pick the newest name when the names are not variants of each other", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Axle Smoothslice", 10], ["Edine Sharphorn", 10]])).get(1)?.value).toBe("Edine Sharphorn");
+  });
+
+  it("should treat a name with exactly the minimum sessions and share as a variant", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Kanonier", 20], ["Kanonierin", 5]])).get(1)?.value).toBe("Kanonier");
+  });
+
+  it("should treat names exactly 3 edits apart as variants, but not 4", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Wache", 10], ["Wachenab", 10]])).get(1)?.value).toBe("Wache");
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Wache", 10], ["Wachenabc", 10]])).get(1)?.value).toBe("Wachenabc");
+  });
+
+  it("should pick the shortest of three variants", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Kanonierin", 10], ["Kanonier", 10], ["Kanoniere", 10]])).get(1)?.value).toBe("Kanonier");
+  });
+
+  it("should prefer the shorter of two well supported names even when a close longer one is a rename", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Wache", 20], ["Wachen", 20]])).get(1)?.value).toBe("Wache");
+  });
+
+  it("should leave a single name alone", () => {
+    expect(aggregateNewestNameScalarSummary(summaryOf([["Kanonier", 1]])).get(1)).toMatchObject({ value: "Kanonier", alternativeCount: 0 });
   });
 });
 
