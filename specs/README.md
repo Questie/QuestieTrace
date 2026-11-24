@@ -88,7 +88,7 @@ specs/
 | Reputation | 5 events | Event + index iteration | `FactionOrder`, `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` |
 | QuestLog | quest/login events | Event + coalesced re-samples + iteration | Quest membership, per-quest text/data, timers, rewards |
 | CompletedQuests | quest/login events | Event + coalesced re-samples | `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted`, tracked as independent delta streams |
-| UnitInteraction | target/dialog/NPC/login events | Fixed unit-token fanout | `UnitGUID`, `UnitName`, gossip quest-list APIs |
+| UnitInteraction | target/dialog/NPC/login events | Fixed unit-token fanout | `UnitGUID`, `UnitName`, item IDs of item quest givers, gossip quest-list APIs |
 | GroupState | 5 events | Event-driven | `IsInGroup`, `GetNumGroupMembers` |
 | SkillLines | 3 events | Event + index iteration | `GetNumSkillLines`/`GetSkillLineInfo` (legacy, when present), `GetProfessions`, `GetProfessionInfo`, `C_TradeSkillUI.*` (independent, when present) |
 | SpellBook | 2 events | Event + slot iteration | Spellbook slot streams + `PlayerKnownSpells` delta |

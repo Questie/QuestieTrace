@@ -15,6 +15,9 @@ local DeepCompare = Core.DeepCompare
 -- Nameplate tokens ("nameplate1", ...): UnitGUID only, sampled on
 -- NAME_PLATE_UNIT_ADDED; see SampleNameplate.
 --
+-- C_Item.GetItemIDByGUID(itemGUID) -> number? itemID (Forever only)
+--   stored as functions[key][itemGUID] for each Item GUID in UnitGUID; see RecordItemID.
+--
 -- C_GossipInfo.GetAvailableQuests() -> GossipQuestUIInfo[] (table)
 -- C_GossipInfo.GetActiveQuests()    -> GossipQuestUIInfo[] (table)
 ---------------------------------------------------------------------------
@@ -31,6 +34,8 @@ local NAMEPLATE_TOKEN_PATTERN = "^nameplate%d+$"
 local guidStreams
 ---@type table<string, FunctionStreamEntry[]>?
 local nameStreams
+---@type table<string, FunctionStreamEntry[]>? Keyed by item GUID; nil on clients without C_Item.GetItemIDByGUID.
+local itemIDStreams
 ---@type FunctionStreamEntry[]?
 local gossipAvailableStream
 ---@type FunctionStreamEntry[]?
@@ -80,6 +85,23 @@ local function IsPlayerControlled(token, guid)
   return ok and controlled == true
 end
 
+---Record which item an Item GUID belongs to, since the GUID holds no item ID.
+---An item that starts a quest is the dialog's "questnpc", and Forever's
+---QUEST_DETAIL reports its questStartItemID as 0. The stream is keyed by the GUID
+---to join it with UnitGUID. A known ID is not read again: it never changes, and
+---accepting the quest can use the item up.
+---@param t number Session-relative GetTime()
+---@param tp number Session-relative GetTimePreciseSec()
+---@param itemGUID string
+local function RecordItemID(t, tp, itemGUID)
+  if not itemIDStreams or itemIDStreams[itemGUID] then return end
+
+  local ok, itemID = SafeScalarCall(C_Item.GetItemIDByGUID, itemGUID)
+  if ok and itemID then
+    itemIDStreams[itemGUID] = { { t = t, tp = tp, v = itemID } }
+  end
+end
+
 --- Sample UnitGUID and UnitName for every fixed token.
 ---@param t number Session-relative GetTime()
 ---@param tp number Session-relative GetTimePreciseSec()
@@ -117,6 +139,10 @@ local function SampleAll(t, tp)
         local prevGuid = guidStream[#guidStream]
         if not prevGuid or prevGuid.v ~= guid then
           guidStream[#guidStream + 1] = { t = t, tp = tp, v = guid }
+        end
+
+        if kind == "item" and guid then
+          RecordItemID(t, tp, guid)
         end
 
         -- UnitName (packed actual returns). Do not synthesize nil from UnitExists;
@@ -254,6 +280,10 @@ Core.RegisterTracker({
     functions["C_GossipInfo.GetActiveQuests"]    = {}
     gossipAvailableStream = functions["C_GossipInfo.GetAvailableQuests"]
     gossipActiveStream    = functions["C_GossipInfo.GetActiveQuests"]
+
+    local hasItemLookup = type(C_Item) == "table" and type(C_Item.GetItemIDByGUID) == "function"
+    itemIDStreams = hasItemLookup and {} or nil
+    functions["C_Item.GetItemIDByGUID"] = itemIDStreams
 
     -- Initial sample at t=0
     SampleAll(0, 0)

@@ -503,6 +503,12 @@ All tuple-returning functions MUST have `n` on every stored value.
 
 Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, unrecognized or restricted GUIDs, and failed `UnitGUID` calls are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. Instances are sampled too: Questie draws nameplate icons in dungeons on Classic clients, while Forever restricts GUIDs there, so its instance adds record nil. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
 
+### Parameterized by item GUID
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar (number) | UnitInteraction; Forever only. For every `Item-` GUID in `UnitGUID` (`"questnpc"` while an item starts a quest); join by the GUID. One entry per GUID, the first non-nil answer. Schema 22+ |
+
 ### Parameterized by unit token (`"target"`, `"mouseover"`)
 
 | Function key | Return type | Notes |

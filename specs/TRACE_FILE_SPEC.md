@@ -448,6 +448,12 @@ Called with a quest ID as the argument.
 | `UnitGUID` | scalar string or nil | GUID; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
 
+### Parameterized by item GUID (string)
+
+| Function key | Return type | Description |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar number | Forever only; item ID of an `Item-` GUID in `UnitGUID`, such as the item that starts a quest |
+
 ### Parameterized by loot slot index (number)
 
 | Function key | Return type | Description |

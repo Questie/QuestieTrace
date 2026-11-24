@@ -155,6 +155,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_Map.GetPlayerMapPosition(map, "player")` | `functions["C_Map.GetPlayerMapPosition"]["player"]` |
 | `UnitGUID(token)` | `functions["UnitGUID"][token]` |
 | `UnitName(token)` | `functions["UnitName"][token]` |
+| `C_Item.GetItemIDByGUID(itemGUID)` | `functions["C_Item.GetItemIDByGUID"][itemGUID]` (only item GUIDs that were a unit, e.g. a quest's starting item) |
 | `IsQuestComplete(questId)` | `functions["IsQuestComplete"][questId]` |
 | `HaveQuestData(questId)` | `functions["HaveQuestData"][questId]` |
 | `C_QuestLog.IsOnQuest(questId)` | `functions["C_QuestLog.IsOnQuest"][questId]` |
