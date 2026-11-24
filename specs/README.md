@@ -25,7 +25,7 @@ Agent-facing index for QuestieTrace, a WoW Classic Era addon that records quest/
 ├─────────────────────────────────────────────────────────┤
 │  Trackers/            Isolated tracker files            │
 │    PlayerIdentity     Race/class/base class/sex/faction │
-│    UnitLevel          UnitLevel + quest green range     │
+│    UnitLevel          UnitLevel + trivial quest range   │
 │    Position           Zone/map/XY/instance state        │
 │    Loot               Loot window functions             │
 │    Reputation         FactionOrder, faction detail raw │
@@ -83,7 +83,7 @@ specs/
 | Tracker | Events | Trigger Pattern | Purpose |
 |---|---|---|---|
 | PlayerIdentity | None | Init only | `UnitRace`, `UnitClass`, `UnitClassBase`, `UnitSex`, `UnitFactionGroup` |
-| UnitLevel | 3 events | Event-driven | `UnitLevel["player"]`, `GetQuestGreenRange` |
+| UnitLevel | 3 events | Event-driven | `UnitLevel["player"]`, `C_QuestLog.GetTrivialRange`/`GetQuestGreenRange` |
 | Position | zone/login events + timer + private movement sampling | Timer + event-driven | Zone texts, map ID, XY, instance state |
 | Loot | `LOOT_READY`, `LOOT_CLOSED` | Window lifecycle | Loot count + per-slot functions |
 | Reputation | 5 events | Event + index iteration | `FactionOrder`, `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` |

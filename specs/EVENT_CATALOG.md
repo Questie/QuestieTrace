@@ -87,7 +87,7 @@ is a player's, or that does not classify as `"npc"`/`"object"`/`"item"` per
 
 ### UnitLevel tracker
 
-Triggers `UnitLevel("player")` sampling.
+Triggers `UnitLevel("player")` and trivial quest range sampling.
 
 - `PLAYER_LEVEL_UP`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*

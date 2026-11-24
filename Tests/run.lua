@@ -3340,6 +3340,60 @@ local function TestFailingGhostStateIsReported()
   assert(#functions.UnitIsGhost.player == 1 and functions.UnitIsGhost.player[1].v == true, "Recording resumes when the call works again")
 end
 
+local function TestTrivialRangeFollowsTheLevelOnForever()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitLevel.lua" })
+  local level, range = 33, 7
+  runtime.env.UnitLevel = function(unit) return unit == "player" and level or nil end
+  runtime.env.C_QuestLog = { GetTrivialRange = function() return range end }
+  -- Forever has no such global; this one stands for another addon's.
+  runtime.env.GetQuestGreenRange = function() return 99 end
+  runtime.core.StartCapture("trivial range")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local stream = functions["C_QuestLog.GetTrivialRange"]
+  assert(#stream == 1 and stream[1].t == 0 and stream[1].v == 7, "The range is recorded at capture start")
+  assert(functions.GetQuestGreenRange == nil, "Another addon's GetQuestGreenRange must not be recorded")
+
+  -- The client still answers for the old level when PLAYER_LEVEL_UP fires.
+  runtime.now = 10
+  SendEvent(runtime, "PLAYER_LEVEL_UP", 34)
+  level, range = 34, 8
+  runtime.now = 11
+  SendEvent(runtime, "SPELLS_CHANGED")
+  assert(#stream == 2 and stream[2].t == 11 and stream[2].v == 8, "A new range is recorded once, when the client answers with it")
+  assert(functions.UnitLevel.player[2].t == 11 and functions.UnitLevel.player[2].v == 34, "The level is recorded with it")
+end
+
+local function TestQuestGreenRangeOnClassic()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitLevel.lua" })
+  runtime.env.UnitLevel = function() return 20 end
+  runtime.env.C_QuestLog = {}
+  runtime.env.GetQuestGreenRange = function() return 5 end
+  runtime.core.StartCapture("green range")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(#functions.GetQuestGreenRange == 1 and functions.GetQuestGreenRange[1].v == 5, "Clients without GetTrivialRange record GetQuestGreenRange")
+  assert(functions["C_QuestLog.GetTrivialRange"] == nil, "An API the client lacks has no stream")
+end
+
+local function TestLevelIsRecordedWithoutAWorkingRange()
+  for _, case in ipairs({ "no API", "failing API" }) do
+    local runtime = NewRuntime({ "Modules/Trackers/UnitLevel.lua" })
+    local level = 20
+    ---@type any[]
+    local reported = {}
+    runtime.env.UnitLevel = function() return level end
+    runtime.env.geterrorhandler = function() return function(err) reported[#reported + 1] = err end end
+    if case == "failing API" then
+      runtime.env.GetQuestGreenRange = function() error("not available") end
+    end
+    runtime.core.StartCapture(case)
+    level = 21
+    SendEvent(runtime, "SPELLS_CHANGED")
+    local functions = Session(runtime).functions --[[@as table<string, any>]]
+    assert(#functions.UnitLevel.player == 2 and functions.UnitLevel.player[2].v == 21, case .. ": the level must still be recorded")
+    assert(#reported == (case == "failing API" and 2 or 0), case .. ": errors are reported, a missing API is none")
+  end
+end
+
 local function TestDisplayRecordsOnlyAllowlistedCVars()
   local runtime = NewRuntime({ "Modules/Trackers/Display.lua" })
   local env = runtime.env
@@ -4086,6 +4140,9 @@ local tests = {
   { name = "a trade partner is never recorded", run = TestTradePartnerIsNotRecorded },
   { name = "ghost state is recorded at capture start and when it changes", run = TestGhostStateIsRecorded },
   { name = "a failing ghost state call is reported and does not stop the capture", run = TestFailingGhostStateIsReported },
+  { name = "the trivial quest range follows the level on Forever", run = TestTrivialRangeFollowsTheLevelOnForever },
+  { name = "the green quest range is recorded on clients without a trivial range", run = TestQuestGreenRangeOnClassic },
+  { name = "the level is recorded without a working quest range", run = TestLevelIsRecordedWithoutAWorkingRange },
   { name = "should record leaving an npc that was hovered at capture start", run = TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },

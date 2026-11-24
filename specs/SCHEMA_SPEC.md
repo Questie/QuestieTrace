@@ -360,7 +360,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `IsInGroup` | scalar (boolean) | |
 | `GetNumGroupMembers` | scalar (number) | 0 when not in a group |
 | `GetNumSkillLines` | scalar (number) | Legacy global; only present when it exists, no synthesized fallback |
-| `GetQuestGreenRange` | scalar (number) | XP threshold; changes with player level |
+| `C_QuestLog.GetTrivialRange` | scalar (number) | UnitLevel; how many levels below the player a quest may be before it is trivial. Changes with the player's level, Forever only. Schema 22+ |
+| `GetQuestGreenRange` | scalar (number) | UnitLevel; the same on clients without `C_QuestLog.GetTrivialRange`. Not recorded by some versions before schema 22 |
 | `GetProfessions` | tuple (n=5) | profession tab indices; nil in missing tuple slots |
 | `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object (number[]) | Tracked independently whenever the API exists |
 | `C_GossipInfo.GetAvailableQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |

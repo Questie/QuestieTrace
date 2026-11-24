@@ -347,7 +347,8 @@ Called with no arguments. Stream is a flat `{t, tp, v}` array.
 | `GetNumLootItems` | scalar number | Number of loot slots (0 when no loot window) |
 | `IsInGroup` | scalar boolean | Whether in a party/raid |
 | `GetNumGroupMembers` | scalar number | Party/raid size (0 when solo) |
-| `GetQuestGreenRange` | scalar number | XP green-range threshold |
+| `C_QuestLog.GetTrivialRange` | scalar number | Trivial quest range; Forever only |
+| `GetQuestGreenRange` | scalar number | Trivial quest range on the other clients |
 | `C_GossipInfo.GetAvailableQuests` | object (table[]) | Array of available quests from an NPC |
 | `C_GossipInfo.GetActiveQuests` | object (table[]) | Array of active quests at an NPC |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar number | Gossip available count |
