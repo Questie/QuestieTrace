@@ -2,17 +2,18 @@
 //!
 //! The intake writes `removals/requested/<id>` when a rejection of an accepted submission has
 //! become final, and purges its own receipt of the submission once `removals/done/<id>` is
-//! listed. For each request without that answer, in this order:
+//! listed. For each request without that answer, a run does one of two things:
 //!
-//! 1. Find every occurrence of the submission: in `loose/`, and in every pack, by reading
-//!    every pack's index.
-//! 2. Record that the removal starts: `removals/started/<id>`, naming what was found.
-//! 3. Delete the loose object. Rewrite each pack that holds the submission without it.
-//! 4. Write `removals/done/<id>`.
+//! - **The submission is found**, in `loose/` or in any pack's index. Record that the removal
+//!   starts, `removals/started/<id>`, naming what was found. Delete the loose object. Rewrite
+//!   each pack that holds the submission without it. Write no answer.
+//! - **The submission is found nowhere, and its removal was started.** Write the answer,
+//!   `removals/done/<id>`.
 //!
-//! The answer is written last, and only for a removal that was recorded as started. Finding
-//! the submission nowhere is not an answer by itself: that is also what a mistake in step 1
-//! would look like.
+//! So the answer always comes from a run that looked everywhere afresh and found nothing,
+//! never from the run that deleted: a removal takes two runs. Finding the submission nowhere
+//! without a started removal is not an answer either: that is also what a mistake in the
+//! search would look like.
 
 use crate::bucket::{
     delete_unchanged, md5_hex, submission_id, submission_name, Bucket, Listed, LOOSE, PACKS, REMOVAL_INTENTS, REMOVAL_RECEIPTS, REMOVAL_REQUESTS,
@@ -21,18 +22,25 @@ use anyhow::{anyhow, bail, Context, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use trace_pack::pack::{self, Entry};
+use trace_pack::pack;
 
 /// What the removal step of one run did.
 #[derive(Debug, Default, PartialEq)]
 pub struct Removals {
-    pub answered: Vec<Removed>,
-    /// One line for each request that stays open, with the reason. Each needs someone to
-    /// look: the next run will find the same.
+    /// Submissions this run deleted from `loose/` or took out of packs. The next run answers
+    /// their requests.
+    pub removed: Vec<Removed>,
+    /// The ids whose requests this run answered.
+    pub answered: Vec<String>,
+    /// One line for each request that could not be worked on, with the reason. Each is left
+    /// open for someone to look at.
     pub unanswered: Vec<String>,
+    /// Why the step ended before it had gone through every request, when it did. The rest of
+    /// the run goes on.
+    pub stopped: Option<String>,
 }
 
-/// One answered request.
+/// One submission whose stored copies a run removed.
 #[derive(Debug, PartialEq)]
 pub struct Removed {
     pub id: String,
@@ -45,52 +53,57 @@ pub fn requested(bucket: &dyn Bucket) -> Result<BTreeSet<String>> {
     Ok(ids_under(bucket.list(REMOVAL_REQUESTS)?, REMOVAL_REQUESTS))
 }
 
+/// The ids the keys under `prefix` name. A key that names a folder, which some tools create
+/// as a marker, is not one.
 fn ids_under(listed: Vec<Listed>, prefix: &str) -> BTreeSet<String> {
-    listed.into_iter().map(|object| object.key[prefix.len()..].to_owned()).collect()
+    listed
+        .into_iter()
+        .map(|object| object.key[prefix.len()..].to_owned())
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+        .collect()
 }
 
-/// Answers every request that has no receipt yet. `level` compresses the index of a rewritten
-/// pack.
+/// Works on every request that has no answer yet, adding to `removals` as it goes. `level`
+/// compresses the index of a rewritten pack.
 ///
-/// No pack may be mid-upload: the caller finishes an interrupted pack first.
-pub fn answer(bucket: &dyn Bucket, requested: &BTreeSet<String>, level: i32) -> Result<Removals> {
+/// No pack may be mid-upload: the caller finishes an interrupted pack first. And nothing else
+/// may write packs meanwhile, under any writer name: a rewrite replaces a pack with what this
+/// run read of it.
+pub fn answer(bucket: &dyn Bucket, requested: &BTreeSet<String>, level: i32, removals: &mut Removals) -> Result<()> {
     let answered = ids_under(bucket.list(REMOVAL_RECEIPTS)?, REMOVAL_RECEIPTS);
-    let open: Vec<&String> = requested.difference(&answered).collect();
-    let mut removals = Removals::default();
+    let open: BTreeSet<&str> = requested.difference(&answered).map(String::as_str).collect();
     if open.is_empty() {
-        return Ok(removals);
+        return Ok(());
     }
 
-    // Where every stored submission is. Read once for all requests; a pack that is rewritten
+    // Where each requested submission is. Read once for all requests; a pack that is rewritten
     // below is brought up to date here.
     let loose = bucket.list(LOOSE)?;
-    let mut packs = read_pack_indexes(bucket)?;
+    let mut packs = packs_holding(bucket, &open)?;
 
     for id in open {
         match remove(bucket, id, &loose, &mut packs, level)? {
-            Ok(removed) => removals.answered.push(removed),
-            Err(reason) => removals.unanswered.push(format!("{id}: {reason}")),
+            Outcome::Removed(removed) => removals.removed.push(removed),
+            Outcome::Answered => removals.answered.push(id.to_owned()),
+            Outcome::Open(reason) => removals.unanswered.push(format!("{id}: {reason}")),
         }
     }
-    Ok(removals)
+    Ok(())
 }
 
-/// A pack in the bucket and what its index lists.
+/// A pack in the bucket, and which of the requested submissions its index lists.
 struct StoredPack {
     key: String,
     etag: String,
-    entries: Vec<Entry>,
+    holds: BTreeSet<String>,
 }
 
-impl StoredPack {
-    fn holds(&self, id: &str) -> bool {
-        self.entries.iter().any(|entry| submission_id(&entry.name) == id)
-    }
-}
-
-/// The index of every pack of every writer. One that cannot be read is an error: without it
-/// nothing can be said about where a submission is not.
-fn read_pack_indexes(bucket: &dyn Bucket) -> Result<Vec<StoredPack>> {
+/// Every pack of every writer, with the submissions of `wanted` it holds. An index that
+/// cannot be read is an error: without it nothing can be said about where a submission is
+/// not.
+///
+/// Only the wanted ids are kept. The indexes together list every submission of the archive.
+fn packs_holding(bucket: &dyn Bucket, wanted: &BTreeSet<&str>) -> Result<Vec<StoredPack>> {
     bucket
         .list(PACKS)?
         .into_par_iter()
@@ -103,10 +116,15 @@ fn read_pack_indexes(bucket: &dyn Bucket) -> Result<Vec<StoredPack>> {
                 Err(error) => Err(format!("{error:#}")),
             };
             let entries = pack::read_index(listed.size, fetch).map_err(|message| anyhow!("{}: {message}", listed.key))?;
+            let holds = entries
+                .iter()
+                .map(|entry| submission_id(&entry.name))
+                .filter(|id| wanted.contains(id.as_str()))
+                .collect();
             Ok(StoredPack {
                 key: listed.key,
                 etag: listed.etag,
-                entries,
+                holds,
             })
         })
         .collect()
@@ -119,7 +137,7 @@ struct Request {
     id: String,
 }
 
-/// The record that a removal was started: step 2. Written once and kept for good.
+/// The record that a removal was started. Written once and kept for good.
 #[derive(Serialize)]
 struct RemovalIntent<'a> {
     schema_version: u32,
@@ -141,34 +159,48 @@ struct Receipt<'a> {
     id: &'a str,
 }
 
-/// Removes one submission and answers its request. The inner `Err` is the reason the request
-/// stays open; the outer one stops the run.
-fn remove(bucket: &dyn Bucket, id: &str, loose: &[Listed], packs: &mut [StoredPack], level: i32) -> Result<Result<Removed, String>> {
+/// What a run did about one request.
+enum Outcome {
+    /// Its stored copies were removed. The request is answered by a later run.
+    Removed(Removed),
+    /// Nothing of it was found and its removal had been started: the answer is written.
+    Answered,
+    /// It could not be worked on, for this reason.
+    Open(String),
+}
+
+/// Works on one request. An `Err` is the bucket failing, or holding something other than
+/// what was listed.
+fn remove(bucket: &dyn Bucket, id: &str, loose: &[Listed], packs: &mut [StoredPack], level: i32) -> Result<Outcome> {
     // The request must be one this version understands, and about the id its key names.
     let Some(request) = bucket.get(&format!("{REMOVAL_REQUESTS}{id}"))? else {
-        return Ok(Err("its request is gone since it was listed".into()));
+        return Ok(Outcome::Open("its request is gone since it was listed".into()));
     };
     match serde_json::from_slice::<Request>(&request) {
         Ok(request) if request.schema_version == 1 && request.id == id => {}
-        _ => return Ok(Err("its request is not one this version reads, or names another submission".into())),
+        _ => return Ok(Outcome::Open("its request is not one this version reads, or names another submission".into())),
     }
 
-    // Every occurrence, by id.
+    // Every occurrence, by the id in its name.
     let loose_copies: Vec<&Listed> = loose
         .iter()
         .filter(|object| submission_name(&object.key).is_some_and(|name| submission_id(name) == id))
         .collect();
-    let holding: Vec<usize> = (0..packs.len()).filter(|&index| packs[index].holds(id)).collect();
-
+    let holding: Vec<usize> = (0..packs.len()).filter(|&index| packs[index].holds.contains(id)).collect();
     let intent_key = format!("{REMOVAL_INTENTS}{id}");
     let started = bucket.etag(&intent_key)?.is_some();
+
     if loose_copies.is_empty() && holding.is_empty() {
-        // An earlier run recorded the removal, deleted everything and stopped before the
-        // receipt. Without that record, nothing found means nothing is known.
         if !started {
-            return Ok(Err("found in neither loose/ nor any pack, and no removal of it was started".into()));
+            return Ok(Outcome::Open("found in neither loose/ nor any pack, and no removal of it was started".into()));
         }
-    } else if !started {
+        // From here on the intake forgets the submission.
+        let receipt = Receipt { schema_version: 1, id };
+        bucket.put(&format!("{REMOVAL_RECEIPTS}{id}"), &serde_json::to_vec_pretty(&receipt)?)?;
+        return Ok(Outcome::Answered);
+    }
+
+    if !started {
         let found = |key, etag| Found { key, etag };
         let intent = RemovalIntent {
             schema_version: 1,
@@ -178,18 +210,13 @@ fn remove(bucket: &dyn Bucket, id: &str, loose: &[Listed], packs: &mut [StoredPa
         };
         bucket.put(&intent_key, &serde_json::to_vec_pretty(&intent)?)?;
     }
-
     for object in &loose_copies {
         delete_unchanged(bucket, &object.key, &object.etag)?;
     }
     for &index in &holding {
         rewrite_without(bucket, &mut packs[index], id, level)?;
     }
-
-    // Last: from here on the intake forgets the submission.
-    let receipt = Receipt { schema_version: 1, id };
-    bucket.put(&format!("{REMOVAL_RECEIPTS}{id}"), &serde_json::to_vec_pretty(&receipt)?)?;
-    Ok(Ok(Removed {
+    Ok(Outcome::Removed(Removed {
         id: id.to_owned(),
         loose_deleted: loose_copies.len(),
         packs_rewritten: holding.iter().map(|&index| packs[index].key.clone()).collect(),
@@ -198,15 +225,13 @@ fn remove(bucket: &dyn Bucket, id: &str, loose: &[Listed], packs: &mut [StoredPa
 
 /// Replaces a pack with itself minus one submission, under the same key.
 ///
-/// The upload replaces the only copy of every other submission in the pack. The old pack
-/// must therefore be the object whose index was read, and [`pack::without`] compares every
-/// frame it keeps with the old pack before anything is uploaded.
+/// The upload replaces the only copy of every other submission in the pack. The pack that is
+/// downloaded must therefore be the one that was listed, and [`pack::without`] compares every
+/// frame it keeps with that pack before anything is uploaded.
 fn rewrite_without(bucket: &dyn Bucket, stored: &mut StoredPack, id: &str, level: i32) -> Result<()> {
-    let old = bucket
-        .get(&stored.key)?
-        .with_context(|| format!("{}: gone since its index was read", stored.key))?;
+    let old = bucket.get(&stored.key)?.with_context(|| format!("{}: gone since it was listed", stored.key))?;
     if md5_hex(&old) != stored.etag {
-        bail!("{}: what was downloaded is not the pack whose index was read", stored.key);
+        bail!("{}: what was downloaded is not the pack that was listed", stored.key);
     }
     let rewritten = pack::without(&old, level, |entry| submission_id(&entry.name) == id).map_err(|message| anyhow!("{}: {message}", stored.key))?;
     drop(old);
@@ -216,7 +241,7 @@ fn rewrite_without(bucket: &dyn Bucket, stored: &mut StoredPack, id: &str, level
     if bucket.etag(&stored.key)?.as_deref() != Some(etag.as_str()) {
         bail!("{}: the bucket does not hold the rewritten pack", stored.key);
     }
-    stored.entries.retain(|entry| submission_id(&entry.name) != id);
+    // The next request may be for another submission of the same pack.
     stored.etag = etag;
     Ok(())
 }
@@ -239,14 +264,15 @@ mod tests {
         (bucket, files, pack)
     }
 
-    /// The request the intake writes for this submission.
+    /// The request the intake writes for a submission.
+    fn request_for(bucket: &MemoryBucket, id: &str, name: &str) {
+        let body = format!("{{\n  \"schema_version\": 1,\n  \"id\": \"{id}\",\n  \"name\": \"{name}\"\n}}\n");
+        bucket.store(&format!("{REMOVAL_REQUESTS}{id}"), body.as_bytes(), now());
+    }
+
+    /// The request for the submission `bucket_with` stores at this position.
     fn request(bucket: &MemoryBucket, index: u32) {
-        let body = format!(
-            "{{\n  \"schema_version\": 1,\n  \"id\": \"{}\",\n  \"name\": \"{}\"\n}}\n",
-            id(index),
-            name(index)
-        );
-        bucket.store(&format!("{REMOVAL_REQUESTS}{}", id(index)), body.as_bytes(), now());
+        request_for(bucket, &id(index), &name(index));
     }
 
     fn has_receipt(bucket: &MemoryBucket, index: u32) -> bool {
@@ -262,24 +288,30 @@ mod tests {
         run(bucket, &config(u64::MAX), now()).unwrap()
     }
 
+    const NOTHING: [String; 0] = [];
+
     #[test]
-    fn a_requested_submission_still_in_loose_is_deleted_and_answered() {
+    fn a_requested_submission_still_in_loose_is_deleted_and_the_next_run_answers() {
         let (bucket, files) = bucket_with(3, 47);
         request(&bucket, 1);
         let request_before = bucket.object(&format!("{REMOVAL_REQUESTS}{}", id(1))).unwrap();
 
-        let report = run_once(&bucket);
+        let first = run_once(&bucket);
 
         assert_eq!(bucket.keys(LOOSE), [format!("{LOOSE}{}", name(0)), format!("{LOOSE}{}", name(2))]);
-        assert!(has_receipt(&bucket, 1));
         assert_eq!(bucket.keys(REMOVAL_INTENTS), [format!("{REMOVAL_INTENTS}{}", id(1))]);
+        assert_eq!((first.removals.removed.len(), first.removals.removed[0].loose_deleted), (1, 1));
+        // The run that deleted does not answer.
+        assert!(!has_receipt(&bucket, 1));
+        assert_eq!(first.removals.answered, NOTHING);
+
+        let second = run_once(&bucket);
+
+        assert!(has_receipt(&bucket, 1));
+        assert_eq!(second.removals.answered, [id(1)]);
+        assert_eq!(second.removals.removed, []);
         // The request is the intake's: it is neither changed nor removed.
         assert_eq!(bucket.object(&format!("{REMOVAL_REQUESTS}{}", id(1))).unwrap(), request_before);
-        assert_eq!(report.removals.answered.len(), 1);
-        assert_eq!(
-            (report.removals.answered[0].loose_deleted, report.removals.answered[0].packs_rewritten.len()),
-            (1, 0)
-        );
         assert_eq!(packed(&bucket, &files).len(), 0);
     }
 
@@ -288,8 +320,12 @@ mod tests {
         let (bucket, files, pack) = bucket_with_a_pack(4);
         let pack_before = bucket.object(&pack).unwrap();
         request(&bucket, 1);
+        // Folder markers, which some tools create, are neither packs nor requests.
+        for marker in ["packs/", "packs/live/", REMOVAL_REQUESTS, "removals/requested/2026/"] {
+            bucket.store(marker, b"", now());
+        }
 
-        let report = run_once(&bucket);
+        let first = run_once(&bucket);
 
         // Every submission has the same export; they differ only in their ids. Exactly the
         // requested one is gone, and the others read back as their files.
@@ -298,9 +334,14 @@ mod tests {
         // The pack keeps its key.
         assert_eq!(pack_keys(&bucket), [pack.as_str()]);
         assert!(bucket.object(&pack).unwrap().len() < pack_before.len());
+        assert_eq!(first.removals.removed[0].packs_rewritten, [pack.as_str()]);
+        assert_eq!((first.removals.unanswered, first.removals.stopped), (NOTHING.to_vec(), None));
+        assert!(!has_receipt(&bucket, 1));
+
+        let second = run_once(&bucket);
         assert!(has_receipt(&bucket, 1));
-        assert_eq!(report.removals.answered[0].packs_rewritten, [pack.as_str()]);
-        assert_eq!(report.removals.unanswered, [] as [String; 0]);
+        assert_eq!((second.removals.unanswered, second.removals.stopped), (NOTHING.to_vec(), None));
+        assert_eq!(packed(&bucket, &files).len(), 3);
     }
 
     #[test]
@@ -318,13 +359,14 @@ mod tests {
         assert_eq!(found.keys().cloned().collect::<Vec<_>>(), [name(0), name(2)]);
         assert!(found.values().all(|packs| *packs == 2));
         assert_eq!(bucket.keys(LOOSE), [] as [&str; 0]);
+        assert_eq!(report.removals.removed[0].loose_deleted, 1);
+        assert_eq!(report.removals.removed[0].packs_rewritten, [second, pack.as_str()]);
+        run_once(&bucket);
         assert!(has_receipt(&bucket, 1));
-        assert_eq!(report.removals.answered[0].loose_deleted, 1);
-        assert_eq!(report.removals.answered[0].packs_rewritten, [second, pack.as_str()]);
     }
 
     #[test]
-    fn two_requests_for_one_pack_are_both_answered_in_one_run() {
+    fn two_requests_for_one_pack_are_both_worked_on_in_one_run() {
         let (bucket, files, _) = bucket_with_a_pack(3);
         request(&bucket, 0);
         request(&bucket, 2);
@@ -332,8 +374,9 @@ mod tests {
         let report = run_once(&bucket);
 
         assert_eq!(packed(&bucket, &files).keys().cloned().collect::<Vec<_>>(), [name(1)]);
-        assert!(has_receipt(&bucket, 0) && has_receipt(&bucket, 2));
-        assert_eq!(report.removals.answered.len(), 2);
+        assert_eq!(report.removals.removed.len(), 2);
+        assert_eq!(run_once(&bucket).removals.answered, [id(0), id(2)]);
+        assert_eq!(packed(&bucket, &files).keys().cloned().collect::<Vec<_>>(), [name(1)]);
     }
 
     #[test]
@@ -342,10 +385,38 @@ mod tests {
         request(&bucket, 0);
 
         run_once(&bucket);
+        run_once(&bucket);
 
         assert_eq!(pack_keys(&bucket), [pack.as_str()]);
         assert_eq!(packed(&bucket, &files).len(), 0);
         assert!(has_receipt(&bucket, 0));
+    }
+
+    /// A submission is the one its name says, in a pack as in loose/: not the one its file
+    /// claims to be, and not one whose id merely ends the same.
+    #[test]
+    fn a_submission_is_matched_by_the_id_in_its_name_and_by_nothing_else() {
+        let bucket = MemoryBucket::new(now());
+        let mut files = BTreeMap::new();
+        for (minute, name_id, file_id) in [(1, "aabb", "aabb"), (2, "bb", "bb"), (3, "cc", "dd")] {
+            let (name, _) = submission(minute, name_id);
+            let (_, file) = submission(minute, file_id);
+            bucket.store(&format!("{LOOSE}{name}"), &file, hours_ago(49));
+            files.insert(name, file);
+        }
+        run_once(&bucket);
+        assert_eq!(packed(&bucket, &files).len(), 3);
+        // "bb" also ends the name of "aabb". "dd" is what the third file says it is, under
+        // the name of "cc".
+        request_for(&bucket, "bb", "x");
+        request_for(&bucket, "dd", "x");
+
+        let report = run_once(&bucket);
+
+        let left: Vec<String> = packed(&bucket, &files).into_keys().collect();
+        assert_eq!(left, [submission(1, "aabb").0, submission(3, "cc").0]);
+        assert_eq!(report.removals.removed.iter().map(|removed| removed.id.as_str()).collect::<Vec<_>>(), ["bb"]);
+        assert!(report.removals.unanswered.len() == 1 && report.removals.unanswered[0].starts_with("dd: found in neither"));
     }
 
     #[test]
@@ -366,11 +437,11 @@ mod tests {
         assert_eq!(report.packed.packs.len(), 1);
         assert_eq!(packed(&bucket, &files).len(), 3);
 
-        // With the record of a removal that an earlier run started and did not answer.
+        // With the record of a removal that an earlier run started.
         bucket.store(&format!("{REMOVAL_INTENTS}{}", id(7)), b"{}", now());
         let report = run_once(&bucket);
         assert!(has_receipt(&bucket, 7));
-        assert_eq!(report.removals.unanswered, [] as [String; 0]);
+        assert_eq!(report.removals.unanswered, NOTHING);
     }
 
     #[test]
@@ -403,7 +474,7 @@ mod tests {
             let report = run_once(&bucket);
 
             assert_eq!(report.removals.unanswered.len(), 1);
-            assert!(!has_receipt(&bucket, 1));
+            assert_eq!(bucket.keys(REMOVAL_INTENTS), [] as [&str; 0]);
             // Nothing of it was touched, and it was not packed a second time either.
             assert_eq!(packed(&bucket, &files), BTreeMap::from([(name(0), 1), (name(1), 1)]));
             assert_eq!(bucket.keys(LOOSE), [format!("{LOOSE}{}", name(1))]);
@@ -411,25 +482,34 @@ mod tests {
     }
 
     #[test]
-    fn a_pack_whose_index_cannot_be_read_stops_every_removal() {
-        let (bucket, files, _) = bucket_with_a_pack(2);
+    fn a_pack_whose_index_cannot_be_read_stops_the_removals_and_not_the_packing() {
+        let (bucket, mut files, _) = bucket_with_a_pack(2);
         bucket.store(&format!("{LOOSE}{}", name(1)), &files[&name(1)], hours_ago(1));
         let unreadable = "packs/backfill/2026/11/08/18-0.pack";
         bucket.store(unreadable, b"this is not a pack, so what it holds is unknown", now());
         request(&bucket, 1);
+        let (settled_name, settled_file) = submission(40, "settled");
+        bucket.store(&format!("{LOOSE}{settled_name}"), &settled_file, hours_ago(49));
+        files.insert(settled_name.clone(), settled_file);
 
-        let error = run(&bucket, &config(u64::MAX), now()).unwrap_err();
+        let report = run_once(&bucket);
 
-        assert!(format!("{error:#}").contains(unreadable), "{error:#}");
-        assert!(!has_receipt(&bucket, 1));
+        // Nothing is concluded about the requested submission, and nothing of it is touched.
+        assert!(
+            report.removals.stopped.as_ref().is_some_and(|reason| reason.contains(unreadable)),
+            "{:?}",
+            report.removals
+        );
         assert_eq!(bucket.keys(LOOSE), [format!("{LOOSE}{}", name(1))]);
         assert_eq!(bucket.keys(REMOVAL_INTENTS), [] as [&str; 0]);
+        // What had settled is packed all the same.
+        assert_eq!(report.packed.packs.len(), 1);
         bucket.remove(unreadable);
-        assert_eq!(packed(&bucket, &files), BTreeMap::from([(name(0), 1), (name(1), 1)]));
+        assert_eq!(packed(&bucket, &files), BTreeMap::from([(name(0), 1), (name(1), 1), (settled_name, 1)]));
     }
 
     #[test]
-    fn a_pack_replaced_after_its_index_was_read_is_not_rewritten() {
+    fn a_pack_replaced_after_it_was_listed_is_not_rewritten() {
         let (bucket, _, pack) = bucket_with_a_pack(3);
         request(&bucket, 1);
         // Another pack takes its place between the reading of its index and the rewrite.
@@ -439,27 +519,79 @@ mod tests {
         };
         bucket.before_get(&pack, &other);
 
-        let error = run(&bucket, &config(u64::MAX), now()).unwrap_err();
+        let report = run_once(&bucket);
 
-        assert!(format!("{error:#}").contains("not the pack whose index was read"), "{error:#}");
+        assert!(
+            report
+                .removals
+                .stopped
+                .as_ref()
+                .is_some_and(|reason| reason.contains("not the pack that was listed")),
+            "{:?}",
+            report.removals
+        );
         assert_eq!(bucket.object(&pack).unwrap(), other);
-        assert!(!has_receipt(&bucket, 1));
+    }
+
+    #[test]
+    fn a_loose_object_that_changed_after_it_was_listed_is_not_deleted_for_a_removal() {
+        let (bucket, files) = bucket_with(2, 47);
+        request(&bucket, 1);
+        let changed = format!("{LOOSE}{}", name(1));
+        bucket.after_listing(LOOSE, &changed, b"other bytes under the same key");
+
+        let report = run_once(&bucket);
+
+        assert!(
+            report
+                .removals
+                .stopped
+                .as_ref()
+                .is_some_and(|reason| reason.contains("changed since it was listed")),
+            "{:?}",
+            report.removals
+        );
+        assert_eq!(bucket.object(&changed).unwrap(), b"other bytes under the same key");
+        let _ = files;
     }
 
     /// The upload carries a checksum the provider enforces. Should a rewritten pack be stored
-    /// wrongly all the same, or not at all, the submission must not be reported as removed.
+    /// wrongly all the same, or not at all, the removal must not count as made.
     #[test]
-    fn a_rewritten_pack_the_bucket_did_not_store_as_sent_is_not_answered() {
+    fn a_rewritten_pack_the_bucket_did_not_store_as_sent_stops_the_removals() {
         for fault in [PutFault::Damaged, PutFault::NotStored] {
             let (bucket, _, pack) = bucket_with_a_pack(3);
             request(&bucket, 1);
             bucket.fail_put(&pack, fault);
 
-            let error = run(&bucket, &config(u64::MAX), now()).unwrap_err();
+            let report = run_once(&bucket);
 
-            assert!(format!("{error:#}").contains("does not hold the rewritten pack"), "{fault:?}: {error:#}");
-            assert!(!has_receipt(&bucket, 1), "{fault:?}");
+            assert!(
+                report
+                    .removals
+                    .stopped
+                    .as_ref()
+                    .is_some_and(|reason| reason.contains("does not hold the rewritten pack")),
+                "{fault:?}: {:?}",
+                report.removals
+            );
+            assert_eq!(report.removals.removed, [], "{fault:?}");
         }
+    }
+
+    /// A pack whose loose objects are not deleted yet must be finished before a removal
+    /// rewrites it: the intent names the pack by the checksum it had.
+    #[test]
+    fn an_interrupted_pack_is_finished_before_a_removal_rewrites_it() {
+        let (bucket, files) = bucket_with(3, 49);
+        stopped_after_the_upload(&bucket);
+        request(&bucket, 1);
+
+        run_once(&bucket);
+
+        assert_eq!(bucket.keys("intents/"), [] as [&str; 0]);
+        assert_eq!(bucket.keys(LOOSE), [] as [&str; 0]);
+        assert_eq!(packed(&bucket, &files).keys().cloned().collect::<Vec<_>>(), [name(0), name(2)]);
     }
 
     /// The two things a removal must never do, wherever a run stops, and wherever the run
@@ -490,10 +622,13 @@ mod tests {
             }
         };
         let finished = |bucket: &MemoryBucket, files: &BTreeMap<String, Vec<u8>>, when: &str| {
-            let report = run(bucket, &config(u64::MAX), now()).unwrap_or_else(|error| panic!("{when}: the last run failed: {error:#}"));
-            check(bucket, files, when);
+            // One run removes what is left, the next answers.
+            for _ in 0..2 {
+                let report = run(bucket, &config(u64::MAX), now()).unwrap_or_else(|error| panic!("{when}: a later run failed: {error:#}"));
+                assert_eq!((report.removals.unanswered, report.removals.stopped), (NOTHING.to_vec(), None), "{when}");
+                check(bucket, files, when);
+            }
             assert!(has_receipt(bucket, 0) && has_receipt(bucket, 1), "{when}");
-            assert_eq!(report.removals.unanswered, [] as [String; 0], "{when}");
             assert_eq!(bucket.keys(LOOSE), [] as [&str; 0], "{when}");
         };
 

@@ -1149,6 +1149,37 @@ mod tests {
         // was asked for.
         assert!(read_index(pack.len() as u64, |range| Ok(pack[range.start as usize..range.end as usize - 1].to_vec())).is_err());
         assert!(read_index(pack.len() as u64, |_| Ok(pack.clone())).is_err());
+
+        // A store that returns nothing for the trailer, with the header as it should be.
+        let header_only = read_index(pack.len() as u64, |range| Ok(if range.start == 0 { pack[..16].to_vec() } else { Vec::new() }));
+        assert!(header_only.is_err());
+        // A store that returns a trailer of another length, with the header as it should be.
+        for off_by in [-1i64, 1] {
+            let odd_trailer = read_index(pack.len() as u64, |range| {
+                let start = if range.start == 0 { 0 } else { (range.start as i64 + off_by) as usize };
+                Ok(pack[start.min(pack.len())..range.end as usize].to_vec())
+            });
+            assert!(odd_trailer.is_err(), "a trailer of {} bytes was read", 24 - off_by);
+        }
+    }
+
+    /// A trailer is read before the index is fetched, and what it says is not to be trusted
+    /// with a download of any size.
+    #[test]
+    fn an_index_larger_than_the_limit_is_refused_before_it_is_fetched() {
+        let (_, pack) = three_submissions();
+        let pack_len: u64 = 300 << 20;
+        let mut trailer = pack[pack.len() - 24..].to_vec();
+        trailer[8..16].copy_from_slice(&16u64.to_le_bytes());
+        trailer[16..24].copy_from_slice(&(pack_len - 24 - 16).to_le_bytes());
+
+        let outcome = read_index(pack_len, |range| match range.start {
+            0 => Ok(pack[..16].to_vec()),
+            start if start == pack_len - 24 => Ok(trailer.clone()),
+            _ => panic!("the index was fetched: bytes {range:?}"),
+        });
+
+        assert_eq!(outcome.unwrap_err(), "pack index is over the limit");
     }
 
     #[test]

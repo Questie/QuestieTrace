@@ -514,7 +514,10 @@ mod tests {
             .unwrap();
         let report = run(&bucket, &pack_everything(), in_two_minutes()).unwrap();
 
-        assert_eq!(report.removals.answered[0].packs_rewritten, [pack_key.as_str()]);
+        assert_eq!(report.removals.removed[0].packs_rewritten, [pack_key.as_str()]);
+        // The run after it looks again, finds nothing, and answers.
+        let report = run(&bucket, &pack_everything(), in_two_minutes()).unwrap();
+        assert_eq!(report.removals.answered, ["bbbb"]);
         let pack = bucket.get(&pack_key).unwrap().unwrap();
         let reader = PackReader::open(&pack).unwrap();
         let names: Vec<&str> = reader.entries().iter().map(|entry| entry.name.as_str()).collect();

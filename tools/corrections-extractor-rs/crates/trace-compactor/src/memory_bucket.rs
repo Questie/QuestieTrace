@@ -6,6 +6,7 @@ use jiff::Timestamp;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Mutex;
+use std::time::Duration;
 
 /// How the one failed request ends.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +44,10 @@ struct State {
     after_listing: Option<(String, String, Option<Vec<u8>>)>,
     /// When this key is next downloaded whole, store these bytes under it first.
     before_get: Option<(String, Vec<u8>)>,
+    /// How long a whole download takes, and how many were going on at once at most.
+    get_delay: Duration,
+    gets_now: usize,
+    most_gets: usize,
     /// The next upload to a key with this prefix is reported as stored, and is not stored as
     /// it was sent.
     put_fault: Option<(String, PutFault)>,
@@ -65,6 +70,9 @@ impl MemoryBucket {
                 after_listing: None,
                 before_get: None,
                 put_fault: None,
+                get_delay: Duration::ZERO,
+                gets_now: 0,
+                most_gets: 0,
             }),
         }
     }
@@ -122,6 +130,16 @@ impl MemoryBucket {
     /// a part of it and the reading of all of it.
     pub fn before_get(&self, key: &str, bytes: &[u8]) {
         self.state.lock().unwrap().before_get = Some((key.to_owned(), bytes.to_vec()));
+    }
+
+    /// Makes every whole download take this long, so that downloads which may overlap do.
+    pub fn slow_gets(&self, delay: Duration) {
+        self.state.lock().unwrap().get_delay = delay;
+    }
+
+    /// The most whole downloads that were going on at one moment.
+    pub fn most_gets_at_once(&self) -> usize {
+        self.state.lock().unwrap().most_gets
     }
 
     /// Makes the next upload to a key with this prefix go wrong without an error, as with a
@@ -182,6 +200,14 @@ impl Bucket for MemoryBucket {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let delay = {
+            let mut state = self.state.lock().unwrap();
+            state.gets_now += 1;
+            state.most_gets = state.most_gets.max(state.gets_now);
+            state.get_delay
+        };
+        std::thread::sleep(delay);
+        self.state.lock().unwrap().gets_now -= 1;
         self.request(|state| {
             if state.before_get.as_ref().is_some_and(|(replaced, _)| replaced == key) {
                 let (key, bytes) = state.before_get.take().expect("checked above");

@@ -10,9 +10,9 @@
 //! A run that stops leaves at most one intent, which the next run finishes before anything
 //! else. Nothing is deleted without a confirmed pack that holds it.
 //!
-//! A pack's key ends in the pack's own checksum. Two different packs therefore never share a
-//! key, whatever a listing shows and whenever an upload arrives, and an upload that is
-//! repeated stores the same bytes again.
+//! A pack's key ends in the checksum the pack had when it was written. Two different packs
+//! are therefore never written to one key, whatever a listing shows and whenever an upload
+//! arrives, and an upload that is repeated stores the same bytes again.
 
 use crate::bucket::{delete_unchanged, md5_hex, pack_intent_key, packs_prefix, submission_id, submission_name, Bucket, Listed, LOOSE};
 use crate::Config;
@@ -29,8 +29,8 @@ use trace_pack::record::Encoding;
 #[derive(Debug, Default, PartialEq)]
 pub struct Packed {
     pub packs: Vec<PackReport>,
-    /// One line for each settled loose object that was left where it is, with the reason.
-    /// Each needs someone to look: the next run will find the same.
+    /// One line for each settled loose object that was left where it is, with the reason,
+    /// for someone to look at.
     pub left_loose: Vec<String>,
 }
 
@@ -446,23 +446,6 @@ mod tests {
         assert!(stopped_runs > 20, "only {stopped_runs} requests were failed");
     }
 
-    /// A run whose pack is stored and confirmed, and that stops before it deletes anything:
-    /// the intent and every loose object are left for the next run.
-    fn stopped_after_the_upload(bucket: &MemoryBucket) {
-        let first_delete = (0..)
-            .find(|call| {
-                let (probe, _) = bucket_with(3, 49);
-                probe.fail_call(*call, crate::memory_bucket::Fault::Refused);
-                let _ = run(&probe, &config(u64::MAX), now());
-                probe.restore() && !pack_keys(&probe).is_empty()
-            })
-            .unwrap();
-        bucket.fail_call(first_delete, crate::memory_bucket::Fault::Refused);
-        run(bucket, &config(u64::MAX), now()).unwrap_err();
-        assert!(bucket.restore());
-        assert_eq!((bucket.keys(LOOSE).len(), pack_keys(bucket).len()), (3, 1));
-    }
-
     #[test]
     fn a_loose_object_that_changed_after_it_was_packed_is_not_deleted() {
         let (bucket, files) = bucket_with(3, 49);
@@ -572,6 +555,27 @@ mod tests {
 
         assert_eq!((packed_now.packs.len(), packed_now.left_loose.len()), (0, 1));
         assert_eq!(bucket.keys(""), [only.as_str()]);
+    }
+
+    /// With room for one byte, every object is larger than the budget and is read and built
+    /// alone, however many threads there are.
+    #[test]
+    fn the_build_budget_limits_how_much_a_run_reads_at_once() {
+        let most_at_once = |build_input_bytes: u64| {
+            let (bucket, _) = bucket_with(8, 49);
+            bucket.slow_gets(Duration::from_millis(20));
+            let config = Config {
+                build_input_bytes,
+                ..config(u64::MAX)
+            };
+            run(&bucket, &config, now()).unwrap();
+            bucket.most_gets_at_once()
+        };
+        assert_eq!(most_at_once(1), 1);
+        // Without the limit they overlap, so the count above is not one for another reason.
+        if rayon::current_num_threads() > 1 {
+            assert!(most_at_once(u64::MAX) > 1);
+        }
     }
 
     #[test]

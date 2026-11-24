@@ -22,7 +22,9 @@ use trace_pack::pack::PackOptions;
 
 pub struct Config {
     /// Names this writer's packs and its pack intent: `live` for the compactor on the server.
-    /// Only one process may run under a name at a time.
+    /// The names keep two writers' keys apart. They do not make two processes safe together:
+    /// only one may run against a bucket at a time, whatever their names, because a removal
+    /// rewrites packs of every writer.
     pub writer: String,
     /// How long a loose object waits before it is packed, counted from when the bucket
     /// stored it.
@@ -45,7 +47,7 @@ pub struct RunReport {
 }
 
 /// One run at `now`. An `Err` means the run stopped and the next one continues from what it
-/// left. A removal request that could not be answered, or a loose object that could not be
+/// left. A removal request that could not be worked on, or a loose object that could not be
 /// packed, does not stop the run: it is in the report, and is left as it is.
 pub fn run(bucket: &dyn Bucket, config: &Config, now: Timestamp) -> Result<RunReport> {
     // First what an earlier run left: until its pack is finished, loose objects that are
@@ -53,9 +55,13 @@ pub fn run(bucket: &dyn Bucket, config: &Config, now: Timestamp) -> Result<RunRe
     packing::finish_interrupted(bucket, config)?;
 
     // Removals before packing, so a submission that is to go is deleted from `loose/` and not
-    // packed first.
+    // packed first. A removal step that cannot go on does not hold up the packing: a pack
+    // whose index cannot be read says nothing against packing what is in `loose/`.
     let requested = removal::requested(bucket)?;
-    let removals = removal::answer(bucket, &requested, config.options.level)?;
+    let mut removals = removal::Removals::default();
+    if let Err(error) = removal::answer(bucket, &requested, config.options.level, &mut removals) {
+        removals.stopped = Some(format!("{error:#}"));
+    }
 
     let packed = packing::pack_settled(bucket, config, now, &requested)?;
     Ok(RunReport { removals, packed })

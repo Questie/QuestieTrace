@@ -15,9 +15,10 @@ usage:
                       [--build-input-mib N] [--threads N] [--level N] [--exact]
                       [--tp-schema N,N,...] [--lock FILE]
 
-run     answers the intake's removal requests, then packs every loose submission the archive
-        bucket stored more than the settle window ago and deletes what it packed. A run that
-        was stopped is finished first.
+run     works on the intake's removal requests, then packs every loose submission the
+        archive bucket stored more than the settle window ago and deletes what it packed. A
+        run that was stopped is finished first. Only one run may work on a bucket at a time,
+        whatever its writer name.
         --writer NAME       names the packs, packs/NAME/..., and this writer's record of the
                             pack it is storing. Default: live
         --settle-hours N    how long a loose submission waits. Default: 48
@@ -28,14 +29,16 @@ run     answers the intake's removal requests, then packs every loose submission
         --level N           zstd level. Default: 9
         --exact             no value encoding: every export stored as inflated
         --tp-schema ...     round tp to microseconds in sessions of these schemaVersions
-        --lock FILE         held while running, so two runs under one writer name on this
-                            machine cannot overlap. Default: trace-compactor-NAME.lock in the
-                            temporary directory
+        --lock FILE         held while running, so that two runs on this machine cannot
+                            overlap. Default: trace-compactor.lock in the temporary
+                            directory. A container has a temporary directory of its own:
+                            there, whatever starts the containers has to keep runs apart.
 
 Memory: a pack is built and uploaded from memory. A run needs about 22 times
 --build-input-mib while it builds, plus up to two thirds of --pack-input-mib for the pack it
 holds, and twice a pack's size to rewrite one for a removal. A submission larger than
---build-input-mib is built alone and needs about 22 times its own size.
+--build-input-mib is built alone and needs about 22 times its own size, which nothing here
+bounds.
 
 The bucket is read from the environment: ARCHIVE_S3_ENDPOINT (host only), ARCHIVE_S3_REGION,
 ARCHIVE_S3_BUCKET, ARCHIVE_S3_ACCESS_KEY_ID and ARCHIVE_S3_SECRET_ACCESS_KEY. The key must
@@ -103,8 +106,9 @@ impl Arguments {
 fn run(arguments: Arguments) -> Result<()> {
     let Arguments { config, threads, lock } = arguments;
 
-    // Two runs under one writer name would each finish, or discard, the other's intent.
-    let lock_path = lock.unwrap_or_else(|| std::env::temp_dir().join(format!("trace-compactor-{}.lock", config.writer)));
+    // Two runs at once would each finish, or discard, the other's intent, and a removal
+    // rewrites packs of every writer.
+    let lock_path = lock.unwrap_or_else(|| std::env::temp_dir().join("trace-compactor.lock"));
     let lock = File::create(&lock_path).with_context(|| format!("opening {}", lock_path.display()))?;
     if lock.try_lock().is_err() {
         bail!("another run holds {}", lock_path.display());
@@ -116,7 +120,8 @@ fn run(arguments: Arguments) -> Result<()> {
     let bucket = bucket_from_environment()?;
 
     let report = trace_compactor::run(&bucket, &config, Timestamp::now())?;
-    for removed in &report.removals.answered {
+    let removals = &report.removals;
+    for removed in &removals.removed {
         println!(
             "removed {}: {} loose, rewrote {} packs {}",
             removed.id,
@@ -124,6 +129,9 @@ fn run(arguments: Arguments) -> Result<()> {
             removed.packs_rewritten.len(),
             removed.packs_rewritten.join(" ")
         );
+    }
+    for id in &removals.answered {
+        println!("answered the removal request for {id}");
     }
     for pack in &report.packed.packs {
         println!(
@@ -139,22 +147,26 @@ fn run(arguments: Arguments) -> Result<()> {
         }
     }
     println!(
-        "{} removals answered, {} packs written",
-        report.removals.answered.len(),
+        "{} submissions removed, {} removal requests answered, {} packs written",
+        removals.removed.len(),
+        removals.answered.len(),
         report.packed.packs.len()
     );
 
     // What needs someone to look comes last, and makes the run a failed one, so that whatever
     // watches the timer shows it.
-    for unanswered in &report.removals.unanswered {
+    if let Some(reason) = &removals.stopped {
+        println!("REMOVALS STOPPED {reason}");
+    }
+    for unanswered in &removals.unanswered {
         println!("REMOVAL NOT ANSWERED {unanswered}");
     }
     for left in &report.packed.left_loose {
         println!("NOT PACKED {left}");
     }
-    let open = report.removals.unanswered.len() + report.packed.left_loose.len();
+    let open = removals.stopped.iter().len() + removals.unanswered.len() + report.packed.left_loose.len();
     if open > 0 {
-        bail!("{open} removal requests or loose objects need someone to look");
+        bail!("{open} things need someone to look: see the lines above");
     }
     Ok(())
 }

@@ -58,16 +58,17 @@ pub fn bucket_with(count: u32, stored_hours_ago: i64) -> (MemoryBucket, BTreeMap
     (bucket, files)
 }
 
-/// In how many stored packs each submission is. Every pack in the bucket must open, and every
-/// record in it must be the file it was made from.
-/// The keys of the packs in the bucket, in the order of their keys.
+/// The keys of the packs in the bucket, in the order of their keys. Folder markers, which
+/// some tools create, are not packs.
 pub fn pack_keys(bucket: &MemoryBucket) -> Vec<String> {
-    bucket.keys("packs/")
+    bucket.keys("packs/").into_iter().filter(|key| !key.ends_with('/')).collect()
 }
 
+/// In how many stored packs each submission is. Every pack in the bucket must open, and every
+/// record in it must be the file it was made from.
 pub fn packed(bucket: &MemoryBucket, files: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, usize> {
     let mut found = BTreeMap::new();
-    for key in bucket.keys("packs/") {
+    for key in pack_keys(bucket) {
         let pack = bucket.object(&key).unwrap();
         let reader = PackReader::open(&pack).unwrap_or_else(|message| panic!("{key} does not open: {message}"));
         for (index, entry) in reader.entries().iter().enumerate() {
@@ -79,6 +80,25 @@ pub fn packed(bucket: &MemoryBucket, files: &BTreeMap<String, Vec<u8>>) -> BTree
         }
     }
     found
+}
+
+/// Leaves the bucket as a run does that stored and confirmed its pack and stopped before it
+/// deleted anything: the intent and every loose object are there for the next run. The bucket
+/// must hold what `bucket_with(3, 49)` gives.
+pub fn stopped_after_the_upload(bucket: &MemoryBucket) {
+    use crate::memory_bucket::Fault;
+    let first_delete = (0..)
+        .find(|call| {
+            let (probe, _) = bucket_with(3, 49);
+            probe.fail_call(*call, Fault::Refused);
+            let _ = crate::run(&probe, &config(u64::MAX), now());
+            probe.restore() && !pack_keys(&probe).is_empty()
+        })
+        .unwrap();
+    bucket.fail_call(first_delete, Fault::Refused);
+    crate::run(bucket, &config(u64::MAX), now()).unwrap_err();
+    assert!(bucket.restore());
+    assert_eq!((bucket.keys(LOOSE).len(), pack_keys(bucket).len()), (3, 1));
 }
 
 /// Runs `setup` again and again, each time stopping the run at another request, in both ways
