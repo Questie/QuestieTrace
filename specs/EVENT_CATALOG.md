@@ -336,9 +336,9 @@ No events. Sampled once at capture start (`t=0`).
 ### Initialization
 
 Events related to addon loading, login, and logout. `ADDON_LOADED` is
-filtered so only the addon's own load event is recorded in the stream.
+registered, but never recorded: only the addon's own passes the filter, and it
+fires before the capture starts at `PLAYER_LOGIN`.
 
-- `ADDON_LOADED` (filtered: only recorded when `addonName == "QuestieTrace"`)
 - `PLAYER_LOGOUT` *(also ResetTime + auto-save handling)*
 - `PLAYER_LEAVING_WORLD`
 - `LOADING_SCREEN_ENABLED` -- Questie's quest log cache treats objective
@@ -450,8 +450,8 @@ dropped and never recorded or dispatched to trackers.
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).
 - `ADDON_LOADED` fires for every addon. An event filter in `OnEvent`
-  skips it unless `addonName == "QuestieTrace"`, so only the addon's
-  own load appears in the event stream.
+  skips it unless `addonName == "QuestieTrace"`. The addon's own load
+  comes before capture start, so none appears in the event stream.
 - `PLAYER_LOGIN` triggers auto-start (if consent is granted and no
   capture is active). Auto-start runs before `ProcessTrackedEvent` so
   `PLAYER_LOGIN` is recorded as the first event in the session.
