@@ -147,6 +147,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_DateAndTime.GetCurrentCalendarTime()` | `functions["C_DateAndTime.GetCurrentCalendarTime"]` snapshot; derive the realm's UTC offset against the `GetServerTime` sample at the same `t` |
 | `UnitLevel("player")` | `functions["UnitLevel"]["player"]` |
 | `C_QuestLog.GetTrivialRange()` / `GetQuestGreenRange()` | `functions["C_QuestLog.GetTrivialRange"]` / `functions["GetQuestGreenRange"]`; a trace has the one its client has |
+| `C_GameRules.IsHardcoreActive()`, `C_Seasons.HasActiveSeason()`, `C_Seasons.GetActiveSeason()` | `functions["C_GameRules.IsHardcoreActive"]` etc.; a client without `C_Seasons` has no `C_Seasons` streams |
 | `UnitIsGhost("player")` | `functions["UnitIsGhost"]["player"]` |
 | `UnitRace("player")` | `functions["UnitRace"]["player"]` |
 | `UnitClass("player")` | `functions["UnitClass"]["player"]` |

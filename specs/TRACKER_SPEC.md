@@ -224,7 +224,7 @@ successful observed returns.
 
 | Tracker | File | Functions | Trigger | Events |
 |---|---|---|---|---|
-| PlayerIdentity | `Trackers/PlayerIdentity.lua` | `UnitRace["player"]`, `UnitClass["player"]`, `UnitClassBase["player"]`, `UnitSex["player"]`, `UnitFactionGroup["player"]` | Init only (t=0) | None |
+| PlayerIdentity | `Trackers/PlayerIdentity.lua` | `UnitRace["player"]`, `UnitClass["player"]`, `UnitClassBase["player"]`, `UnitSex["player"]`, `UnitFactionGroup["player"]`; realm rules `C_GameRules.IsHardcoreActive`, `C_Seasons.HasActiveSeason`, `C_Seasons.GetActiveSeason` (each when the client itself has it) | Init only (t=0) | None |
 | UnitLevel | `Trackers/UnitLevel.lua` | `UnitLevel["player"]`; `C_QuestLog.GetTrivialRange` (Forever), else `GetQuestGreenRange` | Event-driven | `PLAYER_LEVEL_UP`, `PLAYER_ENTERING_WORLD`, `SPELLS_CHANGED` |
 | Position | `Trackers/Position.lua` | `GetZoneText`, `GetSubZoneText`, `GetRealZoneText`, `C_Map.GetBestMapForUnit["player"]`, `C_Map.GetPlayerMapPosition["player"]`, `IsInInstance`, `GetInstanceInfo`, `IsIndoors`, `C_MapExplorationInfo.GetExploredMapTextures[mapID]` (on map change and `MAP_EXPLORATION_UPDATED` only). `GetPlayerFacing` is not recorded; replay derives the heading from consecutive positions | Timer (0.2s) + event-driven + private movement sampling | zone/map events + `PLAYER_ENTERING_WORLD`, `PLAYER_ALIVE`, `SPELLS_CHANGED`; movement events are private sampling triggers and are not recorded globally |
 | Loot | `Trackers/Loot.lua` | `GetNumLootItems`, `GetLootSlotInfo[slot]`, `GetLootSourceInfo[slot]`, `GetLootSlotLink[slot]`, `GetLootSlotType[slot]` | Event + window lifecycle | `LOOT_READY`, `LOOT_CLOSED` |

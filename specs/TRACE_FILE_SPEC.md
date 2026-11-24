@@ -349,6 +349,9 @@ Called with no arguments. Stream is a flat `{t, tp, v}` array.
 | `GetNumGroupMembers` | scalar number | Party/raid size (0 when solo) |
 | `C_QuestLog.GetTrivialRange` | scalar number | Trivial quest range; Forever only |
 | `GetQuestGreenRange` | scalar number | Trivial quest range on the other clients |
+| `C_GameRules.IsHardcoreActive` | scalar boolean | Hardcore realm; t=0 only |
+| `C_Seasons.HasActiveSeason` | scalar boolean | Seasonal realm; t=0 only, not on Forever |
+| `C_Seasons.GetActiveSeason` | scalar number/nil | `Enum.SeasonID`; t=0 only, not on Forever |
 | `C_GossipInfo.GetAvailableQuests` | object (table[]) | Array of available quests from an NPC |
 | `C_GossipInfo.GetActiveQuests` | object (table[]) | Array of active quests at an NPC |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar number | Gossip available count |

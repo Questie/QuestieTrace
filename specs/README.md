@@ -82,7 +82,7 @@ specs/
 
 | Tracker | Events | Trigger Pattern | Purpose |
 |---|---|---|---|
-| PlayerIdentity | None | Init only | `UnitRace`, `UnitClass`, `UnitClassBase`, `UnitSex`, `UnitFactionGroup` |
+| PlayerIdentity | None | Init only | `UnitRace`, `UnitClass`, `UnitClassBase`, `UnitSex`, `UnitFactionGroup`, realm rules (hardcore, season) |
 | UnitLevel | 3 events | Event-driven | `UnitLevel["player"]`, `C_QuestLog.GetTrivialRange`/`GetQuestGreenRange` |
 | Position | zone/login events + timer + private movement sampling | Timer + event-driven | Zone texts, map ID, XY, instance state |
 | Loot | `LOOT_READY`, `LOOT_CLOSED` | Window lifecycle | Loot count + per-slot functions |

@@ -362,6 +362,9 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumSkillLines` | scalar (number) | Legacy global; only present when it exists, no synthesized fallback |
 | `C_QuestLog.GetTrivialRange` | scalar (number) | UnitLevel; how many levels below the player a quest may be before it is trivial. Changes with the player's level, Forever only. Schema 22+ |
 | `GetQuestGreenRange` | scalar (number) | UnitLevel; the same on clients without `C_QuestLog.GetTrivialRange`. Not recorded by some versions before schema 22 |
+| `C_GameRules.IsHardcoreActive` | scalar (boolean) | PlayerIdentity; hardcore realm, recorded once at t=0. Schema 22+ |
+| `C_Seasons.HasActiveSeason` | scalar (boolean) | PlayerIdentity; recorded once at t=0 on clients that have `C_Seasons` (not Forever, where addons may define a stand-in). Schema 22+ |
+| `C_Seasons.GetActiveSeason` | scalar (number/nil) | PlayerIdentity; `Enum.SeasonID`, e.g. 2 Season of Discovery, 3 hardcore. Recorded like `C_Seasons.HasActiveSeason`. Schema 22+ |
 | `GetProfessions` | tuple (n=5) | profession tab indices; nil in missing tuple slots |
 | `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object (number[]) | Tracked independently whenever the API exists |
 | `C_GossipInfo.GetAvailableQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |

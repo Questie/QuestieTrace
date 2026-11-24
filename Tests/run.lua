@@ -3394,6 +3394,66 @@ local function TestLevelIsRecordedWithoutAWorkingRange()
   end
 end
 
+---Starts a capture with the PlayerIdentity tracker and returns its function streams.
+---@param mocks table<string, any> Globals of the client under test
+---@return table<string, any> functions
+local function PlayerIdentityStreams(mocks)
+  local runtime = NewRuntime({ "Modules/Trackers/PlayerIdentity.lua" })
+  local env = runtime.env
+  env.UnitRace = function() return "Orc", "Orc", 2 end
+  env.UnitClass = function() return "Warrior", "WARRIOR", 1 end
+  env.UnitSex = function() return 2 end
+  env.UnitFactionGroup = function() return "Horde", "Horde" end
+  env.GetBuildInfo = function() return "1.15.9", "70003", "Oct 14 2026", 11509 end
+  for name, mock in pairs(mocks) do env[name] = mock end
+  runtime.core.StartCapture("player identity")
+  return Session(runtime).functions --[[@as table<string, any>]]
+end
+
+local function TestRealmRulesAreRecordedOnce()
+  local functions = PlayerIdentityStreams({
+    C_GameRules = { IsHardcoreActive = function() return true end },
+    C_Seasons = { HasActiveSeason = function() return true end, GetActiveSeason = function() return 3 end },
+    issecurevariable = function(name) return name == "C_Seasons" end,
+  })
+  for key, expected in pairs({ ["C_GameRules.IsHardcoreActive"] = true, ["C_Seasons.HasActiveSeason"] = true, ["C_Seasons.GetActiveSeason"] = 3 }) do
+    local stream = functions[key]
+    assert(#stream == 1 and stream[1].t == 0 and stream[1].v == expected, key .. " is recorded at capture start")
+  end
+
+  functions = PlayerIdentityStreams({
+    C_Seasons = { HasActiveSeason = function() return false end, GetActiveSeason = function() return nil end },
+    issecurevariable = function(name) return name == "C_Seasons" end,
+  })
+  assert(functions["C_Seasons.HasActiveSeason"][1].v == false, "A realm without a season is recorded")
+  assert(#functions["C_Seasons.GetActiveSeason"] == 1 and functions["C_Seasons.GetActiveSeason"][1].v == nil, "So is the missing season")
+  assert(functions["C_GameRules.IsHardcoreActive"] == nil, "An API the client lacks has no stream")
+end
+
+local function TestAddonsSeasonStandInIsNotRecorded()
+  -- Questie defines C_Seasons on clients that have none, and loads before QuestieTrace.
+  local functions = PlayerIdentityStreams({
+    C_GameRules = { IsHardcoreActive = function() return false end },
+    C_Seasons = { HasActiveSeason = function() return false end, GetActiveSeason = function() return 0 end },
+    issecurevariable = function() return false, "Questie" end,
+  })
+  assert(functions["C_Seasons.HasActiveSeason"] == nil and functions["C_Seasons.GetActiveSeason"] == nil, "Another addon's answers must not be recorded")
+  assert(functions["C_GameRules.IsHardcoreActive"][1].v == false, "The client's own rule is recorded")
+end
+
+local function TestFailingRealmRuleIsReported()
+  ---@type any[]
+  local reported = {}
+  local functions = PlayerIdentityStreams({
+    C_GameRules = { IsHardcoreActive = function() error("not available") end },
+    C_Seasons = { HasActiveSeason = function() return true end, GetActiveSeason = function() return 2 end },
+    issecurevariable = function(name) return name == "C_Seasons" end,
+    geterrorhandler = function() return function(err) reported[#reported + 1] = err end end,
+  })
+  assert(#reported == 1, "The failing call is reported")
+  assert(functions["C_Seasons.GetActiveSeason"][1].v == 2 and functions.UnitRace.player[1].v[3] == 2, "Everything else is still recorded")
+end
+
 local function TestDisplayRecordsOnlyAllowlistedCVars()
   local runtime = NewRuntime({ "Modules/Trackers/Display.lua" })
   local env = runtime.env
@@ -4143,6 +4203,9 @@ local tests = {
   { name = "the trivial quest range follows the level on Forever", run = TestTrivialRangeFollowsTheLevelOnForever },
   { name = "the green quest range is recorded on clients without a trivial range", run = TestQuestGreenRangeOnClassic },
   { name = "the level is recorded without a working quest range", run = TestLevelIsRecordedWithoutAWorkingRange },
+  { name = "realm rules are recorded once", run = TestRealmRulesAreRecordedOnce },
+  { name = "another addon's season stand-in is not recorded", run = TestAddonsSeasonStandInIsNotRecorded },
+  { name = "a failing realm rule is reported and does not stop the capture", run = TestFailingRealmRuleIsReported },
   { name = "should record leaving an npc that was hovered at capture start", run = TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },

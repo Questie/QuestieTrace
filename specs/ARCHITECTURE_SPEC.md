@@ -17,7 +17,7 @@ Modules/Localization/Translations/Consent.lua  -- Data collection consent transl
 Modules/Localization/Translations/ExportUI.lua -- Export/UI translations
 Modules/Localization/Translations/ExportReminder.lua -- Share-reminder translations
 Modules/Consent.lua                   -- Data collection consent popup + login reminder
-Modules/Trackers/PlayerIdentity.lua   -- UnitRace, UnitClass, UnitClassBase, UnitSex, UnitFactionGroup (t=0 only)
+Modules/Trackers/PlayerIdentity.lua   -- UnitRace, UnitClass, UnitClassBase, UnitSex, UnitFactionGroup, realm rules (t=0 only)
 Modules/Trackers/UnitLevel.lua        -- UnitLevel["player"], C_QuestLog.GetTrivialRange/GetQuestGreenRange
 Modules/Trackers/Position.lua         -- Zone texts, map ID, player position, instance state
 Modules/Trackers/Loot.lua             -- Loot window capture
@@ -200,7 +200,7 @@ by callers.
 
 | Tracker | Purpose |
 |---|---|
-| PlayerIdentity | Player race/class/base-class/sex/faction at capture start |
+| PlayerIdentity | Player race/class/base-class/sex/faction and realm rules at capture start |
 | UnitLevel | Level and trivial quest range |
 | Position | Zone, map, XY, instance state |
 | Loot | Loot window count and per-slot APIs |
@@ -229,6 +229,6 @@ by callers.
 | `Core.PackArgs(...)` | Pack varargs into `{..., n=count}` | Events and tuple streams |
 | `Core.CopyPacked(args)` | Copy packed args | Event recording |
 | `Core.Round(num, decimals)` | Round numbers | Position tracker |
-| `Core.SampleScalar(stream, t, tp, fn, ...)` | Append a function's answer if it changed; report a failing call | GhostState, UnitLevel |
+| `Core.SampleScalar(stream, t, tp, fn, ...)` | Append a function's answer if it changed; report a failing call | PlayerIdentity, UnitLevel, GhostState |
 | `DeepCompare(t1, t2)` | Recursive table comparison | Change detection |
 | `C_After` / `Defer` | Timer helpers | Delayed sampling |
