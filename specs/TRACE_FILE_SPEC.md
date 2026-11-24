@@ -451,6 +451,7 @@ Called with a quest ID as the argument.
 |---|---|---|
 | `UnitGUID` | scalar string or nil | GUID; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+| `UnitGUIDIsSecret` | scalar boolean | Synthetic: whether `UnitGUID(token)` returned a secret value; also for nameplate tokens |
 
 ### Parameterized by loot slot index (number)
 

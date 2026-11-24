@@ -3294,6 +3294,75 @@ local function TestTradePartnerIsNotRecorded()
   assert(not ContainsString(session, "Grimtotem") and not ContainsString(session, "Player-"), "A trade partner's name and GUID are never recorded")
 end
 
+local function TestHiddenUnitIsToldFromNoUnit()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local secretGUID = "Creature-0-5251-36-12-644-000099999"
+  local npcGUID = "Creature-0-5251-0-12-295-000001"
+  ---@type table<string, string?>
+  local guids = {}
+  local fails = false
+  runtime.env.issecretvalue = function(value) return value == secretGUID end
+  runtime.env.UnitGUID = function(token)
+    if fails then error("token not available to addons") end
+    return guids[token]
+  end
+  runtime.env.UnitName = function(token) return guids[token] and "Some unit", nil end
+  runtime.env.UnitPlayerControlled = function() return false end
+  runtime.core.StartCapture("hidden units")
+  local session = Session(runtime)
+  local functions = session.functions --[[@as table<string, any>]]
+  local secrecy, recorded = functions.UnitGUIDIsSecret, functions.UnitGUID.target
+
+  ---@param now number
+  ---@param guid string?
+  local function Target(now, guid)
+    runtime.now = now
+    guids.target = guid
+    SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  end
+
+  -- Outside instances nothing is hidden, and nothing is recorded about it.
+  Target(1, npcGUID)
+  Target(2, nil)
+  assert(next(secrecy) == nil, "No stream before the first hidden unit")
+
+  Target(3, secretGUID)
+  Target(4, secretGUID)
+  assert(#secrecy.target == 1 and secrecy.target[1].t == 3 and secrecy.target[1].v == true, "A hidden unit is recorded once")
+  assert(#recorded == 3 and recorded[3].t == 2, "A hidden unit adds no GUID")
+
+  Target(5, nil)
+  assert(#secrecy.target == 2 and secrecy.target[2].t == 5 and secrecy.target[2].v == false, "No unit is told from a hidden unit")
+  Target(6, secretGUID)
+  Target(7, npcGUID)
+  assert(#secrecy.target == 4 and secrecy.target[4].t == 7 and secrecy.target[4].v == false, "So is a readable unit")
+  assert(recorded[#recorded].t == 7 and recorded[#recorded].v == npcGUID, "A readable unit is recorded after a hidden one")
+
+  -- A call that fails tells nothing about the unit.
+  Target(8, secretGUID)
+  local entries = #secrecy.target
+  fails = true
+  Target(9, nil)
+  assert(#secrecy.target == entries, "A failed call is no observation")
+  fails = false
+
+  -- Nameplates
+  guids.nameplate3 = secretGUID
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate3")
+  assert(#secrecy.nameplate3 == 1 and secrecy.nameplate3[1].v == true, "A hidden nameplate unit is recorded")
+  guids.nameplate3 = npcGUID
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate3")
+  assert(#secrecy.nameplate3 == 2 and secrecy.nameplate3[2].v == false, "A readable unit on a reused nameplate is recorded")
+  assert(secrecy.npc == nil and secrecy.nameplate1 == nil, "Tokens without hidden units have no stream")
+
+  assert(not ContainsString(session, secretGUID), "The hidden GUID itself is never recorded")
+
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("next capture")
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(next(Session(runtime).functions.UnitGUIDIsSecret) == nil, "A new capture starts without hidden units")
+end
+
 local function TestGhostStateIsRecorded()
   local runtime = NewRuntime({ "Modules/Trackers/GhostState.lua" })
   local isGhost = false
@@ -4206,6 +4275,7 @@ local tests = {
   { name = "realm rules are recorded once", run = TestRealmRulesAreRecordedOnce },
   { name = "another addon's season stand-in is not recorded", run = TestAddonsSeasonStandInIsNotRecorded },
   { name = "a failing realm rule is reported and does not stop the capture", run = TestFailingRealmRuleIsReported },
+  { name = "a hidden unit is told from no unit", run = TestHiddenUnitIsToldFromNoUnit },
   { name = "should record leaving an npc that was hovered at capture start", run = TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },

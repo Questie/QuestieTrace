@@ -160,7 +160,8 @@ Restricted GUIDs cannot pass privacy classification and are omitted, along with
 their associated unit names. They are not replaced with synthetic nil observations;
 other readable observations continue to be recorded. The one exception is
 nameplate tokens (schema 15+), where every withheld unit, restricted or not,
-records nil so a reused token never answers with its previous unit.
+records nil so a reused token never answers with its previous unit. Since
+schema 22 `UnitGUIDIsSecret[token]` tells when a GUID was restricted.
 
 Missing markers mean legacy/unknown semantics, even for schema v9. Those sessions
 may contain synthetic resets or normalized returns. Consumers must check for the
@@ -498,12 +499,14 @@ All tuple-returning functions MUST have `n` on every stored value.
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | GUID string; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+| `UnitGUIDIsSecret` | scalar (boolean) | *(synthetic)* whether `UnitGUID(token)` returned a secret value, i.e. the token has a unit whose identity the client hides (Forever, in instances). A token's stream starts at its first `true`; no stream means never hidden. Schema 22+ |
 
 ### Parameterized by nameplate token (`"nameplate1"`, `"nameplate2"`, ...)
 
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | UnitInteraction; `Creature-` or `Vehicle-` GUID, or nil when the token's unit is withheld. Sampled on `NAME_PLATE_UNIT_ADDED`, change-only per token. Schema 15+ |
+| `UnitGUIDIsSecret` | scalar (boolean) | *(synthetic)* as above: tells a hidden unit from the other withheld ones. Schema 22+ |
 
 Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, unrecognized or restricted GUIDs, and failed `UnitGUID` calls are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. Instances are sampled too: Questie draws nameplate icons in dungeons on Classic clients, while Forever restricts GUIDs there, so its instance adds record nil. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
 
