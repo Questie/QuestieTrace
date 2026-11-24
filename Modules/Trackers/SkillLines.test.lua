@@ -111,14 +111,23 @@ describe("SkillLines tracker", function()
   end)
 
   describe("on a client with C_SkillInfo", function()
-    ---@type (table|false)[] The skill window's rows; false for a row without data
-    local rows
-    ---@type table<number, table> Rows under a collapsed header, by skill ID
-    local collapsedRows
+    ---@class TestSkillHeader
+    ---@field skillID number
+    ---@field isCollapsed boolean
+    ---@field skills (table|false)[] false for a row the client has no data for
+
+    ---@type TestSkillHeader[] The skill window
+    local headers
     ---@type table[]
     local timers
     ---@type string[] Errors passed to the client's error handler
     local errors
+    ---@type string[] Headers opened and closed, in order
+    local headerChanges
+    ---@type table? The capture whose tracker gets the events the mock fires
+    local listening
+    ---@type number Every sample reads GetProfessions once
+    local samplesTaken
 
     ---@param skillID number
     ---@param rank number
@@ -128,6 +137,32 @@ describe("SkillLines tracker", function()
         skillID = skillID, name = "Testplayer's skill", description = "Testplayer learned this", isHeader = false, isCollapsed = false,
         rank = rank, maxRank = 150, modifier = 5, tempPoints = 0, parentSkillLineID = 0, skillLineCategoryID = 9,
       }
+    end
+
+    ---The rows the client lists: every header, and the skills of the open ones.
+    ---@return (table|false)[] rows
+    ---@return table<number, TestSkillHeader> headerByRow
+    local function ListRows()
+      local rows, headerByRow = {}, {}
+      for _, header in ipairs(headers) do
+        rows[#rows + 1] = { skillID = header.skillID, name = "Testplayer's header", isHeader = true, isCollapsed = header.isCollapsed }
+        headerByRow[#rows] = header
+        if not header.isCollapsed then
+          for _, skill in ipairs(header.skills) do rows[#rows + 1] = skill end
+        end
+      end
+      return rows, headerByRow
+    end
+
+    ---Like the client: the event fires while the call runs.
+    ---@param index number
+    ---@param isCollapsed boolean
+    local function SetCollapsed(index, isCollapsed)
+      local _, headerByRow = ListRows()
+      local header = assert(headerByRow[index], "Row " .. index .. " is not a header")
+      header.isCollapsed = isCollapsed
+      headerChanges[#headerChanges + 1] = (isCollapsed and "close " or "open ") .. header.skillID
+      if listening then tracker.OnEvent(listening, "SKILL_LINES_CHANGED") end
     end
 
     ---@return table<number, table[]>
@@ -154,6 +189,7 @@ describe("SkillLines tracker", function()
       env.GetTimePreciseSec = function() return 5000 + env.now + 0.25 end
       local capture = NewCapture()
       capture.startedAt, capture.startedAtPrecise = 100, 5000
+      listening = capture
       tracker.Init(capture)
       return capture
     end
@@ -161,78 +197,99 @@ describe("SkillLines tracker", function()
     ---Count the samples taken from now on.
     ---@return fun(): number
     local function CountSamples()
-      local samples = 0
-      local getNumSkillLines = env.C_SkillInfo.GetNumSkillLines
-      env.C_SkillInfo.GetNumSkillLines = function()
-        samples = samples + 1
-        return getNumSkillLines()
-      end
-      return function() return samples end
+      local samplesBefore = samplesTaken
+      return function() return samplesTaken - samplesBefore end
     end
 
     before_each(function()
       env.now = 0
-      errors = {}
+      errors, headerChanges, timers, listening, samplesTaken = {}, {}, {}, nil, 0
+      env.GetProfessions = function()
+        samplesTaken = samplesTaken + 1
+        return 1
+      end
       env.geterrorhandler = function() return function(err) errors[#errors + 1] = err end end
-      timers = {}
       env.C_Timer = { After = function(delay, callback) timers[#timers + 1] = { at = env.now + delay, callback = callback } end }
-      collapsedRows = {}
-      rows = { { skillID = 9, name = "Secondary Skills", isHeader = true }, Skill(129, 44), Skill(762, 75) }
+      headers = {
+        { skillID = 9, isCollapsed = false, skills = { Skill(129, 44), Skill(762, 75) } },
+        { skillID = 6, isCollapsed = false, skills = { Skill(43, 10) } },
+        { skillID = 8, isCollapsed = false, skills = { Skill(415, 1) } },
+      }
       env.C_SkillInfo = {
-        GetNumSkillLines = function() return #rows end,
-        GetSkillLineInfo = function(index) return rows[index] end,
-        GetSkillLineInfoByID = function(skillID) return collapsedRows[skillID] end,
+        GetNumSkillLines = function() return #ListRows() end,
+        GetSkillLineInfo = function(index) return ListRows()[index] or nil end,
+        GetSkillLineInfoByID = function(skillID)
+          for _, header in ipairs(headers) do
+            for _, skill in ipairs(header.skills) do
+              if skill and skill.skillID == skillID then return skill end
+            end
+          end
+        end,
+        ExpandSkillHeader = function(index) SetCollapsed(index, false) end,
+        CollapseSkillHeader = function(index) SetCollapsed(index, true) end,
       }
     end)
 
     it("should record the changing numbers of each skill by its id, and no text", function()
       local capture = StartCapture()
 
-      assert.are.same({
-        [129] = { { t = 0, tp = 0.25, v = { rank = 44, maxRank = 150, modifier = 5, tempPoints = 0 } } },
-        [762] = { { t = 0, tp = 0.25, v = { rank = 75, maxRank = 150, modifier = 5, tempPoints = 0 } } },
-      }, Streams(capture))
+      ---@param rank number
+      local function Entry(rank) return { { t = 0, tp = 0.25, v = { rank = rank, maxRank = 150, modifier = 5, tempPoints = 0 } } } end
+      assert.are.same({ [129] = Entry(44), [762] = Entry(75), [43] = Entry(10), [415] = Entry(1) }, Streams(capture))
+      assert.are.same({}, errors)
     end)
 
     it("should record a skill again only when one of its numbers changed", function()
       local capture = StartCapture()
+      local firstAid = headers[1].skills[1]
+      ---@cast firstAid table
 
       for second, field in ipairs({ "rank", "maxRank", "modifier", "tempPoints" }) do
         env.now = second * 10
         tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
         assert.are.equal(second, #Streams(capture)[129], "Nothing changed yet")
-        rows[2][field] = rows[2][field] + 1
+        firstAid[field] = firstAid[field] + 1
         env.now = second * 10 + 5
         tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
         assert.are.equal(second + 1, #Streams(capture)[129], field .. " changed")
-        assert.are.equal(rows[2][field], Streams(capture)[129][second + 1].v[field])
+        assert.are.equal(firstAid[field], Streams(capture)[129][second + 1].v[field])
       end
       assert.are.equal(1, #Streams(capture)[762])
     end)
 
-    it("should keep following a skill under a collapsed header, and record an unlearned one as gone", function()
+    it("should record an unlearned skill as gone, once, and again when it is learned again", function()
       local capture = StartCapture()
 
-      collapsedRows[129] = Skill(129, 60)
-      rows[3], rows[2] = nil, nil
-      env.now = 5
-      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
-
-      assert.are.equal(60, Streams(capture)[129][2].v.rank)
+      local riding = table.remove(headers[1].skills, 2)
+      for _, second in ipairs({ 5, 10 }) do
+        env.now = second
+        tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      end
+      assert.are.equal(2, #Streams(capture)[762])
       assert.are.same({ t = 5, tp = 5.25 }, Streams(capture)[762][2])
 
-      env.now = 10
-      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
-      assert.are.equal(2, #Streams(capture)[762])
-
-      rows[2] = Skill(762, 1)
+      headers[1].skills[2] = riding
       env.now = 15
       tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
-      assert.are.equal(1, Streams(capture)[762][3].v.rank, "Learned again")
+      assert.are.equal(75, Streams(capture)[762][3].v.rank)
+    end)
+
+    it("should not record skills as gone while the client lists none but still knows them", function()
+      local capture = StartCapture()
+
+      local getNumSkillLines = env.C_SkillInfo.GetNumSkillLines
+      env.C_SkillInfo.GetNumSkillLines = function() return 0 end
+      env.now = 5
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      env.C_SkillInfo.GetNumSkillLines = getNumSkillLines
+      env.now = 10
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+
+      assert.are.equal(1, #Streams(capture)[129])
     end)
 
     it("should skip a row the client has no data for", function()
-      rows[2] = false
+      headers[1].skills[1] = false
       local capture = StartCapture()
 
       assert.is_nil(Streams(capture)[129])
@@ -240,22 +297,110 @@ describe("SkillLines tracker", function()
       assert.are.same({}, errors)
     end)
 
-    it("should not use the old functions another addon provides, nor open the player's skill headers", function()
+    it("should not use the old functions another addon provides, nor touch headers that are open", function()
       env.GetNumSkillLines = function() error("must not be called") end
       env.GetSkillLineInfo = env.GetNumSkillLines
       env.ExpandSkillHeader = env.GetNumSkillLines
-      env.C_SkillInfo.ExpandSkillHeader = env.GetNumSkillLines
 
       local capture = StartCapture()
 
       assert.are.equal(44, Streams(capture)[129][1].v.rank)
+      assert.are.same({}, headerChanges)
       assert.is_nil(capture.session.functions["GetNumSkillLines"])
       assert.is_nil(capture.session.functions["GetSkillLineInfo"])
     end)
 
+    it("should record skills under headers collapsed before the capture, and collapse those headers again", function()
+      headers[1].isCollapsed, headers[3].isCollapsed = true, true
+      local capture = StartCapture()
+
+      assert.are.equal(44, Streams(capture)[129][1].v.rank)
+      assert.are.equal(75, Streams(capture)[762][1].v.rank)
+      assert.are.equal(1, Streams(capture)[415][1].v.rank)
+      assert.are.same({ true, false, true }, { headers[1].isCollapsed, headers[2].isCollapsed, headers[3].isCollapsed })
+      assert.are.same({ "open 8", "open 9", "close 8", "close 9" }, headerChanges)
+      assert.are.same({}, errors)
+    end)
+
+    it("should record a skill learned under a collapsed header, and keep following the others", function()
+      headers[1].isCollapsed = true
+      local capture = StartCapture()
+
+      headers[1].skills[1].rank = 60
+      table.insert(headers[1].skills, Skill(356, 1))
+      env.now = 5
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+
+      assert.are.equal(60, Streams(capture)[129][2].v.rank)
+      assert.are.equal(1, Streams(capture)[356][1].v.rank)
+      assert.are.equal(1, #Streams(capture)[762], "Known under the collapsed header, not gone")
+      assert.is_true(headers[1].isCollapsed)
+    end)
+
+    it("should not sample again for the events its own opening and closing fires", function()
+      headers[1].isCollapsed = true
+      local capture = StartCapture()
+      local samples = CountSamples()
+
+      env.now = 10
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      AdvanceTo(60)
+
+      assert.are.equal(1, samples())
+    end)
+
+    it("should collapse the headers again and keep sampling when reading the opened list fails", function()
+      headers[1].isCollapsed = true
+      local riding = headers[1].skills[2]
+      ---@cast riding table
+      headers[1].skills[2] = setmetatable({}, { __index = function(_, key)
+        if key == "rank" then error("not available yet") end
+        return riding[key]
+      end })
+
+      local capture = StartCapture()
+      assert.are.equal(1, #errors)
+      assert.is_truthy(errors[1]:find("not available yet", 1, true))
+      assert.are.same({ "open 9", "close 9" }, headerChanges)
+
+      headers[1].skills[2] = riding
+      env.now = 10
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      assert.are.equal(75, Streams(capture)[762][1].v.rank)
+      assert.are.equal(1, #errors)
+    end)
+
+    it("should collapse only the headers it opened when opening one fails", function()
+      headers[1].isCollapsed, headers[3].isCollapsed = true, true
+      local expandSkillHeader = env.C_SkillInfo.ExpandSkillHeader
+      env.C_SkillInfo.ExpandSkillHeader = function(index)
+        local _, headerByRow = ListRows()
+        if headerByRow[index] == headers[1] then error("not now") end
+        expandSkillHeader(index)
+      end
+
+      StartCapture()
+
+      assert.are.same({ "open 8", "close 8" }, headerChanges)
+      assert.are.equal(1, #errors)
+    end)
+
+    it("should keep sampling when the client fails to collapse a header again", function()
+      headers[1].isCollapsed = true
+      env.C_SkillInfo.CollapseSkillHeader = function() error("not now") end
+
+      local capture = StartCapture()
+      assert.are.equal(44, Streams(capture)[129][1].v.rank)
+      assert.are.equal(1, #errors)
+
+      headers[1].skills[1].rank = 45
+      env.now = 10
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      assert.are.equal(45, Streams(capture)[129][2].v.rank)
+    end)
+
     it("should report a failing client function and keep the capture running", function()
       env.C_SkillInfo.GetNumSkillLines = function() error("not available yet") end
-      env.GetProfessions = function() return 1 end
 
       local capture = StartCapture()
 
@@ -273,7 +418,7 @@ describe("SkillLines tracker", function()
       for _ = 1, 4101 do tracker.OnEvent(capture, "SKILL_LINES_CHANGED") end
       assert.are.equal(1, samples(), "The first event samples at once, however soon after the capture started")
 
-      rows[2].rank = 45
+      headers[1].skills[1].rank = 45
       AdvanceTo(0.12)
       tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
       AdvanceTo(0.14)
@@ -305,24 +450,38 @@ describe("SkillLines tracker", function()
       assert.are.equal(2, samples())
     end)
 
-    it("should drop a pending sample when the capture has stopped, or another one has started", function()
+    it("should take a pending sample when the capture stops, and only then", function()
+      local capture = StartCapture()
+      env.now = 10
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      local samples = CountSamples()
+
+      capture.active = false
+      tracker.OnCaptureStopped(capture)
+      assert.are.equal(0, samples(), "Nothing pending")
+      capture.active = true
+
+      headers[1].skills[1].rank = 50
+      env.now = 10.05
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      env.now = 10.06
+      capture.active = false
+      tracker.OnCaptureStopped(capture)
+      assert.are.equal(1, samples())
+      assert.are.equal(50, Streams(capture)[129][2].v.rank)
+
+      AdvanceTo(20)
+      assert.are.equal(1, samples(), "The timer of the stopped capture does nothing")
+    end)
+
+    it("should drop a pending sample when another capture has started", function()
       local capture = StartCapture()
       env.now = 10
       tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
       tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
-      rows[2].rank = 50
-
-      capture.active = false
-      AdvanceTo(20)
-      assert.are.equal(1, #Streams(capture)[129])
 
       -- QuestieTrace reuses one capture table: a restart sets it active again with a new token.
-      capture.active = true
       capture.token = 2
-      tracker.Init(capture)
-      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
-      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
-      capture.token = 3
       tracker.Init(capture)
       local samples = CountSamples()
       AdvanceTo(30)
@@ -330,7 +489,7 @@ describe("SkillLines tracker", function()
 
       tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
       assert.are.equal(1, samples())
-      capture.token = 4
+      capture.token = 3
       tracker.Init(capture)
       tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
       assert.are.equal(3, samples(), "A new capture samples its first event at once")
@@ -392,6 +551,18 @@ describe("SkillLines tracker", function()
       assert.are.equal(3, headersExpanded)
       assert.are.equal(1, #timers)
       assert.are.equal(151, capture.session.functions["GetSkillLineInfo"][1][2].v[4])
+    end)
+
+    it("should take a pending sample when the capture stops", function()
+      env.now = 10
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      env.now, env.rank = 10.05, 151
+      tracker.OnEvent(capture, "SKILL_LINES_CHANGED")
+      capture.active = false
+      tracker.OnCaptureStopped(capture)
+
+      local stream = capture.session.functions["GetSkillLineInfo"][1]
+      assert.are.equal(151, stream[#stream].v[4])
     end)
   end)
 

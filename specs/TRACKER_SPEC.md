@@ -381,10 +381,12 @@ Forever, without the spell ID the tracker reads.
   known: the book can list fewer spells than the player knows, e.g. while it loads.
 - **Skills** are keyed by skill ID: a row's index changes when a skill is learned or a header
   collapsed. Only `rank`, `maxRank`, `modifier` and `tempPoints` are stored, since a skill's other
-  fields never change and the description is longer than all of them. A skill whose row is gone is
-  read by ID: under a collapsed header it is still there, an unlearned one is recorded as an entry
-  without a value. Headers are never expanded; a skill under a header that was collapsed for the
-  whole capture is not recorded.
+  fields never change and the description is longer than all of them. A skill that is not listed is
+  asked for by ID, and recorded as an entry without a value when the client does not know it either.
+- The client does not list skills under a collapsed header. Those headers are opened, the list is
+  read again, and they are collapsed again, also when reading fails. Nothing is touched while every
+  header is open. No skill IDs are tried instead: the client only answers for skills the player has,
+  so there is no telling where to stop.
 - A client function that fails is reported to the client's error handler, and the capture goes on.
 
 ---

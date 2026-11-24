@@ -70,8 +70,8 @@ local knownSkillLineIndices
 local knownProfessionIndices
 ---@type table<number, boolean>
 local knownTradeSkillLineIds
----@type boolean
-local expandingSkillHeaders
+---@type boolean While this tracker opens or closes headers, which fires SKILL_LINES_CHANGED during the call
+local changingSkillHeaders
 ---@type SkillInfoApi?
 local skillInfoApi
 
@@ -90,6 +90,7 @@ local isSamplePending
 ---@class SkillInfoRow
 ---@field skillID number
 ---@field isHeader boolean
+---@field isCollapsed boolean
 ---@field rank number
 ---@field maxRank number
 ---@field modifier number
@@ -99,6 +100,8 @@ local isSamplePending
 ---@field GetNumSkillLines fun(): number
 ---@field GetSkillLineInfo fun(index: number): SkillInfoRow?
 ---@field GetSkillLineInfoByID fun(skillID: number): SkillInfoRow?
+---@field ExpandSkillHeader fun(index: number)
+---@field CollapseSkillHeader fun(index: number)
 
 ---C_SkillInfo on clients that list their skills through it. Looked for before
 ---the old functions, since other addons bring those back on Forever.
@@ -113,9 +116,9 @@ end
 local function ExpandAllSkillHeaders()
   if type(ExpandSkillHeader) ~= "function" then return end
 
-  expandingSkillHeaders = true
+  changingSkillHeaders = true
   ExpandSkillHeader(0)
-  expandingSkillHeaders = false
+  changingSkillHeaders = false
 end
 
 ---Safely call a function and return the first result.
@@ -253,24 +256,68 @@ local function AppendSkillIfChanged(skillID, t, tp, row)
   AppendPackedIfChanged("C_SkillInfo.GetSkillLineInfoByID", skillID, prevSkillLineInfo, t, tp, numbers)
 end
 
---- Sample the skills through C_SkillInfo, by skill ID: a row's index changes
---- when a skill is learned or a header collapsed.
+--- Append the skills the client lists, by skill ID: a row's index changes when
+--- a skill is learned or a header collapsed.
+---@param api SkillInfoApi
+---@param t number
+---@param tp number
+---@param seenSkillIDs table<number, boolean> Filled with the skills listed
+---@return table<number, boolean>? collapsedHeaderIDs Headers whose skills are not listed
+local function AppendListedSkills(api, t, tp, seenSkillIDs)
+  ---@type table<number, boolean>?
+  local collapsedHeaderIDs
+  for index = 1, api.GetNumSkillLines() do
+    local row = api.GetSkillLineInfo(index)
+    if row and row.isHeader then
+      if row.isCollapsed then
+        collapsedHeaderIDs = collapsedHeaderIDs or {}
+        collapsedHeaderIDs[row.skillID] = true
+      end
+    elseif row then
+      seenSkillIDs[row.skillID] = true
+      AppendSkillIfChanged(row.skillID, t, tp, row)
+    end
+  end
+  return collapsedHeaderIDs
+end
+
+--- Goes from the last row to the first: opening or closing a header moves the
+--- rows after it.
+---@param api SkillInfoApi
+---@param headerIDs table<number, boolean>
+---@param isCollapsed boolean
+local function SetSkillHeadersCollapsed(api, headerIDs, isCollapsed)
+  for index = api.GetNumSkillLines(), 1, -1 do
+    local row = api.GetSkillLineInfo(index)
+    if row and row.isHeader and headerIDs[row.skillID] and row.isCollapsed ~= isCollapsed then
+      if isCollapsed then
+        api.CollapseSkillHeader(index)
+      else
+        api.ExpandSkillHeader(index)
+      end
+    end
+  end
+end
+
+--- Sample the skills through C_SkillInfo. The client does not list skills under
+--- a collapsed header, so those headers are opened for the read and closed again.
 ---@param api SkillInfoApi
 ---@param t number
 ---@param tp number
 local function SampleSkillInfo(api, t, tp)
   ---@type table<number, boolean>
   local seenSkillIDs = {}
-  for index = 1, api.GetNumSkillLines() do
-    local row = api.GetSkillLineInfo(index)
-    if row and not row.isHeader then
-      seenSkillIDs[row.skillID] = true
-      AppendSkillIfChanged(row.skillID, t, tp, row)
-    end
+  local collapsedHeaderIDs = AppendListedSkills(api, t, tp, seenSkillIDs)
+  if collapsedHeaderIDs then
+    changingSkillHeaders = true
+    local ok, err = pcall(function()
+      SetSkillHeadersCollapsed(api, collapsedHeaderIDs, false)
+      AppendListedSkills(api, t, tp, seenSkillIDs)
+    end)
+    SetSkillHeadersCollapsed(api, collapsedHeaderIDs, true)
+    if not ok then error(err, 0) end
   end
 
-  -- Under a collapsed header, or unlearned. Opening the header would change
-  -- what the player sees in the skill window.
   local streams = functions["C_SkillInfo.GetSkillLineInfoByID"]
   ---@cast streams table<number, FunctionStreamEntry[]>
   for skillID in pairs(streams) do
@@ -374,6 +421,7 @@ local function SampleSkills(capture)
   if skillInfoApi then
     -- Reported like any Lua error, but the capture and the other trackers go on.
     local ok, err = pcall(SampleSkillInfo, skillInfoApi, t, tp)
+    changingSkillHeaders = false
     if not ok then geterrorhandler()(err) end
   else
     SampleSkillLines(t, tp)
@@ -421,7 +469,7 @@ Core.RegisterTracker({
     knownSkillLineIndices = {}
     knownProfessionIndices = {}
     knownTradeSkillLineIds = {}
-    expandingSkillHeaders = false
+    changingSkillHeaders = false
     skillInfoApi = FindSkillInfoApi()
     lastSampleAt = nil
     isSamplePending = false
@@ -455,9 +503,16 @@ Core.RegisterTracker({
   ---@param capture CaptureState
   ---@param event string
   OnEvent = function(capture, event)
-    if event == "SKILL_LINES_CHANGED" and expandingSkillHeaders then
+    if event == "SKILL_LINES_CHANGED" and changingSkillHeaders then
       return
     end
     RequestSample(capture)
+  end,
+
+  ---@param capture CaptureState
+  OnCaptureStopped = function(capture)
+    if not isSamplePending then return end
+    isSamplePending = false
+    SampleSkills(capture)
   end,
 })
