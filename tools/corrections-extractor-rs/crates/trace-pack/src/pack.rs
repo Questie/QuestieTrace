@@ -513,6 +513,113 @@ fn decode_index(bytes: &[u8]) -> Result<Vec<Entry>, WireError> {
 
 // ---- Reading a pack ----
 
+/// The first [`HEADER_LEN`] bytes of a pack: its magic and a version this reader knows.
+fn check_header(header: &[u8]) -> Result<(), String> {
+    if header.len() != HEADER_LEN || header[..4] != HEADER_MAGIC || header[4..8] != 8u32.to_le_bytes() || header[8..12] != *PACK_MAGIC {
+        return Err("not a pack".into());
+    }
+    let version = u32::from_le_bytes(header[12..16].try_into().expect("four bytes"));
+    if version != FORMAT_VERSION {
+        return Err(format!("pack format version {version} is not supported"));
+    }
+    Ok(())
+}
+
+/// Where the index frame lies in a pack of `pack_len` bytes, from the pack's last
+/// [`TRAILER_LEN`] bytes. The index must end where the trailer starts.
+fn index_range(pack_len: u64, trailer: &[u8]) -> Result<std::ops::Range<u64>, String> {
+    if trailer.len() != TRAILER_LEN || trailer[..4] != TRAILER_MAGIC || trailer[4..8] != 16u32.to_le_bytes() {
+        return Err("pack has no trailer: it was cut off".into());
+    }
+    let number = |range: std::ops::Range<usize>| u64::from_le_bytes(trailer[range].try_into().expect("eight bytes"));
+    let (index_offset, index_length) = (number(8..16), number(16..24));
+    let index_end = index_offset
+        .checked_add(index_length)
+        .filter(|&end| Some(end) == pack_len.checked_sub(TRAILER_LEN as u64));
+    match index_end {
+        Some(index_end) if index_offset >= HEADER_LEN as u64 => Ok(index_offset..index_end),
+        _ => Err("pack trailer does not point at the index".into()),
+    }
+}
+
+/// The entries of an index frame that starts at `index_offset` in its pack.
+///
+/// The frames must fill the space between the header and the index, back to back and in index
+/// order: one entry for every frame, and no bytes the index does not account for.
+fn entries_of(index_frame: &[u8], index_offset: u64) -> Result<Vec<Entry>, String> {
+    let index = decompress(index_frame, MAX_INDEX_BYTES).map_err(|message| format!("pack index: {message}"))?;
+    let entries = decode_index(&index).map_err(|error| error.0)?;
+    let mut expected_offset = HEADER_LEN as u64;
+    for entry in &entries {
+        if entry.offset != expected_offset {
+            return Err("pack index does not list the frames back to back".into());
+        }
+        expected_offset = entry
+            .offset
+            .checked_add(entry.length)
+            .filter(|&end| end <= index_offset)
+            .ok_or("pack index names a frame outside the pack")?;
+    }
+    if expected_offset != index_offset {
+        return Err("pack holds bytes its index does not list".into());
+    }
+    Ok(entries)
+}
+
+/// The index of a pack that is stored somewhere else, read without its frames.
+///
+/// `fetch` returns the bytes of one range of the pack. It is asked three times: for the
+/// header, the trailer and the index. The pack must be the same object for all three; a
+/// caller that cannot rule out a rewrite in between pins the pack's checksum in `fetch`.
+pub fn read_index(pack_len: u64, mut fetch: impl FnMut(std::ops::Range<u64>) -> Result<Vec<u8>, String>) -> Result<Vec<Entry>, String> {
+    if pack_len < (HEADER_LEN + TRAILER_LEN) as u64 {
+        return Err("not a pack: too short".into());
+    }
+    check_header(&fetch(0..HEADER_LEN as u64)?)?;
+    let index = index_range(pack_len, &fetch(pack_len - TRAILER_LEN as u64..pack_len)?)?;
+    // The compressed index is smaller than what it decompresses to, which has this limit.
+    if index.end - index.start > MAX_INDEX_BYTES {
+        return Err("pack index is over the limit".into());
+    }
+    entries_of(&fetch(index.clone())?, index.start)
+}
+
+/// `pack` without the submissions `remove` selects. This is how a rejected submission leaves
+/// a pack; `level` compresses the new index.
+///
+/// Frames are copied, never built again. The new pack replaces the only copy of every other
+/// submission the pack holds, so it is opened before it is returned: each of its frames must
+/// be, byte for byte, the frame the old pack has for that submission, under the same index
+/// entry apart from where the frame now lies.
+pub fn without(pack: &[u8], level: i32, remove: impl Fn(&Entry) -> bool) -> Result<Vec<u8>, String> {
+    let old = PackReader::open(pack)?;
+    let kept: Vec<&Entry> = old.entries().iter().filter(|entry| !remove(entry)).collect();
+    let mut writer = PackWriter::new();
+    for entry in &kept {
+        writer.add(Frame {
+            compressed: old.frame(entry).to_vec(),
+            entry: (*entry).clone(),
+            report: FrameReport::default(),
+        });
+    }
+    let rewritten = writer.finish(level)?;
+
+    let new = PackReader::open(&rewritten).map_err(|message| format!("the rewritten pack does not open: {message}"))?;
+    if new.entries().len() != kept.len() {
+        return Err("the rewritten pack does not hold the submissions that were kept".into());
+    }
+    for (new_entry, old_entry) in new.entries().iter().zip(&kept) {
+        let same_entry = Entry {
+            offset: old_entry.offset,
+            ..new_entry.clone()
+        } == **old_entry;
+        if !same_entry || new.frame(new_entry) != old.frame(old_entry) {
+            return Err(format!("{}: the rewritten pack does not hold the frame the pack had", old_entry.name));
+        }
+    }
+    Ok(rewritten)
+}
+
 pub struct PackReader<'a> {
     bytes: &'a [u8],
     entries: Vec<Entry>,
@@ -522,48 +629,14 @@ impl<'a> PackReader<'a> {
     /// Reads the index of a pack held in memory. Every frame the index names must lie inside
     /// the pack, before the index.
     pub fn open(bytes: &'a [u8]) -> Result<Self, String> {
-        let header = bytes.get(..HEADER_LEN).ok_or("not a pack: too short")?;
-        if header[..4] != HEADER_MAGIC || header[4..8] != 8u32.to_le_bytes() || header[8..12] != *PACK_MAGIC {
-            return Err("not a pack".into());
-        }
-        let version = u32::from_le_bytes(header[12..16].try_into().expect("four bytes"));
-        if version != FORMAT_VERSION {
-            return Err(format!("pack format version {version} is not supported"));
-        }
+        check_header(bytes.get(..HEADER_LEN).ok_or("not a pack: too short")?)?;
         let trailer = bytes
             .len()
             .checked_sub(TRAILER_LEN)
             .map(|start| &bytes[start..])
             .ok_or("not a pack: too short")?;
-        if trailer[..4] != TRAILER_MAGIC || trailer[4..8] != 16u32.to_le_bytes() {
-            return Err("pack has no trailer: it was cut off".into());
-        }
-        let number = |range: std::ops::Range<usize>| u64::from_le_bytes(trailer[range].try_into().expect("eight bytes"));
-        let (index_offset, index_length) = (number(8..16), number(16..24));
-        let index_end = index_offset.checked_add(index_length).filter(|&end| end == (bytes.len() - TRAILER_LEN) as u64);
-        if index_offset < HEADER_LEN as u64 || index_end.is_none() {
-            return Err("pack trailer does not point at the index".into());
-        }
-        let index =
-            decompress(&bytes[index_offset as usize..bytes.len() - TRAILER_LEN], MAX_INDEX_BYTES).map_err(|message| format!("pack index: {message}"))?;
-        let entries = decode_index(&index).map_err(|error| error.0)?;
-
-        // The frames must fill the space between the header and the index, back to back and in
-        // index order: one entry for every frame, and no bytes the index does not account for.
-        let mut expected_offset = HEADER_LEN as u64;
-        for entry in &entries {
-            if entry.offset != expected_offset {
-                return Err("pack index does not list the frames back to back".into());
-            }
-            expected_offset = entry
-                .offset
-                .checked_add(entry.length)
-                .filter(|&end| end <= index_offset)
-                .ok_or("pack index names a frame outside the pack")?;
-        }
-        if expected_offset != index_offset {
-            return Err("pack holds bytes its index does not list".into());
-        }
+        let index = index_range(bytes.len() as u64, trailer)?;
+        let entries = entries_of(&bytes[index.start as usize..index.end as usize], index.start)?;
         Ok(PackReader { bytes, entries })
     }
 
@@ -1014,5 +1087,118 @@ mod tests {
         let mut late = second.clone();
         late.offset += 1;
         assert_eq!(open(&[first, late]).as_deref(), Some("pack index does not list the frames back to back"));
+    }
+    // ---- A pack stored elsewhere, and a pack rewritten ----
+
+    fn three_submissions() -> (Vec<(&'static str, Vec<u8>)>, Vec<u8>) {
+        let files = vec![
+            ("2026-11/2026-11-08_180000Z_aaa.json", file(&export_string(&trace(7.370141)))),
+            // The same export as the first: another contributor sent the same trace.
+            ("2026-11/2026-11-08_180100Z_bbb.json", file(&export_string(&trace(7.370141)))),
+            ("2026-11/2026-11-08_180200Z_ccc.json", file("not an export")),
+        ];
+        let (pack, _) = pack_of(&files, &options());
+        (files, pack)
+    }
+
+    #[test]
+    fn the_index_of_a_pack_stored_elsewhere_is_read_from_three_small_ranges() {
+        let (_, pack) = three_submissions();
+        let mut fetched = Vec::new();
+        let entries = read_index(pack.len() as u64, |range| {
+            fetched.push(range.clone());
+            Ok(pack[range.start as usize..range.end as usize].to_vec())
+        })
+        .unwrap();
+
+        assert_eq!(entries, PackReader::open(&pack).unwrap().entries());
+        let last_frame_end = entries.last().map(|entry| entry.offset + entry.length).unwrap();
+        assert_eq!(
+            fetched,
+            [0..16, pack.len() as u64 - 24..pack.len() as u64, last_frame_end..pack.len() as u64 - 24]
+        );
+    }
+
+    #[test]
+    fn an_index_read_from_ranges_is_refused_like_the_pack_would_be() {
+        let (_, pack) = three_submissions();
+        let read = |pack: &[u8], pack_len: u64| {
+            read_index(pack_len, |range| {
+                pack.get(range.start as usize..range.end as usize)
+                    .map(<[u8]>::to_vec)
+                    .ok_or("out of range".to_string())
+            })
+        };
+        assert!(read(&pack, pack.len() as u64).is_ok());
+
+        // Cut off: the last bytes are not a trailer.
+        assert!(read(&pack[..pack.len() - 1], pack.len() as u64 - 1).is_err());
+        // A size that is not the pack's: the trailer is found elsewhere, or not at all.
+        assert!(read(&pack, pack.len() as u64 - 24).is_err());
+        assert!(read(&pack, 39).is_err());
+        // Another format version.
+        let mut newer = pack.clone();
+        newer[12] = 2;
+        assert_eq!(read(&newer, newer.len() as u64).unwrap_err(), "pack format version 2 is not supported");
+        // A damaged index fails its checksum.
+        let mut damaged = pack.clone();
+        let inside_the_index = pack.len() - 24 - 5;
+        damaged[inside_the_index] ^= 1;
+        assert!(read(&damaged, damaged.len() as u64).is_err());
+        // A store that returns fewer bytes than were asked for, or the whole pack whatever
+        // was asked for.
+        assert!(read_index(pack.len() as u64, |range| Ok(pack[range.start as usize..range.end as usize - 1].to_vec())).is_err());
+        assert!(read_index(pack.len() as u64, |_| Ok(pack.clone())).is_err());
+    }
+
+    #[test]
+    fn a_pack_without_one_submission_keeps_every_other_frame_byte_for_byte() {
+        let (files, pack) = three_submissions();
+        let old = PackReader::open(&pack).unwrap();
+
+        let rewritten = without(&pack, 9, |entry| entry.name.ends_with("_aaa.json")).unwrap();
+
+        let new = PackReader::open(&rewritten).unwrap();
+        let names: Vec<&str> = new.entries().iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(names, [files[1].0, files[2].0]);
+        for (index, entry) in new.entries().iter().enumerate() {
+            let before = &old.entries()[index + 1];
+            assert_eq!(new.frame(entry), old.frame(before));
+            assert_eq!(new.record(index).unwrap(), old.record(index + 1).unwrap());
+            assert_eq!(
+                (&entry.submission_id, &entry.contributor_id, &entry.received_at, &entry.exports),
+                (&before.submission_id, &before.contributor_id, &before.received_at, &before.exports)
+            );
+        }
+        // The frames moved up by the length of the one that left.
+        assert_eq!(new.entries()[0].offset, 16);
+        assert_eq!(
+            rewritten.len(),
+            pack.len() - old.entries()[0].length as usize - (index_length(&pack) - index_length(&rewritten))
+        );
+    }
+
+    /// The length of a pack's index frame, from its trailer.
+    fn index_length(pack: &[u8]) -> usize {
+        u64::from_le_bytes(pack[pack.len() - 8..].try_into().unwrap()) as usize
+    }
+
+    #[test]
+    fn a_pack_without_nothing_is_the_same_pack_and_without_everything_is_an_empty_one() {
+        let (_, pack) = three_submissions();
+        assert_eq!(without(&pack, 9, |_| false).unwrap(), pack);
+
+        let empty = without(&pack, 9, |_| true).unwrap();
+        assert_eq!(PackReader::open(&empty).unwrap().entries(), []);
+        assert_eq!(
+            read_index(empty.len() as u64, |range| Ok(empty[range.start as usize..range.end as usize].to_vec())).unwrap(),
+            []
+        );
+    }
+
+    #[test]
+    fn a_pack_that_does_not_open_is_not_rewritten() {
+        let (_, pack) = three_submissions();
+        assert!(without(&pack[..pack.len() - 1], 9, |_| false).is_err());
     }
 }

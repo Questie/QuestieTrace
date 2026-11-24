@@ -4,24 +4,26 @@ use anyhow::{bail, Context, Result};
 use jiff::{SignedDuration, Timestamp};
 use std::fs::File;
 use std::path::PathBuf;
-use trace_compactor::packing::{self, Config};
 use trace_compactor::s3::S3Bucket;
+use trace_compactor::Config;
 use trace_pack::pack::PackOptions;
 use trace_pack::values::TpPolicy;
 
 const USAGE: &str = "\
 usage:
-  trace-compactor run [--writer NAME] [--settle-hours N] [--pack-input-mib N] [--threads N]
-                      [--level N] [--exact] [--tp-schema N,N,...] [--lock FILE]
+  trace-compactor run [--writer NAME] [--settle-hours N] [--pack-input-mib N]
+                      [--build-input-mib N] [--threads N] [--level N] [--exact]
+                      [--tp-schema N,N,...] [--lock FILE]
 
-run     packs every loose submission the archive bucket stored more than the settle window
-        ago, then deletes what it packed. A run that was stopped is finished first.
+run     answers the intake's removal requests, then packs every loose submission the archive
+        bucket stored more than the settle window ago and deletes what it packed. A run that
+        was stopped is finished first.
         --writer NAME       names the packs, packs/NAME/..., and this writer's record of the
                             pack it is storing. Default: live
         --settle-hours N    how long a loose submission waits. Default: 48
-        --pack-input-mib N  the most loose JSON one pack is built from. A pack is built in
-                            memory. Default: 2048
-        --threads N         how many submissions are read and compressed at once.
+        --pack-input-mib N  the most loose JSON one pack is built from. Default: 2048
+        --build-input-mib N the most loose JSON being built at one moment. Default: 64
+        --threads N         how many submissions are built at once, within that.
                             Default: one per core
         --level N           zstd level. Default: 9
         --exact             no value encoding: every export stored as inflated
@@ -29,6 +31,11 @@ run     packs every loose submission the archive bucket stored more than the set
         --lock FILE         held while running, so two runs under one writer name on this
                             machine cannot overlap. Default: trace-compactor-NAME.lock in the
                             temporary directory
+
+Memory: a pack is built and uploaded from memory. A run needs about 22 times
+--build-input-mib while it builds, plus up to two thirds of --pack-input-mib for the pack it
+holds, and twice a pack's size to rewrite one for a removal. A submission larger than
+--build-input-mib is built alone and needs about 22 times its own size.
 
 The bucket is read from the environment: ARCHIVE_S3_ENDPOINT (host only), ARCHIVE_S3_REGION,
 ARCHIVE_S3_BUCKET, ARCHIVE_S3_ACCESS_KEY_ID and ARCHIVE_S3_SECRET_ACCESS_KEY. The key must
@@ -55,6 +62,7 @@ impl Arguments {
                 writer: "live".into(),
                 settle: SignedDuration::from_hours(48),
                 pack_input_bytes: 2048 << 20,
+                build_input_bytes: 64 << 20,
                 options: PackOptions::default(),
             },
             threads: None,
@@ -67,6 +75,7 @@ impl Arguments {
                 "--writer" => parsed.config.writer = value()?.clone(),
                 "--settle-hours" => parsed.config.settle = SignedDuration::from_hours(value()?.parse::<u32>().context("--settle-hours")?.into()),
                 "--pack-input-mib" => parsed.config.pack_input_bytes = value()?.parse::<u64>().context("--pack-input-mib")? << 20,
+                "--build-input-mib" => parsed.config.build_input_bytes = value()?.parse::<u64>().context("--build-input-mib")? << 20,
                 "--threads" => parsed.threads = Some(value()?.parse().context("--threads")?),
                 "--level" => parsed.config.options.level = value()?.parse().context("--level")?,
                 "--exact" => parsed.config.options.value_encoding = false,
@@ -106,21 +115,47 @@ fn run(arguments: Arguments) -> Result<()> {
     }
     let bucket = bucket_from_environment()?;
 
-    let reports = packing::run(&bucket, &config, Timestamp::now())?;
-    for report in &reports {
+    let report = trace_compactor::run(&bucket, &config, Timestamp::now())?;
+    for removed in &report.removals.answered {
+        println!(
+            "removed {}: {} loose, rewrote {} packs {}",
+            removed.id,
+            removed.loose_deleted,
+            removed.packs_rewritten.len(),
+            removed.packs_rewritten.join(" ")
+        );
+    }
+    for pack in &report.packed.packs {
         println!(
             "{}  {} submissions ({} kept whole)  {:.1} MiB from {:.1} MiB",
-            report.key,
-            report.submissions,
-            report.kept_whole,
-            mib(report.pack_bytes),
-            mib(report.loose_bytes)
+            pack.key,
+            pack.submissions,
+            pack.kept_whole,
+            mib(pack.pack_bytes),
+            mib(pack.loose_bytes)
         );
-        for fallback in &report.value_fallbacks {
+        for fallback in &pack.value_fallbacks {
             println!("  WARNING stored exact after failing its check: {fallback}");
         }
     }
-    println!("{} packs written", reports.len());
+    println!(
+        "{} removals answered, {} packs written",
+        report.removals.answered.len(),
+        report.packed.packs.len()
+    );
+
+    // What needs someone to look comes last, and makes the run a failed one, so that whatever
+    // watches the timer shows it.
+    for unanswered in &report.removals.unanswered {
+        println!("REMOVAL NOT ANSWERED {unanswered}");
+    }
+    for left in &report.packed.left_loose {
+        println!("NOT PACKED {left}");
+    }
+    let open = report.removals.unanswered.len() + report.packed.left_loose.len();
+    if open > 0 {
+        bail!("{open} removal requests or loose objects need someone to look");
+    }
     Ok(())
 }
 
