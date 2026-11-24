@@ -303,7 +303,7 @@ export function finalize(acc: ExtractAccumulator, options: Omit<ExtractOptions, 
     ),
   });
   const objectRecords = emitObjectRecords({
-    name: aggregateAgreedScalarSummary(scalars.objectName),
+    name: aggregateAgreedScalarSummary(scalars.objectName, { acceptUncontested: true }),
     spawns: field<SpawnObservationValue, ReturnType<typeof mergeObjectSpawns>>("objectSpawns", (obs) => mergeObjectSpawns(obs, questObjectIds.has(obs[0].entityId)), "objectTurnInSpawns"),
     zoneID: field("objectSpawns", mergeObjectZoneID, "objectTurnInSpawns"),
   });

@@ -189,11 +189,18 @@ const AGREED_MIN_LEAD = 2;
  * attached to a neighbouring NPC): the value seen in the most sessions wins, but only when at
  * least AGREED_MIN_SESSIONS sessions saw it and it has AGREED_MIN_LEAD times the sessions of the
  * runner-up. Entities without such a value are left out. Only sessions with a server time are counted.
+ *
+ * With `acceptUncontested`, a value nothing else was observed against wins even when it is seen
+ * in a single session: nothing contradicts it, and a rare entity would otherwise get no value.
  */
-export function aggregateAgreedScalarSummary<T>(summary: ScalarSummary<T>): Map<number, Fact<T>> {
+export function aggregateAgreedScalarSummary<T>(summary: ScalarSummary<T>, { acceptUncontested = false } = {}): Map<number, Fact<T>> {
   const facts = new Map<number, Fact<T>>();
   for (const [entityId, groups] of summary) {
     const all = [...groups.values()];
+    if (acceptUncontested && all.length === 1) {
+      facts.set(entityId, toFact(entityId, all[0], all));
+      continue;
+    }
     const [winner, runnerUp] = [...all].sort((a, b) => b.timedSessionCount - a.timedSessionCount || defaultOrder(a, b));
     if (winner.timedSessionCount < AGREED_MIN_SESSIONS) continue;
     if (runnerUp && winner.timedSessionCount < AGREED_MIN_LEAD * runnerUp.timedSessionCount) continue;

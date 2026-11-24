@@ -172,6 +172,29 @@ describe("aggregateAgreedScalarSummary", () => {
 
     expect(aggregateAgreedScalarSummary(summary).has(1)).toBe(false);
   });
+
+  describe("with acceptUncontested", () => {
+    const uncontested = { acceptUncontested: true };
+
+    it("should accept a value seen in a single session when nothing else was observed", () => {
+      expect(aggregateAgreedScalarSummary(summaryOf({ Tailor: 1 }), uncontested).get(1)).toMatchObject({ value: "Tailor", alternativeCount: 0 });
+    });
+
+    it("should accept a value seen only in sessions without a server time when nothing else was observed", () => {
+      const summary: ScalarSummary<string> = new Map();
+      addToScalarSummary(summary, [sessionObs(1, "Tailor", 1, null)]);
+
+      expect(aggregateAgreedScalarSummary(summary, uncontested).get(1)?.value).toBe("Tailor");
+    });
+
+    it("should still leave out a single-session value that another value was observed against", () => {
+      expect(aggregateAgreedScalarSummary(summaryOf({ Tailor: 1, Leatherworker: 1 }), uncontested).has(1)).toBe(false);
+    });
+
+    it("should still require a clear lead when several values were observed", () => {
+      expect(aggregateAgreedScalarSummary(summaryOf({ Tailor: 3, Leatherworker: 2 }), uncontested).has(1)).toBe(false);
+    });
+  });
 });
 
 describe("aggregateScalarSummary tie-break", () => {
