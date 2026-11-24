@@ -544,6 +544,8 @@ globals = {
     "C_QuestLog.GetQuestObjectives",
     "C_QuestLog.IsOnQuest",
     "C_QuestLog.ShouldShowQuestRewards",
+    "C_QuestOffer",
+    "C_QuestOffer.GetQuestRewardCurrencyInfo",
     "C_RecruitAFriend.CheckEmailEnabled",
     "C_RecruitAFriend.GetRecruitInfo",
     "C_RecruitAFriend.IsSendingEnabled",

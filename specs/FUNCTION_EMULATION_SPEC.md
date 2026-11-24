@@ -128,6 +128,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetNumRewardCurrencies()` / `GetMaxRewardCurrencies()` | `functions["GetNumRewardCurrencies"]` / `functions["GetMaxRewardCurrencies"]` (clients that have them, e.g. Mists) |
 | `GetQuestCurrencyInfo("reward", index)` | `functions["GetQuestCurrencyInfo"]["reward"][index]` (same) |
 | `GetQuestCurrencyID("reward", index)` | `functions["GetQuestCurrencyID"]["reward"][index]` (same) |
+| `C_QuestOffer.GetQuestRewardCurrencyInfo("reward", index)` | `functions["C_QuestOffer.GetQuestRewardCurrencyInfo"]["reward"][index]` (Forever; `currencyID`, `baseRewardAmount` and `totalRewardAmount` only) |
 | `C_Item.GetItemCount(itemID)` | `functions["C_Item.GetItemCount"][itemID]`; answers calls without `includeBank` only (trailing nil arguments are skipped by `getStream`) |
 | `C_Item.IsItemDataCachedByID(itemID)` | `functions["C_Item.IsItemDataCachedByID"][itemID]`; see the item data note below |
 | `IsIndoors()` | `functions["IsIndoors"]` |

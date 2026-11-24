@@ -3320,6 +3320,72 @@ local function TestQuestDialogRecordsMistsRewardCurrencies()
     "Slots past the count are read up to the maximum, as Blizzard's frame does")
   assert(functions.GetNumRewardCurrencies[1].v == 1 and functions.GetMaxRewardCurrencies[1].v == 2,
     "Both bounds are recorded")
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil, "Forever's API creates no stream on Mists")
+end
+
+---Runtime with Forever's reward currency APIs: GetQuestCurrencyID answers 0 for an
+---empty slot, GetQuestRewardCurrencyInfo a fresh table per call or nil. Slot 1
+---holds the currency.
+---@return TestRuntime runtime
+---@return { amount: number, bonus: number } reward
+local function ForeverRewardCurrencyRuntime()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  local env = runtime.env
+  local reward = { amount = 3, bonus = 0 }
+  env.GetMaxRewardCurrencies = function() return 2 end
+  env.GetQuestCurrencyID = function(_, index) return index == 1 and 3402 or 0 end
+  env.C_QuestOffer = {
+    ---@param itemType string
+    ---@param index number
+    GetQuestRewardCurrencyInfo = function(itemType, index)
+      if itemType ~= "reward" or index ~= 1 then return nil end
+      return {
+        texture = 132996, name = "A Currency", currencyID = 3402, quality = 1, baseRewardAmount = reward.amount,
+        bonusRewardAmount = reward.bonus, totalRewardAmount = reward.amount + reward.bonus, questRewardContextFlags = 0,
+      }
+    end,
+  }
+  return runtime, reward
+end
+
+local function TestQuestDialogRecordsForeverRewardCurrencies()
+  local runtime, reward = ForeverRewardCurrencyRuntime()
+  runtime.core.StartCapture("reward currency amounts")
+  AdvanceTo(runtime, 2)
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local info = functions["C_QuestOffer.GetQuestRewardCurrencyInfo"].reward
+  assert(#info[1] == 1, "An identical (fresh) table is not re-appended by the delayed samples")
+  assert(runtime.core.DeepCompare(info[1][1].v, { currencyID = 3402, baseRewardAmount = 3, totalRewardAmount = 3 }),
+    "Only the currency ID and the amounts are stored")
+  assert(#info[2] == 1 and info[2][1].v == nil and info[3] == nil,
+    "An empty slot records nil once, and no slot past GetMaxRewardCurrencies is read")
+
+  reward.bonus = 2
+  SendEvent(runtime, "QUEST_COMPLETE")
+  assert(#info[1] == 2 and info[1][2].v.baseRewardAmount == 3 and info[1][2].v.totalRewardAmount == 5,
+    "A changed amount is appended")
+end
+
+local function TestQuestDialogSkipsFailedRewardCurrencies()
+  local runtime = ForeverRewardCurrencyRuntime()
+  runtime.env.C_QuestOffer.GetQuestRewardCurrencyInfo = function() error("No quest offer") end
+  runtime.core.StartCapture("failing reward currency")
+  SendEvent(runtime, "QUEST_DETAIL")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil, "A failed call records nothing")
+  assert(functions.GetQuestCurrencyID.reward[1][1].v == 3402, "A failing API does not block the others")
+
+  -- Classic clients document the C_QuestOffer namespace without this function.
+  local classic = ForeverRewardCurrencyRuntime()
+  local lookups = 0
+  classic.env.C_QuestOffer = setmetatable({}, { __index = function() lookups = lookups + 1 end })
+  classic.core.StartCapture("no reward currency API")
+  SendEvent(classic, "QUEST_DETAIL")
+  functions = Session(classic).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil and functions.GetQuestCurrencyID.reward[1][1].v == 3402,
+    "Without the API there is no stream, and the other currency streams stay")
+  assert(lookups == 1, "The API is looked for once per capture, not in every sample")
 end
 
 local function TestItemCountSnapshotAndChanges()
@@ -3889,6 +3955,8 @@ local tests = {
   { name = "frame heartbeat records the first frame updates and gaps", run = TestFrameHeartbeatRecordsFirstFramesAndGaps },
   { name = "quest dialog records reward items per type and index", run = TestQuestDialogRecordsRewardItems },
   { name = "quest dialog records Mists reward currencies up to the maximum", run = TestQuestDialogRecordsMistsRewardCurrencies },
+  { name = "quest dialog records Forever reward currency amounts", run = TestQuestDialogRecordsForeverRewardCurrencies },
+  { name = "quest dialog skips failed and absent reward currency APIs", run = TestQuestDialogSkipsFailedRewardCurrencies },
   { name = "display records screen size and only allowlisted CVars", run = TestDisplayRecordsOnlyAllowlistedCVars },
   { name = "nameplates record only world creatures, change-only per token", run = TestNameplatesRecordOnlyWorldCreatures },
   { name = "restricted unit identity does not interrupt capture", run = TestRestrictedUnitIdentityDoesNotInterruptCapture },

@@ -478,6 +478,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetQuestItemLink` | `[type][index]` | scalar (string/nil) | QuestDialog; same keys as `GetQuestItemInfo`. Schema 15+ |
 | `GetQuestCurrencyInfo` | `["reward"][index]` | tuple (n varies) | QuestDialog, on clients that have it (Mists); name, texture, count, quality. Read for index 1..`GetMaxRewardCurrencies()`, past `GetNumRewardCurrencies()`, as Blizzard's Mists quest frame does (`Wrath/QuestInfo.lua`); empty slots return n=0. Classic frames never read required currencies. Schema 15+ |
 | `GetQuestCurrencyID` | `["reward"][index]` | scalar (number/nil) | QuestDialog, on clients that have it (Mists); same keys as `GetQuestCurrencyInfo`. Schema 15+ |
+| `C_QuestOffer.GetQuestRewardCurrencyInfo` | `["reward"][index]` | object (table) or nil | QuestDialog; Forever only. The `QuestRewardCurrencyInfo` reduced to `currencyID`, `baseRewardAmount` (without bonuses) and `totalRewardAmount` (what the quest frame shows). Same indices as `GetQuestCurrencyID`; documented to be nil for an empty slot. Schema 22+ |
 
 ### Parameterized by greeting index
 
