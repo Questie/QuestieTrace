@@ -418,6 +418,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitLevel` | scalar (number) | |
+| `UnitIsGhost` | scalar (boolean) | GhostState; a released spirit, not merely dead. Schema 22+ |
 | `UnitXP` | scalar (number) | PlayerProgress; experience into the current level. Schema 15+ |
 | `UnitXPMax` | scalar (number) | PlayerProgress; experience needed for the level. Schema 15+ |
 | `UnitRace` | tuple (n=3) | localizedName, englishName, raceID |

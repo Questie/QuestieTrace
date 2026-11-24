@@ -3294,6 +3294,52 @@ local function TestTradePartnerIsNotRecorded()
   assert(not ContainsString(session, "Grimtotem") and not ContainsString(session, "Player-"), "A trade partner's name and GUID are never recorded")
 end
 
+local function TestGhostStateIsRecorded()
+  local runtime = NewRuntime({ "Modules/Trackers/GhostState.lua" })
+  local isGhost = false
+  runtime.env.UnitIsGhost = function(unit) return unit == "player" and isGhost end
+  runtime.core.StartCapture("ghost state")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local stream = functions.UnitIsGhost.player
+  assert(#stream == 1 and stream[1].t == 0 and stream[1].v == false, "The state is recorded at capture start")
+
+  local entries = 1
+  for index, event in ipairs({ "PLAYER_ALIVE", "PLAYER_UNGHOST", "PLAYER_ENTERING_WORLD", "PLAYER_DEAD" }) do
+    isGhost = not isGhost
+    runtime.now = index * 10
+    SendEvent(runtime, event)
+    SendEvent(runtime, event)
+    entries = entries + 1
+    assert(#stream == entries and stream[entries].t == index * 10 and stream[entries].v == isGhost, event .. " must record the changed state once")
+  end
+
+  local events = Session(runtime).events
+  assert(events[1].e == "PLAYER_ALIVE" and events[3].e == "PLAYER_UNGHOST" and events[7].e == "PLAYER_DEAD", "Dying and resurrecting are recorded as events")
+end
+
+local function TestFailingGhostStateIsReported()
+  local runtime = NewRuntime({ "Modules/Trackers/GhostState.lua", "Modules/Trackers/GroupState.lua" })
+  local fails = true
+  ---@type any[]
+  local reported = {}
+  runtime.env.geterrorhandler = function() return function(err) reported[#reported + 1] = err end end
+  runtime.env.UnitIsGhost = function()
+    if fails then error("not available") end
+    return true
+  end
+  runtime.env.IsInGroup = function() return false end
+  runtime.env.GetNumGroupMembers = function() return 0 end
+  runtime.core.StartCapture("failing ghost state")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(#reported == 1 and tostring(reported[1]):find("not available", 1, true), "The error is reported once")
+  assert(#functions.UnitIsGhost.player == 0, "A failed call records nothing")
+  assert(functions.IsInGroup, "The other trackers still start")
+
+  fails = false
+  SendEvent(runtime, "PLAYER_ALIVE")
+  assert(#functions.UnitIsGhost.player == 1 and functions.UnitIsGhost.player[1].v == true, "Recording resumes when the call works again")
+end
+
 local function TestDisplayRecordsOnlyAllowlistedCVars()
   local runtime = NewRuntime({ "Modules/Trackers/Display.lua" })
   local env = runtime.env
@@ -3833,10 +3879,10 @@ local EVENTS_WITHOUT_PERSONAL_ARGUMENTS = {
     "LOADING_SCREEN_DISABLED", "LOADING_SCREEN_ENABLED", "LOOT_CLOSED", "LOOT_OPENED", "LOOT_READY", "MAIL_CLOSED", "MAIL_SHOW",
     "MAP_EXPLORATION_UPDATED", "MERCHANT_CLOSED", "MERCHANT_SHOW", "MODIFIER_STATE_CHANGED", "NAME_PLATE_UNIT_ADDED",
     "NAME_PLATE_UNIT_REMOVED", "NEW_RECIPE_LEARNED", "NEW_WMO_CHUNK", "PETITION_CLOSED", "PETITION_SHOW", "PET_STABLE_CLOSED",
-    "PET_STABLE_SHOW", "PLAYER_ALIVE", "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
+    "PET_STABLE_SHOW", "PLAYER_ALIVE", "PLAYER_DEAD", "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
     "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "PLAYER_LEAVING_WORLD", "PLAYER_LEVEL_UP",
     "PLAYER_LOGIN", "PLAYER_LOGOUT", "PLAYER_MAP_CHANGED", "PLAYER_MONEY", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
-    "PLAYER_TARGET_CHANGED", "PLAYER_XP_UPDATE", "QUESTLINE_UPDATE", "QUEST_ACCEPTED", "QUEST_AUTOCOMPLETE", "QUEST_COMPLETE",
+    "PLAYER_TARGET_CHANGED", "PLAYER_UNGHOST", "PLAYER_XP_UPDATE", "QUESTLINE_UPDATE", "QUEST_ACCEPTED", "QUEST_AUTOCOMPLETE", "QUEST_COMPLETE",
     "QUEST_DATA_LOAD_RESULT", "QUEST_DETAIL", "QUEST_FINISHED", "QUEST_GREETING", "QUEST_ITEM_UPDATE", "QUEST_LOG_CRITERIA_UPDATE",
     "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "QUEST_PROGRESS", "QUEST_REMOVED", "QUEST_TURNED_IN", "QUEST_WATCH_LIST_CHANGED",
     "QUEST_WATCH_UPDATE", "SKILL_LINES_CHANGED", "SPELLS_CHANGED", "TASK_PROGRESS_UPDATE", "TAXIMAP_CLOSED", "TAXIMAP_OPENED",
@@ -4038,6 +4084,8 @@ local tests = {
   { name = "should record leaving an npc once and clear the mouseover streams", run = TestMouseoverLeavingNpcIsRecordedOnce },
   { name = "interaction windows record their unit at show and hide", run = TestInteractionWindowsRecordTheirUnit },
   { name = "a trade partner is never recorded", run = TestTradePartnerIsNotRecorded },
+  { name = "ghost state is recorded at capture start and when it changes", run = TestGhostStateIsRecorded },
+  { name = "a failing ghost state call is reported and does not stop the capture", run = TestFailingGhostStateIsReported },
   { name = "should record leaving an npc that was hovered at capture start", run = TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },

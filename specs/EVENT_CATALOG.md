@@ -231,6 +231,17 @@ Triggers `IsInGroup` and `GetNumGroupMembers` sampling.
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
 - `SPELLS_CHANGED` *(login-time sampling)*
 
+### GhostState tracker
+
+Triggers `UnitIsGhost("player")` sampling. `PLAYER_DEAD` and `PLAYER_UNGHOST`
+are recorded since schema 22; like `PLAYER_ALIVE` they have no arguments.
+
+- `PLAYER_DEAD`
+- `PLAYER_ALIVE` -- fires when the player releases the spirit, and when a
+  resurrection is accepted before that
+- `PLAYER_UNGHOST`
+- `PLAYER_ENTERING_WORLD` *(login-time sampling)*
+
 ### SkillLines tracker
 
 Triggers skill window, profession-tab, and trade-skill-line sampling.

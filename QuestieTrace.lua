@@ -112,7 +112,9 @@ local TRACKED_EVENT_CATEGORIES = {
     events = {
       "PLAYER_LOGIN",
       "PLAYER_ENTERING_WORLD",
+      "PLAYER_DEAD",
       "PLAYER_ALIVE",
+      "PLAYER_UNGHOST",
       "PLAYER_LEVEL_UP",
       "PLAYER_XP_UPDATE",
       "UPDATE_EXHAUSTION",

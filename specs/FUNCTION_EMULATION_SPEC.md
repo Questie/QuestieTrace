@@ -146,6 +146,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestLogSpecialItemInfo(questLogIndex)` for active quest `questId` | `functions["GetQuestLogSpecialItemInfo"][questId]` |
 | `C_DateAndTime.GetCurrentCalendarTime()` | `functions["C_DateAndTime.GetCurrentCalendarTime"]` snapshot; derive the realm's UTC offset against the `GetServerTime` sample at the same `t` |
 | `UnitLevel("player")` | `functions["UnitLevel"]["player"]` |
+| `UnitIsGhost("player")` | `functions["UnitIsGhost"]["player"]` |
 | `UnitRace("player")` | `functions["UnitRace"]["player"]` |
 | `UnitClass("player")` | `functions["UnitClass"]["player"]` |
 | `UnitClassBase("player")` | `functions["UnitClassBase"]["player"]` |

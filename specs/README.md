@@ -23,7 +23,7 @@ Agent-facing index for QuestieTrace, a WoW Classic Era addon that records quest/
 │  globals.lua          Core namespace, utilities,        │
 │                       RegisterTracker/RegisterDump APIs │
 ├─────────────────────────────────────────────────────────┤
-│  Trackers/            13 isolated tracker files         │
+│  Trackers/            Isolated tracker files            │
 │    PlayerIdentity     Race/class/base class/sex/faction │
 │    UnitLevel          UnitLevel + quest green range     │
 │    Position           Zone/map/XY/instance state        │
@@ -33,6 +33,7 @@ Agent-facing index for QuestieTrace, a WoW Classic Era addon that records quest/
 │    CompletedQuests    Independent completed-quest delta │
 │    UnitInteraction    Unit identity + gossip quest APIs │
 │    GroupState         Party membership state            │
+│    GhostState         Whether the player is a ghost     │
 │    SkillLines         Skill window + profession tabs    │
 │    SpellBook          Raw slot state + known spell set  │
 │    QuestDialog        Gossip/greeting/current quest UI  │
@@ -90,6 +91,7 @@ specs/
 | CompletedQuests | quest/login events | Event + coalesced re-samples | `C_QuestLog.GetAllCompletedQuestIDs`/`GetQuestsCompleted`, tracked as independent delta streams |
 | UnitInteraction | target/dialog/NPC/login events | Fixed unit-token fanout | `UnitGUID`, `UnitName`, gossip quest-list APIs |
 | GroupState | 5 events | Event-driven | `IsInGroup`, `GetNumGroupMembers` |
+| GhostState | 4 events | Init + event-driven | `UnitIsGhost["player"]` |
 | SkillLines | 3 events | Event + index iteration | `GetNumSkillLines`/`GetSkillLineInfo` (legacy, when present), `GetProfessions`, `GetProfessionInfo`, `C_TradeSkillUI.*` (independent, when present) |
 | SpellBook | 2 events | Event + slot iteration | Spellbook slot streams + `PlayerKnownSpells` delta |
 | QuestDialog | 8 dialog events | Event + delayed re-samples + observed close sample | Gossip/greeting/current quest dialog APIs |

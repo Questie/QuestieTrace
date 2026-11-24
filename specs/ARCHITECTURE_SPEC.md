@@ -27,6 +27,7 @@ Modules/Trackers/CompletedQuests.lua  -- C_QuestLog.GetAllCompletedQuestIDs/GetQ
 Modules/Trackers/QuestDialog.lua      -- Gossip, greeting, and current quest-dialog APIs
 Modules/Trackers/UnitInteraction.lua  -- UnitGUID/UnitName and gossip quest-list APIs
 Modules/Trackers/GroupState.lua       -- IsInGroup, GetNumGroupMembers
+Modules/Trackers/GhostState.lua       -- UnitIsGhost["player"]
 Modules/Trackers/SkillLines.lua       -- Skill window + profession tabs
 Modules/Trackers/SpellBook.lua        -- Raw spellbook slots + PlayerKnownSpells
 Modules/Trackers/ResetTime.lua        -- GetServerTime and GetQuestResetTime/C_DateAndTime.GetSecondsUntilDailyReset
@@ -208,6 +209,7 @@ by callers.
 | CompletedQuests | Completed quest set as a delta stream |
 | UnitInteraction | Target/NPC/quest NPC identity and C_Gossip quest-list APIs |
 | GroupState | Group membership/count |
+| GhostState | Whether the player is a ghost |
 | SkillLines | Skill rows and profession tabs |
 | SpellBook | Raw spellbook slots and known spell set |
 | QuestDialog | Gossip, greeting, and current quest dialog APIs |
@@ -227,5 +229,6 @@ by callers.
 | `Core.PackArgs(...)` | Pack varargs into `{..., n=count}` | Events and tuple streams |
 | `Core.CopyPacked(args)` | Copy packed args | Event recording |
 | `Core.Round(num, decimals)` | Round numbers | Position tracker |
+| `Core.SampleScalar(stream, t, tp, fn, ...)` | Append a function's answer if it changed; report a failing call | GhostState |
 | `DeepCompare(t1, t2)` | Recursive table comparison | Change detection |
 | `C_After` / `Defer` | Timer helpers | Delayed sampling |

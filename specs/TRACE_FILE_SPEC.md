@@ -388,6 +388,7 @@ Called with `"player"` as the argument.
 | Function key | Return type | Description |
 |---|---|---|
 | `UnitLevel` | scalar number | Player level |
+| `UnitIsGhost` | scalar boolean | Whether the player is a ghost |
 | `UnitRace` | tuple (n=3) | localizedName, englishName, raceID |
 | `UnitClass` | tuple (n=3) | localizedName, englishName, classID |
 | `UnitClassBase` | tuple (n=2) | classFilename, classID |
