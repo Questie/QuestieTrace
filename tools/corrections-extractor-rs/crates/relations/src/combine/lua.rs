@@ -32,6 +32,7 @@
 //! - a new nextQuestInChain a signal saw contradicted more often than supported.
 //! - a new nextQuestInChain from a quest that three or more quests require: it opens several
 //!   quests at once, and the handoff only shows which one players took first.
+//! - a new target fewer than ten characters back ([`MIN_CHARACTERS`]).
 //!
 //! A quest with nothing to apply is written commented out as a whole, so the module never creates
 //! an empty row for it.
@@ -45,6 +46,7 @@
 
 use super::assumptions::assumption;
 use super::edges::Truth;
+use super::resolve::Outcome;
 use super::views::QuestView;
 use crate::model::{QuestCatalog, QuestId, RelationField, RelationSet};
 use crate::text::is_js_whitespace;
@@ -78,10 +80,17 @@ pub enum NotApplied {
     Implied { before: Vec<QuestId> },
     /// A new chain from a quest that every one of `opens` (three or more quests) requires.
     OpensSeveral { opens: Vec<QuestId> },
+    /// Fewer than [`MIN_CHARACTERS`] characters back it.
+    FewCharacters,
 }
 
 /// A new nextQuestInChain is not applied from a quest this many quests require.
 const MIN_QUESTS_OPENED: usize = 3;
+
+/// A new target is not applied with fewer characters behind it. On the archive of November 13, 2026
+/// the accepted prerequisites fewer characters back are as in QuestieDB 90% of the time, the others
+/// 98%.
+const MIN_CHARACTERS: u32 = 10;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Written {
@@ -155,6 +164,20 @@ pub struct RecordSources<'a> {
 impl RecordSources<'_> {
     fn reference(&self, quest_id: QuestId, field: RelationField) -> &[QuestId] {
         values_of(self.truth.get(&quest_id).copied(), field)
+    }
+
+    /// Whether fewer than [`MIN_CHARACTERS`] characters back an accepted target.
+    fn has_few_characters(&self, quest_id: QuestId, field: RelationField, target: QuestId) -> bool {
+        let Some(view) = self.views.get(&quest_id) else { return false };
+        let Some(edge) = view.edges.iter().find(|edge| edge.is_written() && edge.field == field && edge.target == target) else {
+            return false;
+        };
+        // A chain no signal claimed is as sure as the breadcrumb that implies it.
+        let source = match edge.because {
+            Some(because) if edge.outcome == Outcome::Derived => view.edges.iter().find(|edge| edge.key == because).unwrap_or(edge),
+            _ => edge,
+        };
+        source.characters() < MIN_CHARACTERS
     }
 
     /// Why a later layer keeps this module's value for `fields` from applying, if one does.
@@ -294,15 +317,24 @@ fn quest_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSourc
         } else {
             is_subset(accepted, reference)
         };
-        fields.push(if nothing_new {
-            LuaField::shown(field, accepted, NotApplied::AlreadyInQuestieDb)
-        } else if let Some(why) = sources.overridden(quest_id, &[field]) {
-            LuaField::shown(field, accepted, why)
-        } else if field.is_scalar() {
-            LuaField::applied(field, accepted.to_vec())
-        } else {
-            LuaField::applied(field, union(reference, accepted))
-        });
+        if nothing_new {
+            fields.push(LuaField::shown(field, accepted, NotApplied::AlreadyInQuestieDb));
+            continue;
+        }
+        if let Some(why) = sources.overridden(quest_id, &[field]) {
+            fields.push(LuaField::shown(field, accepted, why));
+            continue;
+        }
+        let is_few = |target: &QuestId| !reference.contains(target) && sources.has_few_characters(quest_id, field, *target);
+        let (few, enough): (Vec<QuestId>, Vec<QuestId>) = accepted.iter().copied().partition(is_few);
+        if field.is_scalar() && !enough.is_empty() {
+            fields.push(LuaField::applied(field, enough));
+        } else if !is_subset(&enough, reference) {
+            fields.push(LuaField::applied(field, union(reference, &enough)));
+        }
+        if !few.is_empty() {
+            fields.push(LuaField::shown(field, &few, NotApplied::FewCharacters));
+        }
     }
     fields
 }
@@ -315,8 +347,8 @@ fn quest_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSourc
 /// - read as OR: extends QuestieDB's OR list or starts one. Against an AND list, one prerequisite
 ///   (the same under either kind) joins it; several are shown, not applied.
 ///
-/// New targets that are known breadcrumbs of the quest, or that come before its parent quest or
-/// another of its prerequisites, are taken out first and shown on their own.
+/// New targets that are known breadcrumbs of the quest, that come before its parent quest or another
+/// of its prerequisites, or that few characters back are taken out first and shown on their own.
 fn prerequisite_fields(quest_id: QuestId, accepted: &RelationSet, sources: &RecordSources, lineage: &Lineage) -> Vec<LuaField> {
     let (ruled_out, accepted) = without_ruled_out_prerequisites(quest_id, accepted, sources, lineage);
     let mut fields = slot_fields(quest_id, &accepted, sources);
@@ -339,6 +371,16 @@ fn without_ruled_out_prerequisites(quest_id: QuestId, accepted: &RelationSet, so
         .flat_map(new_targets)
         .filter(|&target| is_breadcrumb(target, quest_id, sources))
         .collect();
+    // An authored fix overrides them anyway, which says more.
+    let few: Vec<QuestId> = if sources.overridden(quest_id, &PREREQUISITES).is_some() {
+        Vec::new()
+    } else {
+        PREREQUISITES
+            .into_iter()
+            .flat_map(|field| new_targets(field).filter(move |&target| sources.has_few_characters(quest_id, field, target)))
+            .filter(|target| !breadcrumbs.contains(target))
+            .collect()
+    };
     // What a new target can come before: the parent quests and every other prerequisite.
     let anchors: Vec<QuestId> = parents
         .iter()
@@ -346,16 +388,17 @@ fn without_ruled_out_prerequisites(quest_id: QuestId, accepted: &RelationSet, so
         .chain(group)
         .chain(PREREQUISITES.iter().flat_map(|&field| values_of(Some(accepted), field)))
         .copied()
-        .filter(|anchor| !breadcrumbs.contains(anchor))
+        .filter(|anchor| !breadcrumbs.contains(anchor) && !few.contains(anchor))
         .collect();
 
     let mut kept = accepted.clone();
     let mut ruled_out = Vec::new();
     for field in PREREQUISITES {
         let field_breadcrumbs: Vec<QuestId> = new_targets(field).filter(|target| breadcrumbs.contains(target)).collect();
+        let field_few: Vec<QuestId> = new_targets(field).filter(|target| few.contains(target)).collect();
         let mut implied = Vec::new();
         let mut before = BTreeSet::new();
-        for target in new_targets(field).filter(|target| !breadcrumbs.contains(target)) {
+        for target in new_targets(field).filter(|target| !breadcrumbs.contains(target) && !few.contains(target)) {
             let later: Vec<QuestId> = if parents.contains(&target) {
                 vec![target]
             } else {
@@ -388,8 +431,11 @@ fn without_ruled_out_prerequisites(quest_id: QuestId, accepted: &RelationSet, so
                 },
             ));
         }
+        if !field_few.is_empty() {
+            ruled_out.push(LuaField::shown(field, &field_few, NotApplied::FewCharacters));
+        }
         if let Some(values) = kept.get_mut(&field) {
-            values.retain(|target| !field_breadcrumbs.contains(target) && !implied.contains(target));
+            values.retain(|target| !field_breadcrumbs.contains(target) && !implied.contains(target) && !field_few.contains(target));
             if values.is_empty() {
                 kept.remove(&field);
             }
@@ -574,6 +620,7 @@ fn not_applied_reason(field: RelationField, why: &NotApplied) -> String {
             opens.len(),
             joined(opens)
         ),
+        NotApplied::FewCharacters => format!("not applied: fewer than {MIN_CHARACTERS} characters back it"),
     }
 }
 
@@ -1024,7 +1071,7 @@ mod tests {
     #[test]
     fn shows_a_new_chain_a_signal_saw_contradicted_more_often_than_supported() {
         let (weak, strong) = (
-            [claim("handoff", NextQuestInChain, 0.96, 5, 13)],
+            [claim("handoff", NextQuestInChain, 0.96, 12, 13)],
             [claim("handoff", NextQuestInChain, 0.96, 31, 2)],
         );
         let (weak_set, strong_set) = (set(&[(NextQuestInChain, &[11])]), set(&[(NextQuestInChain, &[21])]));
@@ -1046,6 +1093,137 @@ mod tests {
             [shown(NextQuestInChain, &[11], NotApplied::Contradicted { signal: "handoff".into() })]
         );
         assert_eq!(records[&20], [applied(NextQuestInChain, &[21])]);
+    }
+
+    #[test]
+    fn shows_a_new_target_fewer_than_ten_characters_back_without_applying_it() {
+        let (nine, ten) = (
+            [claim("handoff", PreQuestSingle, 0.96, 9, 0), claim("absence", PreQuestSingle, 0.9, 3, 0)],
+            [claim("handoff", PreQuestSingle, 0.96, 2, 0), claim("absence", PreQuestSingle, 0.9, 10, 0)],
+        );
+        let prerequisites = |quest: QuestId| {
+            vec![
+                written_edge(EdgeKind::Prerequisite, quest, PreQuestSingle, 1, 0.95, &nine),
+                written_edge(EdgeKind::Prerequisite, quest, PreQuestSingle, 2, 0.95, &ten),
+            ]
+        };
+        let both = set(&[(PreQuestSingle, &[1, 2])]);
+        let exclusive = set(&[(ExclusiveTo, &[1, 2])]);
+        let chain = set(&[(NextQuestInChain, &[1])]);
+        let views = IndexMap::from([
+            (10, view(10, &both, prerequisites(10))),
+            (20, view(20, &both, prerequisites(20))),
+            (30, view(30, &both, prerequisites(30))),
+            (
+                40,
+                view(
+                    40,
+                    &exclusive,
+                    vec![
+                        written_edge(EdgeKind::Exclusive, 40, ExclusiveTo, 1, 0.95, &nine),
+                        written_edge(EdgeKind::Exclusive, 40, ExclusiveTo, 2, 0.95, &ten),
+                    ],
+                ),
+            ),
+            (
+                60,
+                view(
+                    60,
+                    &exclusive,
+                    vec![
+                        written_edge(EdgeKind::Exclusive, 60, ExclusiveTo, 1, 0.95, &nine),
+                        written_edge(EdgeKind::Exclusive, 60, ExclusiveTo, 2, 0.95, &ten),
+                    ],
+                ),
+            ),
+            (50, view(50, &chain, vec![written_edge(EdgeKind::Next, 50, NextQuestInChain, 1, 0.95, &nine)])),
+        ]);
+        let records = records_of(
+            &[
+                (10, both.clone()),
+                (20, both.clone()),
+                (30, both.clone()),
+                (40, exclusive.clone()),
+                (60, exclusive.clone()),
+                (50, chain.clone()),
+            ],
+            &[
+                // QuestieDB has the one few characters back, and another.
+                (20, set(&[(PreQuestSingle, &[1, 5])])),
+                (30, set(&[(PreQuestSingle, &[5])])),
+                (40, set(&[(ExclusiveTo, &[5])])),
+                (60, set(&[(ExclusiveTo, &[1])])),
+            ],
+            (&[(30, &[PreQuestSingle])], &[]),
+            &views,
+        );
+
+        let few = |field| shown(field, &[1], NotApplied::FewCharacters);
+        assert_eq!(records[&10], [applied(PreQuestSingle, &[2]), few(PreQuestSingle)]);
+        assert_eq!(records[&20], [applied(PreQuestSingle, &[1, 2, 5])], "QuestieDB's own targets are not held back");
+        assert_eq!(
+            records[&30],
+            [shown(PreQuestSingle, &[1, 2], NotApplied::AuthoredFix)],
+            "an authored fix decides anyway"
+        );
+        assert_eq!(records[&40], [applied(ExclusiveTo, &[2, 5]), few(ExclusiveTo)]);
+        assert_eq!(records[&60], [applied(ExclusiveTo, &[1, 2])], "QuestieDB's own targets are not held back");
+        assert_eq!(records[&50], [few(NextQuestInChain)]);
+        assert_eq!(
+            not_applied_reason(PreQuestSingle, &NotApplied::FewCharacters),
+            "not applied: fewer than 10 characters back it"
+        );
+    }
+
+    #[test]
+    fn a_chain_its_breadcrumb_implies_has_the_breadcrumbs_characters() {
+        let (nine, ten) = (
+            [claim("breadcrumbs", BreadcrumbForQuestId, 0.96, 9, 0)],
+            [claim("breadcrumbs", BreadcrumbForQuestId, 0.96, 10, 0)],
+        );
+        let relations = set(&[(BreadcrumbForQuestId, &[1]), (NextQuestInChain, &[1])]);
+        let edges = |quest: QuestId, claims: &'static [Claim<'static>]| {
+            let breadcrumb = written_edge(EdgeKind::Breadcrumb, quest, BreadcrumbForQuestId, 1, 0.95, claims);
+            let chain = EdgeView {
+                outcome: Outcome::Derived,
+                because: Some(breadcrumb.key),
+                ..written_edge(EdgeKind::Next, quest, NextQuestInChain, 1, 0.95, &[])
+            };
+            vec![breadcrumb, chain]
+        };
+        let (nine, ten): (&'static [Claim], &'static [Claim]) = (Box::leak(Box::new(nine)), Box::leak(Box::new(ten)));
+        let views = IndexMap::from([(10, view(10, &relations, edges(10, nine))), (20, view(20, &relations, edges(20, ten)))]);
+
+        let records = records_of(&[(10, relations.clone()), (20, relations.clone())], &[], NONE_OWNED, &views);
+
+        let few = |field| shown(field, &[1], NotApplied::FewCharacters);
+        assert_eq!(records[&10], [few(NextQuestInChain), few(BreadcrumbForQuestId)]);
+        assert_eq!(records[&20], [applied(NextQuestInChain, &[1]), applied(BreadcrumbForQuestId, &[1])]);
+    }
+
+    #[test]
+    fn a_prerequisite_is_not_implied_by_one_too_few_characters_back() {
+        // 1 comes before 2 in QuestieDB; 2 is claimed by nine characters and held back, so 1 stays.
+        let (nine, ten) = ([claim("handoff", PreQuestSingle, 0.96, 9, 0)], [claim("handoff", PreQuestSingle, 0.96, 10, 0)]);
+        let relations = set(&[(PreQuestSingle, &[1, 2])]);
+        let views = IndexMap::from([(
+            10,
+            view(
+                10,
+                &relations,
+                vec![
+                    written_edge(EdgeKind::Prerequisite, 10, PreQuestSingle, 1, 0.95, &ten),
+                    written_edge(EdgeKind::Prerequisite, 10, PreQuestSingle, 2, 0.95, &nine),
+                ],
+            ),
+        )]);
+
+        let records = records_of(&[(10, relations.clone())], &[(2, set(&[(PreQuestSingle, &[1])]))], NONE_OWNED, &views);
+
+        assert_eq!(
+            records[&10],
+            [applied(PreQuestSingle, &[1]), shown(PreQuestSingle, &[2], NotApplied::FewCharacters)]
+        );
     }
 
     fn header() -> LuaHeader<'static> {

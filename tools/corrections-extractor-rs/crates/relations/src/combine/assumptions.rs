@@ -35,8 +35,7 @@ fn certainty(probability: f64) -> &'static str {
 /// as traces accumulate, and above 100 more characters tell a reviewer nothing, so three ranges:
 /// between two real exports 4.8% of relations changed range, against 12.2% with a 1000+ range.
 fn characters(edge: &EdgeView) -> &'static str {
-    // Support 0: only observations a signal could not pin to one independent character.
-    match edge.claims.iter().map(|claim| claim.support).max().unwrap_or(0) {
+    match edge.characters() {
         0..=9 => "<10 characters",
         10..=99 => "10+ characters",
         _ => "100+ characters",

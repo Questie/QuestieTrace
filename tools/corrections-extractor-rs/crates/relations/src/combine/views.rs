@@ -64,6 +64,12 @@ impl EdgeView<'_> {
     pub fn is_written(&self) -> bool {
         self.outcome.is_written()
     }
+
+    /// The most independent characters any agreeing signal saw it in. 0 also when a signal could
+    /// not pin its observations to one independent character.
+    pub fn characters(&self) -> u32 {
+        self.claims.iter().map(|claim| claim.support).max().unwrap_or(0)
+    }
 }
 
 /// A relationship only context-only sources claim.

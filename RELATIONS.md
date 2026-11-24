@@ -156,6 +156,11 @@ OR-list entries nobody turned in (mostly copies that complete together). Combine
    cross-validation part that holds it out would train on 8 wrong examples (on none in the 5% sample,
    which lost 450 correct pairs). As built it trains on 48 or more (11 in the sample).
 
+A third rule is about thin evidence: a new target fewer than 10 characters back is shown in the module
+with the reason and not applied (`MIN_CHARACTERS` in `combine/lua.rs`). Accepted prerequisites fewer
+than 10 characters back are as in QuestieDB 90% of the time, the others 98%. It holds back 9 of 59
+fields, e.g. "Report to Rageroar" and "To Serve The Draenei", which rest on one character each.
+
 Found on the way, not done:
 - **Race masks in QuestieDB are wrong on 87 quests** (three or more characters of an excluded race
   accepted the quest): 51 from the base data (Wowhead's Race and Side), 30 from the Classic data
