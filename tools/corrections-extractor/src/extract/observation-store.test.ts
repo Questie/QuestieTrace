@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,10 +11,10 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function diskStore(): ObservationStore {
+function diskStore(readBlockBytes?: number): ObservationStore {
   const dir = mkdtempSync(join(tmpdir(), "observation-store-"));
   tempDirs.push(dir);
-  return new ObservationStore(join(dir, "store"));
+  return new ObservationStore(join(dir, "store"), readBlockBytes);
 }
 
 const obs = (entityId: number, value: number): Observation<number> => ({ entityId, value, confidence: "high", provenance: { session: "s", t: value } });
@@ -33,6 +33,28 @@ describe("ObservationStore", () => {
       expect(groups.get(65)?.map((o) => o.value)).toEqual([2]);
     },
   );
+
+  it.each([1, 7, 64])("should read observations back that span several read blocks of %i bytes, multi-byte text included", (blockBytes) => {
+    const store = diskStore(blockBytes);
+    const observations = [1, 2, 3].map((i): Observation<string> => ({ ...obs(i, i), value: `Schwert ${i} – Épée ✓ 劍` }));
+    store.add("names", observations);
+
+    expect(store.all<string>("names")).toEqual(observations);
+    expect([...store.groups<string>(["names"])].flatMap((byEntity) => [...byEntity.values()].flat())).toHaveLength(3);
+  });
+
+  it("should read the last observation of a file that has no trailing newline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "observation-store-"));
+    tempDirs.push(dir);
+    const store = new ObservationStore(dir, 5);
+    writeFileSync(join(dir, "names.0.ndjson"), `${JSON.stringify(obs(1, 1))}\n${JSON.stringify(obs(2, 2))}`);
+
+    expect(store.all<number>("names").map((o) => o.value)).toEqual([1, 2]);
+  });
+
+  it("should read nothing for a field without a file", () => {
+    expect(diskStore().all("missing")).toEqual([]);
+  });
 
   it("should stream turnInPoi in the order it was added", () => {
     const store = diskStore();
