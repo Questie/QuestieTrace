@@ -14,8 +14,8 @@ local DeepCompare = Core.DeepCompare
 -- C_Reputation.GetFactionDataByID(factionID) -> table data (raw, as returned)
 --
 -- GetFactionInfoByID(factionID) -> string  name,     -- legacy global, only
---                                  string  description,  -- recorded when it
---                                  number  standingID,   -- exists
+--                                  string  description,  -- recorded when it is
+--                                  number  standingID,   -- the client's own
 --                                  number  barMin,
 --                                  number  barMax,
 --                                  number  barValue,
@@ -55,6 +55,8 @@ local functions       -- capture.session.functions
 local factionOrder    -- ordered array of known factionIDs
 ---@type boolean
 local collecting      -- recursion guard for ExpandFactionHeader
+---@type function?
+local getFactionInfoByID -- the legacy global, if it is recorded on this client
 
 --- Number of factions visible in the reputation panel, from whichever real
 --- API exists. Used only to bound CollectFactionIDs' iteration; not recorded.
@@ -155,8 +157,8 @@ local function SampleFaction(t, tp, factionID)
     end
   end
 
-  if GetFactionInfoByID then
-    local packed = PackArgs(pcall(GetFactionInfoByID, factionID))
+  if getFactionInfoByID then
+    local packed = PackArgs(pcall(getFactionInfoByID, factionID))
     if packed[1] then
       AppendFactionIfChanged("GetFactionInfoByID", factionID, t, tp, PackArgs(unpack(packed, 2, packed.n)))
     end
@@ -223,6 +225,7 @@ Core.RegisterTracker({
     functions["C_Reputation.GetFactionDataByID"] = {}
     factionOrder = {}
     collecting = false
+    getFactionInfoByID = Core.GetOldGlobal("GetFactionInfoByID", C_Reputation and C_Reputation.GetFactionDataByID)
 
     CollectAndSample(capture)
   end,

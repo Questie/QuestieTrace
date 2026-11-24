@@ -412,8 +412,8 @@ Called with a quest ID as the argument.
 | `C_QuestLog.IsComplete` | scalar boolean/nil | Raw API result |
 | `C_QuestLog.IsFailed` | scalar boolean/nil | Raw API result |
 | `C_QuestLog.GetLogIndexForQuestID` | scalar number/nil | Raw API result |
-| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, only present when this global exists -- not synthesized from `C_QuestLog.*` |
-| `GetQuestLogIndexByID` | scalar number/nil | Legacy global; raw API result |
+| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, only present when this global is the client's own -- not synthesized from `C_QuestLog.*`. Before schema 22 also another addon's on Forever |
+| `GetQuestLogIndexByID` | scalar number/nil | Legacy global; raw API result. Present as `GetQuestLogTitle` |
 | `GetQuestLogQuestText` | tuple (n=2) | questDescription, questObjectives |
 | `QuestLogZone` | scalar string/nil | Derived: header/zone title immediately preceding this quest in the quest log |
 | `GetQuestTimers` | scalar number/nil | Derived questId-keyed seconds-left |
@@ -478,7 +478,7 @@ Called with a quest ID as the argument.
 
 | Function key | Return type | Description |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists) |
+| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when the legacy global is the client's own (independent of whether C_Reputation.GetFactionDataByID also exists). Before schema 22 also another addon's on Forever (n=8) |
 | `C_Reputation.GetFactionDataByID` | object (table) | Raw API result |
 
 ### Delta streams (in `functionsDelta`)

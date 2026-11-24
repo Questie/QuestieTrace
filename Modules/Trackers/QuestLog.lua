@@ -21,8 +21,8 @@ local C_After = C_Timer.After
 -- C_QuestLog.GetLogIndexForQuestID(questID) -> number? questLogIndex
 --
 -- GetQuestLogTitle(questLogIndex)   -> packed 17-value tuple (legacy global,
---                                      only recorded when that global exists)
--- GetQuestLogIndexByID(questID)     -> number questLogIndex (legacy global)
+--                                      only recorded when it is the client's own)
+-- GetQuestLogIndexByID(questID)     -> number questLogIndex (same)
 --
 -- GetQuestLogQuestText(questLogIndex) -> string questDescription,
 --                                        string questObjectives
@@ -83,6 +83,10 @@ local prevNested    -- Mirrors nested stream parameters for change detection onl
 local prevTimedQuestIds -- Timed quest IDs from the previous derived timer sample.
 ---@type table<number, number>
 local prevRewardCounts -- Highest reward index previously captured for each active quest.
+---@type function?
+local getQuestLogTitle -- The legacy global, if it is recorded on this client.
+---@type function?
+local getQuestLogIndexByID -- The legacy global, if it is recorded on this client.
 
 ---------------------------------------------------------------------------
 -- API helpers (logic preserved from existing implementation)
@@ -469,8 +473,8 @@ local function ProbeQuestLogIndexAndTitle(t, tp, questId)
     end
   end
 
-  if type(GetQuestLogIndexByID) == "function" then
-    local ok, value = SafeScalarCall(GetQuestLogIndexByID, questId)
+  if getQuestLogIndexByID then
+    local ok, value = SafeScalarCall(getQuestLogIndexByID, questId)
     if ok then
       AppendIfChanged(
         GetOrCreateParamStream("GetQuestLogIndexByID", questId),
@@ -524,9 +528,9 @@ local function ProbeQuestLogIndexAndTitle(t, tp, questId)
     end
   end
 
-  -- Legacy global -- raw 17-value tuple, only recorded when the global exists.
-  if type(GetQuestLogTitle) == "function" then
-    local ok, titleTuple = SafePackedCall(GetQuestLogTitle, questLogIndex)
+  -- Legacy global -- raw 17-value tuple, only recorded when it is the client's own.
+  if getQuestLogTitle then
+    local ok, titleTuple = SafePackedCall(getQuestLogTitle, questLogIndex)
     if ok then
       AppendIfChanged(
         GetOrCreateParamStream("GetQuestLogTitle", questId),
@@ -819,6 +823,8 @@ Core.RegisterTracker({
     prevNested = {}
     prevTimedQuestIds = {}
     prevRewardCounts = {}
+    getQuestLogTitle = Core.GetOldGlobal("GetQuestLogTitle", C_QuestLog and C_QuestLog.GetInfo)
+    getQuestLogIndexByID = Core.GetOldGlobal("GetQuestLogIndexByID", C_QuestLog and C_QuestLog.GetLogIndexForQuestID)
 
     -- The quest ID list is recorded synchronously so the stream has a t=0
     -- baseline; the heavier per-quest sampling waits for the next frame.

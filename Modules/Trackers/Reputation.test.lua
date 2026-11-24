@@ -39,6 +39,17 @@ local function NewCapture()
   }
 end
 
+--- Mock issecurevariable: the globals in `addonGlobals` were defined by another addon.
+---@param env table<string, any>
+---@param addonGlobals table<string, boolean>
+local function MockSecureVariables(env, addonGlobals)
+  env.issecurevariable = function(tbl, name)
+    assert(tbl == env, "only globals are looked up")
+    if addonGlobals[name] then return false, "OtherAddon" end
+    return true, nil
+  end
+end
+
 describe("Reputation tracker", function()
   ---@type table<string, any>
   local env
@@ -149,6 +160,7 @@ describe("Reputation tracker", function()
     env.GetFactionInfoByID = function(factionID)
       if factionID == 1168 then guildReads = guildReads + 1 end
     end
+    MockSecureVariables(env, {})
 
     tracker = select(2, LoadReputationTracker(env))
     local capture = NewCapture()
@@ -160,7 +172,7 @@ describe("Reputation tracker", function()
     assert.are.equal("Stormwind", capture.session.functions["C_Reputation.GetFactionDataByID"][72][1].v.name)
   end)
 
-  it("should record both C_Reputation.GetFactionDataByID and legacy GetFactionInfoByID independently when both APIs exist", function()
+  it("should record C_Reputation.GetFactionDataByID and legacy GetFactionInfoByID independently when both are the client's own", function()
     env.C_Reputation = {
       GetNumFactions = function() return 1 end,
       GetFactionDataByIndex = function(index)
@@ -176,6 +188,7 @@ describe("Reputation tracker", function()
       if factionID ~= 42 then return nil end
       return "Stormwind (legacy)", "desc", 5, 0, 100, 50, false, false, false, false, true, true, false, 42
     end
+    MockSecureVariables(env, {})
 
     tracker = select(2, LoadReputationTracker(env))
     local capture = NewCapture()
@@ -185,5 +198,41 @@ describe("Reputation tracker", function()
     local legacyStream = capture.session.functions["GetFactionInfoByID"]
     assert.are.equal("Stormwind (modern)", modernStream[42][1].v.name)
     assert.are.equal("Stormwind (legacy)", legacyStream[42][1].v[1])
+  end)
+
+  it("should not record a GetFactionInfoByID that another addon brought back", function()
+    env.C_Reputation = {
+      GetNumFactions = function() return 1 end,
+      GetFactionDataByIndex = function() return { isHeader = false, isCollapsed = false, factionID = 42 } end,
+      GetFactionDataByID = function() return { name = "Stormwind", factionID = 42, currentStanding = 0 } end,
+    }
+    -- The shape seen in recordings: 8 values, where the client's own function returns 16.
+    env.GetFactionInfoByID = function() return "Stormwind", "desc", 4, 0, 3000, 0, false, false end
+    MockSecureVariables(env, { GetFactionInfoByID = true })
+
+    tracker = select(2, LoadReputationTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+    tracker.OnEvent(capture, "UPDATE_FACTION")
+
+    assert.is_nil(next(capture.session.functions["GetFactionInfoByID"]))
+    assert.are.equal("Stormwind", capture.session.functions["C_Reputation.GetFactionDataByID"][42][1].v.name)
+  end)
+
+  it("should keep recording GetFactionInfoByID where the client has no replacement, even if another addon wrapped it", function()
+    -- Classic Era, TBC and Mists have a C_Reputation without the faction list.
+    env.C_Reputation = { GetWatchedFactionData = function() end }
+    env.GetNumFactions = function() return 1 end
+    env.GetFactionInfo = function()
+      return "Stormwind", "desc", 5, 0, 100, 50, false, false, false, false, true, true, false, 42
+    end
+    env.GetFactionInfoByID = env.GetFactionInfo
+    MockSecureVariables(env, { GetFactionInfoByID = true })
+
+    tracker = select(2, LoadReputationTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    assert.are.equal("Stormwind", capture.session.functions["GetFactionInfoByID"][42][1].v[1])
   end)
 end)

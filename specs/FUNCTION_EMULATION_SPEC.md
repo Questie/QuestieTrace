@@ -166,8 +166,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_QuestLog.IsComplete(questId)` | `functions["C_QuestLog.IsComplete"][questId]` |
 | `C_QuestLog.IsFailed(questId)` | `functions["C_QuestLog.IsFailed"][questId]` |
 | `C_QuestLog.GetLogIndexForQuestID(questId)` | `functions["C_QuestLog.GetLogIndexForQuestID"][questId]` |
-| `GetQuestLogTitle(questLogIndex)` (legacy) for active quest `questId` | `functions["GetQuestLogTitle"][questId]` (raw 17-value tuple, only present when this global exists) |
-| `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]` |
+| `GetQuestLogTitle(questLogIndex)` (legacy) for active quest `questId` | `functions["GetQuestLogTitle"][questId]` (raw 17-value tuple, only present when this global is the client's own; ignore it on Forever before schema 22) |
+| `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]`; ignore it on Forever before schema 22 |
 | `GetQuestLogQuestText(questLogIndex)` for active quest `questId` | `functions["GetQuestLogQuestText"][questId]` |
 | Timed quest value for `questId` | `functions["GetQuestTimers"][questId]` |
 | `GetQuestIndexForTimer(timerIndex)` (legacy) | `functions["GetQuestIndexForTimer"][timerIndex]` |
@@ -184,7 +184,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetLootSourceInfo(slot)` | `functions["GetLootSourceInfo"][slot]` |
 | `GetLootSlotLink(slot)` | `functions["GetLootSlotLink"][slot]` |
 | `GetLootSlotType(slot)` | `functions["GetLootSlotType"][slot]` |
-| `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple, only present when the legacy global exists, independent of whether `C_Reputation.GetFactionDataByID` also exists) |
+| `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple, only present when the legacy global is the client's own, independent of whether `C_Reputation.GetFactionDataByID` also exists; ignore it on Forever before schema 22) |
 | `C_Reputation.GetFactionDataByID(factionID)` | `functions["C_Reputation.GetFactionDataByID"][factionID]` (raw table) |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
 | `GetSpellBookItemName(slot)` | `functions["GetSpellBookItemName"][slot]` |

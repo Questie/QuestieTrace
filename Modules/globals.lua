@@ -201,6 +201,20 @@ function Core.CopyPacked(args)
   return out
 end
 
+--- Get an old global function to record. Other addons bring old globals back
+--- on clients that replaced them (Forever), and what those answer is not client
+--- data: where the client has the replacement, the global must be its own too.
+---@param name string
+---@param replacement function? The client's newer function for the same data, nil if it has none
+---@return function?
+function Core.GetOldGlobal(name, replacement)
+  local fn = _G[name]
+  if fn and replacement and not issecurevariable(_G, name) then
+    return nil
+  end
+  return fn
+end
+
 --- Round a number to the given decimal places.
 ---@param num number?
 ---@param decimals number?
