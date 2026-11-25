@@ -466,6 +466,7 @@ All design decisions are documented in `specs/`. Before implementing significant
 ## WoW API Documentation
 
 - Primary: https://warcraft.wiki.gg
+- What was tried on a live Forever client (tooltips, objects, lookups): `docs/forever-client-findings.md`
 - Local: `./Documentation/WoW-API/Functions-AI/` and `./Documentation/WoW-Event/`
 
 ## Forbidden Patterns
