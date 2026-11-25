@@ -562,6 +562,7 @@ mod tests {
     use crate::observers::npc::friendly_to_faction::FactionReactionValue;
     use crate::observers::quest::finished_by::FinishedByFinisher;
     use crate::observers::quest::started_by::StartedByStarter;
+    use crate::observers::spawn::{SpawnObservation, SpawnToken};
 
     const QUEST: i64 = 96659;
 
@@ -766,6 +767,48 @@ mod tests {
         assert_eq!(lookup.as_deref(), Some("[300200] = \"Suspicious Chest\","));
     }
 
+    /// The locales of the object lookup modules after object 300200 was seen with these names.
+    fn object_lookup_locales(values: &[(&str, f64)]) -> Vec<String> {
+        let bundle = finalized(sightings(values, |staged, name| {
+            let german = Localized {
+                locale: "deDE".to_owned(),
+                value: name.to_owned(),
+            };
+            staged.lookups.object_name = SessionScalars::new(vec![obs(OBJECT, german)]);
+        }));
+        let lookups = bundle.lookups.into_iter().find(|(name, _)| *name == "lookupObjects").expect("object lookups");
+        lookups.1.into_iter().map(|(locale, _)| locale).collect()
+    }
+
+    #[test]
+    fn writes_no_lookup_module_for_a_locale_without_names() {
+        assert_eq!(
+            object_lookup_locales(&[("Suspicious Chest", 1000.0), ("Wooden Chair", 2000.0)]),
+            [] as [String; 0]
+        );
+        assert_eq!(object_lookup_locales(&[("Suspicious Chest", 1000.0)]), ["deDE"]);
+    }
+
+    #[test]
+    fn exports_the_spawns_of_an_object_without_an_agreed_name() {
+        let sessions = [("Suspicious Chest", 1000.0), ("Wooden Chair", 2000.0)];
+        let bundle = finalized(sightings(&sessions, |staged, name| {
+            staged.object_name = SessionScalars::new(vec![obs(OBJECT, name.to_owned())]);
+            let spawn = SpawnObservation {
+                zone_id: 40.0,
+                x: 30.01,
+                y: 86.02,
+                token: SpawnToken::Target,
+            };
+            staged.object_spawns = vec![obs(OBJECT, spawn)];
+        }));
+        let object = record(module(&bundle, "foreverObjectTraces.lua"), OBJECT).expect("the object's record");
+        assert!(
+            object.contains("[objectKeys.spawns] = {[40]={{30.01,86.02}}}") && !object.contains("objectKeys.name"),
+            "{object}"
+        );
+    }
+
     #[test]
     fn exports_no_object_name_without_agreement() {
         let no_agreement: [&[(&str, f64)]; 2] = [
@@ -815,5 +858,35 @@ mod tests {
     #[test]
     fn writes_the_newest_name_of_a_renamed_npc() {
         assert_eq!(npc_lookup(["Axle Smoothslice", "Edine Sharphorn"]), "[30000] = {\"Edine Sharphorn\",nil},");
+    }
+
+    #[test]
+    fn exports_the_newest_npc_name_in_the_corrections_though_the_lookups_pick_a_stable_variant() {
+        let seen: Vec<(&str, f64)> = [("Kanonier", 0), ("Kanonierin", 1000)]
+            .into_iter()
+            .flat_map(|(name, at)| (0..6).map(move |n| (name, f64::from(at + n))))
+            .collect();
+        let bundle = finalized(sightings(&seen, |staged, name| {
+            staged.npc_name = SessionScalars::new(vec![obs(NPC, name.to_owned())]);
+        }));
+        let npc = record(module(&bundle, "foreverNpcTraces.lua"), NPC).expect("the npc's record");
+        assert!(npc.contains("[npcKeys.name] = \"Kanonierin\""), "{npc}");
+    }
+
+    #[test]
+    fn exports_the_newest_item_name_in_the_lookups() {
+        let seen: Vec<(&str, f64)> = [("Old Name", 0, 3), ("New Name", 1000, 2)]
+            .into_iter()
+            .flat_map(|(name, at, count)| (0..count).map(move |n| (name, f64::from(at + n))))
+            .collect();
+        let bundle = finalized(sightings(&seen, |staged, name| {
+            let german = Localized {
+                locale: "deDE".to_owned(),
+                value: name.to_owned(),
+            };
+            staged.lookups.item_name = SessionScalars::new(vec![obs(30000, german)]);
+        }));
+        let lookups = bundle.lookups.iter().find(|(name, _)| *name == "lookupItems").expect("item lookups");
+        assert!(lookups.1[0].1.contains("[30000] = \"New Name\""), "{:?}", lookups.1[0].1);
     }
 }

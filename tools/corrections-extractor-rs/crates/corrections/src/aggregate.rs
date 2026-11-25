@@ -557,6 +557,34 @@ mod tests {
     }
 
     #[test]
+    fn a_tie_ignores_the_time_within_an_older_session_added_after_the_newest() {
+        let summary = seen_once(&[
+            ("A", Some(200.0), 10.0),
+            ("A", Some(100.0), 3000.0),
+            ("B", Some(200.0), 50.0),
+            ("B", Some(100.0), 5.0),
+        ]);
+        assert_eq!(summary.aggregate()[&1], "B");
+    }
+
+    /// Observers walk stream by stream, so one session's times can go backwards.
+    #[test]
+    fn a_tie_takes_the_latest_time_within_a_session_not_the_last_observed() {
+        let mut sessions = Sessions::default();
+        let (first, second) = (sessions.add(Some(200.0)), sessions.add(Some(200.0)));
+        let mut summary = ScalarSummary::default();
+        summary.add(
+            [obs(1, "A", Confidence::High, 50.0, first), obs(1, "A", Confidence::High, 10.0, first)],
+            &sessions,
+        );
+        summary.add(
+            [obs(1, "B", Confidence::High, 20.0, second), obs(1, "B", Confidence::High, 15.0, second)],
+            &sessions,
+        );
+        assert_eq!(summary.aggregate()[&1], "A");
+    }
+
+    #[test]
     fn a_tie_takes_the_latest_time_of_every_session_at_the_newest_server_time() {
         let summary = seen_once(&[
             ("A", Some(200.0), 40.0),
@@ -641,6 +669,17 @@ mod tests {
     fn the_same_variant_of_a_chain_wins_whichever_end_of_the_chain_is_newest() {
         assert_eq!(newest_name_of(&[("Wachenab", 10), ("Wache", 10), ("Wachenabcd", 10)]), "Wache");
         assert_eq!(newest_name_of(&[("Wache", 10), ("Wachenabcd", 10), ("Wachenab", 10)]), "Wache");
+    }
+
+    #[test]
+    fn the_newest_name_wins_over_a_variant_with_enough_sessions_but_just_too_small_a_share() {
+        assert_eq!(newest_name_of(&[("Kanonier", 26), ("Kanonierin", 6)]), "Kanonierin");
+    }
+
+    /// JS compares lengths in UTF-16 units: 4 against 5, though 8 bytes against 7.
+    #[test]
+    fn the_shortest_name_is_the_one_with_the_fewest_units_of_a_js_string() {
+        assert_eq!(newest_name_of(&[("ÄÄÄÄ", 10), ("ÄÄaaa", 10)]), "ÄÄÄÄ");
     }
 
     #[test]

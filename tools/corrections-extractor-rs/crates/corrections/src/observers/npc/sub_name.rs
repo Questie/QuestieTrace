@@ -459,18 +459,63 @@ mod tests {
     // Not in the TS tests: the privacy rule of CLAUDE.md for tooltip lines.
 
     #[test]
-    fn never_hands_a_line_sampled_after_a_player_to_the_npc_before_it() {
+    fn never_observes_the_line_of_a_player() {
         // A player's tooltip line is their guild. The tracker never records it; should it, the
-        // player's sample in the same frame (UnitInteraction.lua records a player as a sample
-        // without a GUID) still ends the npc's pairing window before it.
+        // player's GUID never counts as an npc's, recorded with the line or as the target.
+        let recorded = en_us(json!({
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Some Guild" }] },
+            "UnitSubNameGUID": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Player-5284-0362" }] },
+        }));
+        assert_eq!(observed(recorded, vec![]), []);
+        let targeted = en_us(json!({
+            "UnitGUID": { "target": [{ "t": 3.5, "tp": 3.5, "v": "Player-5284-0362" }] },
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Some Guild" }] },
+        }));
+        assert_eq!(observed(targeted, vec![]), []);
+    }
+
+    // Not in the TS tests: inputs where a plausible rewrite would pair differently.
+
+    #[test]
+    fn tells_two_tooltips_of_one_frame_apart_by_their_precise_time() {
+        let functions = en_us(json!({
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Innkeeper" }, { "t": 3, "tp": 3.2, "v": "Tailor" }] },
+            "UnitSubNameGUID": { "mouseover": [{ "t": 3, "tp": 3.1, "v": NORDUN }, { "t": 3, "tp": 3.2, "v": ISAAC }] },
+        }));
+        let values: Vec<(i64, String)> = observed(functions, vec![]).into_iter().map(|(id, name, ..)| (id, name)).collect();
+        assert_eq!(values, [(268238, "Innkeeper".to_owned()), (258930, "Tailor".to_owned())]);
+    }
+
+    #[test]
+    fn takes_the_latest_subname_by_precise_time_whatever_the_order_of_the_entries() {
+        let functions = en_us(json!({
+            "UnitGUID": { "target": [{ "t": 3.5, "tp": 3.5, "v": NORDUN }] },
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.4, "v": "Tailor" }, { "t": 3, "tp": 3.0, "v": "Innkeeper" }] },
+        }));
+        assert_eq!(observed(functions, vec![])[0].1, "Tailor");
+    }
+
+    #[test]
+    fn pairs_a_subname_up_to_exactly_a_second_before_the_target_change() {
+        let at = |tp: f64| {
+            let functions = en_us(json!({
+                "UnitGUID": { "target": [{ "t": 3.5, "tp": 3.5, "v": NORDUN }] },
+                "UnitSubName": { "mouseover": [{ "t": 2.5, "tp": tp, "v": "Tailor" }] },
+            }));
+            observed_ids(functions, vec![])
+        };
+        assert_eq!(at(2.5), [268238], "exactly a second");
+        assert_eq!(at(2.75), [268238]);
+        assert_eq!(at(2.45), [] as [i64; 0]);
+    }
+
+    #[test]
+    fn reads_the_locale_the_subname_was_sampled_in_not_the_one_at_the_target_change() {
         let functions = json!({
-            "GetLocale": { "player": [{ "t": 0, "tp": 0, "v": "enUS" }] },
-            "UnitGUID": { "mouseover": [
-                { "t": 3, "tp": 3, "v": "Creature-0-5208-0-7-823-000031" },
-                { "t": 3, "tp": 3.2 },
-            ]},
-            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.3, "v": "Some Guild" }] },
+            "GetLocale": { "player": [{ "t": 0, "tp": 0, "v": "enUS" }, { "t": 3.4, "tp": 3.4, "v": "deDE" }] },
+            "UnitGUID": { "target": [{ "t": 3.5, "tp": 3.5, "v": NORDUN }] },
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Tailor" }] },
         });
-        assert_eq!(observed(functions, vec![]), []);
+        assert_eq!(localized(functions)[0].locale, "enUS");
     }
 }

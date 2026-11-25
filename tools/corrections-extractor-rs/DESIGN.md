@@ -99,7 +99,10 @@ Reviewed and left as they are: real trace data cannot produce any of them.
 - A submission whose `export_string` holds a lone UTF-16 surrogate escape (`\ud800`) is read as
   "no export_string"; JS strings allow lone surrogates, Rust strings do not.
 - An entry without `t` reads as NaN here and as NULL in the TS tool's DuckDB summary, so
-  `latestT` can differ for it. The addon always records `t`.
+  `latestT` and the time within the newest session can differ for it. The addon always records `t`.
+- A sample, target change or combat event without `tp` reads as NaN here and as `undefined` in TS,
+  so which NPC a subname is paired with can differ for it. The addon always records `tp` since the
+  subname stream exists.
 - An observer that panics stops the run even on a session copy that would be skipped as a
   duplicate; the TS tool only stops when the failing copy is used.
 - A top-level `buildInfo` that is text, or whose version (`buildInfo["4"]`) is a hex, octal or
