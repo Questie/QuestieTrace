@@ -18,7 +18,8 @@
 //!   title was often paired with a neighbouring NPC. Instead, players hover an NPC before they
 //!   target it with the mouse, so the last subname before PLAYER_TARGET_CHANGED to an NPC is that
 //!   NPC's. It is only trusted when it is recent and the player is not in combat (target changes in
-//!   combat are mostly tab targeting). Compared with the Classic NPC database, this was right for
+//!   combat are mostly tab targeting; a recording whose first combat event is the end of a fight
+//!   began in combat). Compared with the Classic NPC database, this was right for
 //!   99% of the titled NPCs on a sample of 848 recent sessions. Targeting without hovering still
 //!   pairs a wrong title now and then.
 //!
@@ -81,11 +82,10 @@ fn observe_before_target_change(session: &Session, sub_names: &[Value]) -> Vec<O
         if encounter.tp - entry_tp(sample) > MAX_SECONDS_BEFORE_TARGET {
             continue;
         }
-        let in_combat = combat
-            .iter()
-            .take_while(|change| change.tp <= encounter.tp)
-            .last()
-            .is_some_and(|change| change.in_combat);
+        // The first change of a recording begun mid-fight is its end, with no start before it.
+        let begun_in_combat = combat.first().is_some_and(|change| !change.in_combat);
+        let last_change = combat.iter().take_while(|change| change.tp <= encounter.tp).last();
+        let in_combat = last_change.map_or(begun_in_combat, |change| change.in_combat);
         if in_combat {
             continue;
         }
@@ -351,6 +351,12 @@ mod tests {
     #[test]
     fn does_not_pair_target_changes_in_combat() {
         let events = vec![event(2.0, "PLAYER_REGEN_DISABLED", no_args()), event(6.0, "PLAYER_REGEN_ENABLED", no_args())];
+        assert_eq!(observed_ids(two_targets(), events), [258930]);
+    }
+
+    #[test]
+    fn does_not_pair_target_changes_before_the_first_combat_end_of_a_recording_begun_mid_fight() {
+        let events = vec![event(6.0, "PLAYER_REGEN_ENABLED", no_args())];
         assert_eq!(observed_ids(two_targets(), events), [258930]);
     }
 
