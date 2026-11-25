@@ -68,6 +68,12 @@ It is also the tool most sensitive to `tp`:
 
 ### Parity run
 
+**Corrections extractor: passed on 2026-11-25.** Over the whole local checkout, 199,967 submissions received from 2026-09-17 to 2026-11-13, the tool was run from the JSON files and from packs made of them with `tp` rounded for `schemaVersion` 9 to 18 (`trace-compactor backfill --tp-schema 9,10,11,12,13,14,15,16,17,18`). Every output file is identical apart from its timestamp, and both runs report the same counts: 629 submissions partly decoded, 108,077 older copies of sessions ignored, and the same one submission skipped with the same message. The packs are 25.2% of the JSON: 98.6 GiB for 391.4 GiB. The run from JSON took 17 minutes and the run from packs 19.
+
+**The relations pipeline has not been run from packs yet.** It is the tool that is sensitive to `tp`, so `tp` rounding is not settled until it has.
+
+What was planned:
+
 Before any trace is stored with rounded `tp`, both tools are run twice over the local checkout: from the JSON files and from packs built from them.
 
 - It passes when every final output is identical and intermediate `tp`-derived times differ by at most one microsecond.
