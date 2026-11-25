@@ -17,6 +17,7 @@
 #   TP_SCHEMA            schemaVersions whose tp is rounded: those a parity run has covered
 #   MIN_FREE_GIB         stops when OUT's disk has less free (default 25)
 #   MIN_MEMORY_GIB       waits when less memory is available (default 6)
+#   RETRY_SECONDS        the pause before a failed day is tried again (default 300)
 set -uo pipefail
 
 first="${1:?FIRST_DAY}"
@@ -76,7 +77,7 @@ pack_day() {
     # Submissions that could not be packed: trying again finds the same.
     grep -q '^NOT PACKED' "$last_attempt" && return 2
     note "day $day failed with status $status: $(tail -1 "$last_attempt" | cut -c1-200)"
-    [ "$attempt" -lt "$attempts" ] && sleep 300
+    [ "$attempt" -lt "$attempts" ] && sleep "${RETRY_SECONDS:-300}"
   done
   return 1
 }
