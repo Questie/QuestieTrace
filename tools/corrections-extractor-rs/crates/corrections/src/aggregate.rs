@@ -269,12 +269,26 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
     /// [`AGREED_MIN_LEAD`] times the sessions of the runner-up. Entities without such a value are
     /// left out. Only sessions with a server time are counted.
     pub fn aggregate_agreed(&self) -> IndexMap<i64, T> {
+        self.agreed(false)
+    }
+
+    /// Like [`Self::aggregate_agreed`], but a value nothing else was observed against wins even when
+    /// it is seen in a single session: nothing contradicts it, and a rare entity would otherwise
+    /// get no value.
+    pub fn aggregate_agreed_or_uncontested(&self) -> IndexMap<i64, T> {
+        self.agreed(true)
+    }
+
+    fn agreed(&self, accept_uncontested: bool) -> IndexMap<i64, T> {
         self.entities
             .iter()
             .filter_map(|(&id, groups)| {
                 let mut sorted: Vec<&ScalarGroup<T>> = groups.values().collect();
                 sorted.sort_by(|a, b| b.timed_session_count.cmp(&a.timed_session_count).then_with(|| default_order(a, b)));
                 let winner = sorted[0];
+                if accept_uncontested && sorted.len() == 1 {
+                    return Some((id, winner.value.clone()));
+                }
                 let has_lead = sorted
                     .get(1)
                     .is_none_or(|runner_up| winner.timed_session_count >= AGREED_MIN_LEAD * runner_up.timed_session_count);
@@ -523,6 +537,22 @@ mod tests {
     fn agreement_needs_twice_the_sessions_of_the_runner_up() {
         assert_eq!(seen_in_sessions(&[("Tailor", 4), ("Leatherworker", 2)]).aggregate_agreed()[&1], "Tailor");
         assert!(seen_in_sessions(&[("Tailor", 3), ("Leatherworker", 2)]).aggregate_agreed().is_empty());
+    }
+
+    #[test]
+    fn an_uncontested_value_wins_from_a_single_session_with_or_without_a_server_time() {
+        assert_eq!(seen_in_sessions(&[("Tailor", 1)]).aggregate_agreed_or_uncontested()[&1], "Tailor");
+        assert_eq!(seen_once(&[("Tailor", None, 1.0)]).aggregate_agreed_or_uncontested()[&1], "Tailor");
+    }
+
+    #[test]
+    fn a_contested_value_still_needs_agreement() {
+        assert!(seen_in_sessions(&[("Tailor", 1), ("Leatherworker", 1)])
+            .aggregate_agreed_or_uncontested()
+            .is_empty());
+        assert!(seen_in_sessions(&[("Tailor", 3), ("Leatherworker", 2)])
+            .aggregate_agreed_or_uncontested()
+            .is_empty());
     }
 
     #[test]

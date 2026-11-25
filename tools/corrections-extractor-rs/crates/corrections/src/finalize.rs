@@ -334,7 +334,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     });
     let object_zones = merge_with_extra(&acc.object_spawns, &object_turn_in, |_, obs| object_spawns_merge::merge_zone_id(obs));
     let mut objects = Records::default();
-    objects.field("name", &acc.object_name.aggregate_agreed(), |name| Js::str(name));
+    objects.field("name", &acc.object_name.aggregate_agreed_or_uncontested(), |name| Js::str(name));
     objects.field("spawns", &object_spawns, |spawns| zone_coordinates(spawns.iter().cloned()));
     objects.field("zoneID", &object_zones, |zone| Js::Num(*zone));
 
@@ -488,8 +488,8 @@ fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) 
 /// id (unlike the corrections, Classic ones too). Names can change over time (a renamed NPC), so
 /// the newest one wins. Subnames rarely change but are sometimes attached to the wrong NPC, so
 /// they need agreement between sessions. Object names never change, but a looted object can be
-/// named after a neighbour whose tooltip was last shown, so they need it too. Objective texts use
-/// the default policy.
+/// named after a neighbour whose tooltip was last shown, so they need it too, unless no other name
+/// was observed (a rare object is seen in one session). Objective texts use the default policy.
 fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, String)>)> {
     let mut npcs = Vec::new();
     for locale in sorted_locales(&acc.npc_name) {
@@ -543,7 +543,10 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
         ("lookupNpcs", npcs),
         ("lookupQuests", quests),
         ("lookupItems", names(&acc.item_name, LookupTable::Item, ScalarSummary::aggregate_newest)),
-        ("lookupObjects", names(&acc.object_name, LookupTable::Object, ScalarSummary::aggregate_agreed)),
+        (
+            "lookupObjects",
+            names(&acc.object_name, LookupTable::Object, ScalarSummary::aggregate_agreed_or_uncontested),
+        ),
     ]
 }
 
@@ -753,6 +756,13 @@ mod tests {
         let (object, lookup) = with_object_names(&[("Dalaran Digest", 1000.0), ("Dalaran Digest", 2000.0), ("Leyline Focus", 3000.0)]);
         assert!(object.expect("the object's record").contains("[objectKeys.name] = \"Dalaran Digest\""));
         assert_eq!(lookup.as_deref(), Some("[300200] = \"Dalaran Digest\","));
+    }
+
+    #[test]
+    fn exports_an_object_name_seen_in_one_session_when_no_other_name_was_seen() {
+        let (object, lookup) = with_object_names(&[("Suspicious Chest", 1000.0)]);
+        assert!(object.expect("the object's record").contains("[objectKeys.name] = \"Suspicious Chest\""));
+        assert_eq!(lookup.as_deref(), Some("[300200] = \"Suspicious Chest\","));
     }
 
     #[test]
