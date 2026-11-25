@@ -69,6 +69,7 @@ QuestieTrace.lua          - Main addon entry point (initialization, event handli
 QuestieTrace_UI.lua       - User interface code
 Modules/                  - Core modules and tracking systems
     globals.lua           - Global variables, constants, shared state
+    ObjectSpells.lua       - Generated list of the spells cast on world objects (tools/generate-object-spells.py)
     Trackers/             - Individual tracking modules
         PlayerIdentity.lua     - Player identity tracking
         UnitLevel.lua          - Unit level tracking
@@ -87,6 +88,7 @@ Modules/                  - Core modules and tracking systems
         SpellBook.lua          - Spell book tracking
         ResetTime.lua          - Daily/weekly reset and realm calendar time tracking
         ItemCount.lua          - Carried item counts (C_Item.GetItemCount)
+        ObjectCast.lua         - Names of the world objects the player casts on (Forever)
         Display.lua            - Screen size, UI scale and allowlisted UI CVars
         PlayerProgress.lua     - Experience, rested bonus and money
         ItemInfo.lua           - When item data an addon asked for arrives

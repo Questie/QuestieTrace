@@ -21,6 +21,8 @@ Releases and their version: 9 = v1.0.0, v1.0.1 · 10 = v1.1.0, v1.1.1 · 11 = v1
 - **Added** `C_Item.GetItemIDByGUID[itemGUID]` for item GUIDs in `UnitGUID`: the item that starts a quest. **Consumers**: Forever's `QUEST_DETAIL` reports `questStartItemID` 0, so this is the only source.
 - **Added** `UnitGUIDIsSecret[token]`: whether the client hid which unit a token was. **Consumers**: below 22 a hidden unit looks like no unit, or like the unit before it.
 - **Added** `IsQuestSequenced`. **Consumers**: there is nothing like it in older sessions.
+- **Added** `UnitNameFromGUID[objectGUID]`, the name of a looted game object, on Forever. **Consumers**: prefer it for looted objects, as it belongs to the GUID in `GetLootSourceInfo`. Sessions without it only have the last `GameObjectName` before the loot, which can be another object's.
+- **Added** `ObjectCast`, the spell and the name of the world object (or item) it was cast on, on Forever. **Consumers**: it names objects that are clicked without a loot window, at the time of the click, but not their ID. Sessions without it only have the last `GameObjectName` before the click.
 - **Added** `TrainerServices[npcID][service]`, the trainer's kind and the list filters.
 - **Added** `GetMerchantItemID`, `GetMerchantFilter`, and merchant samples when an item's data arrives late. **Consumers**: a third of the older slot series have no name or link.
 - **Added** `UnitIsGhost["player"]`, `PLAYER_DEAD` and `PLAYER_UNGHOST`, the trivial quest range (`C_QuestLog.GetTrivialRange` on Forever, else `GetQuestGreenRange`), hardcore and season state, interaction windows (`PLAYER_INTERACTION_MANAGER_FRAME_SHOW`/`_HIDE`), and whether recipes used as quest requirements are known.
