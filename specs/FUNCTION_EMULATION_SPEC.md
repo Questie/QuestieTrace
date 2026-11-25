@@ -79,6 +79,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetNumGroupMembers()` | `functions["GetNumGroupMembers"]` |
 | `GetNumSkillLines()` | `functions["GetNumSkillLines"]` (only present when this legacy global exists; no synthesized fallback) |
 | `GetSkillLineInfo(index)` (legacy) | `functions["GetSkillLineInfo"][index]` (only present when `GetNumSkillLines` exists) |
+| `C_SkillInfo.GetSkillLineInfoByID(skillID)` (Forever) | `functions["C_SkillInfo.GetSkillLineInfoByID"][skillID]` (`rank`, `maxRank`, `modifier` and `tempPoints` only) |
 | `C_TradeSkillUI.GetAllProfessionTradeSkillLines()` | `functions["C_TradeSkillUI.GetAllProfessionTradeSkillLines"]` |
 | `C_TradeSkillUI.GetTradeSkillLineInfoByID(skillLineID)` | `functions["C_TradeSkillUI.GetTradeSkillLineInfoByID"][skillLineID]` |
 | `GetProfessions()` | `functions["GetProfessions"]` |
@@ -193,6 +194,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetSpellBookItemName(slot)` | `functions["GetSpellBookItemName"][slot]` |
 | `GetSpellBookItemInfo(slot)` | `functions["GetSpellBookItemInfo"][slot]` |
 | `IsPassiveSpell(slot)` | `functions["IsPassiveSpell"][slot]` |
+| `C_SpellBook.IsSpellKnown(spellID)` (Forever) | `PlayerKnownSpells` holds `spellID` (spells in the book, riding spells and the recipes QuestieDB uses in `requiredSpell`) |
 
 Notes:
 
@@ -212,7 +214,7 @@ Notes:
 - Loot, skill/profession, spellbook, and unit-token streams follow the same raw-observation rule. Close events or shrinking index ranges cause event-synchronous probes of the represented APIs; failed calls are skipped rather than represented by invented values.
 - `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` are two independent raw streams for the same conceptual data, not one normalized value: whichever real API the client exposes is probed and recorded under that API's own name.
 - Only factions in `FactionOrder` (the player's reputation panel) are recorded. A faction outside it has had no reputation change yet, so answer it from a static per-faction-group table of starting values (e.g. a `C_Reputation.GetFactionDataByID` dump of a new Alliance and a new Horde character, minus their panels), answering `isWatched = false`.
-- `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries. `GetProfessions`/`GetProfessionInfo` and `C_TradeSkillUI.GetAllProfessionTradeSkillLines`/`C_TradeSkillUI.GetTradeSkillLineInfoByID` are tracked independently and unconditionally whenever they exist (not only as a fallback for the legacy skill-line APIs).
+- `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries; Forever has `C_SkillInfo.GetSkillLineInfoByID` in their place. `C_SkillInfo.GetNumSkillLines()` and `GetSkillLineInfo(index)` can be built from it: one row per skill with a value, in any order, with the names and headers of the client's skill line data. `GetProfessions`/`GetProfessionInfo` and `C_TradeSkillUI.GetAllProfessionTradeSkillLines`/`C_TradeSkillUI.GetTradeSkillLineInfoByID` are tracked independently and unconditionally whenever they exist (not only as a fallback for the legacy skill-line APIs).
 
 ### Stored custom streams
 
