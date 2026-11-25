@@ -87,7 +87,7 @@ is a player's, or that does not classify as `"npc"`/`"object"`/`"item"` per
 
 ### UnitLevel tracker
 
-Triggers `UnitLevel("player")` sampling.
+Triggers `UnitLevel("player")` and trivial quest range sampling.
 
 - `PLAYER_LEVEL_UP`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
@@ -133,11 +133,16 @@ Triggers observed `UnitGUID` and packed observed `UnitName` sampling for
 are sampled on every event without synthesizing `UnitName` from `UnitExists`.
 
 Privacy: any of these tokens can resolve to another player character (e.g.
-targeting a party member), not just an NPC. `Core.ParseGUIDKind` classifies
-the observed `UnitGUID` before it is stored; if it resolves to `"player"` (or
-an unrecognized kind), neither the GUID nor the paired `UnitName` observation
-for that token/cycle is recorded. A `nil` GUID (no unit present) is still
-recorded, since that reflects a state transition rather than PII.
+targeting a party member, or the trade partner on `npc`), not just an NPC.
+`Core.ParseGUIDKind` classifies the observed `UnitGUID` before it is stored.
+Players and their pets and minions are recorded as no unit, with an empty
+name; for an unrecognized kind, neither the GUID nor the paired `UnitName`
+observation is recorded. A `nil` GUID (no unit present) is still recorded,
+since that reflects a state transition rather than PII.
+
+An item that starts a quest is an `Item-` GUID on `"questnpc"`. Its item ID is
+recorded as `C_Item.GetItemIDByGUID[itemGUID]` on clients that have that API
+(Forever), where `QUEST_DETAIL` reports `questStartItemID` 0.
 
 **From `player_state` (shared with other trackers):**
 - `PLAYER_TARGET_CHANGED`
@@ -150,7 +155,7 @@ recorded, since that reflects a state transition rather than PII.
 - `QUEST_COMPLETE`
 - `QUEST_GREETING`
 - `QUEST_FINISHED`
-- `QUEST_ACCEPT_CONFIRM`
+- `QUEST_ACCEPT_CONFIRM` *(without the name of the player who shares the quest)*
 - `GOSSIP_SHOW`
 - `GOSSIP_CLOSED`
 
@@ -159,12 +164,18 @@ recorded, since that reflects a state transition rather than PII.
 - `QUEST_TURNED_IN`
 
 **From `npc_interaction` (new category):**
+- `PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, `PLAYER_INTERACTION_MANAGER_FRAME_HIDE`
+  (schema 22+) -- the argument is an `Enum.PlayerInteractionType` number, e.g.
+  1 trade, 3 gossip, 4 quest giver, 5 merchant, 14 tabard vendor, 17 mailbox,
+  18 spirit healer, 20 innkeeper. They come in addition to a window's own
+  events, and several types can follow each other with one NPC. Which types
+  each client fires them for was not checked in a client.
 - `MERCHANT_SHOW`
 - `MERCHANT_CLOSED`
 - `TRAINER_SHOW`
 - `TRAINER_CLOSED`
 - `MAIL_SHOW`
-- `MAIL_CLOSED`
+- `MAIL_CLOSED` *(never seen on any client; `PLAYER_INTERACTION_MANAGER_FRAME_HIDE(17)` tells instead)*
 - `AUCTION_HOUSE_SHOW`
 - `AUCTION_HOUSE_CLOSED`
 - `BANKFRAME_OPENED`
@@ -223,6 +234,17 @@ Triggers `IsInGroup` and `GetNumGroupMembers` sampling.
 - `GROUP_ROSTER_UPDATE`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
 - `SPELLS_CHANGED` *(login-time sampling)*
+
+### GhostState tracker
+
+Triggers `UnitIsGhost("player")` sampling. `PLAYER_DEAD` and `PLAYER_UNGHOST`
+are recorded since schema 22; like `PLAYER_ALIVE` they have no arguments.
+
+- `PLAYER_DEAD`
+- `PLAYER_ALIVE` -- fires when the player releases the spirit, and when a
+  resurrection is accepted before that
+- `PLAYER_UNGHOST`
+- `PLAYER_ENTERING_WORLD` *(login-time sampling)*
 
 ### SkillLines tracker
 
@@ -367,7 +389,7 @@ to trackers for login-time data sampling (see tracker sections above).
 - `PLAYER_EQUIPMENT_CHANGED`
 - `SKILL_LINES_CHANGED`
 - `NEW_RECIPE_LEARNED`
-- `UI_INFO_MESSAGE`
+- `UI_INFO_MESSAGE` *(names redacted)*
 - `CURRENCY_DISPLAY_UPDATE`
 
 ### Map/zone (not used by position tracker)
@@ -407,8 +429,8 @@ dropped and never recorded or dispatched to trackers.
 
 ### Group/world
 
-- `GROUP_JOINED`
-- `GROUP_LEFT`
+- `GROUP_JOINED` *(without the party GUID)*
+- `GROUP_LEFT` *(without the party GUID)*
 - `GROUP_ROSTER_UPDATE`
 - `NAME_PLATE_UNIT_ADDED` *(also UnitInteraction nameplate sampling)*
 - `NAME_PLATE_UNIT_REMOVED`

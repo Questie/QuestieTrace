@@ -347,7 +347,11 @@ Called with no arguments. Stream is a flat `{t, tp, v}` array.
 | `GetNumLootItems` | scalar number | Number of loot slots (0 when no loot window) |
 | `IsInGroup` | scalar boolean | Whether in a party/raid |
 | `GetNumGroupMembers` | scalar number | Party/raid size (0 when solo) |
-| `GetQuestGreenRange` | scalar number | XP green-range threshold |
+| `C_QuestLog.GetTrivialRange` | scalar number | Trivial quest range; Forever only |
+| `GetQuestGreenRange` | scalar number | Trivial quest range on the other clients |
+| `C_GameRules.IsHardcoreActive` | scalar boolean | Hardcore realm; t=0 only |
+| `C_Seasons.HasActiveSeason` | scalar boolean | Seasonal realm; t=0 only, not on Forever |
+| `C_Seasons.GetActiveSeason` | scalar number/nil | `Enum.SeasonID`; t=0 only, not on Forever |
 | `C_GossipInfo.GetAvailableQuests` | object (table[]) | Array of available quests from an NPC |
 | `C_GossipInfo.GetActiveQuests` | object (table[]) | Array of active quests at an NPC |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar number | Gossip available count |
@@ -387,6 +391,7 @@ Called with `"player"` as the argument.
 | Function key | Return type | Description |
 |---|---|---|
 | `UnitLevel` | scalar number | Player level |
+| `UnitIsGhost` | scalar boolean | Whether the player is a ghost |
 | `UnitRace` | tuple (n=3) | localizedName, englishName, raceID |
 | `UnitClass` | tuple (n=3) | localizedName, englishName, classID |
 | `UnitClassBase` | tuple (n=2) | classFilename, classID |
@@ -420,7 +425,8 @@ Called with a quest ID as the argument.
 | `GetNumQuestLogRewards` | scalar number/nil | Reward count |
 | `GetQuestLogRewardMoney` | scalar number/nil | Reward money |
 | `GetQuestTagInfo` | tuple (n varies) | Tag info |
-| `IsBreadcrumbQuest` | scalar boolean | Forever only; undocumented, called with the quest ID |
+| `IsBreadcrumbQuest` | scalar boolean | Forever only, undocumented; only while on the quest since schema 22, see SCHEMA_SPEC for older readings |
+| `IsQuestSequenced` | scalar boolean | Forever only, undocumented; only while on the quest |
 | `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | Forever only; questLineName/questName raw, other fields raw; includes hidden quest lines |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar number | Forever only; `Enum.QuestClassification` |
 
@@ -445,6 +451,13 @@ Called with a quest ID as the argument.
 |---|---|---|
 | `UnitGUID` | scalar string or nil | GUID; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+| `UnitGUIDIsSecret` | scalar boolean | Synthetic: whether `UnitGUID(token)` returned a secret value; also for nameplate tokens |
+
+### Parameterized by item GUID (string)
+
+| Function key | Return type | Description |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar number | Forever only; item ID of an `Item-` GUID in `UnitGUID`, such as the item that starts a quest |
 
 ### Parameterized by loot slot index (number)
 

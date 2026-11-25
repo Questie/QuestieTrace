@@ -160,7 +160,8 @@ Restricted GUIDs cannot pass privacy classification and are omitted, along with
 their associated unit names. They are not replaced with synthetic nil observations;
 other readable observations continue to be recorded. The one exception is
 nameplate tokens (schema 15+), where every withheld unit, restricted or not,
-records nil so a reused token never answers with its previous unit.
+records nil so a reused token never answers with its previous unit. Since
+schema 22 `UnitGUIDIsSecret[token]` tells when a GUID was restricted.
 
 Missing markers mean legacy/unknown semantics, even for schema v9. Those sessions
 may contain synthetic resets or normalized returns. Consumers must check for the
@@ -360,7 +361,11 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `IsInGroup` | scalar (boolean) | |
 | `GetNumGroupMembers` | scalar (number) | 0 when not in a group |
 | `GetNumSkillLines` | scalar (number) | Legacy global; only present when it exists, no synthesized fallback |
-| `GetQuestGreenRange` | scalar (number) | XP threshold; changes with player level |
+| `C_QuestLog.GetTrivialRange` | scalar (number) | UnitLevel; how many levels below the player a quest may be before it is trivial. Changes with the player's level, Forever only. Schema 22+ |
+| `GetQuestGreenRange` | scalar (number) | UnitLevel; the same on clients without `C_QuestLog.GetTrivialRange`. Not recorded by some versions before schema 22 |
+| `C_GameRules.IsHardcoreActive` | scalar (boolean) | PlayerIdentity; hardcore realm, recorded once at t=0. Schema 22+ |
+| `C_Seasons.HasActiveSeason` | scalar (boolean) | PlayerIdentity; recorded once at t=0 on clients that have `C_Seasons` (not Forever, where addons may define a stand-in). Schema 22+ |
+| `C_Seasons.GetActiveSeason` | scalar (number/nil) | PlayerIdentity; `Enum.SeasonID`, e.g. 2 Season of Discovery, 3 hardcore. Recorded like `C_Seasons.HasActiveSeason`. Schema 22+ |
 | `GetProfessions` | tuple (n=5) | profession tab indices; nil in missing tuple slots |
 | `C_GossipInfo.GetAvailableQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetActiveQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
@@ -417,6 +422,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitLevel` | scalar (number) | |
+| `UnitIsGhost` | scalar (boolean) | GhostState; a released spirit, not merely dead. Schema 22+ |
 | `UnitXP` | scalar (number) | PlayerProgress; experience into the current level. Schema 15+ |
 | `UnitXPMax` | scalar (number) | PlayerProgress; experience needed for the level. Schema 15+ |
 | `UnitRace` | tuple (n=3) | localizedName, englishName, raceID |
@@ -449,7 +455,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumQuestLogRewards` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestLogRewardMoney` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestTagInfo` | tuple (n varies) | |
-| `IsBreadcrumbQuest` | scalar (boolean expected) | QuestDialog; Forever only, undocumented API called as `IsBreadcrumbQuest(questID)` -- argument meaning unconfirmed, treat as a hint |
+| `IsBreadcrumbQuest` | scalar (boolean) | QuestLog; Forever only, undocumented. Recorded only while `C_QuestLog.IsOnQuest(questID)` is true, because it answers false for every other quest. Schema 22+; before that QuestDialog recorded it for dialog and offered quests, so only readings taken while `C_QuestLog.IsOnQuest[questID]` was true are meaningful |
+| `IsQuestSequenced` | scalar (boolean) | QuestLog; Forever only, undocumented; whether the quest shows its objectives one after another. Recorded only while `C_QuestLog.IsOnQuest(questID)` is true. Schema 22+ |
 | `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | QuestDialog; Forever only; copy of the `C_QuestLine.GetQuestLineInfo(questID)` table with all fields raw (no map, `displayableOnly` defaults to false so hidden lines return with `isHidden = true`) |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar (number) | QuestDialog; Forever only; raw `Enum.QuestClassification` value |
 | `C_QuestLog.GetRequiredMoney` | scalar (number) | Raw API result; Forever returns -1 when the quest requires no money; probed again after quest leaves log. Schema 15+ |
@@ -476,6 +483,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetQuestItemLink` | `[type][index]` | scalar (string/nil) | QuestDialog; same keys as `GetQuestItemInfo`. Schema 15+ |
 | `GetQuestCurrencyInfo` | `["reward"][index]` | tuple (n varies) | QuestDialog, on clients that have it (Mists); name, texture, count, quality. Read for index 1..`GetMaxRewardCurrencies()`, past `GetNumRewardCurrencies()`, as Blizzard's Mists quest frame does (`Wrath/QuestInfo.lua`); empty slots return n=0. Classic frames never read required currencies. Schema 15+ |
 | `GetQuestCurrencyID` | `["reward"][index]` | scalar (number/nil) | QuestDialog, on clients that have it (Mists); same keys as `GetQuestCurrencyInfo`. Schema 15+ |
+| `C_QuestOffer.GetQuestRewardCurrencyInfo` | `["reward"][index]` | object (table) or nil | QuestDialog; Forever only. The `QuestRewardCurrencyInfo` reduced to `currencyID`, `baseRewardAmount` (without bonuses) and `totalRewardAmount` (what the quest frame shows). Same indices as `GetQuestCurrencyID`; documented to be nil for an empty slot. Schema 22+ |
 
 ### Parameterized by greeting index
 
@@ -492,14 +500,22 @@ All tuple-returning functions MUST have `n` on every stored value.
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | GUID string; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+| `UnitGUIDIsSecret` | scalar (boolean) | *(synthetic)* whether `UnitGUID(token)` returned a secret value, i.e. the token has a unit whose identity the client hides (Forever, in instances). A token's stream starts at its first `true`; no stream means never hidden. Schema 22+ |
 
 ### Parameterized by nameplate token (`"nameplate1"`, `"nameplate2"`, ...)
 
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | UnitInteraction; `Creature-` or `Vehicle-` GUID, or nil when the token's unit is withheld. Sampled on `NAME_PLATE_UNIT_ADDED`, change-only per token. Schema 15+ |
+| `UnitGUIDIsSecret` | scalar (boolean) | *(synthetic)* as above: tells a hidden unit from the other withheld ones. Schema 22+ |
 
 Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, unrecognized or restricted GUIDs, and failed `UnitGUID` calls are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. Instances are sampled too: Questie draws nameplate icons in dungeons on Classic clients, while Forever restricts GUIDs there, so its instance adds record nil. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
+
+### Parameterized by item GUID
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar (number) | UnitInteraction; Forever only. For every `Item-` GUID in `UnitGUID` (`"questnpc"` while an item starts a quest); join by the GUID. One entry per GUID, the first non-nil answer. Schema 22+ |
 
 ### Parameterized by unit token (`"target"`, `"mouseover"`)
 

@@ -225,6 +225,26 @@ function Core.Round(num, decimals)
   return math.floor(num * mult + 0.5) / mult
 end
 
+--- Call a client function and append its answer to a stream if it differs from
+--- the last entry. A failing call is reported like any Lua error and records
+--- nothing, so the capture and the other trackers go on.
+---@param stream FunctionStreamEntry[]
+---@param t number Session-relative GetTime()
+---@param tp number Session-relative GetTimePreciseSec()
+---@param fn function A function that returns one value, not a table
+---@param ... any Arguments for fn
+function Core.SampleScalar(stream, t, tp, fn, ...)
+  local ok, value = pcall(fn, ...)
+  if not ok then
+    geterrorhandler()(value)
+    return
+  end
+  local previous = stream[#stream]
+  if not previous or previous.v ~= value then
+    stream[#stream + 1] = { t = t, tp = tp, v = value }
+  end
+end
+
 ---------------------------------------------------------------------------
 -- Tracker registration
 ---------------------------------------------------------------------------
