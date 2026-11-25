@@ -5,6 +5,7 @@
 //! then to the value seen first. Fields whose merge is not "pick one winner" keep every
 //! observation and merge them themselves.
 
+use crate::js;
 use crate::observation::{Confidence, Localized, Observation, SessionId, Sessions};
 use indexmap::IndexMap;
 use rustc_hash::FxBuildHasher;
@@ -53,6 +54,8 @@ pub struct ScalarGroup<T> {
     last_session: SessionId,
     /// Newest server time among those sessions; None when none had one.
     pub newest_session_time: Option<f64>,
+    /// Latest t among the observations of the sessions at newest_session_time; None when that is.
+    pub newest_session_t: Option<f64>,
 }
 
 /// One session's observations of a scalar field, merged per entity and value in the order they
@@ -71,6 +74,8 @@ struct SessionGroup<T> {
     first_t: f64,
     /// The largest t that is not NaN; NaN when every t is.
     max_t: f64,
+    /// `Math.max` of every t: NaN when any is.
+    latest_t: f64,
 }
 
 impl<T> Default for SessionScalars<T> {
@@ -92,6 +97,7 @@ impl<T: Clone + Eq + Hash> SessionScalars<T> {
                     if obs.t > group.max_t || (group.max_t.is_nan() && !obs.t.is_nan()) {
                         group.max_t = obs.t;
                     }
+                    group.latest_t = js::max(&[group.latest_t, obs.t]);
                 }
                 Entry::Vacant(slot) => {
                     let (entity_id, value) = slot.key().clone();
@@ -103,6 +109,7 @@ impl<T: Clone + Eq + Hash> SessionScalars<T> {
                         count: 1,
                         first_t: obs.t,
                         max_t: obs.t,
+                        latest_t: obs.t,
                     });
                 }
             }
@@ -128,6 +135,7 @@ impl<T: Clone + Eq + Hash> SessionScalars<Localized<T>> {
                 count: group.count,
                 first_t: group.first_t,
                 max_t: group.max_t,
+                latest_t: group.latest_t,
             };
             by_locale.entry(locale).or_default().groups.push(part);
         }
@@ -189,6 +197,7 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
                         timed_session_count: usize::from(session_time.is_some()),
                         last_session: session,
                         newest_session_time: session_time,
+                        newest_session_t: session_time.map(|_| part.latest_t),
                     },
                 );
             }
@@ -206,6 +215,10 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
                 if let Some(time) = session_time {
                     if group.newest_session_time.is_none_or(|newest| time > newest) {
                         group.newest_session_time = Some(time);
+                        group.newest_session_t = Some(part.latest_t);
+                    } else if group.newest_session_time == Some(time) {
+                        let latest = group.newest_session_t.unwrap_or(f64::NEG_INFINITY);
+                        group.newest_session_t = Some(js::max(&[latest, part.latest_t]));
                     }
                 }
             }
@@ -313,7 +326,11 @@ fn default_order<T>(a: &ScalarGroup<T>, b: &ScalarGroup<T>) -> Ordering {
         .then_with(|| b.count.cmp(&a.count))
         // `latest_t` is relative to the start of its session, so it only compares values of one session.
         .then_with(|| newest_first(session_time(a), session_time(b)))
-        .then_with(|| newest_first(a.latest_t, b.latest_t))
+        // Only the observations of the newest session are comparable; untimed groups fall back to latest_t.
+        .then_with(|| match (a.newest_session_t, b.newest_session_t) {
+            (Some(a_t), Some(b_t)) => newest_first(a_t, b_t),
+            _ => newest_first(a.latest_t, b.latest_t),
+        })
 }
 
 /// Custom-merge fields: every observation, grouped by entity in the order they were added.
@@ -447,6 +464,28 @@ mod tests {
     fn a_tie_goes_to_a_session_with_a_server_time() {
         let summary = seen_once(&[("Untimed", None, 3000.0), ("Timed", Some(200.0), 10.0)]);
         assert_eq!(summary.aggregate()[&1], "Timed");
+    }
+
+    #[test]
+    fn a_tie_compares_the_time_within_the_newest_session_not_the_latest_time_of_any_session() {
+        let summary = seen_once(&[
+            ("A", Some(100.0), 3000.0),
+            ("A", Some(200.0), 10.0),
+            ("B", Some(150.0), 5.0),
+            ("B", Some(200.0), 50.0),
+        ]);
+        assert_eq!(summary.aggregate()[&1], "B");
+    }
+
+    #[test]
+    fn a_tie_takes_the_latest_time_of_every_session_at_the_newest_server_time() {
+        let summary = seen_once(&[
+            ("A", Some(200.0), 40.0),
+            ("A", Some(200.0), 10.0),
+            ("B", Some(200.0), 20.0),
+            ("B", Some(200.0), 30.0),
+        ]);
+        assert_eq!(summary.aggregate()[&1], "A");
     }
 
     #[test]
