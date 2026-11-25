@@ -26,6 +26,9 @@ local DeepCompare = Core.DeepCompare
 -- GetLootSlotLink(index) -> string itemLink
 --
 -- GetLootSlotType(slotIndex) -> number slotType
+--
+-- UnitNameFromGUID(guid) -> string unitName, string unitServer (Forever only)
+--   stored as functions[key][objectGUID] for each GameObject GUID in GetLootSourceInfo; see RecordObjectName.
 ---------------------------------------------------------------------------
 
 ---@class LootSlotStreams
@@ -39,6 +42,8 @@ local DeepCompare = Core.DeepCompare
 local functions
 ---@type table<number, LootSlotStreams>? [slot] -> { info=stream, source=stream, link=stream, type=stream }
 local lootSlotStreams
+---@type table<string, FunctionStreamEntry[]>? Keyed by object GUID; nil on clients without UnitNameFromGUID.
+local objectNameStreams
 
 ---Safely call a function and return the first result.
 ---@param fn function?
@@ -165,6 +170,39 @@ local function IsLootSourceAllowed(source)
   return true
 end
 
+---Record the name of a looted game object. GetLootSourceInfo only gives its GUID, and Forever's object
+---tooltips have no GUID, so nothing else tells which name belongs to which object ID. The stream is keyed by
+---the GUID to join it with GetLootSourceInfo. A known name is not read again; an unreadable one is, at the
+---next probe.
+---
+---Privacy: only called for GameObject GUIDs, so the client is never asked for a player's, pet's or NPC's name.
+---The realm of the answer is not stored, a restricted (secret) name is dropped, and the rest is sanitized:
+---player-made objects can carry their owner's name.
+---@param t number
+---@param tp number
+---@param objectGUID string
+local function RecordObjectName(t, tp, objectGUID)
+  if not objectNameStreams or objectNameStreams[objectGUID] then return end
+
+  local ok, returns = SafePackedCall(UnitNameFromGUID, objectGUID)
+  if not ok or not returns then return end
+  local name = returns[1]
+  if issecretvalue and issecretvalue(name) then return end
+  if type(name) ~= "string" or name == "" or name == UNKNOWNOBJECT then return end
+  objectNameStreams[objectGUID] = { { t = t, tp = tp, v = { n = 1, Core.SanitizeText(name) } } }
+end
+
+---Record the names of the game objects among a slot's loot sources.
+---@param t number
+---@param tp number
+---@param source PackedArgs An allowed GetLootSourceInfo tuple (guid1, qty1, guid2, qty2, ...)
+local function RecordObjectNames(t, tp, source)
+  for i = 1, source.n or 0, 2 do
+    local guid = source[i]
+    if Core.ParseGUIDKind(guid) == "object" then RecordObjectName(t, tp, guid) end
+  end
+end
+
 ---Probe one loot slot and append successful observed API returns.
 ---@param t number
 ---@param tp number
@@ -185,6 +223,7 @@ local function ProbeLootSlot(t, tp, slot)
     -- correlated by exact timestamp, so an unchanged source must still be
     -- present when the link changes (and vice versa).
     streams.source[#streams.source + 1] = { t = t, tp = tp, v = source }
+    RecordObjectNames(t, tp, source)
   end
 
   local linkOk, link = SafeScalarCall(GetLootSlotLink, slot)
@@ -236,6 +275,8 @@ Core.RegisterTracker({
     functions = capture.session.functions
     functions["GetNumLootItems"] = {}
     lootSlotStreams = nil
+    objectNameStreams = type(UnitNameFromGUID) == "function" and {} or nil
+    functions["UnitNameFromGUID"] = objectNameStreams
 
     -- Initial sample stores the observed API return, if the API is available.
     SampleLootCount(0, 0)

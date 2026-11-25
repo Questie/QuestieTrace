@@ -523,6 +523,12 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 |---|---|---|
 | `C_Item.GetItemIDByGUID` | scalar (number) | UnitInteraction; Forever only. For every `Item-` GUID in `UnitGUID` (`"questnpc"` while an item starts a quest); join by the GUID. One entry per GUID, the first non-nil answer. Schema 22+ |
 
+### Parameterized by object GUID
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `UnitNameFromGUID` | tuple (n=1) | Loot; Forever only. The name of every `GameObject-` GUID in `GetLootSourceInfo`; join by the GUID. One entry per GUID, the first readable name: restricted (secret) names, `UNKNOWNOBJECT` and `""` are read again at the next probe. Player names redacted; the realm the API also returns is not stored. Schema 22+ |
+
 ### Parameterized by unit token (`"target"`, `"mouseover"`)
 
 | Function key | Return type | Notes |

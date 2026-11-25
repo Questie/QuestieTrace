@@ -80,7 +80,8 @@ Triggers loot function sampling on open and observed close-state sampling on clo
 Privacy: `GetLootSourceInfo` can return a player's GUID (e.g. a party member's
 corpse/personal-loot roll). Any observed source tuple containing a GUID that
 is a player's, or that does not classify as `"npc"`/`"object"`/`"item"` per
-`Core.ParseGUIDKind`, is discarded entirely rather than stored.
+`Core.ParseGUIDKind`, is discarded entirely rather than stored. Names are read
+with `UnitNameFromGUID` for `"object"` GUIDs only, and sanitized.
 
 - `LOOT_READY`
 - `LOOT_CLOSED`
