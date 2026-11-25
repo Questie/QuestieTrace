@@ -50,7 +50,8 @@ where `encoded` is the `SessionRecord` run through the export pipeline (`Core.En
 encoding is not expected to fail, and keeping them is not worth the extra code.
 
 `lastSavedSession` is only set on explicit save — it is not initialized
-on fresh install or migration.
+on fresh install or migration. It names the newest saved session, so it does not
+change when the session just saved is pruned right away.
 
 The share reminder uses a timestamp watermark: `reminder.lastReminderAt` records
 when the last reminder was shown, and `reminder.sessionStart` records when the
@@ -78,10 +79,11 @@ small in the common case: reported sessions are deleted immediately, not
 retained with a flag.
 
 As a pure size backstop for players who never open the export window,
-`Core.SaveCapture()` also prunes the oldest saved session(s) whenever
-`#sessions` exceeds `MAX_SESSIONS` (10), regardless of report status.
+`Core.SaveCapture()` also prunes the saved session(s) with the fewest events
+(`eventCount`, the oldest of equal ones) whenever `#sessions` exceeds
+`MAX_SESSIONS` (10), regardless of report status.
 This ensures a fixed upper bound on disk usage even for users who ignore
-the export reminder indefinitely.
+the export reminder indefinitely. A session without events is not saved at all.
 
 ### Export and deletion
 
@@ -160,7 +162,8 @@ Restricted GUIDs cannot pass privacy classification and are omitted, along with
 their associated unit names. They are not replaced with synthetic nil observations;
 other readable observations continue to be recorded. The one exception is
 nameplate tokens (schema 15+), where every withheld unit, restricted or not,
-records nil so a reused token never answers with its previous unit.
+records nil so a reused token never answers with its previous unit. Since
+schema 22 `UnitGUIDIsSecret[token]` tells when a GUID was restricted.
 
 Missing markers mean legacy/unknown semantics, even for schema v9. Those sessions
 may contain synthetic resets or normalized returns. Consumers must check for the
@@ -362,9 +365,12 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `IsInGroup` | scalar (boolean) | |
 | `GetNumGroupMembers` | scalar (number) | 0 when not in a group |
 | `GetNumSkillLines` | scalar (number) | Legacy global; only present when it exists, no synthesized fallback |
-| `GetQuestGreenRange` | scalar (number) | XP threshold; changes with player level |
+| `C_QuestLog.GetTrivialRange` | scalar (number) | UnitLevel; how many levels below the player a quest may be before it is trivial. Changes with the player's level, Forever only. Schema 22+ |
+| `GetQuestGreenRange` | scalar (number) | UnitLevel; the same on clients without `C_QuestLog.GetTrivialRange`. Not recorded by some versions before schema 22 |
+| `C_GameRules.IsHardcoreActive` | scalar (boolean) | PlayerIdentity; hardcore realm, recorded once at t=0. Schema 22+ |
+| `C_Seasons.HasActiveSeason` | scalar (boolean) | PlayerIdentity; recorded once at t=0 on clients that have `C_Seasons` (not Forever, where addons may define a stand-in). Schema 22+ |
+| `C_Seasons.GetActiveSeason` | scalar (number/nil) | PlayerIdentity; `Enum.SeasonID`, e.g. 2 Season of Discovery, 3 hardcore. Recorded like `C_Seasons.HasActiveSeason`. Schema 22+ |
 | `GetProfessions` | tuple (n=5) | profession tab indices; nil in missing tuple slots |
-| `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object (number[]) | Tracked independently whenever the API exists |
 | `C_GossipInfo.GetAvailableQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetActiveQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar (number) | QuestDialog; when API exists |
@@ -411,7 +417,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `C_DateAndTime.GetSecondsUntilDailyReset` | scalar (number) | Only present when this API exists |
 | `QuestLog` | object (number[]) | *(synthetic)* active quest IDs in quest-log order |
 | `FactionOrder` | object (number[]) | *(synthetic)* known faction IDs in display order |
-| `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration |
+| `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration; through `C_SpellBook` on Forever (schema 22+) |
 | `GameObjectName` | scalar (string) | *(synthetic)* game object name extracted from TooltipDataProcessor Object tooltips (UnitName line, else the first line); player names redacted |
 | `GameObjectGUID` | scalar (string) | *(synthetic)* object GUID of the tooltip each `GameObjectName` sample came from, written together with it at the same `t`; `""` when the tooltip has no readable object GUID (always on Forever). Schema 19+ |
 
@@ -420,6 +426,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitLevel` | scalar (number) | |
+| `UnitIsGhost` | scalar (boolean) | GhostState; a released spirit, not merely dead. Schema 22+ |
 | `UnitXP` | scalar (number) | PlayerProgress; experience into the current level. Schema 15+ |
 | `UnitXPMax` | scalar (number) | PlayerProgress; experience needed for the level. Schema 15+ |
 | `UnitRace` | tuple (n=3) | localizedName, englishName, raceID |
@@ -439,20 +446,21 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `C_QuestLog.IsOnQuest` | scalar (boolean/nil) | Raw API result; probed again after quest leaves log |
 | `C_QuestLog.IsQuestFlaggedCompleted` | scalar (boolean/nil) | Raw API result; related to but not derived from `GetQuestsCompleted` |
 | `C_QuestLog.GetQuestObjectives` | object (QuestObjectiveInfo[]/nil) | Raw API result; probed again after quest leaves log |
-| `C_QuestLog.GetInfo` | object (table) | Raw `C_QuestLog.GetInfo` return, keyed by questID after resolving the current quest log index |
+| `C_QuestLog.GetInfo` | object (table) | Raw `C_QuestLog.GetInfo` return, keyed by questID after resolving the current quest log index. Before schema 22 also another addon's on clients without it (1 of 211 TBC and Mists recordings) |
 | `C_QuestLog.GetQuestTagInfo` | object (table/nil) | Raw API result |
 | `C_QuestLog.IsComplete` | scalar (boolean/nil) | Raw API result |
 | `C_QuestLog.IsFailed` | scalar (boolean/nil) | Raw API result |
 | `C_QuestLog.GetLogIndexForQuestID` | scalar (number/nil) | Raw API result; used to resolve the quest-log index for the streams above |
-| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, stored by quest ID after resolving current quest log index. Only present when this global exists -- not synthesized from `C_QuestLog.*` |
-| `GetQuestLogIndexByID` | scalar (number/nil) | Legacy global; raw API result |
+| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, stored by quest ID after resolving current quest log index. Left out where it is another addon's and `C_QuestLog.GetInfo` is the client's own (see TRACKER_SPEC section 8) -- not synthesized from `C_QuestLog.*`. Before schema 22 also another addon's on Forever |
+| `GetQuestLogIndexByID` | scalar (number/nil) | Legacy global; raw API result. Left out where it is another addon's and `C_QuestLog.GetLogIndexForQuestID` is the client's own (see TRACKER_SPEC section 8), independently of `GetQuestLogTitle`. Before schema 22 also another addon's on Forever |
 | `GetQuestLogQuestText` | tuple (n=2) | questDescription, questObjectives |
 | `GetQuestTimers` | scalar (number/nil) | *(derived compatibility)* questId-keyed seconds-left from native timer slots |
 | `GetQuestLogTimeLeft` | scalar (number/nil) | *(derived compatibility)* same seconds-left value, no selection side effects |
 | `GetNumQuestLogRewards` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestLogRewardMoney` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestTagInfo` | tuple (n varies) | |
-| `IsBreadcrumbQuest` | scalar (boolean expected) | QuestDialog; Forever only, undocumented API called as `IsBreadcrumbQuest(questID)` -- argument meaning unconfirmed, treat as a hint |
+| `IsBreadcrumbQuest` | scalar (boolean) | QuestLog; Forever only, undocumented. Recorded only while `C_QuestLog.IsOnQuest(questID)` is true, because it answers false for every other quest. Schema 22+; before that QuestDialog recorded it for dialog and offered quests, so only readings taken while `C_QuestLog.IsOnQuest[questID]` was true are meaningful |
+| `IsQuestSequenced` | scalar (boolean) | QuestLog; Forever only, undocumented; whether the quest shows its objectives one after another. Recorded only while `C_QuestLog.IsOnQuest(questID)` is true. Schema 22+ |
 | `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | QuestDialog; Forever only; copy of the `C_QuestLine.GetQuestLineInfo(questID)` table with all fields raw (no map, `displayableOnly` defaults to false so hidden lines return with `isHidden = true`) |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar (number) | QuestDialog; Forever only; raw `Enum.QuestClassification` value |
 | `C_QuestLog.GetRequiredMoney` | scalar (number) | Raw API result; Forever returns -1 when the quest requires no money; probed again after quest leaves log. Schema 15+ |
@@ -479,6 +487,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetQuestItemLink` | `[type][index]` | scalar (string/nil) | QuestDialog; same keys as `GetQuestItemInfo`. Schema 15+ |
 | `GetQuestCurrencyInfo` | `["reward"][index]` | tuple (n varies) | QuestDialog, on clients that have it (Mists); name, texture, count, quality. Read for index 1..`GetMaxRewardCurrencies()`, past `GetNumRewardCurrencies()`, as Blizzard's Mists quest frame does (`Wrath/QuestInfo.lua`); empty slots return n=0. Classic frames never read required currencies. Schema 15+ |
 | `GetQuestCurrencyID` | `["reward"][index]` | scalar (number/nil) | QuestDialog, on clients that have it (Mists); same keys as `GetQuestCurrencyInfo`. Schema 15+ |
+| `C_QuestOffer.GetQuestRewardCurrencyInfo` | `["reward"][index]` | object (table) or nil | QuestDialog; Forever only. The `QuestRewardCurrencyInfo` reduced to `currencyID`, `baseRewardAmount` (without bonuses) and `totalRewardAmount` (what the quest frame shows). Same indices as `GetQuestCurrencyID`; documented to be nil for an empty slot. Schema 22+ |
 
 ### Parameterized by greeting index
 
@@ -495,14 +504,22 @@ All tuple-returning functions MUST have `n` on every stored value.
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | GUID string; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+| `UnitGUIDIsSecret` | scalar (boolean) | *(synthetic)* whether `UnitGUID(token)` returned a secret value, i.e. the token has a unit whose identity the client hides (Forever, in instances). A token's stream starts at its first `true`; no stream means never hidden. Schema 22+ |
 
 ### Parameterized by nameplate token (`"nameplate1"`, `"nameplate2"`, ...)
 
 | Function key | Return type | Notes |
 |---|---|---|
 | `UnitGUID` | scalar (string) or nil | UnitInteraction; `Creature-` or `Vehicle-` GUID, or nil when the token's unit is withheld. Sampled on `NAME_PLATE_UNIT_ADDED`, change-only per token. Schema 15+ |
+| `UnitGUIDIsSecret` | scalar (boolean) | *(synthetic)* as above: tells a hidden unit from the other withheld ones. Schema 22+ |
 
 Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, unrecognized or restricted GUIDs, and failed `UnitGUID` calls are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. Instances are sampled too: Questie draws nameplate icons in dungeons on Classic clients, while Forever restricts GUIDs there, so its instance adds record nil. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
+
+### Parameterized by item GUID
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar (number) | UnitInteraction; Forever only. For every `Item-` GUID in `UnitGUID` (`"questnpc"` while an item starts a quest); join by the GUID. One entry per GUID, the first non-nil answer. Schema 22+ |
 
 ### Parameterized by unit token (`"target"`, `"mouseover"`)
 
@@ -533,9 +550,9 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | `C_MerchantFrame.GetItemInfo` | tuple (n=1) | Merchant; `MerchantItemInfo` table, without `name` until the client has the item's data |
 | `GetMerchantItemLink` | scalar (string/nil) | Merchant; no entry until the client has the item's data, nil after the window closed |
 | `GetMerchantItemID` | scalar (number/nil) | Merchant; read together with the link. Only present when the API exists. Schema 22+ |
-| `GetSpellBookItemName` | tuple (n varies) | observed spellbook name API return |
-| `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info API return |
-| `IsPassiveSpell` | scalar (number/nil) | observed passive marker return |
+| `GetSpellBookItemName` | tuple (n varies) | observed spellbook name API return; not on Forever (schema 22+) |
+| `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info API return; not on Forever (schema 22+) |
+| `IsPassiveSpell` | scalar (number/nil) | observed passive marker return; not on Forever (schema 22+) |
 
 ### Parameterized by map ID (number)
 
@@ -561,16 +578,16 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16, or n=0 for a faction the client lacks) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists). Same factions as below |
+| `GetFactionInfoByID` | tuple (n=16, or n=0 for a faction the client lacks) | Legacy global; raw tuple. Left out where it is another addon's and `C_Reputation.GetFactionDataByID` is the client's own (see TRACKER_SPEC section 8). Before schema 22 also another addon's on Forever (n=8). Same factions as below |
 | `C_Reputation.GetFactionDataByID` | object (table)/nil | Raw API result for every `FactionOrder` faction, i.e. the player's reputation panel. A nil answer is recorded once like any other value. The guild faction (1168), named after the player's guild, is never sampled. Factions outside the panel are not recorded and still have their starting values |
 
-### Parameterized by skill index / profession tab index / trade-skill line ID
+### Parameterized by skill index / profession tab index
 
 | Function key | Return type | Notes |
 |---|---|---|
 | `GetSkillLineInfo` | tuple (n=13) | Legacy global; keyed by visible skill-line row index after header expansion. Only present when `GetNumSkillLines` exists -- no synthesized fallback |
+| `C_SkillInfo.GetSkillLineInfoByID` | object (table) | Forever only (schema 22+); keyed by skill ID. `{ rank, maxRank, modifier, tempPoints }`, the fields that can change; no value when the skill is unlearned |
 | `GetProfessionInfo` | tuple (n=10) | keyed by profession tab index returned by `GetProfessions()` |
-| `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
 ### Delta streams (in `functionsDelta`)
 
@@ -578,7 +595,7 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 |---|---|
 | `C_QuestLog.GetAllCompletedQuestIDs` | Completed quest IDs; only grows in practice |
 | `GetQuestsCompleted` | Legacy global; independent completed-quest-ID stream, tracked whenever this global exists (not only as a fallback) |
-| `PlayerKnownSpells` | Known player spell IDs discovered by enumerating spellbook slots |
+| `PlayerKnownSpells` | Known player spell IDs discovered by enumerating spellbook slots. Empty on Forever before schema 22; since then also known riding spells and the recipes QuestieDB uses in `requiredSpell`, and spells are removed only once unlearned |
 
 ---
 

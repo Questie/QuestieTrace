@@ -319,8 +319,8 @@ end
 --- one, so later events cannot change what is exported. Skipped without codec
 --- support, because saving would then drop the session.
 ---
---- The saved sessions are listed before saving, because saving may prune the
---- oldest one, which must still be exported.
+--- The saved sessions are listed before saving, because saving may prune one
+--- of them or the live session itself, which must still be exported.
 ---@return EncodedSessionRecord[] savedSessions Saved sessions to export, including the live session if it was saved.
 ---@return boolean skipLiveSession True if the current live session was started after the export began.
 local function _RotateLiveSession()
@@ -341,19 +341,12 @@ local function _RotateLiveSession()
   end
 
   local wasRunning = Core.GetCaptureState() == "running"
-  local lastBefore = storedSessions[#storedSessions]
-  Core.SaveCapture()
+  savedSessions[#savedSessions + 1] = Core.SaveCapture()
   -- Only continue recording if the player was recording; a stopped capture stays stopped.
   if wasRunning then
     Core.StartCapture()
   end
 
-  -- SaveCapture appends the live session as a new record.
-  storedSessions = type(characterDb.sessions) == "table" and characterDb.sessions or {}
-  local lastAfter = storedSessions[#storedSessions]
-  if lastAfter ~= nil and lastAfter ~= lastBefore then
-    savedSessions[#savedSessions + 1] = lastAfter
-  end
   -- If saving left the live session in place, it is still the one to export,
   -- and confirming discards it (see Core.DeleteReportedSessions()).
   return savedSessions, characterDb.currentSession ~= liveSession

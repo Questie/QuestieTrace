@@ -157,6 +157,7 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     Core.SaveCapture = function()
       table.insert(env.QuestieTraceCharacter.sessions, savedRecord)
       env.QuestieTraceCharacter.currentSession = nil
+      return savedRecord
     end
     Core.DiscardCapture = function() discardCalls = discardCalls + 1 end
     Core.StartCapture = function()
@@ -180,8 +181,10 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     local startCalls = 0
     Core.GetCaptureState = function() return "stopped_unsaved" end
     Core.SaveCapture = function()
-      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      local record = { encoded = "LIVE" }
+      table.insert(env.QuestieTraceCharacter.sessions, record)
       env.QuestieTraceCharacter.currentSession = nil
+      return record
     end
     Core.StartCapture = function() startCalls = startCalls + 1 end
 
@@ -191,17 +194,18 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     assert.equal(0, startCalls)
   end)
 
-  it("should delete the saved live session once reported when saving pruned the oldest session", function()
-    local oldest, other = { encoded = "OLDEST" }, { encoded = "OTHER" }
+  it("should delete the saved live session once reported when saving pruned another session", function()
+    local pruned, other = { encoded = "PRUNED" }, { encoded = "OTHER" }
     local savedRecord = { encoded = "LIVE" }
     env.QuestieTraceCharacter = {
-      sessions = { oldest, other },
+      sessions = { pruned, other },
       currentSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } },
     }
     Core.SaveCapture = function()
       table.insert(env.QuestieTraceCharacter.sessions, savedRecord)
       table.remove(env.QuestieTraceCharacter.sessions, 1)
       env.QuestieTraceCharacter.currentSession = nil
+      return savedRecord
     end
     Core.StartCapture = function()
       env.QuestieTraceCharacter.currentSession = { functions = {}, events = {} }
@@ -258,8 +262,10 @@ describe("ExportUI.ConfirmExportReported live session handling", function()
     local liveSession = { functions = {}, events = { { t = 0, e = "PLAYER_LOGIN" } } }
     env.QuestieTraceCharacter = { sessions = {}, currentSession = liveSession }
     Core.SaveCapture = function()
-      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      local record = { encoded = "LIVE" }
+      table.insert(env.QuestieTraceCharacter.sessions, record)
       env.QuestieTraceCharacter.currentSession = nil
+      return record
     end
     Core.StartCapture = function()
       env.QuestieTraceCharacter.currentSession = { functions = {}, events = {} }
@@ -652,8 +658,10 @@ describe("ExportUI export job over several frames", function()
     end
     Core.SaveCapture = function()
       calls[#calls + 1] = "save"
-      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      local record = { encoded = "LIVE" }
+      table.insert(env.QuestieTraceCharacter.sessions, record)
       env.QuestieTraceCharacter.currentSession = nil
+      return record
     end
     Core.StartCapture = function()
       env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(1) }
@@ -726,15 +734,17 @@ describe("ExportUI export job over several frames", function()
     end
   end)
 
-  it("should export the oldest session even when saving the live session prunes it", function()
-    local oldest = { encoded = "A" }
-    env.QuestieTraceCharacter.sessions = { oldest, { encoded = "B" } }
+  it("should export a saved session even when saving the live session prunes it", function()
+    local pruned = { encoded = "A" }
+    env.QuestieTraceCharacter.sessions = { pruned, { encoded = "B" } }
     env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(2) }
     Core.SaveCapture = function()
       calls[#calls + 1] = "save"
-      table.insert(env.QuestieTraceCharacter.sessions, { encoded = "LIVE" })
+      local record = { encoded = "LIVE" }
+      table.insert(env.QuestieTraceCharacter.sessions, record)
       table.remove(env.QuestieTraceCharacter.sessions, 1)
       env.QuestieTraceCharacter.currentSession = nil
+      return record
     end
 
     Core.ShowExportWindow()
@@ -742,6 +752,21 @@ describe("ExportUI export job over several frames", function()
     Core.ConfirmExportReported()
 
     assert.same({ "save", "decode A", "decode B", "decode LIVE", "encode" }, calls)
+    assert.same({}, env.QuestieTraceCharacter.sessions)
+  end)
+
+  it("should export the live session even when it is too short to be kept", function()
+    env.QuestieTraceCharacter.currentSession = { functions = {}, events = MakeEvents(2) }
+    Core.SaveCapture = function()
+      env.QuestieTraceCharacter.currentSession = nil
+      return { encoded = "LIVE" }
+    end
+
+    Core.ShowExportWindow()
+    RunAllFrames()
+    Core.ConfirmExportReported()
+
+    assert.same({ "decode A", "decode B", "decode LIVE", "encode" }, calls)
     assert.same({}, env.QuestieTraceCharacter.sessions)
   end)
 

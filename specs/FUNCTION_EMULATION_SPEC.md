@@ -79,8 +79,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetNumGroupMembers()` | `functions["GetNumGroupMembers"]` |
 | `GetNumSkillLines()` | `functions["GetNumSkillLines"]` (only present when this legacy global exists; no synthesized fallback) |
 | `GetSkillLineInfo(index)` (legacy) | `functions["GetSkillLineInfo"][index]` (only present when `GetNumSkillLines` exists) |
-| `C_TradeSkillUI.GetAllProfessionTradeSkillLines()` | `functions["C_TradeSkillUI.GetAllProfessionTradeSkillLines"]` |
-| `C_TradeSkillUI.GetTradeSkillLineInfoByID(skillLineID)` | `functions["C_TradeSkillUI.GetTradeSkillLineInfoByID"][skillLineID]` |
+| `C_SkillInfo.GetSkillLineInfoByID(skillID)` (Forever) | `functions["C_SkillInfo.GetSkillLineInfoByID"][skillID]` (`rank`, `maxRank`, `modifier` and `tempPoints` only) |
 | `GetProfessions()` | `functions["GetProfessions"]` |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
 | `C_QuestLog.GetMaxNumQuestsCanAccept()` | `functions["C_QuestLog.GetMaxNumQuestsCanAccept"]` |
@@ -128,6 +127,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetNumRewardCurrencies()` / `GetMaxRewardCurrencies()` | `functions["GetNumRewardCurrencies"]` / `functions["GetMaxRewardCurrencies"]` (clients that have them, e.g. Mists) |
 | `GetQuestCurrencyInfo("reward", index)` | `functions["GetQuestCurrencyInfo"]["reward"][index]` (same) |
 | `GetQuestCurrencyID("reward", index)` | `functions["GetQuestCurrencyID"]["reward"][index]` (same) |
+| `C_QuestOffer.GetQuestRewardCurrencyInfo("reward", index)` | `functions["C_QuestOffer.GetQuestRewardCurrencyInfo"]["reward"][index]` (Forever; `currencyID`, `baseRewardAmount` and `totalRewardAmount` only) |
 | `C_Item.GetItemCount(itemID)` | `functions["C_Item.GetItemCount"][itemID]`; answers calls without `includeBank` only (trailing nil arguments are skipped by `getStream`) |
 | `C_Item.IsItemDataCachedByID(itemID)` | `functions["C_Item.IsItemDataCachedByID"][itemID]`; see the item data note below |
 | `IsIndoors()` | `functions["IsIndoors"]` |
@@ -146,6 +146,9 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestLogSpecialItemInfo(questLogIndex)` for active quest `questId` | `functions["GetQuestLogSpecialItemInfo"][questId]` |
 | `C_DateAndTime.GetCurrentCalendarTime()` | `functions["C_DateAndTime.GetCurrentCalendarTime"]` snapshot; derive the realm's UTC offset against the `GetServerTime` sample at the same `t` |
 | `UnitLevel("player")` | `functions["UnitLevel"]["player"]` |
+| `C_QuestLog.GetTrivialRange()` / `GetQuestGreenRange()` | `functions["C_QuestLog.GetTrivialRange"]` / `functions["GetQuestGreenRange"]`; a trace has the one its client has |
+| `C_GameRules.IsHardcoreActive()`, `C_Seasons.HasActiveSeason()`, `C_Seasons.GetActiveSeason()` | `functions["C_GameRules.IsHardcoreActive"]` etc.; a client without `C_Seasons` has no `C_Seasons` streams |
+| `UnitIsGhost("player")` | `functions["UnitIsGhost"]["player"]` |
 | `UnitRace("player")` | `functions["UnitRace"]["player"]` |
 | `UnitClass("player")` | `functions["UnitClass"]["player"]` |
 | `UnitClassBase("player")` | `functions["UnitClassBase"]["player"]` |
@@ -155,6 +158,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_Map.GetPlayerMapPosition(map, "player")` | `functions["C_Map.GetPlayerMapPosition"]["player"]` |
 | `UnitGUID(token)` | `functions["UnitGUID"][token]` |
 | `UnitName(token)` | `functions["UnitName"][token]` |
+| `C_Item.GetItemIDByGUID(itemGUID)` | `functions["C_Item.GetItemIDByGUID"][itemGUID]` (only item GUIDs that were a unit, e.g. a quest's starting item) |
+| `issecretvalue(UnitGUID(token))` | `functions["UnitGUIDIsSecret"][token]`; see the hidden unit note below |
 | `IsQuestComplete(questId)` | `functions["IsQuestComplete"][questId]` |
 | `HaveQuestData(questId)` | `functions["HaveQuestData"][questId]` |
 | `C_QuestLog.IsOnQuest(questId)` | `functions["C_QuestLog.IsOnQuest"][questId]` |
@@ -165,8 +170,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_QuestLog.IsComplete(questId)` | `functions["C_QuestLog.IsComplete"][questId]` |
 | `C_QuestLog.IsFailed(questId)` | `functions["C_QuestLog.IsFailed"][questId]` |
 | `C_QuestLog.GetLogIndexForQuestID(questId)` | `functions["C_QuestLog.GetLogIndexForQuestID"][questId]` |
-| `GetQuestLogTitle(questLogIndex)` (legacy) for active quest `questId` | `functions["GetQuestLogTitle"][questId]` (raw 17-value tuple, only present when this global exists) |
-| `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]` |
+| `GetQuestLogTitle(questLogIndex)` (legacy) for active quest `questId` | `functions["GetQuestLogTitle"][questId]` (raw 17-value tuple; left out where it is another addon's and `C_QuestLog.GetInfo` is the client's own, see TRACKER_SPEC section 8; ignore it on Forever before schema 22) |
+| `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]`; ignore it on Forever before schema 22 |
 | `GetQuestLogQuestText(questLogIndex)` for active quest `questId` | `functions["GetQuestLogQuestText"][questId]` |
 | Timed quest value for `questId` | `functions["GetQuestTimers"][questId]` |
 | `GetQuestIndexForTimer(timerIndex)` (legacy) | `functions["GetQuestIndexForTimer"][timerIndex]` |
@@ -176,7 +181,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestLogRewardMoney(questId)` | `functions["GetQuestLogRewardMoney"][questId]` |
 | `GetQuestLogRewardInfo(rewardIndex, questId)` | `functions["GetQuestLogRewardInfo"][rewardIndex][questId]` |
 | `GetQuestTagInfo(questId)` | `functions["GetQuestTagInfo"][questId]` |
-| `IsBreadcrumbQuest(questId)` | `functions["IsBreadcrumbQuest"][questId]` |
+| `IsBreadcrumbQuest(questId)` | `functions["IsBreadcrumbQuest"][questId]` while `C_QuestLog.IsOnQuest(questId)` is true, else false |
+| `IsQuestSequenced(questId)` | `functions["IsQuestSequenced"][questId]`; recorded only while on the quest |
 | `C_QuestLine.GetQuestLineInfo(questId)` | `functions["C_QuestLine.GetQuestLineInfo"][questId]` (recorded without `uiMapID`/`displayableOnly`) |
 | `C_QuestInfoSystem.GetQuestClassification(questId)` | `functions["C_QuestInfoSystem.GetQuestClassification"][questId]` |
 | `GetLootSlotInfo(slot)` | `functions["GetLootSlotInfo"][slot]` |
@@ -186,18 +192,20 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetMerchantNumItems()` / `GetMerchantFilter()` | `functions["GetMerchantNumItems"]` / `functions["GetMerchantFilter"]` (the latter on clients that have it) |
 | `GetMerchantItemInfo(index)` (legacy) / `C_MerchantFrame.GetItemInfo(index)` | `functions["GetMerchantItemInfo"][index]` / `functions["C_MerchantFrame.GetItemInfo"][index]` (its one table, packed; valid up to `GetMerchantNumItems()`) |
 | `GetMerchantItemLink(index)` / `GetMerchantItemID(index)` | `functions["GetMerchantItemLink"][index]` / `functions["GetMerchantItemID"][index]` |
-| `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple, only present when the legacy global exists, independent of whether `C_Reputation.GetFactionDataByID` also exists) |
+| `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple; left out where it is another addon's and `C_Reputation.GetFactionDataByID` is the client's own, see TRACKER_SPEC section 8; ignore it on Forever before schema 22) |
 | `C_Reputation.GetFactionDataByID(factionID)` | `functions["C_Reputation.GetFactionDataByID"][factionID]` (raw table) |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
 | `GetSpellBookItemName(slot)` | `functions["GetSpellBookItemName"][slot]` |
 | `GetSpellBookItemInfo(slot)` | `functions["GetSpellBookItemInfo"][slot]` |
 | `IsPassiveSpell(slot)` | `functions["IsPassiveSpell"][slot]` |
+| `C_SpellBook.IsSpellKnown(spellID)` (Forever) | `PlayerKnownSpells` holds `spellID` (spells in the book, riding spells and the recipes QuestieDB uses in `requiredSpell`) |
 
 Notes:
 
 - Raw questID API streams such as `C_QuestLog.IsQuestFlaggedCompleted`, `C_QuestLog.IsOnQuest`, `HaveQuestData`, objectives, reward count/money, `GetQuestTagInfo`, `C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, and `C_QuestLog.IsFailed` store observed API returns. When a quest leaves `QuestLog`, the tracker runs post-invalidation probes and records only values returned by successful calls. `C_QuestLog.IsQuestFlaggedCompleted` is related to `GetQuestsCompleted`, but the raw stream is not derived from it.
 - Quest-log title/tag/completion data is intentionally split across several independent raw streams (`C_QuestLog.GetInfo`, `C_QuestLog.GetQuestTagInfo`, `C_QuestLog.IsComplete`, `C_QuestLog.IsFailed`, legacy `GetQuestLogTitle`) rather than one normalized composite value. Consumers that want a single "quest log title" view must combine whichever of these streams are present themselves; a client that lacks one of the modern `C_QuestLog.*` APIs simply has no entries for that stream, it is never backfilled from another API.
 - Nameplate `UnitGUID` entries are change-only per token. A nil entry means the token's unit was withheld (a player, a player's pet or minion, a game object, an unrecognized or restricted GUID, or a failed call), not that the client returned nil. `UnitName("nameplateN")` is not recorded: answer it from the NPC ID in the GUID (QuestieDB), or nil when the GUID is nil. Instances are sampled too (Forever's restricted instance GUIDs record nil). `NAME_PLATE_UNIT_REMOVED` writes no entry, so a token keeps its last value until its next add.
+- Hidden units (schema 22+): while `UnitGUIDIsSecret[token]` is true, the token has a unit whose identity the client hides. Answer `UnitGUID(token)` and `UnitName(token)` with a value that `issecretvalue` reports as secret; their own streams keep the unit seen before. A token without this stream was never hidden.
 - Session metadata: `session.buildInfo` (schema 15+) is the raw `GetBuildInfo()` tuple at capture start. Use it to choose the client flavor's API set and data; answer `GetBuildInfo()` with `unpack(buildInfo, 1, buildInfo.n)`. Sessions without it only have the interface version, in `functions["GetBuildInfo"]["player"]`.
 - `C_Item.GetItemCount`: an item with no entry at `t=0` was not in the bags, keyring or equipment at capture start (count 0). Later entries come from `ITEM_COUNT_CHANGED` and from a rescan one second after bag changes, so a count can trail the real change by up to a second.
 - Item data: `C_Item.IsItemDataCachedByID[itemID]` exists only for items some addon asked about (`C_Item.GetItemInfo`/`GetItemInfo`/`C_Item.RequestLoadItemDataByID`) before the client had their data. Its first entry, `false`, is the time of the first such request during the capture (the load may have started earlier, before capture start); `true` is when the data arrived, which is not recorded as an event. Replay can answer item info calls for such an item with nil until then, and at the switch fire the event matching the replayed request: `GET_ITEM_INFO_RECEIVED(itemID, true)` after `GetItemInfo`, `ITEM_DATA_LOAD_RESULT(itemID, true)` after `RequestLoadItemDataByID` (the Forever 1.60.1 client fired only the matching one). The first 500 streams come from any addon's requests, later ones only from Questie's, up to 1000. An item without a stream was cached when first asked about, never asked about, or asked about only by other addons after the first 500 streams, or by Questie only after three of their refused requests (a session with 500 streams or more reached that switch).
@@ -208,9 +216,9 @@ Notes:
 - `GetQuestLogRewardInfo` uses nested maps in native argument order `[rewardIndex][questId]`. Previously observed reward indices are probed again after counts shrink or quests leave the log; stored values are successful API returns, not invented inactive values.
 - Legacy gossip globals are raw packed varargs; `GetGossipAvailableQuests` is repeated 7-tuples and `GetGossipActiveQuests` is repeated 6-tuples. Quest dialog close events cancel pending delayed open/update reads and perform one observed API sample; any empty string, nil, zero, or table value in these raw streams is an API return, not a synthetic reset.
 - Loot, skill/profession, spellbook, and unit-token streams follow the same raw-observation rule. Close events or shrinking index ranges cause event-synchronous probes of the represented APIs; failed calls are skipped rather than represented by invented values.
-- `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` are two independent raw streams for the same conceptual data, not one normalized value: whichever real API the client exposes is probed and recorded under that API's own name.
+- `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` are two independent raw streams for the same conceptual data, not one normalized value: whichever of them is recorded (see TRACKER_SPEC section 8) is stored under that API's own name.
 - Only factions in `FactionOrder` (the player's reputation panel) are recorded. A faction outside it has had no reputation change yet, so answer it from a static per-faction-group table of starting values (e.g. a `C_Reputation.GetFactionDataByID` dump of a new Alliance and a new Horde character, minus their panels), answering `isWatched = false`.
-- `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries. `GetProfessions`/`GetProfessionInfo` and `C_TradeSkillUI.GetAllProfessionTradeSkillLines`/`C_TradeSkillUI.GetTradeSkillLineInfoByID` are tracked independently and unconditionally whenever they exist (not only as a fallback for the legacy skill-line APIs).
+- `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries; Forever has `C_SkillInfo.GetSkillLineInfoByID` in their place. `C_SkillInfo.GetNumSkillLines()` and `GetSkillLineInfo(index)` can be built from it: one row per skill with a value, in any order, with the names and headers of the client's skill line data. `GetProfessions`/`GetProfessionInfo` are tracked independently whenever they exist (not only as a fallback for the legacy skill-line APIs).
 
 ### Stored custom streams
 

@@ -201,6 +201,35 @@ function Core.CopyPacked(args)
   return out
 end
 
+--- Get an old global function and the newer one for the same data, as far as they are to be
+--- recorded. Other addons bring old globals back on clients that replaced them (Forever), and
+--- add newer functions to old clients. What those answer is not client data, so a function
+--- another addon defined is left out where the other one is the client's own. Where neither
+--- can be told to be the client's, both are kept: it may be all there is.
+---
+--- Reads only whether the variables are the client's, once per capture: an addon replacing
+--- one later is not noticed, but is not called either.
+---@param oldName string Name of the old global
+---@param newTable table? The table with the newer function, nil if the client has none
+---@param newName string
+---@return function? oldFunction
+---@return function? newFunction
+function Core.GetClientFunctions(oldName, newTable, newName)
+  local oldFunction, newFunction = _G[oldName], newTable and newTable[newName]
+  if type(oldFunction) ~= "function" then oldFunction = nil end
+  if type(newFunction) ~= "function" then newFunction = nil end
+
+  if oldFunction and newFunction and newTable then
+    local isOldOwn, isNewOwn = issecurevariable(_G, oldName), issecurevariable(newTable, newName)
+    if isNewOwn and not isOldOwn then
+      oldFunction = nil
+    elseif isOldOwn and not isNewOwn then
+      newFunction = nil
+    end
+  end
+  return oldFunction, newFunction
+end
+
 --- Round a number to the given decimal places.
 ---@param num number?
 ---@param decimals number?
@@ -209,6 +238,26 @@ function Core.Round(num, decimals)
   if type(num) ~= "number" then return num end
   local mult = 10 ^ (decimals or 0)
   return math.floor(num * mult + 0.5) / mult
+end
+
+--- Call a client function and append its answer to a stream if it differs from
+--- the last entry. A failing call is reported like any Lua error and records
+--- nothing, so the capture and the other trackers go on.
+---@param stream FunctionStreamEntry[]
+---@param t number Session-relative GetTime()
+---@param tp number Session-relative GetTimePreciseSec()
+---@param fn function A function that returns one value, not a table
+---@param ... any Arguments for fn
+function Core.SampleScalar(stream, t, tp, fn, ...)
+  local ok, value = pcall(fn, ...)
+  if not ok then
+    geterrorhandler()(value)
+    return
+  end
+  local previous = stream[#stream]
+  if not previous or previous.v ~= value then
+    stream[#stream + 1] = { t = t, tp = tp, v = value }
+  end
 end
 
 ---------------------------------------------------------------------------
