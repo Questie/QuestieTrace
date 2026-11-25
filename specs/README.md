@@ -1,13 +1,13 @@
 # QuestieTrace Specs
 
-Agent-facing index for QuestieTrace, a WoW Classic Era addon that records quest/gameplay events and WoW API return streams for offline replay. Schema version 9.
+Agent-facing index for QuestieTrace, a WoW Classic Era addon that records quest/gameplay events and WoW API return streams for offline replay. What each schema version changed: [SCHEMA_CHANGELOG.md](./SCHEMA_CHANGELOG.md).
 
 ---
 
 ## Quick Start (Read Order)
 
 1. [ARCHITECTURE_SPEC.md](./ARCHITECTURE_SPEC.md) - File structure, load order, bootstrap
-2. [SCHEMA_SPEC.md](./SCHEMA_SPEC.md) - SavedVariables structure and time model
+2. [SCHEMA_SPEC.md](./SCHEMA_SPEC.md) - SavedVariables structure and time model, and [SCHEMA_CHANGELOG.md](./SCHEMA_CHANGELOG.md) for what each version changed
 3. [TRACKER_SPEC.md](./TRACKER_SPEC.md) - Tracker architecture, lifecycle, trigger patterns
 4. [EVENT_CATALOG.md](./EVENT_CATALOG.md) - Event registration by tracker
 5. [FUNCTION_EMULATION_SPEC.md](./FUNCTION_EMULATION_SPEC.md) - Reconstruct WoW API calls from captured data

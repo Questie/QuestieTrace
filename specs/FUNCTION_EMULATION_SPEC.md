@@ -187,6 +187,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_QuestInfoSystem.GetQuestClassification(questId)` | `functions["C_QuestInfoSystem.GetQuestClassification"][questId]` |
 | `GetLootSlotInfo(slot)` | `functions["GetLootSlotInfo"][slot]` |
 | `GetLootSourceInfo(slot)` | `functions["GetLootSourceInfo"][slot]` |
+| `UnitNameFromGUID(guid)` | `functions["UnitNameFromGUID"][guid]` (only looted game objects; without the realm) |
 | `GetLootSlotLink(slot)` | `functions["GetLootSlotLink"][slot]` |
 | `GetLootSlotType(slot)` | `functions["GetLootSlotType"][slot]` |
 | `GetMerchantNumItems()` / `GetMerchantFilter()` | `functions["GetMerchantNumItems"]` / `functions["GetMerchantFilter"]` (the latter on clients that have it) |

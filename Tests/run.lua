@@ -2031,6 +2031,309 @@ local function TestLootSkipsUnrecognizedGuidKind()
     "An unrecognized (non npc/object/item) guid kind must be discarded, not just player guids")
 end
 
+---@type table<string, any> A table, because a Lua chunk can have 200 local variables at most
+local lootNameTests = {}
+
+---@class LootNameRuntime : TestRuntime
+---@field askedGUIDs string[] GUIDs UnitNameFromGUID was called with
+---@field Loot fun(...: any) Open a loot window whose one slot comes from these (guid, quantity) pairs
+
+---The loot tracker on a client that can name loot sources.
+---@param nameOf fun(guid: string): any, any Answer of UnitNameFromGUID
+---@return LootNameRuntime
+function lootNameTests.NewRuntime(nameOf)
+  local runtime = NewRuntime({ "Modules/Trackers/Loot.lua" }) --[[@as LootNameRuntime]]
+  local env = runtime.env
+  local source = {}
+  runtime.askedGUIDs = {}
+  env.UNKNOWNOBJECT = "Unknown"
+  env.UnitNameFromGUID = function(guid)
+    runtime.askedGUIDs[#runtime.askedGUIDs + 1] = guid
+    return nameOf(guid)
+  end
+  env.GetNumLootItems = function() return 1 end
+  env.GetLootSlotInfo = function() return "icon", "Item", 1, 0, 1, false, false, 0, true end
+  env.GetLootSourceInfo = function() return unpack(source) end
+  env.GetLootSlotLink = function() return "itemlink" end
+  env.GetLootSlotType = function() return 1 end
+
+  function runtime.Loot(...)
+    source = { ... }
+    AdvanceTo(runtime, runtime.now + 1)
+    SendEvent(runtime, "LOOT_READY")
+  end
+  return runtime
+end
+
+lootNameTests.TIN_VEIN = "GameObject-0-16238-0-6333134-1732-D3E657B427"
+lootNameTests.COPPER_VEIN = "GameObject-0-49128-0-2908872-1731-4E32DF1B98"
+
+function lootNameTests.LootedObjectIsNamed()
+  local runtime = lootNameTests.NewRuntime(function(guid) return guid == lootNameTests.TIN_VEIN and "Tin Vein" or "Copper Vein", "SomeRealm" end)
+  runtime.core.StartCapture("looted objects")
+
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+  runtime.Loot(lootNameTests.COPPER_VEIN, 1)
+
+  local names = Session(runtime).functions.UnitNameFromGUID --[[@as table<string, FunctionStreamEntry[]>]]
+  assert(#names[lootNameTests.TIN_VEIN] == 1 and names[lootNameTests.TIN_VEIN][1].v.n == 1 and names[lootNameTests.TIN_VEIN][1].v[1] == "Tin Vein" and names[lootNameTests.TIN_VEIN][1].v[2] == nil,
+    "The first object must be named by its GUID, without a realm")
+  assert(names[lootNameTests.TIN_VEIN][1].t == 1, "The name must have the time it was read")
+  assert(names[lootNameTests.COPPER_VEIN][1].v[1] == "Copper Vein", "Another object must have its own name")
+end
+
+function lootNameTests.LootedObjectIsNamedOnce()
+  local runtime = lootNameTests.NewRuntime(function() return "Tin Vein", "" end)
+  runtime.core.StartCapture("repeated loot")
+
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+  SendEvent(runtime, "LOOT_CLOSED")
+
+  local names = Session(runtime).functions.UnitNameFromGUID
+  assert(#names[lootNameTests.TIN_VEIN] == 1, "A known name must not be recorded again")
+  assert(#runtime.askedGUIDs == 1, "A known name must not be read again, got " .. #runtime.askedGUIDs .. " reads")
+end
+
+function lootNameTests.LootedObjectIsNamedAgainInTheNextCapture()
+  local runtime = lootNameTests.NewRuntime(function() return "Tin Vein", "" end)
+  runtime.core.StartCapture("first capture")
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+  runtime.core.StopCapture()
+  runtime.core.StartCapture("second capture")
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+
+  assert(Session(runtime).functions.UnitNameFromGUID[lootNameTests.TIN_VEIN], "The second capture must not rely on the first one's names")
+  assert(#runtime.askedGUIDs == 2, "The name must be read again, got " .. #runtime.askedGUIDs .. " reads")
+end
+
+function lootNameTests.OnlyObjectsAreNamed()
+  -- Asking for a name is what could bring a player's back, so it is the call that is asserted, not just the result.
+  local runtime = lootNameTests.NewRuntime(function() return "Somebody", "SomeRealm" end)
+  runtime.core.StartCapture("other sources")
+
+  runtime.Loot("Player-4620-00572164", 1)
+  runtime.Loot("Creature-0-6783-1-269-2980-00002C50D7", 1)
+  runtime.Loot("Vehicle-0-6783-1-269-2980-00002C50D7", 1)
+  runtime.Loot("Pet-0-4234-0-6610-165189-0202F859E9", 1)
+  runtime.Loot("Item-4620-0-4000000A369860E1", 1)
+  runtime.Loot("Corpse-0-6783-1-269-2980-00002C50D7", 1)
+  runtime.Loot("BNetAccount-0-000000000016", 1)
+  runtime.Loot(nil)
+  runtime.Loot(lootNameTests.TIN_VEIN, 1, "Player-4620-00572164", 1)
+
+  assert(#runtime.askedGUIDs == 0, "UnitNameFromGUID must only be asked about objects, asked about " .. tostring(runtime.askedGUIDs[1]))
+  assert(next(Session(runtime).functions.UnitNameFromGUID) == nil, "No name must be recorded")
+end
+
+function lootNameTests.EveryObjectOfASharedLootIsNamed()
+  local runtime = lootNameTests.NewRuntime(function(guid) return guid == lootNameTests.TIN_VEIN and "Tin Vein" or "Copper Vein", "" end)
+  runtime.core.StartCapture("shared loot")
+
+  runtime.Loot("Creature-0-6783-1-269-2980-00002C50D7", 1, lootNameTests.TIN_VEIN, 1, lootNameTests.COPPER_VEIN, 2)
+
+  local names = Session(runtime).functions.UnitNameFromGUID
+  assert(names[lootNameTests.TIN_VEIN] and names[lootNameTests.COPPER_VEIN], "Each object of one slot must be named")
+  assert(names["Creature-0-6783-1-269-2980-00002C50D7"] == nil, "The creature must not be named")
+end
+
+function lootNameTests.UnreadableNamesAreSkippedAndReadLater()
+  local answer, isSecret
+  local runtime = lootNameTests.NewRuntime(function() return answer, "" end)
+  runtime.env.issecretvalue = function(value) return isSecret and value == answer end
+  runtime.core.StartCapture("unreadable names")
+  local names = Session(runtime).functions.UnitNameFromGUID
+
+  answer, isSecret = "Tin Vein", true
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+  assert(names[lootNameTests.TIN_VEIN] == nil, "A secret name must not be recorded")
+  isSecret = false
+  for _, unusable in ipairs({ "Unknown", "", 42, false }) do
+    answer = unusable
+    runtime.Loot(lootNameTests.TIN_VEIN, 1)
+    assert(names[lootNameTests.TIN_VEIN] == nil, "Must not be recorded: " .. tostring(unusable))
+  end
+
+  answer = "Tin Vein"
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+  assert(names[lootNameTests.TIN_VEIN][1].v[1] == "Tin Vein", "A readable name must be recorded on a later loot")
+end
+
+function lootNameTests.PlayerNamesInObjectNamesAreRedacted()
+  local runtime = lootNameTests.NewRuntime(function() return "Cruxdruid's Chest", "" end)
+  runtime.env.UnitName = function(token) if token == "player" then return "Cruxdruid" end end
+  runtime.core.StartCapture("player-made object")
+
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+
+  assert(Session(runtime).functions.UnitNameFromGUID[lootNameTests.TIN_VEIN][1].v[1] == "<name>'s Chest", "The player's name must be redacted")
+end
+
+function lootNameTests.ClientsWithoutTheApiRecordTheSameAsBefore()
+  local runtime = lootNameTests.NewRuntime(function() return "Tin Vein", "" end)
+  runtime.env.UnitNameFromGUID = nil
+  runtime.core.StartCapture("no api")
+
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+
+  local functions = Session(runtime).functions
+  assert(functions.UnitNameFromGUID == nil, "No stream must be created")
+  assert(functions.GetLootSourceInfo[1][1].v[1] == lootNameTests.TIN_VEIN, "The loot itself must still be recorded")
+end
+
+function lootNameTests.AnErroringApiDoesNotLoseTheLoot()
+  local runtime = lootNameTests.NewRuntime(function() error("restricted") end)
+  runtime.core.StartCapture("erroring api")
+
+  runtime.Loot(lootNameTests.TIN_VEIN, 1)
+
+  local functions = Session(runtime).functions
+  assert(functions.GetLootSlotLink[1][1].v == "itemlink", "The rest of the loot must be recorded")
+  assert(next(functions.UnitNameFromGUID) == nil, "No name must be recorded")
+end
+
+---@type table<string, any> A table, because a Lua chunk can have 200 local variables at most
+local objectCastTests = {
+  OPENING = 6247, MINING = 3564, HERBALISM = 2366, HEAL = 2061, ARCANE_INTELLECT = 1459, TERMITE_BARREL = 18952,
+}
+
+---@class ObjectCastRuntime : TestRuntime
+---@field Cast fun(spellID: any, target: any, unit: any?) Fire UNIT_SPELLCAST_SENT a second later
+
+---The object cast tracker with the generated spell list.
+---@return ObjectCastRuntime
+function objectCastTests.NewRuntime()
+  local runtime = NewRuntime({ "Modules/ObjectSpells.lua", "Modules/Trackers/ObjectCast.lua" }) --[[@as ObjectCastRuntime]]
+  runtime.env.UnitName = function(token) if token == "player" then return "Cruxdruid" end end
+
+  function runtime.Cast(spellID, target, unit)
+    AdvanceTo(runtime, runtime.now + 1)
+    SendEvent(runtime, "UNIT_SPELLCAST_SENT", unit or "player", target, "Cast-3-0-0-0-0-0000", spellID)
+  end
+  return runtime
+end
+
+---Assert what the stream holds, as { spell ID, target } rows.
+---@param runtime TestRuntime
+---@param expected any[][]
+function objectCastTests.AssertCasts(runtime, expected)
+  local casts = Session(runtime).functions.ObjectCast
+  for row = 1, math.max(#expected, #casts) do
+    local where = "row " .. row
+    assert(expected[row], where .. " must not be recorded, got " .. tostring(casts[row] and casts[row].v.target))
+    assert(casts[row] and casts[row].v.target == expected[row][2], where .. " must have the target")
+    assert(casts[row].v.spellID == expected[row][1], where .. " must have the spell")
+  end
+end
+
+function objectCastTests.CastsOnObjectsAreRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  AdvanceTo(runtime, 100)
+  runtime.core.StartCapture("object casts")
+
+  runtime.Cast(t.OPENING, "Kobold Tracks")
+  runtime.Cast(t.OPENING, "Kobold Tracks")
+  runtime.Cast(t.MINING, "Tin Vein")
+  runtime.Cast(t.HERBALISM, "Wilted Peacebloom")
+
+  t.AssertCasts(runtime, {
+    { t.OPENING, "Kobold Tracks" }, { t.OPENING, "Kobold Tracks" }, { t.MINING, "Tin Vein" }, { t.HERBALISM, "Wilted Peacebloom" },
+  })
+  local casts = Session(runtime).functions.ObjectCast
+  assert(casts[1].t == 1 and casts[2].t == 2, "every cast must have its own time since the capture started, so a click can be placed")
+end
+
+function objectCastTests.CastsOnUnitsAreNeverRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("heals and buffs")
+
+  -- Spells that can target a player send the player's name as the target.
+  runtime.Cast(t.HEAL, "Somebody")
+  runtime.Cast(t.ARCANE_INTELLECT, "Somebody")
+  runtime.Cast(t.TERMITE_BARREL, "Somebody")
+  runtime.Cast(999999999, "Somebody")
+
+  t.AssertCasts(runtime, {})
+end
+
+function objectCastTests.CastsOfOtherUnitsAreNeverRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("other casters")
+
+  runtime.Cast(t.OPENING, "Solid Chest", "party1")
+  runtime.Cast(t.OPENING, "Solid Chest", "pet")
+  runtime.Cast(t.OPENING, "Solid Chest", "target")
+
+  t.AssertCasts(runtime, {})
+end
+
+function objectCastTests.TheRawEventIsNotRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("raw event")
+
+  runtime.Cast(t.OPENING, "Solid Chest")
+  runtime.Cast(t.HEAL, "Somebody")
+
+  for _, event in ipairs(Session(runtime).events) do
+    assert(event.e ~= "UNIT_SPELLCAST_SENT", "The event's arguments can hold a player's name")
+  end
+end
+
+function objectCastTests.SecretAndUnreadableCastsAreSkipped()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  -- Secret values keep their ordinary type: only issecretvalue tells them apart.
+  local hidden = {}
+  runtime.env.issecretvalue = function(value) return hidden[value] == true end
+  runtime.core.StartCapture("secrets")
+
+  hidden = { ["Hidden Object"] = true, [t.MINING] = true }
+  runtime.Cast(t.OPENING, "Hidden Object")
+  runtime.Cast(t.MINING, "Solid Chest")
+  runtime.Cast(t.OPENING, "")
+  runtime.Cast(t.OPENING, nil)
+  runtime.Cast(t.OPENING, 42)
+  runtime.Cast("6247", "Solid Chest")
+  hidden = { player = true }
+  runtime.Cast(t.OPENING, "Hidden caster")
+  hidden = {}
+  runtime.Cast(t.OPENING, "Solid Chest")
+
+  t.AssertCasts(runtime, { { t.OPENING, "Solid Chest" } })
+end
+
+function objectCastTests.PlayerNamesInTargetsAreRedacted()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("redaction")
+
+  runtime.Cast(t.OPENING, "Cruxdruid's Chest")
+
+  t.AssertCasts(runtime, { { t.OPENING, "<name>'s Chest" } })
+end
+
+function objectCastTests.NothingIsRecordedOutsideACapture()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.Cast(t.OPENING, "Before")
+  runtime.core.StartCapture("first")
+  runtime.Cast(t.OPENING, "During")
+  local first = Session(runtime)
+  runtime.core.StopCapture()
+  runtime.Cast(t.OPENING, "After")
+  assert(#first.functions.ObjectCast == 1, "Nothing must be recorded after the capture")
+
+  runtime.core.StartCapture("second")
+  runtime.Cast(t.OPENING, "Again")
+
+  t.AssertCasts(runtime, { { t.OPENING, "Again" } })
+  assert(#first.functions.ObjectCast == 1, "A new capture must not write to the old one")
+end
+
 local function TestUnitInteractionSkipsUnrecognizedGuidKind()
   local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
   runtime.env.UnitGUID = function(token)
@@ -5348,6 +5651,22 @@ local tests = {
   { name = "Loot allows a multi-pair all-npc source tuple", run = TestLootAllowsMultiPairAllNpcSourceTuple },
   { name = "Loot skips a multi-pair source tuple with any player guid", run = TestLootSkipsMultiPairSourceTupleWithAnyPlayerGuid },
   { name = "Loot skips an unrecognized (non npc/object/item) guid kind", run = TestLootSkipsUnrecognizedGuidKind },
+  { name = "ObjectCast records casts on objects", run = objectCastTests.CastsOnObjectsAreRecorded },
+  { name = "ObjectCast never records casts on units", run = objectCastTests.CastsOnUnitsAreNeverRecorded },
+  { name = "ObjectCast never records the casts of other units", run = objectCastTests.CastsOfOtherUnitsAreNeverRecorded },
+  { name = "ObjectCast does not record the raw event", run = objectCastTests.TheRawEventIsNotRecorded },
+  { name = "ObjectCast skips secret and unreadable casts", run = objectCastTests.SecretAndUnreadableCastsAreSkipped },
+  { name = "ObjectCast redacts player names in targets", run = objectCastTests.PlayerNamesInTargetsAreRedacted },
+  { name = "ObjectCast records nothing outside a capture", run = objectCastTests.NothingIsRecordedOutsideACapture },
+  { name = "Loot names a looted object by its GUID", run = lootNameTests.LootedObjectIsNamed },
+  { name = "Loot reads a looted object's name once", run = lootNameTests.LootedObjectIsNamedOnce },
+  { name = "Loot names a looted object again in the next capture", run = lootNameTests.LootedObjectIsNamedAgainInTheNextCapture },
+  { name = "Loot only asks for the names of objects", run = lootNameTests.OnlyObjectsAreNamed },
+  { name = "Loot names every object of a shared loot", run = lootNameTests.EveryObjectOfASharedLootIsNamed },
+  { name = "Loot skips unreadable object names and reads them later", run = lootNameTests.UnreadableNamesAreSkippedAndReadLater },
+  { name = "Loot redacts player names in object names", run = lootNameTests.PlayerNamesInObjectNamesAreRedacted },
+  { name = "Loot records the same as before without UnitNameFromGUID", run = lootNameTests.ClientsWithoutTheApiRecordTheSameAsBefore },
+  { name = "Loot survives an erroring UnitNameFromGUID", run = lootNameTests.AnErroringApiDoesNotLoseTheLoot },
   { name = "UnitInteraction skips an unrecognized guid kind", run = TestUnitInteractionSkipsUnrecognizedGuidKind },
   { name = "SanitizeText escapes pattern-magic characters in names", run = TestSanitizeTextEscapesSpecialCharactersInNames },
   { name = "CHAT_MSG_LOOT args dispatched to trackers are sanitized", run = TestChatMsgLootDispatchArgsAreSanitized },

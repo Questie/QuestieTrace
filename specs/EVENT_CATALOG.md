@@ -80,7 +80,8 @@ Triggers loot function sampling on open and observed close-state sampling on clo
 Privacy: `GetLootSourceInfo` can return a player's GUID (e.g. a party member's
 corpse/personal-loot roll). Any observed source tuple containing a GUID that
 is a player's, or that does not classify as `"npc"`/`"object"`/`"item"` per
-`Core.ParseGUIDKind`, is discarded entirely rather than stored.
+`Core.ParseGUIDKind`, is discarded entirely rather than stored. Names are read
+with `UnitNameFromGUID` for `"object"` GUIDs only, and sanitized.
 
 - `LOOT_READY`
 - `LOOT_CLOSED`
@@ -225,6 +226,18 @@ not event-driven, and the Tooltip tracker's are not either; see TRACKER_SPEC sec
 
 - `PLAYER_TARGET_CHANGED`
 - `UPDATE_MOUSEOVER_UNIT`
+
+### ObjectCast tracker
+
+Records the name of the world object a spell was cast on. Forever only.
+
+Privacy: the event's `target` is a player's name for a heal or buff, so the event
+is never recorded itself, and the target only when the spell is in
+`Core.OBJECT_SPELLS`. That list is generated from the client's spell data
+(`tools/generate-object-spells.py`): its spells target game objects, or objects and
+items, and no unit other than the player. The name is sanitized, restricted (secret) values are skipped.
+
+- `UNIT_SPELLCAST_SENT` *(private trigger, not recorded)*
 
 ### GroupState tracker
 

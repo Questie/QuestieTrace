@@ -1,0 +1,100 @@
+name: Check object spell list
+
+# Modules/ObjectSpells.lua lists the spells whose cast targets are recorded. It is generated from the client's
+# spell data, and a new client build can add or remove such spells. This compares the list, by spell ID, with the
+# newest DBC release database and opens a pull request with the regenerated list when they differ. A spell with a
+# target type the generator does not know fails the run: someone has to look at it.
+#
+# The database is in a private repository, so this runs on a schedule or by hand on the default branch only. Pull
+# requests, also from forks, never see the token. It needs:
+#   - the variable DBC_RELEASE_REPOSITORY, the repository the database is released in (owner/name)
+#   - the secret DBC_RELEASE_TOKEN, which can read that repository's contents
+# Without them the run does nothing.
+
+on:
+  schedule:
+    # Tuesdays, after the weekly release of the database on Monday.
+    - cron: "0 6 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: object-spells
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # A manual run can select any branch. Its code would run next to the token and its changes would be pushed.
+    if: github.repository == 'Questie/QuestieTrace' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the newest DBC release database
+        id: download
+        env:
+          DBC_REPOSITORY: ${{ vars.DBC_RELEASE_REPOSITORY }}
+          GH_TOKEN: ${{ secrets.DBC_RELEASE_TOKEN }}
+        run: |
+          if [ ! -f tools/generate-object-spells.py ] || [ ! -f Modules/ObjectSpells.lua ]; then
+            echo "::notice::There is no object spell list yet, nothing to check."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$DBC_REPOSITORY" ] || [ -z "$GH_TOKEN" ]; then
+            echo "::notice::DBC_RELEASE_REPOSITORY or DBC_RELEASE_TOKEN is not set, nothing to check."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh release download -R "$DBC_REPOSITORY" -p dbc-source.db.xz -D "$RUNNER_TEMP"
+          xz -d "$RUNNER_TEMP/dbc-source.db.xz"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Compare the list with the database
+        id: compare
+        if: steps.download.outputs.ready == 'true'
+        run: |
+          code=0
+          python3 tools/generate-object-spells.py --check "$RUNNER_TEMP/dbc-source.db" > "$RUNNER_TEMP/report.txt" 2>&1 || code=$?
+          cat "$RUNNER_TEMP/report.txt"
+          cat "$RUNNER_TEMP/report.txt" >> "$GITHUB_STEP_SUMMARY"
+          case "$code" in
+            0) echo "result=same" >> "$GITHUB_OUTPUT" ;;
+            3) echo "result=different" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::The generator failed (exit $code); see the log above."; exit 1 ;;
+          esac
+
+      - name: Open or update the pull request
+        if: steps.compare.outputs.result == 'different'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/generate-object-spells.py "$RUNNER_TEMP/dbc-source.db"
+          branch=chore/object-spells
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -- Modules/ObjectSpells.lua
+          git commit -m "chore: update the object spell list"
+          # The branch belongs to this workflow alone.
+          git push --force origin "$branch"
+          if [ -z "$(gh pr list --head "$branch" --state open --json number -q '.[].number')" ]; then
+            {
+              echo "The spells that target a game object changed in the newest client build, so the list that says whose cast"
+              echo "targets are recorded has to follow. It was regenerated with \`tools/generate-object-spells.py\`."
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/report.txt"
+              echo '```'
+              echo
+              echo "CI does not start for pull requests opened by a workflow: close and reopen this one to run it."
+            } > "$RUNNER_TEMP/body.md"
+            gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --title "chore: update the object spell list" --body-file "$RUNNER_TEMP/body.md"
+          fi
