@@ -119,7 +119,7 @@ local function NewRuntime(trackerFiles)
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 21, settings = { dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 22, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   runtime.printedMessages = {}
   env.print = function(...)
@@ -500,7 +500,7 @@ local function TestSessionContract()
 
   runtime.core.StartCapture("new capture")
   local current = Session(runtime)
-  assert(current.schemaVersion == 21 and current.recordingContractVersion == 1,
+  assert(current.schemaVersion == 22 and current.recordingContractVersion == 1,
     "New captures need contract provenance without a storage schema bump")
   assert(current.buildInfo.n == 6 and current.buildInfo[1] == "1.15.9" and current.buildInfo[2] == "70003"
     and current.buildInfo[4] == 11509, "New captures record the client build they were made on")
@@ -564,6 +564,32 @@ local function TestExportScrubsPlayerIdentity()
 
   local saved = runtime.core.GetDiagnosticSession()
   assert(saved.functions.UnitName.player ~= nil, "BuildExportPayload must not change the saved session")
+end
+
+local function TestExportScrubsEventsOfOlderVersions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  ---@param session table
+  local function RecordLikeOlderVersions(session)
+    session.events[#session.events + 1] = { t = 1, tp = 1, e = "QUEST_ACCEPT_CONFIRM", a = { "Grimtotem", "Kaya's Alive", 672, n = 3 } }
+    session.events[#session.events + 1] = { t = 2, tp = 2, e = "GROUP_JOINED", a = { 1, "Party-0-000012345678", n = 2 } }
+    session.events[#session.events + 1] = { t = 3, tp = 3, e = "GROUP_LEFT", a = { 1, "Party-0-000012345678", n = 2 } }
+    session.events[#session.events + 1] = { t = 4, tp = 4, e = "QUEST_ACCEPTED", a = { 1, 672, n = 2 } }
+  end
+  runtime.core.StartCapture("saved")
+  RecordLikeOlderVersions(Session(runtime))
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("live")
+  RecordLikeOlderVersions(Session(runtime))
+
+  local payload = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 2, "The saved and the live session are exported")
+  for _, session in ipairs(payload.sessions) do
+    local confirm, joined, left, accepted = unpack(session.events)
+    assert(confirm.a[1] == nil and confirm.a[2] == "Kaya's Alive" and confirm.a[3] == 672, "The name must be scrubbed, the quest must remain")
+    assert(joined.a[1] == 1 and joined.a[2] == nil and left.a[2] == nil, "The party GUID must be scrubbed")
+    assert(accepted.a[1] == 1 and accepted.a[2] == 672, "Other events must not change")
+  end
+  assert(Session(runtime).events[1].a[1] == "Grimtotem", "BuildExportPayload must not change the live session")
 end
 
 --- The payload handed to the encoder (i.e. what Core.BuildExportString
@@ -686,7 +712,7 @@ local function TestExportSerializationRoundTrips()
   env._G = env
   env.QuestLog = {}
   env.SlashCmdList = {}
-  env.QuestieTrace = { schemaVersion = 21, settings = { dataCollectionConsent = true } }
+  env.QuestieTrace = { schemaVersion = 22, settings = { dataCollectionConsent = true } }
   env.QuestieTraceCharacter = { sessions = {} }
   env.print = function() end
   env.GetTime = function() return runtime.now end
@@ -794,7 +820,7 @@ local function TestSaveCaptureStoresSessionEncoded()
   local saved = runtime.env.QuestieTraceCharacter.sessions[1]
   assert(type(saved.encoded) == "string", "A saved session must be stored as an encoded string")
   assert(saved.events == nil and saved.functions == nil, "The plain session tables must not be stored next to the string")
-  assert(saved.name == "encoded" and saved.schemaVersion == 21 and saved.eventCount == 1 and saved.duration ~= nil,
+  assert(saved.name == "encoded" and saved.schemaVersion == 22 and saved.eventCount == 1 and saved.duration ~= nil,
     "Metadata must stay readable without decoding")
 
   local diagnostic, source = runtime.core.GetDiagnosticSession()
@@ -3747,9 +3773,114 @@ local function TestFrameHeartbeatRecordsFirstFramesAndGaps()
   assert(newUpdates ~= updates and #newUpdates == 1 and math.abs(newUpdates[1].v - 0.02) < 1e-9,
     "Each capture starts its own first frame updates, timed from its own start")
 end
+--- Tracked events whose arguments were checked against Blizzard's API documentation of every client: no player or guild
+--- name, no player or party GUID and no free text that can hold one.
+local EVENTS_WITHOUT_PERSONAL_ARGUMENTS = {
+    "ACHIEVEMENT_EARNED", "ADDON_LOADED", "AREA_POIS_UPDATED", "AUCTION_HOUSE_CLOSED", "AUCTION_HOUSE_SHOW", "BANKFRAME_CLOSED",
+    "BANKFRAME_OPENED", "BATTLEFIELDS_CLOSED", "BATTLEFIELDS_SHOW", "CRITERIA_UPDATE", "CURRENCY_DISPLAY_UPDATE",
+    "DISPLAY_SIZE_CHANGED", "DUEL_FINISHED", "GOSSIP_CLOSED", "GOSSIP_SHOW", "GROUP_ROSTER_UPDATE", "GUILDBANKFRAME_CLOSED",
+    "GUILDBANKFRAME_OPENED", "GUILD_REGISTRAR_CLOSED", "GUILD_REGISTRAR_SHOW", "ITEM_COUNT_CHANGED", "ITEM_LOCK_CHANGED", "ITEM_PUSH",
+    "LOADING_SCREEN_DISABLED", "LOADING_SCREEN_ENABLED", "LOOT_CLOSED", "LOOT_OPENED", "LOOT_READY", "MAIL_CLOSED", "MAIL_SHOW",
+    "MAP_EXPLORATION_UPDATED", "MERCHANT_CLOSED", "MERCHANT_SHOW", "MODIFIER_STATE_CHANGED", "NAME_PLATE_UNIT_ADDED",
+    "NAME_PLATE_UNIT_REMOVED", "NEW_RECIPE_LEARNED", "NEW_WMO_CHUNK", "PETITION_CLOSED", "PETITION_SHOW", "PET_STABLE_CLOSED",
+    "PET_STABLE_SHOW", "PLAYER_ALIVE", "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEAVING_WORLD", "PLAYER_LEVEL_UP",
+    "PLAYER_LOGIN", "PLAYER_LOGOUT", "PLAYER_MAP_CHANGED", "PLAYER_MONEY", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+    "PLAYER_TARGET_CHANGED", "PLAYER_XP_UPDATE", "QUESTLINE_UPDATE", "QUEST_ACCEPTED", "QUEST_AUTOCOMPLETE", "QUEST_COMPLETE",
+    "QUEST_DATA_LOAD_RESULT", "QUEST_DETAIL", "QUEST_FINISHED", "QUEST_GREETING", "QUEST_ITEM_UPDATE", "QUEST_LOG_CRITERIA_UPDATE",
+    "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "QUEST_PROGRESS", "QUEST_REMOVED", "QUEST_TURNED_IN", "QUEST_WATCH_LIST_CHANGED",
+    "QUEST_WATCH_UPDATE", "SKILL_LINES_CHANGED", "SPELLS_CHANGED", "TASK_PROGRESS_UPDATE", "TAXIMAP_CLOSED", "TAXIMAP_OPENED",
+    "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_ACHIEVEMENT_UPDATE", "TRAINER_CLOSED", "TRAINER_SHOW", "UI_SCALE_CHANGED",
+    "UNIT_QUEST_LOG_CHANGED", "UPDATE_ALL_UI_WIDGETS", "UPDATE_EXHAUSTION", "UPDATE_FACTION", "UPDATE_MOUSEOVER_UNIT",
+    "WORLD_MAP_OPEN", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
+}
+
+--- Tracked events that can carry such values, with arguments that hold them and what may be recorded of those.
+---@type table<string, { args: table, recorded: table }>
+local EVENTS_WITH_PERSONAL_ARGUMENTS = {
+  QUEST_ACCEPT_CONFIRM = { args = { "Grimtotem", "Kaya's Alive", 672 }, recorded = { nil, "Kaya's Alive", 672 } },
+  GROUP_JOINED = { args = { 1, "Party-0-000012345678" }, recorded = { 1, nil } },
+  GROUP_LEFT = { args = { 1, "Party-0-000012345678" }, recorded = { 1, nil } },
+  UI_INFO_MESSAGE = { args = { 216, "Grimtotem has accepted your quest." }, recorded = { 216, "<name> has accepted your quest." } },
+}
+
+--- The chat events share one argument shape; the Discord information is the 18th argument.
+for _, event in ipairs({
+  "CHAT_MSG_COMBAT_FACTION_CHANGE", "CHAT_MSG_COMBAT_XP_GAIN", "CHAT_MSG_LOOT", "CHAT_MSG_MONEY", "CHAT_MSG_SKILL", "CHAT_MSG_SYSTEM",
+  "CHAT_MSG_TRADESKILLS",
+}) do
+  EVENTS_WITH_PERSONAL_ARGUMENTS[event] = {
+    args = {
+      "Quest accepted: Grimtotem's Test", "Grimtotem", "", "", "Grimtotem", "", 0, 0, "", 0, 7, "Player-1234-0053656F", 0, false, false, false, false,
+      { globalName = "Grimtotem", lastOnlineName = "Grimtotem", userID = "1" },
+    },
+    recorded = { event == "CHAT_MSG_TRADESKILLS" and "<redacted>" or "Quest accepted: <name>'s Test", nil, "", "", nil, "", 0, 0, "", 0, 7, nil, 0, false,
+      false, false, false, nil },
+  }
+end
+
+local function TestEveryTrackedEventIsReviewedForPersonalArguments()
+  local runtime = NewRuntime({})
+  local reviewed = {}
+  for _, event in ipairs(EVENTS_WITHOUT_PERSONAL_ARGUMENTS) do
+    assert(not EVENTS_WITH_PERSONAL_ARGUMENTS[event], event .. " is in both lists")
+    reviewed[event] = true
+  end
+  for event in pairs(EVENTS_WITH_PERSONAL_ARGUMENTS) do reviewed[event] = true end
+
+  for _, category in ipairs(runtime.core.TRACKED_EVENT_CATEGORIES) do
+    for _, event in ipairs(category.events) do
+      assert(reviewed[event], event .. " is tracked: review its arguments for player names, GUIDs and free text, and add it to one of the two lists")
+      reviewed[event] = nil
+    end
+  end
+  assert(next(reviewed) == nil, tostring(next(reviewed)) .. " is reviewed but not tracked any more")
+end
+
+local function TestPersonalEventArgumentsAreNotRecorded()
+  for event, case in pairs(EVENTS_WITH_PERSONAL_ARGUMENTS) do
+    local runtime = NewRuntime({})
+    runtime.env.UnitName = function(token) return token == "player" and "Grimtotem" or nil end
+    runtime.env.ERR_QUEST_ACCEPTED_S = "Quest accepted: %s"
+    runtime.core.StartCapture("personal arguments")
+    local count = event:find("^CHAT_MSG") and 18 or #case.args
+    SendEvent(runtime, event, unpack(case.args, 1, count))
+
+    local recorded = Session(runtime).events[1]
+    assert(recorded and recorded.e == event, event .. " is recorded")
+    for index = 1, count do
+      local expected = case.recorded[index]
+      if expected ~= "<redacted>" then
+        assert(recorded.a[index] == expected, string.format("%s argument %d: expected %s, recorded %s", event, index, tostring(expected),
+          tostring(recorded.a[index])))
+      end
+    end
+    local function AssertNoName(value)
+      if type(value) == "table" then
+        for _, inner in pairs(value) do AssertNoName(inner) end
+      elseif type(value) == "string" then
+        assert(not value:find("Grimtotem", 1, true) and not value:find("^Player%-") and not value:find("^Party%-"), event .. " recorded " .. value)
+      end
+    end
+    AssertNoName(recorded.a)
+  end
+end
+
+local function TestSecretInfoMessageIsNotRecorded()
+  local runtime = NewRuntime({})
+  local secret = "secret text"
+  runtime.env.issecretvalue = function(value) return value == secret end
+  runtime.core.StartCapture("secret message")
+  SendEvent(runtime, "UI_INFO_MESSAGE", 216, secret)
+  local recorded = Session(runtime).events[1]
+  assert(recorded.a[1] == 216 and recorded.a[2] == nil, "A restricted message is dropped")
+end
 
 ---@type { name: string, run: fun() }[]
 local tests = {
+  { name = "every tracked event is reviewed for personal arguments", run = TestEveryTrackedEventIsReviewedForPersonalArguments },
+  { name = "personal event arguments are not recorded", run = TestPersonalEventArgumentsAreNotRecorded },
+  { name = "export scrubs personal event arguments recorded by older versions", run = TestExportScrubsEventsOfOlderVersions },
+  { name = "a restricted info message is not recorded", run = TestSecretInfoMessageIsNotRecorded },
   { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
   { name = "quest log extras are stored by quest ID", run = TestQuestLogExtrasStoredByQuestID },
   { name = "quest log records its quest list at once and defers per-quest sampling", run = TestQuestLogDefersInitialSample },

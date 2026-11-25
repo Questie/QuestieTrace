@@ -6,7 +6,7 @@ local Core = QuestieTraceCore
 ---@type string
 local ADDON_NAME = "QuestieTrace"
 ---@type number
-local SCHEMA_VERSION = 21
+local SCHEMA_VERSION = 22
 ---@type number Safety cap on QuestieTraceCharacter.sessions -- a pure size
 --- backstop for players who never open the export window, not a substitute
 --- for reporting. Oldest sessions are dropped first; there is no
@@ -248,7 +248,8 @@ local EVENT_FILTERS = {
 -- Every CHAT_MSG_* event QuestieTrace tracks shares the same argument
 -- shape, so a single shared sanitizer (Core.SanitizeChatMsgArgs) covers all
 -- of them. Applied in ProcessTrackedEvent before args are recorded to
--- session.events or dispatched to tracker callbacks.
+-- session.events or dispatched to tracker callbacks. Every tracked event is in
+-- one of the two reviewed lists in Tests/run.lua.
 
 ---@type table<string, fun(args: PackedArgs): PackedArgs>
 local EVENT_ARG_SANITIZERS = {
@@ -259,6 +260,10 @@ local EVENT_ARG_SANITIZERS = {
   CHAT_MSG_TRADESKILLS = Core.SanitizeTradeskillChatMsgArgs,
   CHAT_MSG_COMBAT_FACTION_CHANGE = Core.SanitizeChatMsgArgs,
   CHAT_MSG_COMBAT_XP_GAIN = Core.SanitizeChatMsgArgs,
+  QUEST_ACCEPT_CONFIRM = Core.SanitizeQuestAcceptConfirmArgs,
+  GROUP_JOINED = Core.SanitizeGroupArgs,
+  GROUP_LEFT = Core.SanitizeGroupArgs,
+  UI_INFO_MESSAGE = Core.SanitizeInfoMessageArgs,
 }
 
 ---------------------------------------------------------------------------
