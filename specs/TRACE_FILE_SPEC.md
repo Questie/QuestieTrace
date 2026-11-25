@@ -477,6 +477,7 @@ Called with a quest ID as the argument.
 | Function key | Return type | Description |
 |---|---|---|
 | `GetSkillLineInfo` | tuple (n=13) | Legacy global; only present when `GetNumSkillLines` exists, no synthesized fallback |
+| `C_SkillInfo.GetSkillLineInfoByID` | object (table) | Forever only (schema 22+); `{ rank, maxRank, modifier, tempPoints }` keyed by skill ID, no value when the skill is unlearned |
 | `GetProfessionInfo` | tuple (n=10) | Profession tab information |
 | `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
@@ -499,7 +500,7 @@ Called with a quest ID as the argument.
 |---|---|
 | `C_QuestLog.GetAllCompletedQuestIDs` | Set of completed quest IDs (see section 5) |
 | `GetQuestsCompleted` | Legacy global; independent set of completed quest IDs, tracked whenever this global exists (see section 5) |
-| `PlayerKnownSpells` | Set of known spell IDs discovered from spellbook slots |
+| `PlayerKnownSpells` | Set of known spell IDs discovered from spellbook slots; empty on Forever before schema 22 |
 
 ---
 

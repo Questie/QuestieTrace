@@ -92,8 +92,8 @@ specs/
 | UnitInteraction | target/dialog/NPC/login events | Fixed unit-token fanout | `UnitGUID`, `UnitName`, `UnitGUIDIsSecret`, item IDs of item quest givers, gossip quest-list APIs |
 | GroupState | 5 events | Event-driven | `IsInGroup`, `GetNumGroupMembers` |
 | GhostState | 4 events | Init + event-driven | `UnitIsGhost["player"]` |
-| SkillLines | 3 events | Event + index iteration | `GetNumSkillLines`/`GetSkillLineInfo` (legacy, when present), `GetProfessions`, `GetProfessionInfo`, `C_TradeSkillUI.*` (independent, when present) |
-| SpellBook | 2 events | Event + slot iteration | Spellbook slot streams + `PlayerKnownSpells` delta |
+| SkillLines | 3 events | Event + index iteration, at most every 0.1 s | `GetNumSkillLines`/`GetSkillLineInfo` (legacy, when present), `C_SkillInfo.GetSkillLineInfoByID` (Forever), `GetProfessions`, `GetProfessionInfo`, `C_TradeSkillUI.*` (independent, when present) |
+| SpellBook | 2 events | Event + slot iteration | `PlayerKnownSpells` delta, `SpellBook`, and the slot streams of the legacy globals |
 | QuestDialog | 8 dialog events | Event + delayed re-samples + observed close sample | Gossip/greeting/current quest dialog APIs |
 | ResetTime | 3 lifecycle events | Init + snapshots | `GetServerTime`, `GetQuestResetTime`/`C_DateAndTime.GetSecondsUntilDailyReset` (whichever present) |
 
