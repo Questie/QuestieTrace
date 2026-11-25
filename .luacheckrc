@@ -1221,6 +1221,7 @@ globals = {
     "GetMaxSpellStartRecoveryOffset",
     "GetMaximumExpansionLevel",
     "GetMeleeHaste",
+    "GetMerchantFilter",
     "GetMerchantItemCostInfo",
     "GetMerchantItemCostItem",
     "GetMerchantItemID",

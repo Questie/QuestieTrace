@@ -242,6 +242,7 @@ successful observed returns.
 | Display | `Trackers/Display.lua` | `GetPhysicalScreenSize`, `UIParent:GetScale`, `GetScreenWidth`, `GetScreenHeight`, `GetCVar[lowercase name]` (allowlisted CVars) | Init + event-driven + private CVar trigger | `PLAYER_ENTERING_WORLD`, `UI_SCALE_CHANGED`, `DISPLAY_SIZE_CHANGED`; `CVAR_UPDATE` is a private trigger and is not recorded |
 | PlayerProgress | `Trackers/PlayerProgress.lua` | `UnitXP["player"]`, `UnitXPMax["player"]`, `GetXPExhaustion`, `GetMoney` | Init + event-driven | `PLAYER_ENTERING_WORLD`, `PLAYER_XP_UPDATE`, `PLAYER_LEVEL_UP`, `UPDATE_EXHAUSTION`, `PLAYER_MONEY` |
 | ItemInfo | `Trackers/ItemInfo.lua` | `C_Item.IsItemDataCachedByID[itemID]` for items an addon asked about while uncached | `hooksecurefunc` post-hook on item data requests + private triggers | None; `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` are private triggers and are not recorded |
+| Merchant | `Trackers/Merchant.lua` | `GetMerchantNumItems`, `GetMerchantFilter`, and per slot `GetMerchantItemInfo[index]`, `C_MerchantFrame.GetItemInfo[index]`, `GetMerchantItemLink[index]`, `GetMerchantItemID[index]` | Event + window lifecycle + private update trigger | `MERCHANT_SHOW`, `MERCHANT_CLOSED`; `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE` are private triggers and are not recorded |
 | TrainerServices | `Trackers/TrainerServices.lua` | `TrainerServices[npcID][service]` (synthetic), `C_Trainer.GetTrainerType` or `IsTradeskillTrainer`, `GetTrainerServiceTypeFilter[type]` | Event + window lifecycle + private update trigger | `TRAINER_SHOW`, `TRAINER_CLOSED`; `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE` are private triggers and are not recorded |
 | FrameHeartbeat | `Trackers/FrameHeartbeat.lua` | None; writes `session.frameUpdates` | `OnUpdate` while capturing | None |
 | GameObject | `Trackers/GameObject.lua` | `GameObjectName`, `GameObjectGUID` (synthetic) | TooltipDataProcessor callback (Modern/Forever only) | None (uses `TooltipDataProcessor.AddTooltipPostCall`) |
@@ -421,7 +422,17 @@ The FrameHeartbeat tracker shows a frame whose `OnUpdate` script runs on every c
 
 ---
 
-## 19) TrainerServices tracker behavior
+## 19) Merchant tracker behavior
+
+`MERCHANT_SHOW` samples every slot, but the client may not have the items' data yet: such a slot has a price, and neither name nor link (about 4 in 10 recorded slots before schema 22). The data arrives a fraction of a second later, and Blizzard's merchant window shows it on `MERCHANT_UPDATE`. A private frame listens to that event and to `MERCHANT_FILTER_ITEM_UPDATE(itemID)`. While the window is open and a slot has no link, or the number of slots is another than in the last sample, the first update schedules a sample 0.1 seconds later; further updates until then share it. Once every slot has its link, an update costs one `GetMerchantNumItems` call. Closing the window or stopping the capture drops a scheduled sample.
+
+`GetMerchantItemID[index]` may answer before the item's data has arrived. `GetMerchantFilter` (Forever) is the value the recorded slots were listed with: the filter decides which of the merchant's items get a slot. Both are recorded only on clients that have the function.
+
+`MERCHANT_CLOSED` probes the known slots once more, so streams of functions that answer nil for a closed window end with nil. `C_MerchantFrame.GetItemInfo` returns nothing then and its streams keep their last value; `GetMerchantNumItems` is 0.
+
+---
+
+## 20) TrainerServices tracker behavior
 
 `TrainerServices[npcID][service]` is what a trainer teaches, one change-only stream per service. The value holds `name`, `rank` (the text behind the name), `type` (`"available"`, `"unavailable"` or `"used"` for this player), `level` (required), `cost` (copper, or training points for pet skills on Forever), `skill` and `skillRank` (required skill), and `spellID` or `itemID` where the client tells: on Forever what the service's tooltip shows (`C_TooltipInfo.GetTrainerService`), elsewhere the item ID in `GetTrainerServiceItemLink`, if it has one. Headers of the Classic list are left out.
 
@@ -433,7 +444,7 @@ The kind of trainer is `C_Trainer.GetTrainerType` on Forever and `IsTradeskillTr
 
 ---
 
-## 20) Change detection
+## 21) Change detection
 
 Trackers only append entries when values change. The comparison method
 depends on the value type:

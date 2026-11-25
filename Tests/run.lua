@@ -2751,6 +2751,35 @@ local function TestTrainerServicesRecordedPerNpc()
   assert(#fireball == 2, "A pending sample is dropped when the capture stops")
 end
 
+local function TestMerchantUpdatesArePrivateTriggers()
+  local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
+  local link, reads = nil, 0
+  runtime.env.GetMerchantNumItems = function() return 1 end
+  runtime.env.GetMerchantItemLink = function()
+    reads = reads + 1
+    return link
+  end
+
+  runtime.core.StartCapture("merchant updates")
+  SendEvent(runtime, "MERCHANT_SHOW")
+  link = "|Hitem:3371::::::::10:::::::::|h[Empty Vial]|h|r"
+  SendEvent(runtime, "MERCHANT_UPDATE")
+  SendEvent(runtime, "MERCHANT_FILTER_ITEM_UPDATE", 3371)
+  AdvanceTo(runtime, 1)
+
+  local session = Session(runtime)
+  assert(session.functions.GetMerchantItemLink[1][1].v == link, "An update samples the slots again")
+  assert(#session.events == 1 and session.events[1].e == "MERCHANT_SHOW", "Merchant updates are never recorded")
+
+  link = nil
+  SendEvent(runtime, "MERCHANT_SHOW")
+  SendEvent(runtime, "MERCHANT_UPDATE")
+  local readsBeforeStop = reads
+  runtime.core.StopCapture()
+  AdvanceTo(runtime, 2)
+  assert(reads == readsBeforeStop, "A pending sample is dropped when the capture stops")
+end
+
 local function TestQuestPOTracker()
   local runtime = NewRuntime({ "Modules/Trackers/QuestPOI.lua" })
   local env = runtime.env
@@ -3909,6 +3938,7 @@ local tests = {
   { name = "Merchant records changed items", run = TestMerchantRecordsChangedItems },
   { name = "Merchant empty vendor", run = TestMerchantEmptyVendor },
   { name = "Trainer services recorded per NPC", run = TestTrainerServicesRecordedPerNpc },
+  { name = "Merchant updates are private triggers", run = TestMerchantUpdatesArePrivateTriggers },
   { name = "quest poi tracker records quest log pois", run = TestQuestPOTracker },
   { name = "quest poi tracker handles QUEST_POI_UPDATE", run = TestQuestPOTrackerQuestPOIUpdate },
   { name = "quest poi tracker samples a same-frame QUEST_POI_UPDATE on the next frame", run = TestQuestPOTrackerSameFrameQuestPOIUpdate },
