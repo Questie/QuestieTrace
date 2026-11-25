@@ -14,15 +14,15 @@ local C_After = C_Timer.After
 -- raw APIs. Each is probed and recorded only when it actually exists on the
 -- current client -- there is no synthesized/normalized composite value.
 --
--- C_QuestLog.GetInfo(questLogIndex)      -> table info (raw, as returned by the API)
+-- C_QuestLog.GetInfo(questLogIndex)      -> table info (raw, as returned by the API; see Core.GetClientFunctions)
 -- C_QuestLog.GetQuestTagInfo(questID)    -> table? tagInfo (raw)
 -- C_QuestLog.IsComplete(questID)         -> boolean isComplete
 -- C_QuestLog.IsFailed(questID)           -> boolean isFailed
 -- C_QuestLog.GetLogIndexForQuestID(questID) -> number? questLogIndex
 --
 -- GetQuestLogTitle(questLogIndex)   -> packed 17-value tuple (legacy global,
---                                      only recorded when that global exists)
--- GetQuestLogIndexByID(questID)     -> number questLogIndex (legacy global)
+--                                      see Core.GetClientFunctions)
+-- GetQuestLogIndexByID(questID)     -> number questLogIndex (same)
 --
 -- GetQuestLogQuestText(questLogIndex) -> string questDescription,
 --                                        string questObjectives
@@ -49,6 +49,9 @@ local C_After = C_Timer.After
 -- GetQuestLogRewardInfo(index, questID)        -> packed reward item tuple
 -- GetQuestLogRewardMoney(questID)              -> number money
 -- C_QuestLog.GetRequiredMoney(questID)         -> number copper (-1 observed on Forever when none)
+-- IsBreadcrumbQuest(questID)                   -> boolean isBreadcrumb (Forever only, undocumented,
+--                                                 only while on the quest)
+-- IsQuestSequenced(questID)                    -> boolean isSequenced (same)
 -- C_QuestLog.GetQuestTimers()                  -> QuestTimerInfo[] (flat stream; empty table when none)
 --
 -- Sampled with the native quest-log index but stored by questID, like
@@ -83,6 +86,14 @@ local prevNested    -- Mirrors nested stream parameters for change detection onl
 local prevTimedQuestIds -- Timed quest IDs from the previous derived timer sample.
 ---@type table<number, number>
 local prevRewardCounts -- Highest reward index previously captured for each active quest.
+---@type function?
+local getQuestLogTitle -- The legacy global, if it is recorded on this client.
+---@type function?
+local getQuestLogInfo -- C_QuestLog.GetInfo, if it is recorded on this client.
+---@type function?
+local getQuestLogIndexByID -- The legacy global, if it is recorded on this client.
+---@type function?
+local getLogIndexForQuestID -- C_QuestLog.GetLogIndexForQuestID, if it is recorded on this client.
 
 ---------------------------------------------------------------------------
 -- API helpers (logic preserved from existing implementation)
@@ -96,12 +107,12 @@ local prevRewardCounts -- Highest reward index previously captured for each acti
 ---@param questLogIndex number
 ---@return { questID: number?, isHeader: boolean?, title: string? }? row
 local function ReadQuestLogRow(questLogIndex)
-  if C_QuestLog and C_QuestLog.GetInfo then
-    local info = C_QuestLog.GetInfo(questLogIndex)
+  if getQuestLogInfo then
+    local info = getQuestLogInfo(questLogIndex)
     if not info then return nil end
     return { questID = info.questID, isHeader = info.isHeader, title = info.title }
-  elseif GetQuestLogTitle then
-    local title, _, _, isHeader, _, _, _, questID = GetQuestLogTitle(questLogIndex)
+  elseif getQuestLogTitle then
+    local title, _, _, isHeader, _, _, _, questID = getQuestLogTitle(questLogIndex)
     if not title then return nil end
     return { questID = questID, isHeader = isHeader, title = title }
   end
@@ -344,6 +355,7 @@ end
 ---@param t number
 ---@param tp number
 ---@param questId number
+---@return any value nil when the API is absent or failed
 local function ProbeQuestScalar(funcName, fn, t, tp, questId)
   local ok, value = SafeScalarCall(fn, questId)
   if ok then
@@ -352,6 +364,7 @@ local function ProbeQuestScalar(funcName, fn, t, tp, questId)
       t, tp, value, questId, funcName
     )
   end
+  return value
 end
 
 ---Probe one packed, questId-keyed raw API and append the exact returned tuple.
@@ -426,7 +439,14 @@ local function ProbeQuestDirectApis(t, tp, questId)
   ProbeQuestScalar("HaveQuestData", HaveQuestData, t, tp, questId)
 
   if type(C_QuestLog) == "table" then
-    ProbeQuestScalar("C_QuestLog.IsOnQuest", C_QuestLog.IsOnQuest, t, tp, questId)
+    local onQuest = ProbeQuestScalar("C_QuestLog.IsOnQuest", C_QuestLog.IsOnQuest, t, tp, questId)
+    -- Only asked while on the quest: IsBreadcrumbQuest answers false for every
+    -- other quest. Being listed in the log is not enough, because the log lists
+    -- a turned-in quest for some more frames.
+    if onQuest then
+      ProbeQuestScalar("IsBreadcrumbQuest", IsBreadcrumbQuest, t, tp, questId)
+      ProbeQuestScalar("IsQuestSequenced", IsQuestSequenced, t, tp, questId)
+    end
     ProbeQuestScalar("C_QuestLog.IsQuestFlaggedCompleted", C_QuestLog.IsQuestFlaggedCompleted, t, tp, questId)
     local objOk, objectives = SafeScalarCall(C_QuestLog.GetQuestObjectives, questId)
     if objOk then
@@ -458,8 +478,8 @@ local function ProbeQuestLogIndexAndTitle(t, tp, questId)
   ---@type number?
   local questLogIndex
 
-  if type(C_QuestLog) == "table" and type(C_QuestLog.GetLogIndexForQuestID) == "function" then
-    local ok, value = SafeScalarCall(C_QuestLog.GetLogIndexForQuestID, questId)
+  if getLogIndexForQuestID then
+    local ok, value = SafeScalarCall(getLogIndexForQuestID, questId)
     if ok then
       AppendIfChanged(
         GetOrCreateParamStream("C_QuestLog.GetLogIndexForQuestID", questId),
@@ -469,8 +489,8 @@ local function ProbeQuestLogIndexAndTitle(t, tp, questId)
     end
   end
 
-  if type(GetQuestLogIndexByID) == "function" then
-    local ok, value = SafeScalarCall(GetQuestLogIndexByID, questId)
+  if getQuestLogIndexByID then
+    local ok, value = SafeScalarCall(getQuestLogIndexByID, questId)
     if ok then
       AppendIfChanged(
         GetOrCreateParamStream("GetQuestLogIndexByID", questId),
@@ -482,17 +502,17 @@ local function ProbeQuestLogIndexAndTitle(t, tp, questId)
 
   if not questLogIndex then return end
 
-  if type(C_QuestLog) == "table" then
-    if type(C_QuestLog.GetInfo) == "function" then
-      local ok, info = SafeScalarCall(C_QuestLog.GetInfo, questLogIndex)
-      if ok and info then
-        AppendIfChanged(
-          GetOrCreateParamStream("C_QuestLog.GetInfo", questId),
-          t, tp, info, questId, "C_QuestLog.GetInfo"
-        )
-      end
+  if getQuestLogInfo then
+    local ok, info = SafeScalarCall(getQuestLogInfo, questLogIndex)
+    if ok and info then
+      AppendIfChanged(
+        GetOrCreateParamStream("C_QuestLog.GetInfo", questId),
+        t, tp, info, questId, "C_QuestLog.GetInfo"
+      )
     end
+  end
 
+  if type(C_QuestLog) == "table" then
     if type(C_QuestLog.GetQuestTagInfo) == "function" then
       local ok, tagInfo = SafeScalarCall(C_QuestLog.GetQuestTagInfo, questId)
       if ok then
@@ -524,9 +544,9 @@ local function ProbeQuestLogIndexAndTitle(t, tp, questId)
     end
   end
 
-  -- Legacy global -- raw 17-value tuple, only recorded when the global exists.
-  if type(GetQuestLogTitle) == "function" then
-    local ok, titleTuple = SafePackedCall(GetQuestLogTitle, questLogIndex)
+  -- Legacy global -- raw 17-value tuple, see Core.GetClientFunctions.
+  if getQuestLogTitle then
+    local ok, titleTuple = SafePackedCall(getQuestLogTitle, questLogIndex)
     if ok then
       AppendIfChanged(
         GetOrCreateParamStream("GetQuestLogTitle", questId),
@@ -819,6 +839,8 @@ Core.RegisterTracker({
     prevNested = {}
     prevTimedQuestIds = {}
     prevRewardCounts = {}
+    getQuestLogTitle, getQuestLogInfo = Core.GetClientFunctions("GetQuestLogTitle", C_QuestLog, "GetInfo")
+    getQuestLogIndexByID, getLogIndexForQuestID = Core.GetClientFunctions("GetQuestLogIndexByID", C_QuestLog, "GetLogIndexForQuestID")
 
     -- The quest ID list is recorded synchronously so the stream has a t=0
     -- baseline; the heavier per-quest sampling waits for the next frame.

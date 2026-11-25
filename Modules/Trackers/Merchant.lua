@@ -11,7 +11,8 @@ local C_After = C_Timer.After
 -- WoW API return schemas (for trace analyzer display labels)
 ---------------------------------------------------------------------------
 -- The client sends item data after MERCHANT_SHOW: until it arrives, a slot has
--- a price but neither name nor link. So a window is sampled again on updates.
+-- a price but neither name nor link. So a window is sampled again on updates
+-- and when the data of one of its items arrives.
 --
 -- GetMerchantNumItems() -> number numMerchantItems
 -- GetMerchantFilter() -> number filter  -- LE_LOOT_FILTER_*; it decides which items the slots list
@@ -47,10 +48,30 @@ local SAMPLE_DELAY = 0.1
 ---@field capture CaptureState
 ---@field itemCount number? Slots in the last sample
 ---@field isMissingItems boolean Whether a slot of the last sample had no link
+---@field missingItemIDs table<number, boolean> The items of those slots, as far as the client knows their IDs
 ---@field isSamplePending boolean
 
 ---@type MerchantWindow? The open window, if any. Each opening gets its own table.
 local openWindow
+
+--- What the client reports arriving item data with: (itemID, success). Forever answers a vendor's
+--- items with ITEM_DATA_LOAD_RESULT. Both fire for every item any addon loads, so they are only
+--- registered while an item of the open window is missing.
+---@type table<string, true>
+local ITEM_EVENTS = { ITEM_DATA_LOAD_RESULT = true, GET_ITEM_INFO_RECEIVED = true }
+---@type Frame
+local updateFrame = CreateFrame("Frame")
+
+---@param isListening boolean
+local function ListenForItemData(isListening)
+  for event in pairs(ITEM_EVENTS) do
+    if isListening then
+      updateFrame:RegisterEvent(event)
+    else
+      updateFrame:UnregisterEvent(event)
+    end
+  end
+end
 
 ---Safely call a function and return the first result.
 ---@param fn function?
@@ -196,6 +217,7 @@ end
 ---@param tp number
 ---@param index number
 ---@return boolean hasLink Whether the client has the item's data
+---@return any itemID
 local function ProbeMerchantItem(t, tp, index)
   -- Legacy API: GetMerchantItemInfo
   local legacyOk, legacyValue = SafePackedCall(GetMerchantItemInfo, index)
@@ -204,7 +226,7 @@ local function ProbeMerchantItem(t, tp, index)
     AppendIfChanged(stream, t, tp, legacyValue)
   end
 
-  ProbeSlotScalar("GetMerchantItemID", GetMerchantItemID, t, tp, index)
+  local itemID = ProbeSlotScalar("GetMerchantItemID", GetMerchantItemID, t, tp, index)
   local link = ProbeSlotScalar("GetMerchantItemLink", GetMerchantItemLink, t, tp, index)
 
   -- Modern API: C_MerchantFrame.GetItemInfo (when available)
@@ -218,7 +240,7 @@ local function ProbeMerchantItem(t, tp, index)
     end
   end
 
-  return link ~= nil
+  return link ~= nil, itemID
 end
 
 ---Sample current merchant items by calling raw APIs.
@@ -236,9 +258,16 @@ local function SampleMerchantOpen(window)
 
   window.itemCount = SampleMerchantCount(t, tp)
   window.isMissingItems = false
+  window.missingItemIDs = {}
   for index = 1, window.itemCount or 0 do
-    if not ProbeMerchantItem(t, tp, index) then window.isMissingItems = true end
+    local hasLink, itemID = ProbeMerchantItem(t, tp, index)
+    if not hasLink then
+      window.isMissingItems = true
+      -- A slot without an item, as a currency, never gets a link.
+      if type(itemID) == "number" then window.missingItemIDs[itemID] = true end
+    end
   end
+  ListenForItemData(next(window.missingItemIDs) ~= nil)
 end
 
 ---Sample merchant APIs at close without inventing inactive values.
@@ -269,30 +298,37 @@ end
 ---------------------------------------------------------------------------
 -- Private update frame
 -- MERCHANT_UPDATE is what Blizzard's merchant window redraws an item on when its
--- data arrives; MERCHANT_FILTER_ITEM_UPDATE names an item. Both are sampling
--- triggers only and stay out of the recorded event stream.
+-- data arrives; MERCHANT_FILTER_ITEM_UPDATE names an item. These and ITEM_EVENTS are
+-- sampling triggers only and stay out of the recorded event stream.
 ---------------------------------------------------------------------------
 
----@type Frame
-local updateFrame = CreateFrame("Frame")
-updateFrame:RegisterEvent("MERCHANT_UPDATE")
-updateFrame:RegisterEvent("MERCHANT_FILTER_ITEM_UPDATE")
-updateFrame:SetScript("OnEvent", function()
-  local window = openWindow
-  if not window or window.isSamplePending then return end
-
-  -- With every link known, only a list of another length is news.
-  if not window.isMissingItems then
-    local ok, itemCount = SafeScalarCall(GetMerchantNumItems)
-    if not ok or itemCount == window.itemCount then return end
-  end
-
+--- Sample the window once, SAMPLE_DELAY later, however many events ask for it until then.
+---@param window MerchantWindow
+local function RequestSample(window)
   window.isSamplePending = true
   C_After(SAMPLE_DELAY, function()
     if openWindow ~= window then return end
     window.isSamplePending = false
     SampleMerchantOpen(window)
   end)
+end
+
+updateFrame:RegisterEvent("MERCHANT_UPDATE")
+updateFrame:RegisterEvent("MERCHANT_FILTER_ITEM_UPDATE")
+updateFrame:SetScript("OnEvent", function(_, event, itemID, success)
+  local window = openWindow
+  if not window or window.isSamplePending then return end
+
+  if ITEM_EVENTS[event] then
+    -- Any addon's loads fire these: one lookup tells the window's missing items apart.
+    if not success or not itemID or not window.missingItemIDs[itemID] then return end
+  elseif not window.isMissingItems then
+    -- With every link known, only a list of another length is news.
+    local ok, itemCount = SafeScalarCall(GetMerchantNumItems)
+    if not ok or itemCount == window.itemCount then return end
+  end
+
+  RequestSample(window)
 end)
 
 Core.RegisterTracker({
@@ -322,15 +358,17 @@ Core.RegisterTracker({
   ---@param event string
   OnEvent = function(capture, event)
     if event == "MERCHANT_SHOW" then
-      openWindow = { capture = capture, isMissingItems = false, isSamplePending = false }
+      openWindow = { capture = capture, isMissingItems = false, missingItemIDs = {}, isSamplePending = false }
       SampleMerchantOpen(openWindow)
     elseif event == "MERCHANT_CLOSED" then
       openWindow = nil
+      ListenForItemData(false)
       SampleMerchantClose(capture)
     end
   end,
 
   OnCaptureStopped = function()
     openWindow = nil
+    ListenForItemData(false)
   end,
 })

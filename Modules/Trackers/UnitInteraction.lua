@@ -15,6 +15,11 @@ local DeepCompare = Core.DeepCompare
 -- Nameplate tokens ("nameplate1", ...): UnitGUID only, sampled on
 -- NAME_PLATE_UNIT_ADDED; see SampleNameplate.
 --
+-- C_Item.GetItemIDByGUID(itemGUID) -> number? itemID (Forever only)
+--   stored as functions[key][itemGUID] for each Item GUID in UnitGUID; see RecordItemID.
+--
+-- UnitGUIDIsSecret[token] (synthetic) -> boolean; see SampleSecrecy.
+--
 -- C_GossipInfo.GetAvailableQuests() -> GossipQuestUIInfo[] (table)
 -- C_GossipInfo.GetActiveQuests()    -> GossipQuestUIInfo[] (table)
 ---------------------------------------------------------------------------
@@ -31,6 +36,10 @@ local NAMEPLATE_TOKEN_PATTERN = "^nameplate%d+$"
 local guidStreams
 ---@type table<string, FunctionStreamEntry[]>?
 local nameStreams
+---@type table<string, FunctionStreamEntry[]>? Keyed by item GUID; nil on clients without C_Item.GetItemIDByGUID.
+local itemIDStreams
+---@type table<string, FunctionStreamEntry[]>
+local secrecyStreams
 ---@type FunctionStreamEntry[]?
 local gossipAvailableStream
 ---@type FunctionStreamEntry[]?
@@ -80,6 +89,49 @@ local function IsPlayerControlled(token, guid)
   return ok and controlled == true
 end
 
+---Record which item an Item GUID belongs to, since the GUID holds no item ID.
+---An item that starts a quest is the dialog's "questnpc", and Forever's
+---QUEST_DETAIL reports its questStartItemID as 0. The stream is keyed by the GUID
+---to join it with UnitGUID. A known ID is not read again: it never changes, and
+---accepting the quest can use the item up.
+---@param t number Session-relative GetTime()
+---@param tp number Session-relative GetTimePreciseSec()
+---@param itemGUID string
+local function RecordItemID(t, tp, itemGUID)
+  if not itemIDStreams or itemIDStreams[itemGUID] then return end
+
+  local ok, itemID = SafeScalarCall(C_Item.GetItemIDByGUID, itemGUID)
+  if ok and itemID then
+    itemIDStreams[itemGUID] = { { t = t, tp = tp, v = itemID } }
+  end
+end
+
+---Record whether UnitGUID(token) answered with a secret value, as Forever does in instances: there is a unit,
+---but the client hides which one. Only this fact is stored, never the secret value itself.
+---
+---A token's stream starts at its first secret value, so nothing is recorded outside instances: a token without
+---a stream was never hidden.
+---@param t number Session-relative GetTime()
+---@param tp number Session-relative GetTimePreciseSec()
+---@param token string
+---@param guid any What UnitGUID(token) returned
+---@return boolean isSecret A secret value can be neither compared nor classified, so callers skip it
+local function SampleSecrecy(t, tp, token, guid)
+  local isSecret = issecretvalue ~= nil and issecretvalue(guid)
+  local stream = secrecyStreams[token]
+  if not stream then
+    if not isSecret then return false end
+    stream = {}
+    secrecyStreams[token] = stream
+  end
+
+  local previous = stream[#stream]
+  if not previous or previous.v ~= isSecret then
+    stream[#stream + 1] = { t = t, tp = tp, v = isSecret }
+  end
+  return isSecret
+end
+
 --- Sample UnitGUID and UnitName for every fixed token.
 ---@param t number Session-relative GetTime()
 ---@param tp number Session-relative GetTimePreciseSec()
@@ -89,7 +141,7 @@ local function SampleAll(t, tp)
   for _, token in ipairs(TOKENS) do
     -- UnitGUID (scalar string or nil). Store only successful observed returns.
     local guidOk, guid = SafeScalarCall(UnitGUID, token)
-    if guidOk then
+    if guidOk and not SampleSecrecy(t, tp, token, guid) then
       -- Privacy: `target`/`npc`/`questnpc` tokens can resolve to another
       -- player character just as easily as an NPC (e.g. targeting a party
       -- member). Never record a player's GUID or name; players are blanked
@@ -117,6 +169,10 @@ local function SampleAll(t, tp)
         local prevGuid = guidStream[#guidStream]
         if not prevGuid or prevGuid.v ~= guid then
           guidStream[#guidStream + 1] = { t = t, tp = tp, v = guid }
+        end
+
+        if kind == "item" and guid then
+          RecordItemID(t, tp, guid)
         end
 
         -- UnitName (packed actual returns). Do not synthesize nil from UnitExists;
@@ -175,7 +231,7 @@ local function SampleNameplate(t, tp, token)
   -- token's previous unit is gone either way.
   local guidOk, guid = SafeScalarCall(UnitGUID, token)
   local recordedGUID = nil
-  if guidOk and IsCreatureOrVehicleGUID(guid) and not IsPlayerControlled(token, guid) then
+  if guidOk and not SampleSecrecy(t, tp, token, guid) and IsCreatureOrVehicleGUID(guid) and not IsPlayerControlled(token, guid) then
     recordedGUID = guid
   end
 
@@ -209,6 +265,8 @@ Core.RegisterTracker({
     -- player_state (already registered)
     "LOOT_OPENED",
     -- npc_interaction (new category)
+    "PLAYER_INTERACTION_MANAGER_FRAME_SHOW",
+    "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
     "MERCHANT_SHOW",
     "MERCHANT_CLOSED",
     "TRAINER_SHOW",
@@ -241,9 +299,11 @@ Core.RegisterTracker({
     local functions = capture.session.functions
     if not functions["UnitGUID"] then functions["UnitGUID"] = {} end
     if not functions["UnitName"] then functions["UnitName"] = {} end
+    functions["UnitGUIDIsSecret"] = {}
 
     guidStreams = functions["UnitGUID"] --[[@as table<string, FunctionStreamEntry[]>]]
     nameStreams = functions["UnitName"] --[[@as table<string, FunctionStreamEntry[]>]]
+    secrecyStreams = functions["UnitGUIDIsSecret"] --[[@as table<string, FunctionStreamEntry[]>]]
     for _, token in ipairs(TOKENS) do
       guidStreams[token] = {}
       nameStreams[token] = {}
@@ -254,6 +314,10 @@ Core.RegisterTracker({
     functions["C_GossipInfo.GetActiveQuests"]    = {}
     gossipAvailableStream = functions["C_GossipInfo.GetAvailableQuests"]
     gossipActiveStream    = functions["C_GossipInfo.GetActiveQuests"]
+
+    local hasItemLookup = type(C_Item) == "table" and type(C_Item.GetItemIDByGUID) == "function"
+    itemIDStreams = hasItemLookup and {} or nil
+    functions["C_Item.GetItemIDByGUID"] = itemIDStreams
 
     -- Initial sample at t=0
     SampleAll(0, 0)

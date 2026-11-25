@@ -146,6 +146,7 @@ local function NewRuntime(trackerFiles)
     ---@param self table<string, any>
     ---@param event string
     frame.RegisterEvent = function(self, event) self.registered[event] = true end
+    frame.UnregisterEvent = function(self, event) self.registered[event] = nil end
     ---@param self table<string, any>
     ---@param name string
     ---@param callback function
@@ -243,6 +244,13 @@ end
 ---@return SessionRecord
 local function Session(runtime)
   return assert(runtime.core.GetDiagnosticSession())
+end
+
+--- Record `count` events in the running capture.
+---@param runtime TestRuntime
+---@param count number
+local function RecordEvents(runtime, count)
+  for _ = 1, count do SendEvent(runtime, "PLAYER_REGEN_DISABLED") end
 end
 
 --- Mock IsResting() for reminder tests
@@ -370,9 +378,9 @@ end
 ---@field classification number
 ---@field questLineHidden boolean
 
----Runtime with the Forever-only quest-flag APIs mocked. Quest 200 is a
----breadcrumb, quest 300 has no quest line, and IsBreadcrumbQuest errors for
----quest 300. GetQuestLineInfo returns a fresh table on every call.
+---Runtime with the Forever-only quest-flag APIs mocked. Quest 300 has no quest
+---line, and GetQuestLineInfo errors for quest 500. It returns a fresh table on
+---every call.
 ---@return QuestFlagFixture
 local function QuestFlagRuntime()
   local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
@@ -380,15 +388,11 @@ local function QuestFlagRuntime()
   local state = { runtime = runtime, dialogQuestID = 0, classification = 7, questLineHidden = false }
   local env = runtime.env
   env.GetQuestID = function() return state.dialogQuestID end
-  ---@param questID number
-  env.IsBreadcrumbQuest = function(questID)
-    if questID == 300 then error("Breadcrumb data unavailable") end
-    return questID == 200
-  end
   env.C_QuestLine = {
     ---@param questID number
     GetQuestLineInfo = function(questID)
       if questID == 300 then return nil end
+      if questID == 500 then error("Quest line data unavailable") end
       return { questLineID = 7, questLineName = "Quest line", questID = questID, isHidden = state.questLineHidden }
     end,
   }
@@ -414,12 +418,12 @@ local function TestQuestFlagsSampledForDialogQuests()
   gossipQuests, greetingCount = {}, 1
   SendEvent(runtime, "QUEST_GREETING")
 
-  for _, key in ipairs({ "IsBreadcrumbQuest", "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
+  for _, key in ipairs({ "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
     for _, questID in ipairs({ 100, 200, 400 }) do
       assert(#functions[key][questID] == 1, key .. " must be sampled for quest " .. questID)
     end
   end
-  assert(functions.IsBreadcrumbQuest[200][1].v == true, "Flags are recorded under the quest's own ID")
+  assert(functions["C_QuestLine.GetQuestLineInfo"][200][1].v.questID == 200, "Flags are recorded under the quest's own ID")
 end
 
 local function TestQuestFlagsNilAndFailedCalls()
@@ -431,8 +435,11 @@ local function TestQuestFlagsNilAndFailedCalls()
   local functions = Session(flags.runtime).functions
   local questLine = functions["C_QuestLine.GetQuestLineInfo"][300]
   assert(#questLine == 1 and questLine[1].v == nil, "A real nil return is recorded once")
-  assert(functions.IsBreadcrumbQuest == nil, "A failed call records nothing")
-  assert(functions["C_QuestInfoSystem.GetQuestClassification"][300][1].v == 7,
+
+  flags.dialogQuestID = 500
+  SendEvent(flags.runtime, "QUEST_DETAIL")
+  assert(functions["C_QuestLine.GetQuestLineInfo"][500] == nil, "A failed call records nothing")
+  assert(functions["C_QuestInfoSystem.GetQuestClassification"][500][1].v == 7,
     "A failing flag API does not block the others")
 end
 
@@ -476,7 +483,7 @@ local function TestQuestFlagsAbsentWithoutApis()
   local functions = Session(runtime).functions
   assert(functions.GetAvailableQuestInfo[1][1].v.n == 4, "Short greeting info tuples are still recorded raw")
   assert(functions.GetActiveQuestID == nil, "An absent GetActiveQuestID creates no stream")
-  for _, key in ipairs({ "IsBreadcrumbQuest", "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
+  for _, key in ipairs({ "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
     assert(functions[key] == nil, key .. " must not be recorded when its API is absent")
   end
   assert(gossipReads == 0, "Without flag APIs the gossip list is not read for quest IDs")
@@ -553,6 +560,7 @@ local function TestExportScrubsPlayerIdentity()
     player = { { t = 0, tp = 0, v = "Player-1-000001" } },
     npc = { { t = 0, tp = 0, v = "Creature-0-1-1-1-123-000001" } },
   }
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload = runtime.core.BuildExportPayload()
@@ -564,6 +572,32 @@ local function TestExportScrubsPlayerIdentity()
 
   local saved = runtime.core.GetDiagnosticSession()
   assert(saved.functions.UnitName.player ~= nil, "BuildExportPayload must not change the saved session")
+end
+
+local function TestExportScrubsEventsOfOlderVersions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  ---@param session table
+  local function RecordLikeOlderVersions(session)
+    session.events[#session.events + 1] = { t = 1, tp = 1, e = "QUEST_ACCEPT_CONFIRM", a = { "Grimtotem", "Kaya's Alive", 672, n = 3 } }
+    session.events[#session.events + 1] = { t = 2, tp = 2, e = "GROUP_JOINED", a = { 1, "Party-0-000012345678", n = 2 } }
+    session.events[#session.events + 1] = { t = 3, tp = 3, e = "GROUP_LEFT", a = { 1, "Party-0-000012345678", n = 2 } }
+    session.events[#session.events + 1] = { t = 4, tp = 4, e = "QUEST_ACCEPTED", a = { 1, 672, n = 2 } }
+  end
+  runtime.core.StartCapture("saved")
+  RecordLikeOlderVersions(Session(runtime))
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("live")
+  RecordLikeOlderVersions(Session(runtime))
+
+  local payload = runtime.core.BuildExportPayload()
+  assert(#payload.sessions == 2, "The saved and the live session are exported")
+  for _, session in ipairs(payload.sessions) do
+    local confirm, joined, left, accepted = unpack(session.events)
+    assert(confirm.a[1] == nil and confirm.a[2] == "Kaya's Alive" and confirm.a[3] == 672, "The name must be scrubbed, the quest must remain")
+    assert(joined.a[1] == 1 and joined.a[2] == nil and left.a[2] == nil, "The party GUID must be scrubbed")
+    assert(accepted.a[1] == 1 and accepted.a[2] == 672, "Other events must not change")
+  end
+  assert(Session(runtime).events[1].a[1] == "Grimtotem", "BuildExportPayload must not change the live session")
 end
 
 --- The payload handed to the encoder (i.e. what Core.BuildExportString
@@ -581,6 +615,7 @@ local function TestExportPayloadNeverExposesSourceSessions()
   session.functions.UnitGUID = {
     player = { { t = 0, tp = 0, v = "Player-1-000001" } },
   }
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
@@ -607,6 +642,7 @@ end
 local function TestExportPayloadExcludesDeletedSessions()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
   runtime.core.StartCapture("s1")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
@@ -624,11 +660,13 @@ end
 local function TestExportPayloadIncludesOnlyNewSessionsAfterExport()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
   runtime.core.StartCapture("s1")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
   local _, firstSourceSessions = runtime.core.BuildExportPayload()
   runtime.core.DeleteReportedSessions(firstSourceSessions)
 
   runtime.core.StartCapture("s2")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
@@ -636,20 +674,113 @@ local function TestExportPayloadIncludesOnlyNewSessionsAfterExport()
   assert(sourceSessions[1].name == "s2", "The included session must be the new one, not the deleted one")
 end
 
+--- Save one session per entry of `eventCounts`, named s1, s2, ...
+---@param runtime TestRuntime
+---@param eventCounts number[]
+local function SaveSessionsWithEvents(runtime, eventCounts)
+  for i, eventCount in ipairs(eventCounts) do
+    runtime.core.StartCapture("s" .. i)
+    RecordEvents(runtime, eventCount)
+    runtime.core.SaveCapture()
+  end
+end
+
+---@param runtime TestRuntime
+---@return string names Names of the saved sessions, in stored order.
+local function SavedSessionNames(runtime)
+  local names = {}
+  for i, record in ipairs(runtime.env.QuestieTraceCharacter.sessions) do names[i] = record.name end
+  return table.concat(names, " ")
+end
+
 --- A pure size backstop for players who never report/export: unreported
 --- sessions must still be capped so SavedVariables can't grow forever.
-local function TestSaveCapturePrunesOldestSessionsPastCap()
+local function TestSaveCaptureDropsSessionsWithFewestEventsPastCap()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 90, 80, 70, 3, 60, 50, 2, 55, 65, 75 })
+  assert(SavedSessionNames(runtime) == "s1 s2 s3 s4 s5 s6 s7 s8 s9 s10", "Up to ten sessions are kept, whatever their size")
 
-  for i = 1, 12 do
-    runtime.core.StartCapture("s" .. i)
+  runtime.core.StartCapture("s11")
+  RecordEvents(runtime, 85)
+  runtime.core.SaveCapture()
+  assert(SavedSessionNames(runtime) == "s1 s2 s3 s4 s5 s6 s8 s9 s10 s11", "The session with the fewest events is dropped")
+
+  runtime.core.StartCapture("s12")
+  RecordEvents(runtime, 40)
+  runtime.core.SaveCapture()
+  assert(SavedSessionNames(runtime) == "s1 s2 s3 s5 s6 s8 s9 s10 s11 s12", "The next one to go is the one with the fewest left")
+  assert(runtime.env.QuestieTraceCharacter.lastSavedSession == "s12", "The last saved session is the newest one kept")
+end
+
+--- The reason for the rule: a few reloads must not push out a long recording.
+local function TestSaveCaptureKeepsLongSessionsThroughReloads()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 })
+  local kept = SavedSessionNames(runtime)
+
+  for i = 1, 3 do
+    runtime.core.StartCapture("reload " .. i)
+    -- Short in events, long in time: idling next to a mailbox is not worth keeping either.
+    RecordEvents(runtime, 5)
+    runtime.now = runtime.now + 5000
     runtime.core.SaveCapture()
   end
 
-  local sessions = runtime.env.QuestieTraceCharacter.sessions
-  assert(#sessions == 10, "Sessions must be capped at 10 even though none were reported")
-  assert(sessions[1].name == "s3", "The oldest sessions must be dropped first")
-  assert(sessions[10].name == "s12", "The newest session must always be kept")
+  assert(SavedSessionNames(runtime) == kept, "Short sessions must not push out long ones")
+  assert(runtime.env.QuestieTraceCharacter.lastSavedSession == "s10", "A session that was not kept is not the last saved one")
+  assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "A session that was not kept must not linger as the live one")
+end
+
+local function TestSaveCaptureDropsOldestOfEquallyShortSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 9, 4, 9, 4, 9, 9, 9, 9, 9, 9, 4, 9 })
+  assert(SavedSessionNames(runtime) == "s1 s3 s5 s6 s7 s8 s9 s10 s11 s12",
+    "Of equally short sessions the oldest is dropped first, so the two old ones go and the newer one stays")
+end
+
+--- Older versions kept up to 20 sessions, as plain tables.
+local function TestSaveCapturePrunesMigratedPlainSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua", "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  local sessions = {}
+  for i = 1, 12 do
+    local events = {}
+    for j = 1, i % 2 == 0 and 8 or 0 do events[j] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} } end
+    sessions[i] = { schemaVersion = 8, name = "old" .. i, startedAt = 0, events = events, functions = {}, functionsDelta = {} }
+  end
+  runtime.env.QuestieTraceCharacter.sessions = sessions
+  SendEvent(runtime, "PLAYER_LOGIN")
+  RecordEvents(runtime, 1)
+  runtime.core.SaveCapture()
+
+  assert(SavedSessionNames(runtime) == "old2 old4 old6 old7 old8 old9 old10 old11 old12 2024-01-01_12-00-00",
+    "Sessions without events go first, the oldest of them before the others")
+end
+
+local function TestSaveCaptureSkipsSessionWithoutEvents()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 2 })
+  runtime.core.StartCapture("empty")
+  Session(runtime).functions.GetZoneText = { { t = 0, tp = 0, v = "Dun Morogh" } }
+  local record = runtime.core.SaveCapture()
+
+  assert(record == nil and SavedSessionNames(runtime) == "s1", "A session without events must not be saved")
+  assert(runtime.env.QuestieTraceCharacter.lastSavedSession == "s1", "A session without events is not the last saved one")
+  assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "A session without events must be dropped")
+  assert(runtime.core.GetCaptureState() == "idle", "The next capture must be able to start")
+end
+
+--- The export window exports what SaveCapture returns, also when the session
+--- itself was too short to be kept.
+local function TestSaveCaptureReturnsSessionThatWasNotKept()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 9, 9, 9, 9, 9, 9, 9, 9, 9, 9 })
+  runtime.core.StartCapture("short")
+  RecordEvents(runtime, 3)
+  local record = assert(runtime.core.SaveCapture(), "The encoded session must be returned")
+
+  assert(record.name == "short" and #runtime.core.DecodeExportPayload(record.encoded).events == 3,
+    "The returned session must be the one that was just captured")
 end
 
 local function TestExportPayloadLiveSessionDeletedAndRestarted()
@@ -767,6 +898,7 @@ local function TestExportSerializationRoundTrips()
   runtime.core.StartCapture("serialize test")
   local session = assert(runtime.core.GetDiagnosticSession())
   session.functions.GetZoneText = { { t = 0, tp = 0, v = "Dun Morogh" } }
+  session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
   runtime.core.SaveCapture()
 
   local ok, text = runtime.core.BuildExportString()
@@ -861,6 +993,7 @@ local function TestSaveCaptureSkipsSessionThatCannotBeEncoded()
   local runtime = NewRuntime({})
   runtime.core.EncodeExportPayload = function() return nil end
   runtime.core.StartCapture("unencodable")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
   assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A session that cannot be encoded must not be saved")
   assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "A session that cannot be encoded must be dropped")
@@ -876,6 +1009,7 @@ end
 local function TestSaveCaptureClearsCurrentSession()
   local runtime = NewRuntime({})
   runtime.core.StartCapture("save test")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
   assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "SaveCapture must clear currentSession")
   assert(runtime.env.QuestieTraceCharacter.sessions[1] ~= nil, "Session must be moved to sessions array")
@@ -949,6 +1083,21 @@ local function TestRecoverCurrentSessionOnLogin()
   local current = env.QuestieTraceCharacter.currentSession
   assert(current ~= nil and current ~= recovered, "Login must replace the recovered session with a new capture")
   assert(current.events[1].e == "PLAYER_LOGIN", "The new capture must record PLAYER_LOGIN first")
+end
+
+local function TestRecoverCurrentSessionWithoutEventsIsDropped()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  runtime.env.QuestieTraceCharacter.currentSession = {
+    schemaVersion = 21, recordingContractVersion = 1, name = "recovered", startedAt = 100, startedAtPrecise = 100,
+    events = {}, functions = {}, functionsDelta = {},
+  }
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A recovered session without events must not be saved")
+  assert(runtime.core.GetCaptureState() == "running", "Login must start a new capture after dropping it")
+  assert(runtime.env.QuestieTraceCharacter.currentSession.events[1].e == "PLAYER_LOGIN", "The new capture must be the live one")
 end
 
 local function TestRecoverCurrentSessionDiscardedWhenConsentDeclined()
@@ -1031,6 +1180,7 @@ end
 local function SaveSessions(runtime, count)
   for i = 1, count do
     runtime.core.StartCapture("session " .. i)
+    RecordEvents(runtime, 1)
     runtime.core.SaveCapture()
   end
 end
@@ -3296,6 +3446,283 @@ local function TestNameplatesRecordOnlyWorldCreatures()
   end
 end
 
+local function TestInteractionWindowsRecordTheirUnit()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  ---@type table<string, NameplateUnit>
+  local units = {}
+  MockNameplateUnits(runtime, units)
+  runtime.core.StartCapture("interaction windows")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local guids, names = functions.UnitGUID.npc, functions.UnitName.npc
+
+  -- A mailbox (17) has no closing event of its own, so only HIDE clears its unit.
+  runtime.now = 10
+  units.npc = { guid = "GameObject-0-5251-0-12-142075-000001", name = "Mailbox" }
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 17)
+  runtime.now = 15
+  units.npc = nil
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_HIDE", 17)
+  assert(#guids == 3, "The unit is recorded at capture start, SHOW and HIDE, got " .. #guids)
+  assert(guids[2].t == 10 and guids[2].v == "GameObject-0-5251-0-12-142075-000001" and names[2].v[1] == "Mailbox", "SHOW records the window's object")
+  assert(guids[3].t == 15 and guids[3].v == nil and names[3].v[1] == nil, "HIDE clears the window's object")
+
+  -- An innkeeper (20) opens no window with events of its own.
+  runtime.now = 20
+  units.npc = { guid = "Creature-0-5251-0-12-295-000001", name = "Innkeeper Farley" }
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 20)
+  assert(#guids == 4 and guids[4].t == 20 and guids[4].v == units.npc.guid, "SHOW records the window's NPC")
+
+  local events = Session(runtime).events
+  assert(#events == 3 and events[1].e == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and events[1].a[1] == 17, "SHOW is recorded with its type")
+  assert(events[2].e == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and events[2].a[1] == 17, "HIDE is recorded with its type")
+end
+
+local function TestTradePartnerIsNotRecorded()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  ---@type table<string, NameplateUnit>
+  local units = { npc = { guid = "Creature-0-5251-0-12-295-000001", name = "Innkeeper Farley" } }
+  MockNameplateUnits(runtime, units)
+  runtime.core.StartCapture("trade")
+  local session = Session(runtime)
+  local functions = session.functions --[[@as table<string, any>]]
+
+  units.npc = { guid = "Player-4620-00572164", name = "Grimtotem" }
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 1)
+  local guids, names = functions.UnitGUID.npc, functions.UnitName.npc
+  assert(#guids == 2 and guids[2].v == nil and names[2].v[1] == nil, "A trade partner is recorded as no unit, so the last NPC does not linger")
+  SendEvent(runtime, "PLAYER_INTERACTION_MANAGER_FRAME_HIDE", 1)
+  assert(not ContainsString(session, "Grimtotem") and not ContainsString(session, "Player-"), "A trade partner's name and GUID are never recorded")
+end
+
+local function TestHiddenUnitIsToldFromNoUnit()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
+  local secretGUID = "Creature-0-5251-36-12-644-000099999"
+  local npcGUID = "Creature-0-5251-0-12-295-000001"
+  ---@type table<string, string?>
+  local guids = {}
+  local fails = false
+  runtime.env.issecretvalue = function(value) return value == secretGUID end
+  runtime.env.UnitGUID = function(token)
+    if fails then error("token not available to addons") end
+    return guids[token]
+  end
+  runtime.env.UnitName = function(token) return guids[token] and "Some unit", nil end
+  runtime.env.UnitPlayerControlled = function() return false end
+  runtime.core.StartCapture("hidden units")
+  local session = Session(runtime)
+  local functions = session.functions --[[@as table<string, any>]]
+  local secrecy, recorded = functions.UnitGUIDIsSecret, functions.UnitGUID.target
+
+  ---@param now number
+  ---@param guid string?
+  local function Target(now, guid)
+    runtime.now = now
+    guids.target = guid
+    SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  end
+
+  -- Outside instances nothing is hidden, and nothing is recorded about it.
+  Target(1, npcGUID)
+  Target(2, nil)
+  assert(next(secrecy) == nil, "No stream before the first hidden unit")
+
+  Target(3, secretGUID)
+  Target(4, secretGUID)
+  assert(#secrecy.target == 1 and secrecy.target[1].t == 3 and secrecy.target[1].v == true, "A hidden unit is recorded once")
+  assert(#recorded == 3 and recorded[3].t == 2, "A hidden unit adds no GUID")
+
+  Target(5, nil)
+  assert(#secrecy.target == 2 and secrecy.target[2].t == 5 and secrecy.target[2].v == false, "No unit is told from a hidden unit")
+  Target(6, secretGUID)
+  Target(7, npcGUID)
+  assert(#secrecy.target == 4 and secrecy.target[4].t == 7 and secrecy.target[4].v == false, "So is a readable unit")
+  assert(recorded[#recorded].t == 7 and recorded[#recorded].v == npcGUID, "A readable unit is recorded after a hidden one")
+
+  -- A call that fails tells nothing about the unit.
+  Target(8, secretGUID)
+  local entries = #secrecy.target
+  fails = true
+  Target(9, nil)
+  assert(#secrecy.target == entries, "A failed call is no observation")
+  fails = false
+
+  -- Nameplates
+  guids.nameplate3 = secretGUID
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate3")
+  assert(#secrecy.nameplate3 == 1 and secrecy.nameplate3[1].v == true, "A hidden nameplate unit is recorded")
+  guids.nameplate3 = npcGUID
+  SendEvent(runtime, "NAME_PLATE_UNIT_ADDED", "nameplate3")
+  assert(#secrecy.nameplate3 == 2 and secrecy.nameplate3[2].v == false, "A readable unit on a reused nameplate is recorded")
+  assert(secrecy.npc == nil and secrecy.nameplate1 == nil, "Tokens without hidden units have no stream")
+
+  assert(not ContainsString(session, secretGUID), "The hidden GUID itself is never recorded")
+
+  runtime.core.SaveCapture()
+  runtime.core.StartCapture("next capture")
+  SendEvent(runtime, "PLAYER_TARGET_CHANGED")
+  assert(next(Session(runtime).functions.UnitGUIDIsSecret) == nil, "A new capture starts without hidden units")
+end
+
+local function TestGhostStateIsRecorded()
+  local runtime = NewRuntime({ "Modules/Trackers/GhostState.lua" })
+  local isGhost = false
+  runtime.env.UnitIsGhost = function(unit) return unit == "player" and isGhost end
+  runtime.core.StartCapture("ghost state")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local stream = functions.UnitIsGhost.player
+  assert(#stream == 1 and stream[1].t == 0 and stream[1].v == false, "The state is recorded at capture start")
+
+  local entries = 1
+  for index, event in ipairs({ "PLAYER_ALIVE", "PLAYER_UNGHOST", "PLAYER_ENTERING_WORLD", "PLAYER_DEAD" }) do
+    isGhost = not isGhost
+    runtime.now = index * 10
+    SendEvent(runtime, event)
+    SendEvent(runtime, event)
+    entries = entries + 1
+    assert(#stream == entries and stream[entries].t == index * 10 and stream[entries].v == isGhost, event .. " must record the changed state once")
+  end
+
+  local events = Session(runtime).events
+  assert(events[1].e == "PLAYER_ALIVE" and events[3].e == "PLAYER_UNGHOST" and events[7].e == "PLAYER_DEAD", "Dying and resurrecting are recorded as events")
+end
+
+local function TestFailingGhostStateIsReported()
+  local runtime = NewRuntime({ "Modules/Trackers/GhostState.lua", "Modules/Trackers/GroupState.lua" })
+  local fails = true
+  ---@type any[]
+  local reported = {}
+  runtime.env.geterrorhandler = function() return function(err) reported[#reported + 1] = err end end
+  runtime.env.UnitIsGhost = function()
+    if fails then error("not available") end
+    return true
+  end
+  runtime.env.IsInGroup = function() return false end
+  runtime.env.GetNumGroupMembers = function() return 0 end
+  runtime.core.StartCapture("failing ghost state")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(#reported == 1 and tostring(reported[1]):find("not available", 1, true), "The error is reported once")
+  assert(#functions.UnitIsGhost.player == 0, "A failed call records nothing")
+  assert(functions.IsInGroup, "The other trackers still start")
+
+  fails = false
+  SendEvent(runtime, "PLAYER_ALIVE")
+  assert(#functions.UnitIsGhost.player == 1 and functions.UnitIsGhost.player[1].v == true, "Recording resumes when the call works again")
+end
+
+local function TestTrivialRangeFollowsTheLevelOnForever()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitLevel.lua" })
+  local level, range = 33, 7
+  runtime.env.UnitLevel = function(unit) return unit == "player" and level or nil end
+  runtime.env.C_QuestLog = { GetTrivialRange = function() return range end }
+  -- Forever has no such global; this one stands for another addon's.
+  runtime.env.GetQuestGreenRange = function() return 99 end
+  runtime.core.StartCapture("trivial range")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local stream = functions["C_QuestLog.GetTrivialRange"]
+  assert(#stream == 1 and stream[1].t == 0 and stream[1].v == 7, "The range is recorded at capture start")
+  assert(functions.GetQuestGreenRange == nil, "Another addon's GetQuestGreenRange must not be recorded")
+
+  -- The client still answers for the old level when PLAYER_LEVEL_UP fires.
+  runtime.now = 10
+  SendEvent(runtime, "PLAYER_LEVEL_UP", 34)
+  level, range = 34, 8
+  runtime.now = 11
+  SendEvent(runtime, "SPELLS_CHANGED")
+  assert(#stream == 2 and stream[2].t == 11 and stream[2].v == 8, "A new range is recorded once, when the client answers with it")
+  assert(functions.UnitLevel.player[2].t == 11 and functions.UnitLevel.player[2].v == 34, "The level is recorded with it")
+end
+
+local function TestQuestGreenRangeOnClassic()
+  local runtime = NewRuntime({ "Modules/Trackers/UnitLevel.lua" })
+  runtime.env.UnitLevel = function() return 20 end
+  runtime.env.C_QuestLog = {}
+  runtime.env.GetQuestGreenRange = function() return 5 end
+  runtime.core.StartCapture("green range")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(#functions.GetQuestGreenRange == 1 and functions.GetQuestGreenRange[1].v == 5, "Clients without GetTrivialRange record GetQuestGreenRange")
+  assert(functions["C_QuestLog.GetTrivialRange"] == nil, "An API the client lacks has no stream")
+end
+
+local function TestLevelIsRecordedWithoutAWorkingRange()
+  for _, case in ipairs({ "no API", "failing API" }) do
+    local runtime = NewRuntime({ "Modules/Trackers/UnitLevel.lua" })
+    local level = 20
+    ---@type any[]
+    local reported = {}
+    runtime.env.UnitLevel = function() return level end
+    runtime.env.geterrorhandler = function() return function(err) reported[#reported + 1] = err end end
+    if case == "failing API" then
+      runtime.env.GetQuestGreenRange = function() error("not available") end
+    end
+    runtime.core.StartCapture(case)
+    level = 21
+    SendEvent(runtime, "SPELLS_CHANGED")
+    local functions = Session(runtime).functions --[[@as table<string, any>]]
+    assert(#functions.UnitLevel.player == 2 and functions.UnitLevel.player[2].v == 21, case .. ": the level must still be recorded")
+    assert(#reported == (case == "failing API" and 2 or 0), case .. ": errors are reported, a missing API is none")
+  end
+end
+
+---Starts a capture with the PlayerIdentity tracker and returns its function streams.
+---@param mocks table<string, any> Globals of the client under test
+---@return table<string, any> functions
+local function PlayerIdentityStreams(mocks)
+  local runtime = NewRuntime({ "Modules/Trackers/PlayerIdentity.lua" })
+  local env = runtime.env
+  env.UnitRace = function() return "Orc", "Orc", 2 end
+  env.UnitClass = function() return "Warrior", "WARRIOR", 1 end
+  env.UnitSex = function() return 2 end
+  env.UnitFactionGroup = function() return "Horde", "Horde" end
+  env.GetBuildInfo = function() return "1.15.9", "70003", "Oct 14 2026", 11509 end
+  for name, mock in pairs(mocks) do env[name] = mock end
+  runtime.core.StartCapture("player identity")
+  return Session(runtime).functions --[[@as table<string, any>]]
+end
+
+local function TestRealmRulesAreRecordedOnce()
+  local functions = PlayerIdentityStreams({
+    C_GameRules = { IsHardcoreActive = function() return true end },
+    C_Seasons = { HasActiveSeason = function() return true end, GetActiveSeason = function() return 3 end },
+    issecurevariable = function(name) return name == "C_Seasons" end,
+  })
+  for key, expected in pairs({ ["C_GameRules.IsHardcoreActive"] = true, ["C_Seasons.HasActiveSeason"] = true, ["C_Seasons.GetActiveSeason"] = 3 }) do
+    local stream = functions[key]
+    assert(#stream == 1 and stream[1].t == 0 and stream[1].v == expected, key .. " is recorded at capture start")
+  end
+
+  functions = PlayerIdentityStreams({
+    C_Seasons = { HasActiveSeason = function() return false end, GetActiveSeason = function() return nil end },
+    issecurevariable = function(name) return name == "C_Seasons" end,
+  })
+  assert(functions["C_Seasons.HasActiveSeason"][1].v == false, "A realm without a season is recorded")
+  assert(#functions["C_Seasons.GetActiveSeason"] == 1 and functions["C_Seasons.GetActiveSeason"][1].v == nil, "So is the missing season")
+  assert(functions["C_GameRules.IsHardcoreActive"] == nil, "An API the client lacks has no stream")
+end
+
+local function TestAddonsSeasonStandInIsNotRecorded()
+  -- Questie defines C_Seasons on clients that have none, and loads before QuestieTrace.
+  local functions = PlayerIdentityStreams({
+    C_GameRules = { IsHardcoreActive = function() return false end },
+    C_Seasons = { HasActiveSeason = function() return false end, GetActiveSeason = function() return 0 end },
+    issecurevariable = function() return false, "Questie" end,
+  })
+  assert(functions["C_Seasons.HasActiveSeason"] == nil and functions["C_Seasons.GetActiveSeason"] == nil, "Another addon's answers must not be recorded")
+  assert(functions["C_GameRules.IsHardcoreActive"][1].v == false, "The client's own rule is recorded")
+end
+
+local function TestFailingRealmRuleIsReported()
+  ---@type any[]
+  local reported = {}
+  local functions = PlayerIdentityStreams({
+    C_GameRules = { IsHardcoreActive = function() error("not available") end },
+    C_Seasons = { HasActiveSeason = function() return true end, GetActiveSeason = function() return 2 end },
+    issecurevariable = function(name) return name == "C_Seasons" end,
+    geterrorhandler = function() return function(err) reported[#reported + 1] = err end end,
+  })
+  assert(#reported == 1, "The failing call is reported")
+  assert(functions["C_Seasons.GetActiveSeason"][1].v == 2 and functions.UnitRace.player[1].v[3] == 2, "Everything else is still recorded")
+end
+
 local function TestDisplayRecordsOnlyAllowlistedCVars()
   local runtime = NewRuntime({ "Modules/Trackers/Display.lua" })
   local env = runtime.env
@@ -3397,6 +3824,72 @@ local function TestQuestDialogRecordsMistsRewardCurrencies()
     "Slots past the count are read up to the maximum, as Blizzard's frame does")
   assert(functions.GetNumRewardCurrencies[1].v == 1 and functions.GetMaxRewardCurrencies[1].v == 2,
     "Both bounds are recorded")
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil, "Forever's API creates no stream on Mists")
+end
+
+---Runtime with Forever's reward currency APIs: GetQuestCurrencyID answers 0 for an
+---empty slot, GetQuestRewardCurrencyInfo a fresh table per call or nil. Slot 1
+---holds the currency.
+---@return TestRuntime runtime
+---@return { amount: number, bonus: number } reward
+local function ForeverRewardCurrencyRuntime()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  local env = runtime.env
+  local reward = { amount = 3, bonus = 0 }
+  env.GetMaxRewardCurrencies = function() return 2 end
+  env.GetQuestCurrencyID = function(_, index) return index == 1 and 3402 or 0 end
+  env.C_QuestOffer = {
+    ---@param itemType string
+    ---@param index number
+    GetQuestRewardCurrencyInfo = function(itemType, index)
+      if itemType ~= "reward" or index ~= 1 then return nil end
+      return {
+        texture = 132996, name = "A Currency", currencyID = 3402, quality = 1, baseRewardAmount = reward.amount,
+        bonusRewardAmount = reward.bonus, totalRewardAmount = reward.amount + reward.bonus, questRewardContextFlags = 0,
+      }
+    end,
+  }
+  return runtime, reward
+end
+
+local function TestQuestDialogRecordsForeverRewardCurrencies()
+  local runtime, reward = ForeverRewardCurrencyRuntime()
+  runtime.core.StartCapture("reward currency amounts")
+  AdvanceTo(runtime, 2)
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local info = functions["C_QuestOffer.GetQuestRewardCurrencyInfo"].reward
+  assert(#info[1] == 1, "An identical (fresh) table is not re-appended by the delayed samples")
+  assert(runtime.core.DeepCompare(info[1][1].v, { currencyID = 3402, baseRewardAmount = 3, totalRewardAmount = 3 }),
+    "Only the currency ID and the amounts are stored")
+  assert(#info[2] == 1 and info[2][1].v == nil and info[3] == nil,
+    "An empty slot records nil once, and no slot past GetMaxRewardCurrencies is read")
+
+  reward.bonus = 2
+  SendEvent(runtime, "QUEST_COMPLETE")
+  assert(#info[1] == 2 and info[1][2].v.baseRewardAmount == 3 and info[1][2].v.totalRewardAmount == 5,
+    "A changed amount is appended")
+end
+
+local function TestQuestDialogSkipsFailedRewardCurrencies()
+  local runtime = ForeverRewardCurrencyRuntime()
+  runtime.env.C_QuestOffer.GetQuestRewardCurrencyInfo = function() error("No quest offer") end
+  runtime.core.StartCapture("failing reward currency")
+  SendEvent(runtime, "QUEST_DETAIL")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil, "A failed call records nothing")
+  assert(functions.GetQuestCurrencyID.reward[1][1].v == 3402, "A failing API does not block the others")
+
+  -- Classic clients document the C_QuestOffer namespace without this function.
+  local classic = ForeverRewardCurrencyRuntime()
+  local lookups = 0
+  classic.env.C_QuestOffer = setmetatable({}, { __index = function() lookups = lookups + 1 end })
+  classic.core.StartCapture("no reward currency API")
+  SendEvent(classic, "QUEST_DETAIL")
+  functions = Session(classic).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil and functions.GetQuestCurrencyID.reward[1][1].v == 3402,
+    "Without the API there is no stream, and the other currency streams stay")
+  assert(lookups == 1, "The API is looked for once per capture, not in every sample")
 end
 
 local function TestItemCountSnapshotAndChanges()
@@ -3476,6 +3969,134 @@ local function TestQuestLogExtrasStoredByQuestID()
   assert(functions["C_QuestLog.GetRequiredMoney"][100][1].v == -1, "Required money is the raw API value")
   local timers = functions["C_QuestLog.GetQuestTimers"]
   assert(#timers == 1 and next(timers[1].v) == nil, "No running timers is recorded once, across the delayed re-samples")
+end
+
+---@class LoggedQuestFixture
+---@field runtime TestRuntime
+---@field logged number[] Quest IDs the log lists, in log order
+---@field turnedIn table<number, boolean> Quests the log still lists, but the player is no longer on
+---@field dialogQuestID number Returned by GetQuestID
+---@field breadcrumbs table<number, boolean>
+---@field sequenced table<number, boolean>
+
+---Runtime with both quest trackers and the two flags that are only asked while
+---the player is on the quest. Like the Forever client, IsBreadcrumbQuest answers
+---false for every other quest; that IsQuestSequenced does too is an assumption.
+---@return LoggedQuestFixture
+local function LoggedQuestRuntime()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestLog.lua", "Modules/Trackers/QuestDialog.lua" })
+  ---@type LoggedQuestFixture
+  local state = { runtime = runtime, logged = {}, turnedIn = {}, dialogQuestID = 0, breadcrumbs = {}, sequenced = {} }
+  local env = runtime.env
+  ---@param questID number
+  ---@return number? index
+  local function LogIndex(questID)
+    for index, loggedID in ipairs(state.logged) do
+      if loggedID == questID then return index end
+    end
+  end
+  ---@param questID number
+  local function IsOnQuest(questID) return LogIndex(questID) ~= nil and not state.turnedIn[questID] end
+  env.C_QuestLog = {
+    GetInfo = function(index)
+      if state.logged[index] then return { title = "A Quest", isHeader = false, questID = state.logged[index] } end
+    end,
+    GetLogIndexForQuestID = LogIndex,
+    IsOnQuest = IsOnQuest,
+  }
+  env.GetQuestID = function() return state.dialogQuestID end
+  env.C_QuestInfoSystem = { GetQuestClassification = function() return 7 end }
+  ---@param questID number
+  env.IsBreadcrumbQuest = function(questID) return IsOnQuest(questID) and state.breadcrumbs[questID] == true end
+  ---@param questID number
+  env.IsQuestSequenced = function(questID) return IsOnQuest(questID) and state.sequenced[questID] == true end
+  return state
+end
+
+local function TestQuestLogFlagsOnlyWhileOnQuest()
+  local state = LoggedQuestRuntime()
+  local runtime = state.runtime
+  state.logged, state.breadcrumbs, state.sequenced = { 100 }, { [100] = true, [200] = true }, { [200] = true }
+  runtime.core.StartCapture("logged quest flags")
+  AdvanceTo(runtime, 2)
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(#functions.IsBreadcrumbQuest[100] == 1 and functions.IsBreadcrumbQuest[100][1].v == true,
+    "A quest already in the log at capture start has its breadcrumb flag")
+  assert(#functions.IsQuestSequenced[100] == 1 and functions.IsQuestSequenced[100][1].v == false,
+    "A quest that is not sequenced records false, once")
+
+  state.dialogQuestID = 200
+  SendEvent(runtime, "QUEST_DETAIL")
+  AdvanceTo(runtime, 4)
+  assert(functions["C_QuestInfoSystem.GetQuestClassification"][200] ~= nil, "The offered quest is sampled by QuestDialog")
+  assert(functions.IsBreadcrumbQuest[200] == nil and functions.IsQuestSequenced[200] == nil,
+    "An offered quest that is not in the log has no log flags")
+
+  state.logged, state.dialogQuestID = { 100, 200 }, 0
+  SendEvent(runtime, "QUEST_ACCEPTED", 200)
+  assert(functions.IsBreadcrumbQuest[200][1].v == true and functions.IsQuestSequenced[200][1].v == true,
+    "Accepting a quest records its log flags")
+
+  -- A turned-in quest: the log lists it for some more frames.
+  AdvanceTo(runtime, 6)
+  state.turnedIn = { [200] = true }
+  SendEvent(runtime, "UNIT_QUEST_LOG_CHANGED", "player")
+  local onQuest = functions["C_QuestLog.IsOnQuest"][200]
+  assert(onQuest[#onQuest].v == false and functions.QuestLog[#functions.QuestLog].v[2] == 200,
+    "The sample sees a listed quest the player is not on")
+  assert(#functions.IsBreadcrumbQuest[200] == 1 and #functions.IsQuestSequenced[200] == 1,
+    "A listed quest the player is no longer on is not asked")
+
+  AdvanceTo(runtime, 6.05)
+  state.logged = { 100 }
+  SendEvent(runtime, "QUEST_REMOVED", 200)
+  AdvanceTo(runtime, 8)
+  assert(functions.QuestLog[#functions.QuestLog].v[2] == nil, "The quest left the log")
+  assert(#functions.IsBreadcrumbQuest[200] == 1 and #functions.IsQuestSequenced[200] == 1,
+    "A quest that left the log is not asked by the probes after its removal")
+end
+
+local function TestQuestLogFlagsChangeOnly()
+  local state = LoggedQuestRuntime()
+  local runtime = state.runtime
+  state.logged, state.breadcrumbs = { 100, 200 }, { [200] = true }
+  runtime.core.StartCapture("logged quest flag changes")
+  AdvanceTo(runtime, 2)
+
+  state.breadcrumbs, state.sequenced = { [100] = true, [200] = true }, { [100] = true }
+  runtime.now = 10
+  SendEvent(runtime, "QUEST_LOG_UPDATE")
+  AdvanceTo(runtime, 12)
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local breadcrumb, sequenced = functions.IsBreadcrumbQuest[100], functions.IsQuestSequenced[100]
+  assert(#breadcrumb == 2 and breadcrumb[2].v == true and breadcrumb[2].t == 10, "A changed breadcrumb flag is appended once")
+  assert(#sequenced == 2 and sequenced[2].v == true and sequenced[2].t == 10, "A changed sequenced flag is appended once")
+  assert(#functions.IsBreadcrumbQuest[200] == 1 and #functions.IsQuestSequenced[200] == 1,
+    "Another quest's unchanged flags are not appended")
+end
+
+local function TestQuestLogFlagsFailedAndAbsentApis()
+  local state = LoggedQuestRuntime()
+  state.logged = { 100 }
+  state.runtime.env.IsBreadcrumbQuest = function() error("Breadcrumb data unavailable") end
+  state.runtime.core.StartCapture("failing flag")
+  AdvanceTo(state.runtime, 2)
+  local functions = Session(state.runtime).functions --[[@as table<string, any>]]
+  assert(functions.IsBreadcrumbQuest == nil, "A failed call records nothing")
+  assert(functions.IsQuestSequenced[100][1].v == false and functions["C_QuestLog.GetInfo"][100] ~= nil,
+    "A failing flag does not block the other quest APIs")
+
+  -- Classic clients have neither flag.
+  local classic = LoggedQuestRuntime()
+  classic.logged = { 100 }
+  classic.runtime.env.IsBreadcrumbQuest, classic.runtime.env.IsQuestSequenced = nil, nil
+  classic.runtime.core.StartCapture("no flags")
+  AdvanceTo(classic.runtime, 2)
+  functions = Session(classic.runtime).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestLog.GetInfo"][100] ~= nil, "The quest itself is sampled")
+  assert(functions.IsBreadcrumbQuest == nil and functions.IsQuestSequenced == nil, "Absent APIs create no stream")
 end
 
 local function TestQuestLogDefersInitialSample()
@@ -3823,9 +4444,115 @@ local function TestFrameHeartbeatRecordsFirstFramesAndGaps()
   assert(newUpdates ~= updates and #newUpdates == 1 and math.abs(newUpdates[1].v - 0.02) < 1e-9,
     "Each capture starts its own first frame updates, timed from its own start")
 end
+--- Tracked events whose arguments were checked against Blizzard's API documentation of every client: no player or guild
+--- name, no player or party GUID and no free text that can hold one.
+local EVENTS_WITHOUT_PERSONAL_ARGUMENTS = {
+    "ACHIEVEMENT_EARNED", "ADDON_LOADED", "AREA_POIS_UPDATED", "AUCTION_HOUSE_CLOSED", "AUCTION_HOUSE_SHOW", "BANKFRAME_CLOSED",
+    "BANKFRAME_OPENED", "BATTLEFIELDS_CLOSED", "BATTLEFIELDS_SHOW", "CRITERIA_UPDATE", "CURRENCY_DISPLAY_UPDATE",
+    "DISPLAY_SIZE_CHANGED", "DUEL_FINISHED", "GOSSIP_CLOSED", "GOSSIP_SHOW", "GROUP_ROSTER_UPDATE", "GUILDBANKFRAME_CLOSED",
+    "GUILDBANKFRAME_OPENED", "GUILD_REGISTRAR_CLOSED", "GUILD_REGISTRAR_SHOW", "ITEM_COUNT_CHANGED", "ITEM_LOCK_CHANGED", "ITEM_PUSH",
+    "LOADING_SCREEN_DISABLED", "LOADING_SCREEN_ENABLED", "LOOT_CLOSED", "LOOT_OPENED", "LOOT_READY", "MAIL_CLOSED", "MAIL_SHOW",
+    "MAP_EXPLORATION_UPDATED", "MERCHANT_CLOSED", "MERCHANT_SHOW", "MODIFIER_STATE_CHANGED", "NAME_PLATE_UNIT_ADDED",
+    "NAME_PLATE_UNIT_REMOVED", "NEW_RECIPE_LEARNED", "NEW_WMO_CHUNK", "PETITION_CLOSED", "PETITION_SHOW", "PET_STABLE_CLOSED",
+    "PET_STABLE_SHOW", "PLAYER_ALIVE", "PLAYER_DEAD", "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
+    "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "PLAYER_LEAVING_WORLD", "PLAYER_LEVEL_UP",
+    "PLAYER_LOGIN", "PLAYER_LOGOUT", "PLAYER_MAP_CHANGED", "PLAYER_MONEY", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+    "PLAYER_TARGET_CHANGED", "PLAYER_UNGHOST", "PLAYER_XP_UPDATE", "QUESTLINE_UPDATE", "QUEST_ACCEPTED", "QUEST_AUTOCOMPLETE", "QUEST_COMPLETE",
+    "QUEST_DATA_LOAD_RESULT", "QUEST_DETAIL", "QUEST_FINISHED", "QUEST_GREETING", "QUEST_ITEM_UPDATE", "QUEST_LOG_CRITERIA_UPDATE",
+    "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "QUEST_PROGRESS", "QUEST_REMOVED", "QUEST_TURNED_IN", "QUEST_WATCH_LIST_CHANGED",
+    "QUEST_WATCH_UPDATE", "SKILL_LINES_CHANGED", "SPELLS_CHANGED", "TASK_PROGRESS_UPDATE", "TAXIMAP_CLOSED", "TAXIMAP_OPENED",
+    "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_ACHIEVEMENT_UPDATE", "TRAINER_CLOSED", "TRAINER_SHOW", "UI_SCALE_CHANGED",
+    "UNIT_QUEST_LOG_CHANGED", "UPDATE_ALL_UI_WIDGETS", "UPDATE_EXHAUSTION", "UPDATE_FACTION", "UPDATE_MOUSEOVER_UNIT",
+    "WORLD_MAP_OPEN", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
+}
+
+--- Tracked events that can carry such values, with arguments that hold them and what may be recorded of those.
+---@type table<string, { args: table, recorded: table }>
+local EVENTS_WITH_PERSONAL_ARGUMENTS = {
+  QUEST_ACCEPT_CONFIRM = { args = { "Grimtotem", "Kaya's Alive", 672 }, recorded = { nil, "Kaya's Alive", 672 } },
+  GROUP_JOINED = { args = { 1, "Party-0-000012345678" }, recorded = { 1, nil } },
+  GROUP_LEFT = { args = { 1, "Party-0-000012345678" }, recorded = { 1, nil } },
+  UI_INFO_MESSAGE = { args = { 216, "Grimtotem has accepted your quest." }, recorded = { 216, "<name> has accepted your quest." } },
+}
+
+--- The chat events share one argument shape; the Discord information is the 18th argument.
+for _, event in ipairs({
+  "CHAT_MSG_COMBAT_FACTION_CHANGE", "CHAT_MSG_COMBAT_XP_GAIN", "CHAT_MSG_LOOT", "CHAT_MSG_MONEY", "CHAT_MSG_SKILL", "CHAT_MSG_SYSTEM",
+  "CHAT_MSG_TRADESKILLS",
+}) do
+  EVENTS_WITH_PERSONAL_ARGUMENTS[event] = {
+    args = {
+      "Quest accepted: Grimtotem's Test", "Grimtotem", "", "", "Grimtotem", "", 0, 0, "", 0, 7, "Player-1234-0053656F", 0, false, false, false, false,
+      { globalName = "Grimtotem", lastOnlineName = "Grimtotem", userID = "1" },
+    },
+    recorded = { event == "CHAT_MSG_TRADESKILLS" and "<redacted>" or "Quest accepted: <name>'s Test", nil, "", "", nil, "", 0, 0, "", 0, 7, nil, 0, false,
+      false, false, false, nil },
+  }
+end
+
+local function TestEveryTrackedEventIsReviewedForPersonalArguments()
+  local runtime = NewRuntime({})
+  local reviewed = {}
+  for _, event in ipairs(EVENTS_WITHOUT_PERSONAL_ARGUMENTS) do
+    assert(not EVENTS_WITH_PERSONAL_ARGUMENTS[event], event .. " is in both lists")
+    reviewed[event] = true
+  end
+  for event in pairs(EVENTS_WITH_PERSONAL_ARGUMENTS) do reviewed[event] = true end
+
+  for _, category in ipairs(runtime.core.TRACKED_EVENT_CATEGORIES) do
+    for _, event in ipairs(category.events) do
+      assert(reviewed[event], event .. " is tracked: review its arguments for player names, GUIDs and free text, and add it to one of the two lists")
+      reviewed[event] = nil
+    end
+  end
+  assert(next(reviewed) == nil, tostring(next(reviewed)) .. " is reviewed but not tracked any more")
+end
+
+local function TestPersonalEventArgumentsAreNotRecorded()
+  for event, case in pairs(EVENTS_WITH_PERSONAL_ARGUMENTS) do
+    local runtime = NewRuntime({})
+    runtime.env.UnitName = function(token) return token == "player" and "Grimtotem" or nil end
+    runtime.env.ERR_QUEST_ACCEPTED_S = "Quest accepted: %s"
+    runtime.core.StartCapture("personal arguments")
+    local count = event:find("^CHAT_MSG") and 18 or #case.args
+    SendEvent(runtime, event, unpack(case.args, 1, count))
+
+    local recorded = Session(runtime).events[1]
+    assert(recorded and recorded.e == event, event .. " is recorded")
+    for index = 1, count do
+      local expected = case.recorded[index]
+      if expected ~= "<redacted>" then
+        assert(recorded.a[index] == expected, string.format("%s argument %d: expected %s, recorded %s", event, index, tostring(expected),
+          tostring(recorded.a[index])))
+      end
+    end
+    local function AssertNoName(value)
+      if type(value) == "table" then
+        for _, inner in pairs(value) do AssertNoName(inner) end
+      elseif type(value) == "string" then
+        assert(not value:find("Grimtotem", 1, true) and not value:find("^Player%-") and not value:find("^Party%-"), event .. " recorded " .. value)
+      end
+    end
+    AssertNoName(recorded.a)
+  end
+end
+
+local function TestSecretInfoMessageIsNotRecorded()
+  local runtime = NewRuntime({})
+  local secret = "secret text"
+  runtime.env.issecretvalue = function(value) return value == secret end
+  runtime.core.StartCapture("secret message")
+  SendEvent(runtime, "UI_INFO_MESSAGE", 216, secret)
+  local recorded = Session(runtime).events[1]
+  assert(recorded.a[1] == 216 and recorded.a[2] == nil, "A restricted message is dropped")
+end
 
 ---@type { name: string, run: fun() }[]
 local tests = {
+  { name = "every tracked event is reviewed for personal arguments", run = TestEveryTrackedEventIsReviewedForPersonalArguments },
+  { name = "personal event arguments are not recorded", run = TestPersonalEventArgumentsAreNotRecorded },
+  { name = "export scrubs personal event arguments recorded by older versions", run = TestExportScrubsEventsOfOlderVersions },
+  { name = "a restricted info message is not recorded", run = TestSecretInfoMessageIsNotRecorded },
   { name = "item counts follow carried items, events and throttled bag rescans", run = TestItemCountSnapshotAndChanges },
   { name = "quest log extras are stored by quest ID", run = TestQuestLogExtrasStoredByQuestID },
   { name = "quest log records its quest list at once and defers per-quest sampling", run = TestQuestLogDefersInitialSample },
@@ -3838,6 +4565,8 @@ local tests = {
   { name = "frame heartbeat records the first frame updates and gaps", run = TestFrameHeartbeatRecordsFirstFramesAndGaps },
   { name = "quest dialog records reward items per type and index", run = TestQuestDialogRecordsRewardItems },
   { name = "quest dialog records Mists reward currencies up to the maximum", run = TestQuestDialogRecordsMistsRewardCurrencies },
+  { name = "quest dialog records Forever reward currency amounts", run = TestQuestDialogRecordsForeverRewardCurrencies },
+  { name = "quest dialog skips failed and absent reward currency APIs", run = TestQuestDialogSkipsFailedRewardCurrencies },
   { name = "display records screen size and only allowlisted CVars", run = TestDisplayRecordsOnlyAllowlistedCVars },
   { name = "nameplates record only world creatures, change-only per token", run = TestNameplatesRecordOnlyWorldCreatures },
   { name = "restricted unit identity does not interrupt capture", run = TestRestrictedUnitIdentityDoesNotInterruptCapture },
@@ -3847,6 +4576,9 @@ local tests = {
   { name = "greeting close cancels delayed samples", run = TestGreetingClose },
   { name = "greeting capture restart resets probes", run = TestGreetingRestart },
   { name = "greeting records quest ids per index", run = TestGreetingQuestIDs },
+  { name = "quest log flags are recorded only while on the quest", run = TestQuestLogFlagsOnlyWhileOnQuest },
+  { name = "quest log flags append only on change", run = TestQuestLogFlagsChangeOnly },
+  { name = "quest log flags skip failed and absent APIs", run = TestQuestLogFlagsFailedAndAbsentApis },
   { name = "quest flags sampled for detail, gossip and greeting quests", run = TestQuestFlagsSampledForDialogQuests },
   { name = "quest flags record real nil once and skip failed calls", run = TestQuestFlagsNilAndFailedCalls },
   { name = "quest flags append only on change, including tables", run = TestQuestFlagsChangeOnly },
@@ -3857,7 +4589,12 @@ local tests = {
   { name = "export payload never exposes sourceSessions", run = TestExportPayloadNeverExposesSourceSessions },
   { name = "export excludes deleted (reported) sessions", run = TestExportPayloadExcludesDeletedSessions },
   { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
-  { name = "SaveCapture prunes oldest sessions past the cap", run = TestSaveCapturePrunesOldestSessionsPastCap },
+  { name = "SaveCapture drops the sessions with the fewest events past the cap", run = TestSaveCaptureDropsSessionsWithFewestEventsPastCap },
+  { name = "SaveCapture keeps long sessions through reloads", run = TestSaveCaptureKeepsLongSessionsThroughReloads },
+  { name = "SaveCapture drops the oldest of equally short sessions", run = TestSaveCaptureDropsOldestOfEquallyShortSessions },
+  { name = "SaveCapture prunes migrated plain sessions", run = TestSaveCapturePrunesMigratedPlainSessions },
+  { name = "SaveCapture skips a session without events", run = TestSaveCaptureSkipsSessionWithoutEvents },
+  { name = "SaveCapture returns a session that was not kept", run = TestSaveCaptureReturnsSessionThatWasNotKept },
   { name = "export deletes and restarts live session after report", run = TestExportPayloadLiveSessionDeletedAndRestarted },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "SaveCapture stores the session encoded", run = TestSaveCaptureStoresSessionEncoded },
@@ -3870,6 +4607,7 @@ local tests = {
   { name = "API StartCapture before login does not block auto-start", run = TestApiStartCaptureBeforeLoginDoesNotBlockAutoStart },
   { name = "fresh character login initializes SavedVariables", run = TestLoginInitializesFreshCharacter },
   { name = "recover currentSession on login before auto-start", run = TestRecoverCurrentSessionOnLogin },
+  { name = "recovered currentSession without events is dropped", run = TestRecoverCurrentSessionWithoutEventsIsDropped },
   { name = "recover currentSession discarded when consent declined", run = TestRecoverCurrentSessionDiscardedWhenConsentDeclined },
   { name = "recover currentSession discarded when consent undecided", run = TestRecoverCurrentSessionDiscardedWhenConsentUndecided },
   { name = "consent undecided shows prompt and does not auto-start", run = TestConsentUndecidedShowsPromptAndDoesNotAutoStart },
@@ -3931,6 +4669,17 @@ local tests = {
   { name = "should record and sample the mouseover unit on UPDATE_MOUSEOVER_UNIT", run = TestMouseoverEventIsRecordedAndSampled },
   { name = "should not record or sample UPDATE_MOUSEOVER_UNIT for players, pets and other units", run = TestMouseoverEventIsFilteredForPlayersPetsAndOtherUnits },
   { name = "should record leaving an npc once and clear the mouseover streams", run = TestMouseoverLeavingNpcIsRecordedOnce },
+  { name = "interaction windows record their unit at show and hide", run = TestInteractionWindowsRecordTheirUnit },
+  { name = "a trade partner is never recorded", run = TestTradePartnerIsNotRecorded },
+  { name = "ghost state is recorded at capture start and when it changes", run = TestGhostStateIsRecorded },
+  { name = "a failing ghost state call is reported and does not stop the capture", run = TestFailingGhostStateIsReported },
+  { name = "the trivial quest range follows the level on Forever", run = TestTrivialRangeFollowsTheLevelOnForever },
+  { name = "the green quest range is recorded on clients without a trivial range", run = TestQuestGreenRangeOnClassic },
+  { name = "the level is recorded without a working quest range", run = TestLevelIsRecordedWithoutAWorkingRange },
+  { name = "realm rules are recorded once", run = TestRealmRulesAreRecordedOnce },
+  { name = "another addon's season stand-in is not recorded", run = TestAddonsSeasonStandInIsNotRecorded },
+  { name = "a failing realm rule is reported and does not stop the capture", run = TestFailingRealmRuleIsReported },
+  { name = "a hidden unit is told from no unit", run = TestHiddenUnitIsToldFromNoUnit },
   { name = "should record leaving an npc that was hovered at capture start", run = TestMouseoverLeavingNpcHoveredAtCaptureStartIsRecorded },
   { name = "Merchant classic API records items", run = TestMerchantClassicAPIRecordsItems },
   { name = "Merchant modern API records items", run = TestMerchantModernAPIRecordsItems },

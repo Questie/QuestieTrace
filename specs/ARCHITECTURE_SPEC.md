@@ -17,8 +17,8 @@ Modules/Localization/Translations/Consent.lua  -- Data collection consent transl
 Modules/Localization/Translations/ExportUI.lua -- Export/UI translations
 Modules/Localization/Translations/ExportReminder.lua -- Share-reminder translations
 Modules/Consent.lua                   -- Data collection consent popup + login reminder
-Modules/Trackers/PlayerIdentity.lua   -- UnitRace, UnitClass, UnitClassBase, UnitSex, UnitFactionGroup (t=0 only)
-Modules/Trackers/UnitLevel.lua        -- UnitLevel["player"], GetQuestGreenRange
+Modules/Trackers/PlayerIdentity.lua   -- UnitRace, UnitClass, UnitClassBase, UnitSex, UnitFactionGroup, realm rules (t=0 only)
+Modules/Trackers/UnitLevel.lua        -- UnitLevel["player"], C_QuestLog.GetTrivialRange/GetQuestGreenRange
 Modules/Trackers/Position.lua         -- Zone texts, map ID, player position, instance state
 Modules/Trackers/Loot.lua             -- Loot window capture
 Modules/Trackers/Reputation.lua       -- Faction reputation
@@ -27,6 +27,7 @@ Modules/Trackers/CompletedQuests.lua  -- C_QuestLog.GetAllCompletedQuestIDs/GetQ
 Modules/Trackers/QuestDialog.lua      -- Gossip, greeting, and current quest-dialog APIs
 Modules/Trackers/UnitInteraction.lua  -- UnitGUID/UnitName and gossip quest-list APIs
 Modules/Trackers/GroupState.lua       -- IsInGroup, GetNumGroupMembers
+Modules/Trackers/GhostState.lua       -- UnitIsGhost["player"]
 Modules/Trackers/SkillLines.lua       -- Skill window + profession tabs
 Modules/Trackers/SpellBook.lua        -- Raw spellbook slots + PlayerKnownSpells
 Modules/Trackers/ResetTime.lua        -- GetServerTime and GetQuestResetTime/C_DateAndTime.GetSecondsUntilDailyReset
@@ -90,7 +91,7 @@ Current categories are organizational only and are not persisted:
 - `group_world`
 - `inventory`
 
-Tracker routing is separate: `Core._trackerCallbacks[event]` controls which trackers sample for a specific event. `ADDON_LOADED` is filtered so only `QuestieTrace`'s own load event is recorded.
+Tracker routing is separate: `Core._trackerCallbacks[event]` controls which trackers sample for a specific event. `ADDON_LOADED` is filtered so only `QuestieTrace`'s own load event passes; it fires before capture start, so it is never recorded.
 
 ---
 
@@ -159,7 +160,9 @@ A session is deleted outright by `Core.DeleteReportedSessions()` once the player
 
 ### Session pruning
 
-`Core.SaveCapture()` also enforces `MAX_SESSIONS` (10) as a pure size backstop for players who never open the export window: whenever `#QuestieTraceCharacter.sessions` exceeds this cap, the oldest session(s) are dropped, oldest-first, regardless of report status. Unlike the export-driven deletion above, this is unconditional — it protects against unbounded SavedVariables growth, at the cost of losing the oldest unreported data once the cap is exceeded. There is no "prefer evicting already-reported sessions" tie-break to consider, since reported sessions are already gone by the time pruning runs.
+`Core.SaveCapture()` does not save a session without events, because it has nothing to export.
+
+It also enforces `MAX_SESSIONS` (10) as a pure size backstop for players who never open the export window: whenever `#QuestieTraceCharacter.sessions` exceeds this cap, the session(s) with the fewest events (`EncodedSessionRecord.eventCount`, the oldest of equal ones) are dropped, regardless of report status. That can be the session just saved. Dropping the oldest instead would let a few short sessions, e.g. from reloads, push out a long one. Unlike the export-driven deletion above, this is unconditional — it protects against unbounded SavedVariables growth, at the cost of losing the smallest unreported sessions once the cap is exceeded. `Core.SaveCapture()` returns the encoded session, so the export window can export the live session even if it was dropped here. There is no "prefer evicting already-reported sessions" tie-break to consider, since reported sessions are already gone by the time pruning runs.
 
 ---
 
@@ -199,8 +202,8 @@ by callers.
 
 | Tracker | Purpose |
 |---|---|
-| PlayerIdentity | Player race/class/base-class/sex/faction at capture start |
-| UnitLevel | Level and green quest range |
+| PlayerIdentity | Player race/class/base-class/sex/faction and realm rules at capture start |
+| UnitLevel | Level and trivial quest range |
 | Position | Zone, map, XY, instance state |
 | Loot | Loot window count and per-slot APIs |
 | Reputation | Faction order and faction detail streams |
@@ -208,6 +211,7 @@ by callers.
 | CompletedQuests | Completed quest set as a delta stream |
 | UnitInteraction | Target/NPC/quest NPC identity and C_Gossip quest-list APIs |
 | GroupState | Group membership/count |
+| GhostState | Whether the player is a ghost |
 | SkillLines | Skill rows and profession tabs |
 | SpellBook | Raw spellbook slots and known spell set |
 | QuestDialog | Gossip, greeting, and current quest dialog APIs |
@@ -227,5 +231,6 @@ by callers.
 | `Core.PackArgs(...)` | Pack varargs into `{..., n=count}` | Events and tuple streams |
 | `Core.CopyPacked(args)` | Copy packed args | Event recording |
 | `Core.Round(num, decimals)` | Round numbers | Position tracker |
+| `Core.SampleScalar(stream, t, tp, fn, ...)` | Append a function's answer if it changed; report a failing call | PlayerIdentity, UnitLevel, GhostState |
 | `DeepCompare(t1, t2)` | Recursive table comparison | Change detection |
 | `C_After` / `Defer` | Timer helpers | Delayed sampling |

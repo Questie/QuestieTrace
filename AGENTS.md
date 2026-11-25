@@ -25,6 +25,9 @@ Rules for any code that touches trackers, dumps, or raw event recording:
 - Do not rely on `issecretvalue()` or similar "sometimes correct" global flags as the sole privacy guard —
   privacy filtering must use explicit, deterministic, manually-reviewed checks (e.g. GUID prefix matching,
   known-name substitution) that we own and can test.
+- Any newly tracked event must have its arguments checked in Blizzard's API documentation of every client
+  (names, GUIDs, free text), be scrubbed in `EVENT_ARG_SANITIZERS` if needed, and be added to one of the two
+  reviewed event lists in `Tests/run.lua`.
 - Any new tracker or dump provider must be reviewed against this policy, and covered by a test that proves
   player names/GUIDs are filtered out (see `Tests/run.lua`).
 
@@ -79,6 +82,7 @@ Modules/                  - Core modules and tracking systems
         UnitInteraction.lua    - Unit interaction and nameplate unit tracking
         UnitState.lua          - Unit state (level/classification/reaction) tracking
         GroupState.lua         - Group/raid state tracking
+        GhostState.lua         - Whether the player is a ghost
         SkillLines.lua         - Skill lines tracking
         SpellBook.lua          - Spell book tracking
         ResetTime.lua          - Daily/weekly reset and realm calendar time tracking
@@ -220,6 +224,10 @@ else
     -- Classic API
 end
 ```
+
+A function that exists is not always the client's: another addon can define one the client lacks
+(Questie's `C_Seasons`, a `GetFactionInfoByID` on Forever). Where recorded data has an old global and a
+newer function, get both with `Core.GetClientFunctions` (`specs/TRACKER_SPEC.md`, section 8).
 
 ### Functions vs Methods
 
