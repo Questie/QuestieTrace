@@ -263,6 +263,18 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
         self.agreed(true)
     }
 
+    /// The value of every entity that was only ever observed with one value, seen in at least
+    /// `min_sessions` sessions with a server time.
+    pub fn aggregate_unanimous(&self, min_sessions: usize) -> IndexMap<i64, T> {
+        self.entities
+            .iter()
+            .filter_map(|(&id, groups)| match groups.values().next() {
+                Some(only) if groups.len() == 1 && only.timed_session_count >= min_sessions => Some((id, only.value.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn agreed(&self, accept_uncontested: bool) -> IndexMap<i64, T> {
         self.entities
             .iter()
@@ -732,6 +744,19 @@ mod tests {
     fn an_uncontested_value_wins_from_a_single_session_with_or_without_a_server_time() {
         assert_eq!(seen_in_sessions(&[("Tailor", 1)]).aggregate_agreed_or_uncontested()[&1], "Tailor");
         assert_eq!(seen_once(&[("Tailor", None, 1.0)]).aggregate_agreed_or_uncontested()[&1], "Tailor");
+    }
+
+    #[test]
+    fn unanimity_needs_enough_sessions_and_no_other_value() {
+        assert_eq!(seen_in_sessions(&[("Tailor", 2)]).aggregate_unanimous(2)[&1], "Tailor");
+        assert!(seen_in_sessions(&[("Tailor", 1)]).aggregate_unanimous(2).is_empty());
+        assert!(seen_in_sessions(&[("Tailor", 100), ("Leatherworker", 1)]).aggregate_unanimous(2).is_empty());
+        assert!(
+            seen_once(&[("Tailor", None, 1.0), ("Tailor", Some(5.0), 1.0)])
+                .aggregate_unanimous(2)
+                .is_empty(),
+            "one session has no server time"
+        );
     }
 
     #[test]

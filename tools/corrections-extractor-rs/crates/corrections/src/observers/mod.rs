@@ -2,6 +2,7 @@
 //! (for fields with a custom merge) merge, next to their tests. See DESIGN.md.
 
 pub mod guid_encounters;
+pub mod instance_zone;
 pub mod item;
 pub mod npc;
 pub mod object;

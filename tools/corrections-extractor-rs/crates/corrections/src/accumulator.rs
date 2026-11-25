@@ -35,6 +35,8 @@ pub struct Accumulator {
     pub npc_sub_name: ScalarSummary<String>,
     pub item_name: ScalarSummary<String>,
     pub object_name: ScalarSummary<String>,
+    pub npc_map: ScalarSummary<Num>,
+    pub object_map: ScalarSummary<Num>,
 
     pub required_level: ObservationsByEntity<f64>,
     pub objectives: ObservationsByEntity<Vec<ObjectiveSlot>>,
@@ -118,6 +120,8 @@ impl Accumulator {
             npc_sub_name,
             item_name,
             object_name,
+            npc_map,
+            object_map,
             required_level,
             objectives,
             trigger_end,
@@ -148,6 +152,8 @@ impl Accumulator {
         self.npc_sub_name.add_session(npc_sub_name, s, sessions);
         self.item_name.add_session(item_name, s, sessions);
         self.object_name.add_session(object_name, s, sessions);
+        self.npc_map.add_session(npc_map, s, sessions);
+        self.object_map.add_session(object_map, s, sessions);
 
         self.required_level.add(assign(required_level, s));
         self.objectives.add(assign(objectives, s));
@@ -185,6 +191,8 @@ impl Accumulator {
         add("npcSubName (scalar)", self.npc_sub_name.memory());
         add("itemName (scalar)", self.item_name.memory());
         add("objectName (scalar)", self.object_name.memory());
+        add("npcMap (scalar)", self.npc_map.memory());
+        add("objectMap (scalar)", self.object_map.memory());
         add("requiredLevel", self.required_level.memory());
         add("objectives", self.objectives.memory());
         add("triggerEnd", self.trigger_end.memory());

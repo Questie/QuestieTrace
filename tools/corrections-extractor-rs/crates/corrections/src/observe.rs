@@ -2,6 +2,7 @@
 //! `extract/observe.ts` and `extract/observe-lookups.ts`.
 
 use crate::aggregate::{Num, SessionScalars};
+use crate::guid::GuidKind;
 use crate::js::{self, format_number};
 use crate::observation::{Localized, Observation};
 use crate::observers::item::{npc_drops::NpcDrop, object_drops::ObjectDrop};
@@ -15,7 +16,7 @@ use crate::observers::quest::started_by::StartedByStarter;
 use crate::observers::quest::trigger_end::QuestTriggerEndValue;
 use crate::observers::quest::turn_in_poi::TurnInPoiValue;
 use crate::observers::spawn::SpawnObservation;
-use crate::observers::{item, npc, object, quest};
+use crate::observers::{instance_zone, item, npc, object, quest};
 use crate::probes::{session_server_time, Faction};
 use std::hash::Hash;
 use trace_data::{Session, Value};
@@ -85,6 +86,9 @@ pub struct StagedSession {
     pub npc_sub_name: SessionScalars<String>,
     pub item_name: SessionScalars<String>,
     pub object_name: SessionScalars<String>,
+    /// The maps an npc or object was looted on (instance_zone.rs).
+    pub npc_map: SessionScalars<Num>,
+    pub object_map: SessionScalars<Num>,
 
     // Fields with a custom merge.
     pub required_level: Vec<Observation<f64>>,
@@ -152,6 +156,8 @@ pub fn observe_session(session: &Session) -> Option<StagedSession> {
         npc_sub_name: SessionScalars::new(npc::sub_name::observe(session)),
         item_name: SessionScalars::new(item::name::observe(session)),
         object_name: SessionScalars::new(object::name::observe(session)),
+        npc_map: SessionScalars::new(instance_zone::observe(session, GuidKind::Npc)),
+        object_map: SessionScalars::new(instance_zone::observe(session, GuidKind::Object)),
         required_level: quest::required_level::observe(session),
         objectives: quest::objectives::per_session(quest::objectives::observe(session)),
         trigger_end: quest::trigger_end::observe(session),

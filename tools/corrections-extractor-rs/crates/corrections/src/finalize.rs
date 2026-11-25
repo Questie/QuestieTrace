@@ -11,13 +11,14 @@ use crate::js::format_number;
 use crate::lua::{write_corrections, write_lookup, write_quest_xp, Header, Js, LookupTable, Record};
 use crate::observation::Observation;
 use crate::observe::{MaxIds, MAX_IDS};
+use crate::observers::instance_zone;
 use crate::observers::item::drops_merge;
 use crate::observers::npc::{friendly_to_faction, level, rank, spawns_merge};
 use crate::observers::object::spawns_merge as object_spawns_merge;
 use crate::observers::quest::required_races::{merge_quest_factions, merge_required_races, summarize_reactions, ReactionSummary};
 use crate::observers::quest::turn_in_poi::turn_in_poi_spawns;
 use crate::observers::quest::{finished_by, frequency, objectives, quest_xp, reputation_reward, required_level, started_by, trigger_end};
-use crate::observers::spawn::SpawnObservation;
+use crate::observers::spawn::{SpawnObservation, Spawns};
 use crate::probes::Faction;
 use indexmap::{IndexMap, IndexSet};
 use std::collections::HashSet;
@@ -68,6 +69,36 @@ const SPAWN_ANYWHERE_NPC_IDS: [i64; 1] = [
 
 fn without_spawn_anywhere<T>(values: IndexMap<i64, T>) -> IndexMap<i64, T> {
     values.into_iter().filter(|(id, _)| !SPAWN_ANYWHERE_NPC_IDS.contains(id)).collect()
+}
+
+/// Sessions that have to have looted an entity on the map.
+const INSTANCE_MIN_SESSIONS: usize = 2;
+
+/// Questie's coordinates of a spawn inside an instance, where there is no position.
+const INSTANCE_POSITION: [f64; 2] = [-1.0, -1.0];
+
+/// Per entity, the area of the only map it was looted on.
+fn instance_zones(maps: &ScalarSummary<Num>) -> IndexMap<i64, f64> {
+    maps.aggregate_unanimous(INSTANCE_MIN_SESSIONS)
+        .into_iter()
+        .filter_map(|(id, map)| Some((id, instance_zone::area_of_instance(map.0)? as f64)))
+        .collect()
+}
+
+/// Adds the instance zone of every entity without a position.
+fn with_instance_zones(
+    mut spawns: IndexMap<i64, Spawns>,
+    mut zones: IndexMap<i64, f64>,
+    instances: IndexMap<i64, f64>,
+) -> (IndexMap<i64, Spawns>, IndexMap<i64, f64>) {
+    for (id, area) in instances {
+        if spawns.contains_key(&id) || zones.contains_key(&id) {
+            continue;
+        }
+        spawns.insert(id, vec![(area, vec![INSTANCE_POSITION])]);
+        zones.insert(id, area);
+    }
+    (spawns, zones)
 }
 
 /// The values a merge decided to export (TS `onlyDefinedFacts`).
@@ -311,6 +342,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
         spawns_merge::merge_spawns(obs, quest_npc_ids.contains(&id))
     }));
     let npc_zones = without_spawn_anywhere(merge_with_extra(&acc.npc_spawns, &npc_turn_in, |_, obs| spawns_merge::merge_zone_id(obs)));
+    let (npc_spawns, npc_zones) = with_instance_zones(npc_spawns, npc_zones, without_spawn_anywhere(instance_zones(&acc.npc_map)));
     let mut npcs = Records::default();
     npcs.field("name", &acc.npc_name.aggregate_newest(), |name| Js::str(name));
     // "" means the NPC has no subname, which is Questie's default.
@@ -343,6 +375,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
         object_spawns_merge::merge_spawns(obs, quest_object_ids.contains(&id))
     });
     let object_zones = merge_with_extra(&acc.object_spawns, &object_turn_in, |_, obs| object_spawns_merge::merge_zone_id(obs));
+    let (object_spawns, object_zones) = with_instance_zones(object_spawns, object_zones, instance_zones(&acc.object_map));
     let mut objects = Records::default();
     objects.field("name", &acc.object_name.aggregate_agreed_or_uncontested(), |name| Js::str(name));
     objects.field("spawns", &object_spawns, |spawns| zone_coordinates(spawns.iter().cloned()));
@@ -930,5 +963,74 @@ mod tests {
             let quest = with_frequencies(values);
             assert!(!quest.contains("questFlags") && !quest.contains("specialFlags"), "{values:?}: {quest}");
         }
+    }
+
+    /// The records of NPC and object `ids` after they were looted on these maps, one session each.
+    fn looted_on(id: i64, maps: &[f64]) -> (Option<String>, Option<String>) {
+        let sessions = maps
+            .iter()
+            .enumerate()
+            .map(|(at, &map)| StagedSession {
+                server_time: Some(1000.0 * (at + 1) as f64),
+                npc_map: SessionScalars::new(vec![obs(id, Num(map))]),
+                object_map: SessionScalars::new(vec![obs(OBJECT, Num(map))]),
+                ..StagedSession::default()
+            })
+            .collect();
+        let bundle = finalized(sessions);
+        (
+            record(module(&bundle, "foreverNpcTraces.lua"), id),
+            record(module(&bundle, "foreverObjectTraces.lua"), OBJECT),
+        )
+    }
+
+    #[test]
+    fn exports_the_zone_of_an_entity_only_seen_in_an_instance_without_a_position() {
+        let (npc, object) = looted_on(NPC, &[2959.0, 2959.0]);
+        let npc = npc.expect("the npc's record");
+        assert!(
+            npc.contains("[npcKeys.spawns] = {[16544]={{-1,-1}}}") && npc.contains("[npcKeys.zoneID] = 16544"),
+            "{npc}"
+        );
+        let object = object.expect("the object's record");
+        assert!(
+            object.contains("[objectKeys.spawns] = {[16544]={{-1,-1}}}") && object.contains("[objectKeys.zoneID] = 16544"),
+            "{object}"
+        );
+    }
+
+    #[test]
+    fn exports_no_zone_for_an_entity_seen_elsewhere_too_once_or_on_an_unknown_map() {
+        for maps in [
+            vec![2959.0],
+            vec![2959.0, 2959.0, 0.0],
+            vec![2959.0, 2959.0, 33.0],
+            vec![0.0, 0.0],
+            vec![2991.0, 2991.0],
+        ] {
+            let (npc, object) = looted_on(NPC, &maps);
+            assert!(
+                !npc.unwrap_or_default().contains("zoneID") && !object.unwrap_or_default().contains("zoneID"),
+                "{maps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_spawn_anywhere_npcs_without_an_instance_zone() {
+        let (npc, _) = looted_on(SPAWN_ANYWHERE_NPC_IDS[0], &[2959.0, 2959.0]);
+        assert_eq!(npc, None);
+    }
+
+    #[test]
+    fn keeps_an_observed_position_over_the_instance_zone() {
+        let observed: IndexMap<i64, Spawns> = [(NPC, vec![(1436.0, vec![[30.0, 86.0]])])].into_iter().collect();
+        let zones: IndexMap<i64, f64> = [(NPC, 1436.0)].into_iter().collect();
+        let instances: IndexMap<i64, f64> = [(NPC, 1581.0), (NPC + 1, 1581.0)].into_iter().collect();
+        let (spawns, zones) = with_instance_zones(observed, zones, instances);
+        assert_eq!(spawns[&NPC], [(1436.0, vec![[30.0, 86.0]])]);
+        assert_eq!(zones[&NPC], 1436.0);
+        assert_eq!(spawns[&(NPC + 1)], [(1581.0, vec![[-1.0, -1.0]])]);
+        assert_eq!(zones[&(NPC + 1)], 1581.0);
     }
 }
