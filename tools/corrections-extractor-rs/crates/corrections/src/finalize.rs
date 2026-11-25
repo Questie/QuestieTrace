@@ -306,7 +306,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     // "" means the NPC has no subname, which is Questie's default.
     let npc_sub_names: IndexMap<i64, String> = acc
         .npc_sub_name
-        .aggregate_newest()
+        .aggregate_agreed()
         .into_iter()
         .filter(|(_, sub_name)| !sub_name.is_empty())
         .collect();
@@ -469,14 +469,13 @@ fn required_races(acc: &Accumulator, started_by: &IndexMap<i64, started_by::Star
     required_races
 }
 
-/// lookups.ts `valuesFor`: one value per entity in `locale`, Classic ones included.
-fn values_for<T: Clone + Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>, locale: &str, newest_wins: bool) -> IndexMap<i64, T> {
-    let Some(summary) = by_locale.get(locale) else { return IndexMap::new() };
-    if newest_wins {
-        summary.aggregate_newest()
-    } else {
-        summary.aggregate()
-    }
+/// lookups.ts `valuesFor`: one value per entity in `locale`, Classic ones included, chosen by `aggregate`.
+fn values_for<T: Eq + Hash>(
+    by_locale: &IndexMap<String, ScalarSummary<T>>,
+    locale: &str,
+    aggregate: impl Fn(&ScalarSummary<T>) -> IndexMap<i64, T>,
+) -> IndexMap<i64, T> {
+    by_locale.get(locale).map(aggregate).unwrap_or_default()
 }
 
 fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) -> Vec<String> {
@@ -487,12 +486,13 @@ fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) 
 
 /// lookups.ts `finalizeLookups`: per entity and locale, a Questie l10n module of every observed
 /// id (unlike the corrections, Classic ones too). Names can change over time (a renamed NPC), so
-/// the newest one wins; objective texts use the default policy.
+/// the newest one wins. Subnames rarely change but are sometimes attached to the wrong NPC, so
+/// they need agreement between sessions. Objective texts use the default policy.
 fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, String)>)> {
     let mut npcs = Vec::new();
     for locale in sorted_locales(&acc.npc_name) {
-        let sub_names = values_for(&acc.npc_sub_name, &locale, true);
-        let entries: Vec<(i64, Js)> = values_for(&acc.npc_name, &locale, true)
+        let sub_names = values_for(&acc.npc_sub_name, &locale, ScalarSummary::aggregate_agreed);
+        let entries: Vec<(i64, Js)> = values_for(&acc.npc_name, &locale, ScalarSummary::aggregate_newest)
             .into_iter()
             .map(|(id, name)| {
                 // "" means the NPC has no subname.
@@ -506,9 +506,9 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
     }
     let mut quests = Vec::new();
     for locale in sorted_locales(&acc.quest_name) {
-        let objectives = values_for(&acc.objectives_text, &locale, false);
+        let objectives = values_for(&acc.objectives_text, &locale, ScalarSummary::aggregate);
         // Quests without an observed title are left out: Questie needs the title.
-        let entries: Vec<(i64, Js)> = values_for(&acc.quest_name, &locale, true)
+        let entries: Vec<(i64, Js)> = values_for(&acc.quest_name, &locale, ScalarSummary::aggregate_newest)
             .into_iter()
             .map(|(id, name)| {
                 let text = objectives.get(&id).map_or(Js::Null, |lines| Js::Array(lines.iter().map(Js::str).collect()));
@@ -523,7 +523,10 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
         sorted_locales(by_locale)
             .into_iter()
             .filter_map(|locale| {
-                let entries: Vec<(i64, Js)> = values_for(by_locale, &locale, true).into_iter().map(|(id, name)| (id, Js::Str(name))).collect();
+                let entries: Vec<(i64, Js)> = values_for(by_locale, &locale, ScalarSummary::aggregate_newest)
+                    .into_iter()
+                    .map(|(id, name)| (id, Js::Str(name)))
+                    .collect();
                 (!entries.is_empty()).then(|| {
                     let module = write_lookup(table, &locale, &entries);
                     (locale, module)
@@ -543,7 +546,7 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
 mod tests {
     use super::*;
     use crate::aggregate::SessionScalars;
-    use crate::observation::Confidence;
+    use crate::observation::{Confidence, Localized};
     use crate::observe::StagedSession;
     use crate::observers::item::npc_drops::NpcDrop;
     use crate::observers::item::object_drops::ObjectDrop;
@@ -655,5 +658,67 @@ mod tests {
         sessions[0].started_by.push(obs(QUEST, StartedByStarter::Item(750)));
         let quest = record(module(&finalized(sessions), "foreverQuestTraces.lua"), QUEST).expect("the quest's record");
         assert!(!quest.contains("requiredRaces") && !quest.contains("750"), "{quest}");
+    }
+
+    const NPC: i64 = 30000;
+
+    /// One session per (value, server time), each with one observation of `field`'s value.
+    fn sightings(values: &[(&str, f64)], mut stage: impl FnMut(&mut StagedSession, &str)) -> Vec<StagedSession> {
+        values
+            .iter()
+            .map(|&(value, server_time)| {
+                let mut staged = StagedSession {
+                    server_time: Some(server_time),
+                    ..StagedSession::default()
+                };
+                stage(&mut staged, value);
+                staged
+            })
+            .collect()
+    }
+
+    /// NPC 30000's record and its deDE lookup line after it was seen with these subnames.
+    fn with_sub_names(values: &[(&str, f64)]) -> (Option<String>, String) {
+        let bundle = finalized(sightings(values, |staged, sub_name| {
+            let german = |text: &str| Localized {
+                locale: "deDE".to_owned(),
+                value: text.to_owned(),
+            };
+            staged.npc_sub_name = SessionScalars::new(vec![obs(NPC, sub_name.to_owned())]);
+            staged.lookups.npc_name = SessionScalars::new(vec![obs(NPC, german("Grimm"))]);
+            staged.lookups.npc_sub_name = SessionScalars::new(vec![obs(NPC, german(sub_name))]);
+        }));
+        let lookups = bundle.lookups.iter().find(|(name, _)| *name == "lookupNpcs").expect("npc lookups");
+        let (_, lua) = lookups.1.iter().find(|(locale, _)| locale == "deDE").expect("deDE lookups");
+        let line = lua.lines().find(|line| line.contains("[30000]")).expect("the npc's line");
+        (record(module(&bundle, "foreverNpcTraces.lua"), NPC), line.trim().to_owned())
+    }
+
+    #[test]
+    fn exports_the_npc_subname_most_sessions_agree_on_not_the_newest() {
+        let (npc, lookup) = with_sub_names(&[("Tailor", 1000.0), ("Tailor", 2000.0), ("Leatherworker", 3000.0)]);
+        assert!(npc.expect("the npc's record").contains("[npcKeys.subName] = \"Tailor\""));
+        assert_eq!(lookup, "[30000] = {\"Grimm\",\"Tailor\"},");
+    }
+
+    #[test]
+    fn exports_no_npc_subname_without_agreement() {
+        let no_agreement: [&[(&str, f64)]; 4] = [
+            &[("Tailor", 1000.0)],
+            &[("Isaac Chan's Companion", 1000.0), ("", 2000.0)],
+            &[
+                ("Tailor", 1.0),
+                ("Tailor", 2.0),
+                ("Tailor", 3.0),
+                ("Leatherworker", 4.0),
+                ("Leatherworker", 5.0),
+            ],
+            &[("", 1000.0), ("", 2000.0)],
+        ];
+        for values in no_agreement {
+            let (npc, lookup) = with_sub_names(values);
+            assert!(!npc.unwrap_or_default().contains("subName"), "{values:?}");
+            assert_eq!(lookup, "[30000] = {\"Grimm\",nil},", "{values:?}");
+        }
     }
 }

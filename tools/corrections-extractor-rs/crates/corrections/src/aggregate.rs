@@ -248,6 +248,26 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
             })
             .collect()
     }
+
+    /// aggregate.ts `aggregateAgreedScalarSummary`, for values that rarely change but are sometimes
+    /// observed wrongly (an NPC subname attached to a neighbouring NPC): the value seen in the most
+    /// sessions wins, but only when at least [`AGREED_MIN_SESSIONS`] sessions saw it and it has
+    /// [`AGREED_MIN_LEAD`] times the sessions of the runner-up. Entities without such a value are
+    /// left out. Only sessions with a server time are counted.
+    pub fn aggregate_agreed(&self) -> IndexMap<i64, T> {
+        self.entities
+            .iter()
+            .filter_map(|(&id, groups)| {
+                let mut sorted: Vec<&ScalarGroup<T>> = groups.values().collect();
+                sorted.sort_by(|a, b| b.timed_session_count.cmp(&a.timed_session_count).then_with(|| default_order(a, b)));
+                let winner = sorted[0];
+                let has_lead = sorted
+                    .get(1)
+                    .is_none_or(|runner_up| winner.timed_session_count >= AGREED_MIN_LEAD * runner_up.timed_session_count);
+                (winner.timed_session_count >= AGREED_MIN_SESSIONS && has_lead).then(|| (id, winner.value.clone()))
+            })
+            .collect()
+    }
 }
 
 impl<T: Eq + Hash + crate::memory::HeapSize> ScalarSummary<T> {
@@ -268,6 +288,11 @@ impl<T: Eq + Hash + crate::memory::HeapSize> ScalarSummary<T> {
 
 /// Sessions a value needs before it can win by being the newest.
 const NEWEST_MIN_SESSIONS: usize = 2;
+
+/// Sessions a value needs before it can win by agreement.
+const AGREED_MIN_SESSIONS: usize = 2;
+/// How many times more sessions than the runner-up the winning value needs.
+const AGREED_MIN_LEAD: usize = 2;
 
 /// Newest first, like the TS comparator `b - a`. A total order, as `sort_by` requires: NaN
 /// (never recorded in real traces) sorts as the oldest instead of comparing equal to all.
@@ -391,5 +416,49 @@ mod tests {
         let newer = sessions.add(Some(400.0));
         summary.add([obs(1, "New Name", Confidence::High, 1.0, newer)], &sessions);
         assert_eq!(summary.aggregate_newest()[&1], "New Name");
+    }
+
+    /// Entity 1's values, each seen in that many sessions, one session newer than the one before.
+    fn seen_in_sessions(values: &[(&str, usize)]) -> ScalarSummary<String> {
+        let mut sessions = Sessions::default();
+        let mut summary = ScalarSummary::default();
+        let mut time = 0.0;
+        for &(value, count) in values {
+            for _ in 0..count {
+                time += 100.0;
+                let session = sessions.add(Some(time));
+                summary.add([obs(1, value, Confidence::High, 1.0, session)], &sessions);
+            }
+        }
+        summary
+    }
+
+    #[test]
+    fn agreement_picks_the_value_of_the_most_sessions_not_the_newest() {
+        assert_eq!(seen_in_sessions(&[("Tailor", 3), ("Leatherworker", 1)]).aggregate_agreed()[&1], "Tailor");
+    }
+
+    #[test]
+    fn agreement_leaves_out_a_value_seen_in_only_one_session() {
+        assert!(seen_in_sessions(&[("Tailor", 1)]).aggregate_agreed().is_empty());
+    }
+
+    #[test]
+    fn agreement_needs_twice_the_sessions_of_the_runner_up() {
+        assert_eq!(seen_in_sessions(&[("Tailor", 4), ("Leatherworker", 2)]).aggregate_agreed()[&1], "Tailor");
+        assert!(seen_in_sessions(&[("Tailor", 3), ("Leatherworker", 2)]).aggregate_agreed().is_empty());
+    }
+
+    #[test]
+    fn agreement_only_counts_sessions_with_a_server_time() {
+        let mut sessions = Sessions::default();
+        let untimed = sessions.add(None);
+        let timed = sessions.add(Some(200.0));
+        let mut summary = ScalarSummary::default();
+        summary.add(
+            [obs(1, "Tailor", Confidence::High, 1.0, untimed), obs(1, "Tailor", Confidence::High, 1.0, timed)],
+            &sessions,
+        );
+        assert!(summary.aggregate_agreed().is_empty());
     }
 }
