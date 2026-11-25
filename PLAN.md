@@ -73,8 +73,7 @@ for one last comparison.
 - **Rust relations:** natural Rust, same values as Exporters' TypeScript pipeline on a 5% sample.
   No step holds every episode (an on-disk episode store read one bucket of characters at a time):
   14.5 min and 4.3 GB on the full archive of November 23 (200k submissions) on 16 threads.
-  `scripts/relations.sh` checks inputs, fetches the scraper databases into the gitignored
-  `data/scraper/` and runs it.
+  `scripts/relations.sh` checks inputs and runs it.
 - **What the TypeScript extractor does that the Rust one does not** (from `docs/data-flow.md`):
   - reads new submissions straight from the OVH bucket (rclone, batches of 500); Rust reads a
     local trace-data checkout;

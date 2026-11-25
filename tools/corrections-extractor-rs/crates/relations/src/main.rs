@@ -6,7 +6,7 @@ use relations::config::Config;
 use relations::episode_store::EpisodeStore;
 use relations::model::{CandidateFile, GroundTruth, QuestCatalog};
 use relations::signals::{self, SignalInput};
-use relations::{catalog, combine, ingest, io, score, sources};
+use relations::{catalog, combine, ingest, io, score};
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -17,10 +17,9 @@ use std::time::Instant;
 const USAGE: &str = "\
 Usage: relations <command>
 
-  pipeline             every step in order: ingest, catalog, source:wowhead, signals, combine
+  pipeline             every step in order: ingest, catalog, signals, combine
   ingest               trace-data submissions -> the episode store (episodes/) and episodes.jsonl
   catalog              QuestieDB -> catalog.json + groundtruth.json (runs QuestieDB's Lua loader)
-  source:wowhead       scraper databases -> candidates/wowhead-*.json (review context only)
   signal:<name>        one signal: episodes + catalog -> candidates/<name>.json
   combine              all candidates -> foreverQuestRelationTraces.lua, relations-review.md,
                        relations-meta.json
@@ -28,7 +27,7 @@ Usage: relations <command>
                        precision/recall of candidates/<signal>.json against the ground truth
 
 Environment (the same as the TypeScript pipeline's):
-  TRACE_DATA_DIR, QUESTIEDB_DIR, SCRAPER_DIR, RELATIONS_TRACE_MODULES_DIR
+  TRACE_DATA_DIR, QUESTIEDB_DIR, RELATIONS_TRACE_MODULES_DIR
   RELATIONS_DIR (working files, default .relations), RELATIONS_OUTPUT_DIR (default
   $RELATIONS_DIR/output), RELATIONS_REQUIRE_FOREVER_VERSION=1";
 
@@ -53,7 +52,6 @@ fn run(config: &Config, args: &[String]) -> Result<()> {
         "pipeline" => pipeline(config),
         "ingest" => timed("ingest", || ingest::run(config)?.write(config)),
         "catalog" => timed("catalog", || catalog::run(config)?.write(config)),
-        "source:wowhead" => timed("source:wowhead", || sources::wowhead::run(config)?.write(config)),
         "combine" => timed("combine", || {
             let catalog: QuestCatalog = io::read_json(&config.catalog(), "catalog")?;
             let ground_truth: GroundTruth = io::read_json(&config.ground_truth(), "catalog")?;
@@ -140,13 +138,9 @@ fn pipeline(config: &Config) -> Result<()> {
     cataloged.write(config)?;
     done("catalog");
 
-    let wowhead = sources::wowhead::run(config).context("source:wowhead failed")?;
-    wowhead.write(config)?;
-    done("source:wowhead");
-
-    // Combine gets the candidate files this run produced, not whatever candidates/ holds: a file a
-    // renamed or removed signal left there must not count.
-    let mut candidate_files = wowhead.files;
+    // Combine gets the candidate files this run produced, not whatever candidates/ holds: a file an
+    // earlier run left there must not count.
+    let mut candidate_files = Vec::new();
     let input = SignalInput {
         episodes: &episodes,
         catalog: &cataloged.catalog,

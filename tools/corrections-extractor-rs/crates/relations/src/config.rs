@@ -13,8 +13,6 @@ pub struct Config {
     /// RELATIONS_TRACE_MODULES_DIR: a dump's own forever*Traces.lua modules, used by the catalog in
     /// place of the trace modules imported into QuestieDB.
     pub trace_modules_dir: Option<PathBuf>,
-    /// SCRAPER_DIR: a scraper release folder (raw/ and parsed/ SQLite databases).
-    pub scraper_dir: Option<PathBuf>,
     /// RELATIONS_DIR: the pipeline's working files (episodes, catalog, candidates, reports).
     pub relations_dir: PathBuf,
     /// RELATIONS_OUTPUT_DIR: the deliverables; `<relations dir>/output` by default.
@@ -39,7 +37,6 @@ impl Config {
             trace_data_dir: env_path("TRACE_DATA_DIR"),
             questie_db_dir: env_path("QUESTIEDB_DIR"),
             trace_modules_dir: env_path("RELATIONS_TRACE_MODULES_DIR"),
-            scraper_dir: env_path("SCRAPER_DIR"),
             output_dir: env_path("RELATIONS_OUTPUT_DIR").unwrap_or_else(|| relations_dir.join("output")),
             relations_dir,
             require_forever_version: std::env::var("RELATIONS_REQUIRE_FOREVER_VERSION").is_ok_and(|v| v == "1"),
@@ -66,10 +63,6 @@ impl Config {
 
     pub fn questie_db_dir(&self) -> Result<&Path> {
         required(&self.questie_db_dir, "QUESTIEDB_DIR", "a QuestieDB checkout")
-    }
-
-    pub fn scraper_dir(&self) -> Result<&Path> {
-        required(&self.scraper_dir, "SCRAPER_DIR", "a scraper release folder")
     }
 
     pub fn episodes(&self) -> PathBuf {

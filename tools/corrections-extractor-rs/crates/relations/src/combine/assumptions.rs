@@ -6,7 +6,7 @@
 //! characters back it, both as ranges. It carries no exact counts or scores: those move with every
 //! export, and the module is committed, so they would make every comment change;
 //! relations-review.md has the full evidence for every relation. Targets whose reasons differ only by id share one, so a large exclusive group stays one
-//! readable line. Wowhead never appears: it is context only (see [`super::inputs`]).
+//! readable line.
 
 use super::edges::{Claim, EdgeKind};
 use super::resolve::Outcome;
@@ -183,7 +183,6 @@ mod tests {
             because: None,
             status: None,
             claims,
-            context: &[],
             contributions: &[],
         }
     }
@@ -197,7 +196,6 @@ mod tests {
             relations,
             edges,
             reference_only: vec![],
-            hints: vec![],
             note: None,
         }
     }

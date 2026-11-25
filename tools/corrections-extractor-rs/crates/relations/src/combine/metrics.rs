@@ -15,10 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const SINGLE_SIGNAL_MIN_SCORES: [f64; 5] = [0.0, 0.5, 0.8, 0.9, 0.95];
 
 /// How far "held out" goes. Written next to the metrics in combine-metrics.json and the review.
-pub const METRIC_CAVEATS: [&str; 5] = [
-    "Wowhead is context only. Questie's own relation data was scraped from Wowhead Series rows, so Wowhead's agreement with the ground \
-     truth is circular. It adds no model column, coverage or silence, takes no part in resolution, and is left out of the \
-     best-single-signal comparison.",
+pub const METRIC_CAVEATS: [&str; 4] = [
     "Held out for the combine model only. Every signal calibrated its own score table on groundtruth.json, so a claim's score already \
      carries some of its label and these metrics are optimistic. labelFree refits the model without any score column (claimed, support, \
      contradiction rate and silence only) as a sanity check; claimed is not fully label-free either, since signals drop candidates below \

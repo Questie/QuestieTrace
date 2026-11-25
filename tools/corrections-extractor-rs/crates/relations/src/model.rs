@@ -497,12 +497,12 @@ pub struct GroundTruth {
 }
 
 // ---------------------------------------------------------------------------
-// Candidates (produced by signals and sources, consumed by combine and scoring)
+// Candidates (produced by signals, consumed by combine and scoring)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Evidence {
-    /// QuestEpisode.key, or a source reference such as "wowhead:quest/92579".
+    /// QuestEpisode.key.
     #[serde(rename = "ref")]
     pub reference: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

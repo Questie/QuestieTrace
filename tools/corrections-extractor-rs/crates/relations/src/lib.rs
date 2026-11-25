@@ -4,8 +4,7 @@
 //!
 //! ```text
 //! trace-data --ingest--> episodes --+
-//! QuestieDB --catalog--> catalog ---+--signals--> candidates --+
-//! scraper --wowhead--> context candidates ---------------------+--combine--> Lua, review, meta
+//! QuestieDB --catalog--> catalog ---+--signals--> candidates --combine--> Lua, review, meta
 //! ```
 //!
 //! Every step is a function from typed inputs to a typed output that knows how to write itself
@@ -24,7 +23,6 @@ pub mod model;
 mod race_masks;
 pub mod score;
 pub mod signals;
-pub mod sources;
 mod text;
 mod timeline;
 

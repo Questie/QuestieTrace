@@ -1047,7 +1047,6 @@ mod tests {
             relations,
             edges,
             reference_only: vec![],
-            hints: vec![],
             note: None,
         }
     }
@@ -1063,7 +1062,6 @@ mod tests {
             because: None,
             status: None,
             claims,
-            context: &[],
             contributions: &[],
         }
     }

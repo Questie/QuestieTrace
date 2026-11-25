@@ -16,8 +16,6 @@ trace-pack.workspace = true
 anyhow.workspace = true
 indexmap.workspace = true
 rayon.workspace = true
-regex.workspace = true
-rusqlite.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 # Report objects built with json! keep the order they were written in, whatever else the build
@@ -30,3 +28,5 @@ sha2.workspace = true
 [dev-dependencies]
 # Tests that read a submission through its file or its pack deflate an export as the addon does.
 libdeflater.workspace = true
+# examples/compare.rs
+regex.workspace = true

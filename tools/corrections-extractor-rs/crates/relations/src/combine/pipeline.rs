@@ -1,10 +1,8 @@
 //! The combine pipeline in memory, without reading or writing files: canonical edges from the
-//! trusted candidate files ([`super::edges`]), out-of-fold scores ([`super::crossval`]), then one
+//! signals' candidate files ([`super::edges`]), out-of-fold scores ([`super::crossval`]), then one
 //! consistent RelationSet per quest ([`super::resolve`]) with the ground-truth-dependent rule
 //! inputs measured fold-wise ([`super::foldwise`]). The parent module writes the outputs; the
 //! tests run this directly.
-//!
-//! Only [`Inputs::files`] feed it. Context-only files (Wowhead) never reach this module.
 
 use super::crossval::{score_edges, CvGroups, FittedKind, ModelParams, ScoredEdge};
 use super::edges::{collect_edges, Claim, Edge, Source};
@@ -112,8 +110,8 @@ mod tests {
 
     /// 40 authored quests 92000+i, each claimed to need 91000+i; every fourth claim is wrong. Five
     /// more quests 93000+i have no reference, so the model fitted on all ground truth scores them.
-    fn fixture() -> (QuestCatalog, GroundTruth, Vec<CandidateFile>, CandidateFile) {
-        use RelationField::{BreadcrumbForQuestId, NextQuestInChain, PreQuestSingle};
+    fn fixture() -> (QuestCatalog, GroundTruth, Vec<CandidateFile>) {
+        use RelationField::PreQuestSingle;
         let mut quests = Vec::new();
         for i in 0..45 {
             for (base, name) in [(92000, "Quest"), (91000, "Step"), (90000, "Other")] {
@@ -167,50 +165,27 @@ mod tests {
             &all,
             (0..40).filter(|i| i % 3 != 0).map(|i| (92000 + i, PreQuestSingle, 91000 + i, 0.9, 4)).collect(),
         );
-        // Claims some of the same edges, some of its own, and covers everything: any leak shows up
-        // as a column, a silence or a new edge.
-        let wowhead = file(
-            "wowhead-series",
-            &all,
-            (0..40)
-                .filter(|i| i % 2 == 0)
-                .map(|i| (92000 + i, PreQuestSingle, 91000 + i, 0.85, 3))
-                .chain((0..5).map(|i| (93000 + i, PreQuestSingle, 90000 + i, 0.95, 5)))
-                .chain((0..10).map(|i| (91000 + i, NextQuestInChain, 92000 + i, 0.95, 5)))
-                .chain((0..3).map(|i| (90000 + i, BreadcrumbForQuestId, 92000 + i, 0.35, 2)))
-                .collect(),
-        );
-        (catalog, truth, vec![handoff, offer_set], wowhead)
+        (catalog, truth, vec![handoff, offer_set])
     }
 
-    /// Every edge's probability and decision (by key), and the accepted relations.
-    type Snapshot = (Vec<(String, f64)>, Vec<(String, String)>, BTreeMap<QuestId, RelationSet>);
-
-    fn snapshot(combined: &Combined) -> Snapshot {
-        let mut probabilities: Vec<(String, f64)> = combined.scored.iter().map(|edge| (edge.key().to_string(), edge.probability)).collect();
-        probabilities.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut decisions: Vec<(String, String)> = combined
-            .accepted
-            .decisions
-            .iter()
-            .map(|(key, decision)| (key.to_string(), format!("{decision:?}")))
-            .collect();
-        decisions.sort();
-        (probabilities, decisions, combined.accepted.relations.clone())
-    }
-
+    /// The whole combine step: it learns from the authored quests how far to trust each claim, and
+    /// accepts the right ones, on quests it has no reference for too.
     #[test]
-    fn is_unchanged_by_wowhead_candidate_files() {
-        let (catalog, truth, trace_files, wowhead) = fixture();
-        let with_wowhead: Vec<CandidateFile> = trace_files.iter().cloned().chain([wowhead]).collect();
-        let shipped_inputs = prepare_inputs(&with_wowhead, &catalog, &truth).unwrap();
-        let trace_inputs = prepare_inputs(&trace_files, &catalog, &truth).unwrap();
+    fn accepts_the_claims_that_are_right_and_none_that_are_wrong() {
+        let (catalog, truth, files) = fixture();
+        let inputs = prepare_inputs(&files, &catalog, &truth).unwrap();
 
-        let shipped = snapshot(&combine(&shipped_inputs, MIN_SCORE, &DEFAULT_MODEL_PARAMS));
+        let combined = combine(&inputs, MIN_SCORE, &DEFAULT_MODEL_PARAMS);
 
-        assert_eq!(shipped, snapshot(&combine(&trace_inputs, MIN_SCORE, &DEFAULT_MODEL_PARAMS)));
-        // Not vacuous: something was accepted, and Wowhead did claim things.
-        assert!(!shipped.2.is_empty());
-        assert!(!shipped_inputs.context.is_empty());
+        // Right by the fixture: every claim on an authored quest but each fourth, and the five on
+        // quests without a reference, which look like them.
+        let right = (0..40)
+            .filter(|i| i % 4 != 0)
+            .map(|i| (92000 + i, 91000 + i))
+            .chain((0..5).map(|i| (93000 + i, 91000 + i)));
+        let expected: BTreeMap<QuestId, RelationSet> = right
+            .map(|(quest, required)| (quest, RelationSet::from([(RelationField::PreQuestSingle, vec![required])])))
+            .collect();
+        assert_eq!(combined.accepted.relations, expected);
     }
 }

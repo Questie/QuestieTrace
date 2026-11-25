@@ -1,8 +1,8 @@
 //! Combine: every signal's candidates -> one resolved set of relations, and the deliverables:
 //! `foreverQuestRelationTraces.lua`, `relations-review.md` and `relations-meta.json`.
 //!
-//! `inputs` sets Wowhead aside as context only; `pipeline` scores and resolves the rest. This
-//! module renders the outputs. Deliverables go to the output dir (next to the field extractor's
+//! `inputs` checks what there is to combine; `pipeline` scores and resolves it. This module
+//! renders the outputs. Deliverables go to the output dir (next to the field extractor's
 //! modules): foreverQuestRelationTraces.lua (every accepted relation; see [`lua`] for which apply),
 //! relations-review.md and relations-meta.json. Intermediates stay in the relations dir: relations.json (every quest with
 //! accepted or near-miss relations) and reports/combine-metrics.json.
@@ -54,8 +54,8 @@ const REVIEW_FILE: &str = "relations-review.md";
 const META_FILE: &str = "relations-meta.json";
 
 pub struct CombineInput<'a> {
-    /// Every candidates file (signals and sources), in any order: combine orders them by signal
-    /// name itself (see `inputs::prepare_inputs`).
+    /// Every signal's candidates file, in any order: combine orders them by signal name itself (see
+    /// `inputs::prepare_inputs`).
     pub candidate_files: Vec<CandidateFile>,
     pub catalog: &'a QuestCatalog,
     pub ground_truth: &'a GroundTruth,
@@ -99,7 +99,10 @@ fn relations_path(config: &Config) -> PathBuf {
 
 pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
     let min_score = MIN_SCORE;
-    let lead_ins = claimed_lead_ins(&input.candidate_files);
+    // Before the recordings: files that cannot be combined should fail at once, not after a pass
+    // over every episode.
+    let inputs = inputs::prepare_inputs(&input.candidate_files, input.catalog, input.ground_truth)?;
+    let lead_ins = claimed_lead_ins(&inputs.files);
     let unchecked = Unchecked {
         is_repeatable: &|quest_id| input.catalog.quest(quest_id).is_some_and(CatalogQuest::is_repeatable),
         is_lead_in: &|quest_id, lead_in| lead_ins.contains(&(quest_id, lead_in)),
@@ -111,10 +114,8 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
             recordings.contradicted.len()
         );
     }
-    let inputs = inputs::prepare_inputs(&input.candidate_files, input.catalog, input.ground_truth)?;
     // The same pipeline twice: once as shipped, once without signal-score columns (see METRIC_CAVEATS).
     let shipped = combine(&inputs, min_score, &DEFAULT_MODEL_PARAMS);
-    // Single-signal comparisons use the trace files only: Wowhead's agreement with the ground truth is circular.
     let metrics_of = |run: &Combined| held_out_metrics(&run.accepted.relations, &run.at_review_score.relations, &inputs.files, input.ground_truth);
     let metrics = metrics_of(&shipped);
     let label_free_params = ModelParams {
@@ -128,7 +129,6 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         &ViewSources {
             scored: &shipped.scored,
             resolution: &shipped.accepted,
-            context: &inputs.context,
             truth: &inputs.truth,
             domains: &inputs.domains,
             catalog: input.catalog,
@@ -136,7 +136,6 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         REVIEW_SCORE,
     );
     let input_summary: Vec<InputSummary> = inputs.files.iter().map(|file| InputSummary::of(file)).collect();
-    let context_only: Vec<String> = inputs.context_files.iter().map(|file| file.signal.clone()).collect();
     let relations = RelationsFile {
         generated_at: config.generated_at.clone(),
         params: RunParams {
@@ -147,7 +146,6 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
             model: DEFAULT_MODEL_PARAMS,
         },
         inputs: input_summary.clone(),
-        context_only: context_only.clone(),
         and_sources: and_sources.clone(),
         models: shipped.fitted.iter().map(ModelJson::of).collect(),
         quests: views
@@ -179,7 +177,6 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
     );
 
     let metrics_markdown = format_metrics(&metrics, min_score, REVIEW_SCORE);
-    let context_files: Vec<(&str, usize)> = inputs.context_files.iter().map(|file| (file.signal.as_str(), file.candidates.len())).collect();
     let misses = classic_misses(&shipped.scored, &shipped.accepted.decisions, &inputs.truth, &inputs.domains);
     let review = render_review(&ReviewInput {
         views: &views,
@@ -187,7 +184,6 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         min_score,
         review_score: REVIEW_SCORE,
         candidate_files: &input_summary,
-        context_files: &context_files,
         and_sources: &and_sources,
         metrics_markdown: &metrics_markdown,
         label_free_markdown: &format_comparison(&metrics, &label_free, min_score),
@@ -211,7 +207,6 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
         },
         authored: authored_status_counts(views.values()),
         inputs: input_summary,
-        context_only,
         caveat: LEAKAGE_CAVEAT,
     };
     let summary = summary(config, &views, &shipped.accepted.relations, &meta, &metrics_markdown, inputs.files.len());
@@ -234,11 +229,10 @@ pub fn run(config: &Config, input: CombineInput) -> Result<CombineOutput> {
     })
 }
 
-/// (quest, lead-in) for every breadcrumb a trace signal claims at [`MIN_SCORE`] or more.
-fn claimed_lead_ins(files: &[CandidateFile]) -> FxHashSet<(QuestId, QuestId)> {
+/// (quest, lead-in) for every breadcrumb a signal claims at [`MIN_SCORE`] or more.
+fn claimed_lead_ins(files: &[&CandidateFile]) -> FxHashSet<(QuestId, QuestId)> {
     files
         .iter()
-        .filter(|file| !inputs::is_context_only(&file.signal))
         .flat_map(|file| &file.candidates)
         .filter(|candidate| candidate.score >= MIN_SCORE)
         .filter_map(|candidate| match candidate.field {
@@ -352,7 +346,6 @@ struct RelationsFile {
     generated_at: String,
     params: RunParams,
     inputs: Vec<InputSummary>,
-    context_only: Vec<String>,
     and_sources: Vec<String>,
     models: Vec<ModelJson>,
     /// Every quest with accepted or near-miss relations.
@@ -437,8 +430,6 @@ struct EdgeJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     status: Option<Status>,
     signals: Vec<ClaimJson>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    context: Option<Vec<ClaimJson>>,
     /// Per signal, and "base" for the intercept; null for an uncalibrated kind's intercept.
     log_odds: IndexMap<String, f64>,
 }
@@ -447,13 +438,6 @@ struct EdgeJson {
 struct FieldTarget {
     field: RelationField,
     target: QuestId,
-}
-
-#[derive(Serialize)]
-struct HintJson {
-    field: RelationField,
-    target: QuestId,
-    context: Vec<ClaimJson>,
 }
 
 #[derive(Serialize)]
@@ -467,8 +451,6 @@ struct QuestJson {
     edges: Vec<EdgeJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reference_only: Option<Vec<FieldTarget>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hints: Option<Vec<HintJson>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notes: Option<Vec<String>>,
 }
@@ -492,7 +474,6 @@ impl QuestJson {
                     because: edge.because,
                     status: edge.status,
                     signals: ClaimJson::all(edge.claims),
-                    context: (!edge.context.is_empty()).then(|| ClaimJson::all(edge.context)),
                     log_odds: edge
                         .contributions
                         .iter()
@@ -501,16 +482,6 @@ impl QuestJson {
                 })
                 .collect(),
             reference_only: non_empty(view.reference_only.iter().map(|&(field, target)| FieldTarget { field, target }).collect()),
-            hints: non_empty(
-                view.hints
-                    .iter()
-                    .map(|hint| HintJson {
-                        field: hint.field,
-                        target: hint.target,
-                        context: ClaimJson::all(hint.claims),
-                    })
-                    .collect(),
-            ),
             notes: view.note.map(|note| vec![note.to_owned()]),
         }
     }
@@ -526,7 +497,7 @@ struct MetricsFile {
     generated_at: String,
     min_score: f64,
     review_score: f64,
-    caveats: [&'static str; 5],
+    caveats: [&'static str; 4],
     and_sources: Vec<String>,
     metrics: Vec<TierMetrics>,
     label_free: Vec<TierMetrics>,
