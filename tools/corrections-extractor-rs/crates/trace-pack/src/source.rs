@@ -92,10 +92,13 @@ fn list_packs(packs: &Path) -> io::Result<Vec<StoredSubmission>> {
     Ok(submissions)
 }
 
+/// Links are followed, so that packs on several disks can be read as one directory. A link
+/// that leads nowhere is an error: what it should have led to would be missing unnoticed.
 fn pack_files(directory: &Path, found: &mut Vec<PathBuf>) -> io::Result<()> {
     for entry in std::fs::read_dir(directory)? {
         let path = entry?.path();
-        if path.is_dir() {
+        let kind = std::fs::metadata(&path).map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))?;
+        if kind.is_dir() {
             pack_files(&path, found)?;
         } else if path.extension().is_some_and(|extension| extension == "pack") {
             found.push(path);
@@ -239,6 +242,29 @@ mod tests {
         let listed = list(&scratch.0).unwrap();
 
         assert_eq!(listed.iter().map(|stored| stored.key.as_str()).collect::<Vec<_>>(), [files[1].0, files[0].0]);
+    }
+
+    /// Packs on two disks, read as one: a directory of links. One that leads nowhere, as when
+    /// its disk is not mounted, must not read as a smaller archive.
+    #[test]
+    fn packs_behind_links_are_read_and_a_link_that_leads_nowhere_is_an_error() {
+        let scratch = Scratchpad::new("links");
+        let files = submissions();
+        let (first, _) = pack_of(&files[..1], &options());
+        let (second, _) = pack_of(&files[1..], &options());
+        scratch.write("disk-a/packs/backfill/a.pack", &first);
+        scratch.write("disk-b/packs/backfill/b.pack", &second);
+        let joined = scratch.0.join("joined/packs");
+        std::fs::create_dir_all(&joined).unwrap();
+        for disk in ["disk-a", "disk-b"] {
+            std::os::unix::fs::symlink(scratch.0.join(disk).join("packs"), joined.join(disk)).unwrap();
+        }
+
+        assert_eq!(list(&scratch.0.join("joined")).unwrap().len(), 3);
+
+        std::fs::rename(scratch.0.join("disk-b"), scratch.0.join("disk-b-unmounted")).unwrap();
+        let error = list(&scratch.0.join("joined")).unwrap_err().to_string();
+        assert!(error.contains("disk-b"), "{error}");
     }
 
     #[test]

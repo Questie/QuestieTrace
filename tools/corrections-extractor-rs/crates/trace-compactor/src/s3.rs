@@ -28,6 +28,14 @@ const ATTEMPTS: u32 = 3;
 /// stalls would hold the run, and the timer that starts the next one, for good.
 const LONGEST_REQUEST: Duration = Duration::from_secs(30 * 60);
 
+/// How long the connection may be silent while a response is read. A run waits for each of its
+/// downloads, so one dead connection would idle all of it until [`LONGEST_REQUEST`].
+const LONGEST_SILENCE: Duration = Duration::from_secs(60);
+
+/// How long the provider may take to answer a request that was sent whole. Storing a pack of a
+/// gigabyte is the slowest of them.
+const LONGEST_ANSWER: Duration = Duration::from_secs(5 * 60);
+
 /// The most a download may hold: the largest object one PUT can store. The compactor's packs
 /// are stored that way, and a loose object is a copy of one that was.
 const LARGEST_OBJECT: u64 = 5 << 30;
@@ -93,6 +101,8 @@ impl S3Bucket {
             // a download that reports success.
             .max_redirects(0)
             .timeout_connect(Some(Duration::from_secs(15)))
+            .timeout_recv_response(Some(LONGEST_ANSWER))
+            .timeout_per_read(Some(LONGEST_SILENCE))
             .timeout_global(Some(LONGEST_REQUEST))
             .build()
             .new_agent();

@@ -164,6 +164,9 @@ pub fn run(source: &Source, config: &Config, now: Timestamp, on_pack: &dyn Fn(&P
     let mut report = Report::default();
     let packed = packed_names(&config.out, &config.also_packed)?;
     let stored = source.list(config.only.as_deref().unwrap_or_default())?;
+    if let (Some(only), true) = (&config.only, stored.is_empty()) {
+        bail!("no submission's name starts with {only}");
+    }
 
     // What is in a pack and no longer in the source.
     if source.bucket.is_some() && config.only.is_none() {
@@ -305,6 +308,8 @@ fn write_whole(path: &Path, bytes: &[u8]) -> Result<()> {
         let mut file = File::create(&unfinished)?;
         file.write_all(bytes)?;
         file.sync_all()?;
+        // Closed before it is renamed: a Windows drive may not rename an open file.
+        drop(file);
         std::fs::rename(&unfinished, path)?;
         File::open(directory)?.sync_all()
     };
@@ -622,16 +627,72 @@ mod tests {
             bucket: Some(&OnlyHour18(&bucket)),
             local: None,
         };
-        let narrowed = Config {
-            only: Some("2026-11/2026-11-08_18".into()),
+        let narrowed = |only: &str| Config {
+            only: Some(only.into()),
             ..config(scratch.out())
         };
+        // Hour 19 is packed already, by a run that looked at all of it.
+        let everything = Source {
+            bucket: None,
+            local: Some(scratch.checkout(&files[1..])),
+        };
+        run(&everything, &config(scratch.out()), now(), &|_| {}).unwrap();
 
-        let report = run(&source, &narrowed, now(), &|_| {}).unwrap();
+        let report = run(&source, &narrowed("2026-11/2026-11-08_18"), now(), &|_| {}).unwrap();
 
-        assert_eq!(scratch.packs(&files).into_values().collect::<Vec<_>>(), [vec![files[0].0.clone()]]);
-        // What was not looked at is not reported as gone.
+        assert_eq!(report.packs.len(), 1);
+        assert_eq!(scratch.packs(&files).len(), 2);
+        // Hour 19 is in a pack and was not listed. That is not gone, only not looked at.
         assert_eq!(report.gone_from_source, [] as [String; 0]);
+
+        // A mistyped day lists nothing, and must not pass for a day that is done.
+        let nothing = Source {
+            bucket: Some(&bucket),
+            local: None,
+        };
+        run(&nothing, &narrowed("2026-11/2026-11-80"), now(), &|_| {}).unwrap_err();
+    }
+
+    /// The run is left alone for hours: a bucket that stops answering ends it with whole packs,
+    /// and the next run packs the rest and nothing twice.
+    #[test]
+    fn a_run_whose_bucket_stops_answering_is_continued_by_the_next() {
+        let scratch = Scratchpad::new("stops");
+        let files = [received(18, 1, "aa"), received(19, 1, "bb"), received(20, 1, "cc")];
+        let bucket = MemoryBucket::new(now());
+        for (name, file) in &files {
+            bucket.store(&format!("{SUBMISSIONS}{name}"), file, now());
+        }
+        let source = Source {
+            bucket: Some(&bucket),
+            local: None,
+        };
+        // The listing, the first hour's download, and then nothing more.
+        bucket.fail_call(2, crate::memory_bucket::Fault::Refused);
+        run(&source, &config(scratch.out()), now(), &|_| {}).unwrap_err();
+        assert!(bucket.restore());
+        assert_eq!(scratch.packs(&files).into_values().collect::<Vec<_>>(), [vec![files[0].0.clone()]]);
+
+        let report = run(&source, &config(scratch.out()), now(), &|_| {}).unwrap();
+
+        assert_eq!((report.already_packed, report.packs.len()), (1, 2));
+        let packed: Vec<Vec<String>> = scratch.packs(&files).into_values().collect();
+        assert_eq!(packed, files.iter().map(|(name, _)| vec![name.clone()]).collect::<Vec<_>>());
+    }
+
+    /// A pack is written under another name first. Where that name cannot be written, nothing
+    /// may appear under the pack's own: a later run would take it for a whole pack.
+    #[test]
+    fn a_pack_that_cannot_be_written_whole_does_not_appear() {
+        let (scratch, files) = (Scratchpad::new("unwritable"), [received(18, 5, "aa")]);
+        let source = local(scratch.checkout(&files));
+        let elsewhere = scratch.0.join("elsewhere");
+        let key = run(&source, &config(elsewhere), now(), &|_| {}).unwrap().packs[0].key.clone();
+        std::fs::create_dir_all(scratch.out().join(&key).with_extension("pack.part")).unwrap();
+
+        run(&source, &config(scratch.out()), now(), &|_| {}).unwrap_err();
+
+        assert!(!scratch.out().join(&key).exists());
     }
 
     /// An archive on two disks: what is packed on one is not packed again on the other.

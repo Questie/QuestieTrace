@@ -3,7 +3,7 @@
 
 use anyhow::{bail, Context, Result};
 use jiff::{SignedDuration, Timestamp};
-use std::fs::File;
+use std::fs::{File, TryLockError};
 use std::path::PathBuf;
 use trace_compactor::backfill;
 use trace_compactor::rate_limit::RateLimit;
@@ -276,8 +276,10 @@ fn backfill(arguments: BackfillArguments) -> Result<()> {
     std::fs::create_dir_all(&config.out).with_context(|| format!("creating {}", config.out.display()))?;
     let lock_path = config.out.join("backfill.lock");
     let lock = File::create(&lock_path).with_context(|| format!("opening {}", lock_path.display()))?;
-    if lock.try_lock().is_err() {
-        bail!("another run holds {}", lock_path.display());
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => bail!("another run holds {}", lock_path.display()),
+        Err(TryLockError::Error(error)) => return Err(error).with_context(|| format!("locking {}", lock_path.display())),
     }
     if let Some(threads) = threads {
         rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().context("--threads")?;

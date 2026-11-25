@@ -37,7 +37,11 @@ pub type Sha256Digest = [u8; 32];
 fn compress(bytes: &[u8], level: i32) -> Result<Vec<u8>, String> {
     let mut compressor = zstd::bulk::Compressor::new(level).map_err(|error| error.to_string())?;
     compressor.include_checksum(true).map_err(|error| error.to_string())?;
-    compressor.compress(bytes).map_err(|error| error.to_string())
+    let mut frame = compressor.compress(bytes).map_err(|error| error.to_string())?;
+    // zstd hands back a buffer with room for the uncompressed bytes. Every frame of a pack is
+    // held until the pack is written, so that room would add up to all of them.
+    frame.shrink_to_fit();
+    Ok(frame)
 }
 
 /// Decompresses one frame. The frame must state its size, as every frame of a pack does, and
@@ -208,8 +212,16 @@ fn split_file(file: &[u8], inflater: &mut Inflater) -> Option<SplitFile> {
 fn decodes(cbor: &[u8], arena: &mut Arena) -> bool {
     let accepted = decode_trace(cbor, arena).is_ok();
     arena.reset();
+    if arena.allocated_bytes() > ARENA_KEPT_BYTES {
+        *arena = Arena::new();
+    }
     accepted
 }
+
+/// The most arena memory a worker keeps between submissions: a reset arena keeps its largest
+/// block, so each worker would hold on to the largest submission it ever decoded. The
+/// extractors keep the same.
+const ARENA_KEPT_BYTES: usize = 16 << 20;
 
 /// Compresses the record and reads it back. A value-encoded export that does not read back as
 /// required is stored exact and the frame is built once more. `stats` holds, per export, what
@@ -769,6 +781,16 @@ pub(crate) mod tests {
         let from_file = Submission::from_json(&original, "abc".into(), &mut inflater);
         assert_eq!(read(&from_pack), read(&from_file));
         assert_eq!(read(&from_pack).5.len(), 1);
+    }
+
+    /// All frames of a pack are held until it is written. Each once kept room for its
+    /// uncompressed record, which made a run need several times what its packs hold.
+    #[test]
+    fn a_frame_holds_no_more_memory_than_its_compressed_bytes() {
+        let repetitive = file(&"a".repeat(1 << 20));
+        let frame = build_frame("a_1.json", &repetitive, &options(), &mut Scratch::new()).unwrap();
+        assert!(frame.compressed.len() < 10_000, "{} bytes", frame.compressed.len());
+        assert!(frame.compressed.capacity() < 20_000, "room for {} bytes", frame.compressed.capacity());
     }
 
     #[test]

@@ -18,8 +18,11 @@ impl RateLimit {
     }
 
     /// Accounts for bytes that have arrived and waits until the limit allows reading on. A
-    /// caller that reads a download in small parts and calls this after each holds the
-    /// connection to the limit: the sender stops when what it sent is not read.
+    /// caller reads a download in small parts and calls this after each.
+    ///
+    /// That holds the average over a few seconds to the limit. A connection's buffer still
+    /// takes in a few megabytes at the line's speed, so small objects arrive in short bursts
+    /// with pauses between them.
     pub fn took(&self, bytes: u64) {
         std::thread::sleep(self.account(bytes, Instant::now()));
     }
