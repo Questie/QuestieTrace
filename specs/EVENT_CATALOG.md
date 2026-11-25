@@ -140,6 +140,10 @@ name; for an unrecognized kind, neither the GUID nor the paired `UnitName`
 observation is recorded. A `nil` GUID (no unit present) is still recorded,
 since that reflects a state transition rather than PII.
 
+An item that starts a quest is an `Item-` GUID on `"questnpc"`. Its item ID is
+recorded as `C_Item.GetItemIDByGUID[itemGUID]` on clients that have that API
+(Forever), where `QUEST_DETAIL` reports `questStartItemID` 0.
+
 **From `player_state` (shared with other trackers):**
 - `PLAYER_TARGET_CHANGED`
 - `UPDATE_MOUSEOVER_UNIT`

@@ -456,7 +456,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumQuestLogRewards` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestLogRewardMoney` | scalar (number/nil) | Raw API result; probed again after quest leaves log |
 | `GetQuestTagInfo` | tuple (n varies) | |
-| `IsBreadcrumbQuest` | scalar (boolean expected) | QuestDialog; Forever only, undocumented API called as `IsBreadcrumbQuest(questID)` -- argument meaning unconfirmed, treat as a hint |
+| `IsBreadcrumbQuest` | scalar (boolean) | QuestLog; Forever only, undocumented. Recorded only while `C_QuestLog.IsOnQuest(questID)` is true, because it answers false for every other quest. Schema 22+; before that QuestDialog recorded it for dialog and offered quests, so only readings taken while `C_QuestLog.IsOnQuest[questID]` was true are meaningful |
+| `IsQuestSequenced` | scalar (boolean) | QuestLog; Forever only, undocumented; whether the quest shows its objectives one after another. Recorded only while `C_QuestLog.IsOnQuest(questID)` is true. Schema 22+ |
 | `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | QuestDialog; Forever only; copy of the `C_QuestLine.GetQuestLineInfo(questID)` table with all fields raw (no map, `displayableOnly` defaults to false so hidden lines return with `isHidden = true`) |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar (number) | QuestDialog; Forever only; raw `Enum.QuestClassification` value |
 | `C_QuestLog.GetRequiredMoney` | scalar (number) | Raw API result; Forever returns -1 when the quest requires no money; probed again after quest leaves log. Schema 15+ |
@@ -483,6 +484,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetQuestItemLink` | `[type][index]` | scalar (string/nil) | QuestDialog; same keys as `GetQuestItemInfo`. Schema 15+ |
 | `GetQuestCurrencyInfo` | `["reward"][index]` | tuple (n varies) | QuestDialog, on clients that have it (Mists); name, texture, count, quality. Read for index 1..`GetMaxRewardCurrencies()`, past `GetNumRewardCurrencies()`, as Blizzard's Mists quest frame does (`Wrath/QuestInfo.lua`); empty slots return n=0. Classic frames never read required currencies. Schema 15+ |
 | `GetQuestCurrencyID` | `["reward"][index]` | scalar (number/nil) | QuestDialog, on clients that have it (Mists); same keys as `GetQuestCurrencyInfo`. Schema 15+ |
+| `C_QuestOffer.GetQuestRewardCurrencyInfo` | `["reward"][index]` | object (table) or nil | QuestDialog; Forever only. The `QuestRewardCurrencyInfo` reduced to `currencyID`, `baseRewardAmount` (without bonuses) and `totalRewardAmount` (what the quest frame shows). Same indices as `GetQuestCurrencyID`; documented to be nil for an empty slot. Schema 22+ |
 
 ### Parameterized by greeting index
 
@@ -509,6 +511,12 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `UnitGUIDIsSecret` | scalar (boolean) | *(synthetic)* as above: tells a hidden unit from the other withheld ones. Schema 22+ |
 
 Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, unrecognized or restricted GUIDs, and failed `UnitGUID` calls are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. Instances are sampled too: Questie draws nameplate icons in dungeons on Classic clients, while Forever restricts GUIDs there, so its instance adds record nil. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
+
+### Parameterized by item GUID
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar (number) | UnitInteraction; Forever only. For every `Item-` GUID in `UnitGUID` (`"questnpc"` while an item starts a quest); join by the GUID. One entry per GUID, the first non-nil answer. Schema 22+ |
 
 ### Parameterized by unit token (`"target"`, `"mouseover"`)
 

@@ -129,6 +129,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetNumRewardCurrencies()` / `GetMaxRewardCurrencies()` | `functions["GetNumRewardCurrencies"]` / `functions["GetMaxRewardCurrencies"]` (clients that have them, e.g. Mists) |
 | `GetQuestCurrencyInfo("reward", index)` | `functions["GetQuestCurrencyInfo"]["reward"][index]` (same) |
 | `GetQuestCurrencyID("reward", index)` | `functions["GetQuestCurrencyID"]["reward"][index]` (same) |
+| `C_QuestOffer.GetQuestRewardCurrencyInfo("reward", index)` | `functions["C_QuestOffer.GetQuestRewardCurrencyInfo"]["reward"][index]` (Forever; `currencyID`, `baseRewardAmount` and `totalRewardAmount` only) |
 | `C_Item.GetItemCount(itemID)` | `functions["C_Item.GetItemCount"][itemID]`; answers calls without `includeBank` only (trailing nil arguments are skipped by `getStream`) |
 | `C_Item.IsItemDataCachedByID(itemID)` | `functions["C_Item.IsItemDataCachedByID"][itemID]`; see the item data note below |
 | `IsIndoors()` | `functions["IsIndoors"]` |
@@ -159,6 +160,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_Map.GetPlayerMapPosition(map, "player")` | `functions["C_Map.GetPlayerMapPosition"]["player"]` |
 | `UnitGUID(token)` | `functions["UnitGUID"][token]` |
 | `UnitName(token)` | `functions["UnitName"][token]` |
+| `C_Item.GetItemIDByGUID(itemGUID)` | `functions["C_Item.GetItemIDByGUID"][itemGUID]` (only item GUIDs that were a unit, e.g. a quest's starting item) |
 | `issecretvalue(UnitGUID(token))` | `functions["UnitGUIDIsSecret"][token]`; see the hidden unit note below |
 | `IsQuestComplete(questId)` | `functions["IsQuestComplete"][questId]` |
 | `HaveQuestData(questId)` | `functions["HaveQuestData"][questId]` |
@@ -181,7 +183,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetQuestLogRewardMoney(questId)` | `functions["GetQuestLogRewardMoney"][questId]` |
 | `GetQuestLogRewardInfo(rewardIndex, questId)` | `functions["GetQuestLogRewardInfo"][rewardIndex][questId]` |
 | `GetQuestTagInfo(questId)` | `functions["GetQuestTagInfo"][questId]` |
-| `IsBreadcrumbQuest(questId)` | `functions["IsBreadcrumbQuest"][questId]` |
+| `IsBreadcrumbQuest(questId)` | `functions["IsBreadcrumbQuest"][questId]` while `C_QuestLog.IsOnQuest(questId)` is true, else false |
+| `IsQuestSequenced(questId)` | `functions["IsQuestSequenced"][questId]`; recorded only while on the quest |
 | `C_QuestLine.GetQuestLineInfo(questId)` | `functions["C_QuestLine.GetQuestLineInfo"][questId]` (recorded without `uiMapID`/`displayableOnly`) |
 | `C_QuestInfoSystem.GetQuestClassification(questId)` | `functions["C_QuestInfoSystem.GetQuestClassification"][questId]` |
 | `GetLootSlotInfo(slot)` | `functions["GetLootSlotInfo"][slot]` |

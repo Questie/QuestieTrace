@@ -370,9 +370,9 @@ end
 ---@field classification number
 ---@field questLineHidden boolean
 
----Runtime with the Forever-only quest-flag APIs mocked. Quest 200 is a
----breadcrumb, quest 300 has no quest line, and IsBreadcrumbQuest errors for
----quest 300. GetQuestLineInfo returns a fresh table on every call.
+---Runtime with the Forever-only quest-flag APIs mocked. Quest 300 has no quest
+---line, and GetQuestLineInfo errors for quest 500. It returns a fresh table on
+---every call.
 ---@return QuestFlagFixture
 local function QuestFlagRuntime()
   local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
@@ -380,15 +380,11 @@ local function QuestFlagRuntime()
   local state = { runtime = runtime, dialogQuestID = 0, classification = 7, questLineHidden = false }
   local env = runtime.env
   env.GetQuestID = function() return state.dialogQuestID end
-  ---@param questID number
-  env.IsBreadcrumbQuest = function(questID)
-    if questID == 300 then error("Breadcrumb data unavailable") end
-    return questID == 200
-  end
   env.C_QuestLine = {
     ---@param questID number
     GetQuestLineInfo = function(questID)
       if questID == 300 then return nil end
+      if questID == 500 then error("Quest line data unavailable") end
       return { questLineID = 7, questLineName = "Quest line", questID = questID, isHidden = state.questLineHidden }
     end,
   }
@@ -414,12 +410,12 @@ local function TestQuestFlagsSampledForDialogQuests()
   gossipQuests, greetingCount = {}, 1
   SendEvent(runtime, "QUEST_GREETING")
 
-  for _, key in ipairs({ "IsBreadcrumbQuest", "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
+  for _, key in ipairs({ "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
     for _, questID in ipairs({ 100, 200, 400 }) do
       assert(#functions[key][questID] == 1, key .. " must be sampled for quest " .. questID)
     end
   end
-  assert(functions.IsBreadcrumbQuest[200][1].v == true, "Flags are recorded under the quest's own ID")
+  assert(functions["C_QuestLine.GetQuestLineInfo"][200][1].v.questID == 200, "Flags are recorded under the quest's own ID")
 end
 
 local function TestQuestFlagsNilAndFailedCalls()
@@ -431,8 +427,11 @@ local function TestQuestFlagsNilAndFailedCalls()
   local functions = Session(flags.runtime).functions
   local questLine = functions["C_QuestLine.GetQuestLineInfo"][300]
   assert(#questLine == 1 and questLine[1].v == nil, "A real nil return is recorded once")
-  assert(functions.IsBreadcrumbQuest == nil, "A failed call records nothing")
-  assert(functions["C_QuestInfoSystem.GetQuestClassification"][300][1].v == 7,
+
+  flags.dialogQuestID = 500
+  SendEvent(flags.runtime, "QUEST_DETAIL")
+  assert(functions["C_QuestLine.GetQuestLineInfo"][500] == nil, "A failed call records nothing")
+  assert(functions["C_QuestInfoSystem.GetQuestClassification"][500][1].v == 7,
     "A failing flag API does not block the others")
 end
 
@@ -476,7 +475,7 @@ local function TestQuestFlagsAbsentWithoutApis()
   local functions = Session(runtime).functions
   assert(functions.GetAvailableQuestInfo[1][1].v.n == 4, "Short greeting info tuples are still recorded raw")
   assert(functions.GetActiveQuestID == nil, "An absent GetActiveQuestID creates no stream")
-  for _, key in ipairs({ "IsBreadcrumbQuest", "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
+  for _, key in ipairs({ "C_QuestLine.GetQuestLineInfo", "C_QuestInfoSystem.GetQuestClassification" }) do
     assert(functions[key] == nil, key .. " must not be recorded when its API is absent")
   end
   assert(gossipReads == 0, "Without flag APIs the gossip list is not read for quest IDs")
@@ -3624,6 +3623,72 @@ local function TestQuestDialogRecordsMistsRewardCurrencies()
     "Slots past the count are read up to the maximum, as Blizzard's frame does")
   assert(functions.GetNumRewardCurrencies[1].v == 1 and functions.GetMaxRewardCurrencies[1].v == 2,
     "Both bounds are recorded")
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil, "Forever's API creates no stream on Mists")
+end
+
+---Runtime with Forever's reward currency APIs: GetQuestCurrencyID answers 0 for an
+---empty slot, GetQuestRewardCurrencyInfo a fresh table per call or nil. Slot 1
+---holds the currency.
+---@return TestRuntime runtime
+---@return { amount: number, bonus: number } reward
+local function ForeverRewardCurrencyRuntime()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestDialog.lua" })
+  local env = runtime.env
+  local reward = { amount = 3, bonus = 0 }
+  env.GetMaxRewardCurrencies = function() return 2 end
+  env.GetQuestCurrencyID = function(_, index) return index == 1 and 3402 or 0 end
+  env.C_QuestOffer = {
+    ---@param itemType string
+    ---@param index number
+    GetQuestRewardCurrencyInfo = function(itemType, index)
+      if itemType ~= "reward" or index ~= 1 then return nil end
+      return {
+        texture = 132996, name = "A Currency", currencyID = 3402, quality = 1, baseRewardAmount = reward.amount,
+        bonusRewardAmount = reward.bonus, totalRewardAmount = reward.amount + reward.bonus, questRewardContextFlags = 0,
+      }
+    end,
+  }
+  return runtime, reward
+end
+
+local function TestQuestDialogRecordsForeverRewardCurrencies()
+  local runtime, reward = ForeverRewardCurrencyRuntime()
+  runtime.core.StartCapture("reward currency amounts")
+  AdvanceTo(runtime, 2)
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local info = functions["C_QuestOffer.GetQuestRewardCurrencyInfo"].reward
+  assert(#info[1] == 1, "An identical (fresh) table is not re-appended by the delayed samples")
+  assert(runtime.core.DeepCompare(info[1][1].v, { currencyID = 3402, baseRewardAmount = 3, totalRewardAmount = 3 }),
+    "Only the currency ID and the amounts are stored")
+  assert(#info[2] == 1 and info[2][1].v == nil and info[3] == nil,
+    "An empty slot records nil once, and no slot past GetMaxRewardCurrencies is read")
+
+  reward.bonus = 2
+  SendEvent(runtime, "QUEST_COMPLETE")
+  assert(#info[1] == 2 and info[1][2].v.baseRewardAmount == 3 and info[1][2].v.totalRewardAmount == 5,
+    "A changed amount is appended")
+end
+
+local function TestQuestDialogSkipsFailedRewardCurrencies()
+  local runtime = ForeverRewardCurrencyRuntime()
+  runtime.env.C_QuestOffer.GetQuestRewardCurrencyInfo = function() error("No quest offer") end
+  runtime.core.StartCapture("failing reward currency")
+  SendEvent(runtime, "QUEST_DETAIL")
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil, "A failed call records nothing")
+  assert(functions.GetQuestCurrencyID.reward[1][1].v == 3402, "A failing API does not block the others")
+
+  -- Classic clients document the C_QuestOffer namespace without this function.
+  local classic = ForeverRewardCurrencyRuntime()
+  local lookups = 0
+  classic.env.C_QuestOffer = setmetatable({}, { __index = function() lookups = lookups + 1 end })
+  classic.core.StartCapture("no reward currency API")
+  SendEvent(classic, "QUEST_DETAIL")
+  functions = Session(classic).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestOffer.GetQuestRewardCurrencyInfo"] == nil and functions.GetQuestCurrencyID.reward[1][1].v == 3402,
+    "Without the API there is no stream, and the other currency streams stay")
+  assert(lookups == 1, "The API is looked for once per capture, not in every sample")
 end
 
 local function TestItemCountSnapshotAndChanges()
@@ -3703,6 +3768,134 @@ local function TestQuestLogExtrasStoredByQuestID()
   assert(functions["C_QuestLog.GetRequiredMoney"][100][1].v == -1, "Required money is the raw API value")
   local timers = functions["C_QuestLog.GetQuestTimers"]
   assert(#timers == 1 and next(timers[1].v) == nil, "No running timers is recorded once, across the delayed re-samples")
+end
+
+---@class LoggedQuestFixture
+---@field runtime TestRuntime
+---@field logged number[] Quest IDs the log lists, in log order
+---@field turnedIn table<number, boolean> Quests the log still lists, but the player is no longer on
+---@field dialogQuestID number Returned by GetQuestID
+---@field breadcrumbs table<number, boolean>
+---@field sequenced table<number, boolean>
+
+---Runtime with both quest trackers and the two flags that are only asked while
+---the player is on the quest. Like the Forever client, IsBreadcrumbQuest answers
+---false for every other quest; that IsQuestSequenced does too is an assumption.
+---@return LoggedQuestFixture
+local function LoggedQuestRuntime()
+  local runtime = NewRuntime({ "Modules/Trackers/QuestLog.lua", "Modules/Trackers/QuestDialog.lua" })
+  ---@type LoggedQuestFixture
+  local state = { runtime = runtime, logged = {}, turnedIn = {}, dialogQuestID = 0, breadcrumbs = {}, sequenced = {} }
+  local env = runtime.env
+  ---@param questID number
+  ---@return number? index
+  local function LogIndex(questID)
+    for index, loggedID in ipairs(state.logged) do
+      if loggedID == questID then return index end
+    end
+  end
+  ---@param questID number
+  local function IsOnQuest(questID) return LogIndex(questID) ~= nil and not state.turnedIn[questID] end
+  env.C_QuestLog = {
+    GetInfo = function(index)
+      if state.logged[index] then return { title = "A Quest", isHeader = false, questID = state.logged[index] } end
+    end,
+    GetLogIndexForQuestID = LogIndex,
+    IsOnQuest = IsOnQuest,
+  }
+  env.GetQuestID = function() return state.dialogQuestID end
+  env.C_QuestInfoSystem = { GetQuestClassification = function() return 7 end }
+  ---@param questID number
+  env.IsBreadcrumbQuest = function(questID) return IsOnQuest(questID) and state.breadcrumbs[questID] == true end
+  ---@param questID number
+  env.IsQuestSequenced = function(questID) return IsOnQuest(questID) and state.sequenced[questID] == true end
+  return state
+end
+
+local function TestQuestLogFlagsOnlyWhileOnQuest()
+  local state = LoggedQuestRuntime()
+  local runtime = state.runtime
+  state.logged, state.breadcrumbs, state.sequenced = { 100 }, { [100] = true, [200] = true }, { [200] = true }
+  runtime.core.StartCapture("logged quest flags")
+  AdvanceTo(runtime, 2)
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  assert(#functions.IsBreadcrumbQuest[100] == 1 and functions.IsBreadcrumbQuest[100][1].v == true,
+    "A quest already in the log at capture start has its breadcrumb flag")
+  assert(#functions.IsQuestSequenced[100] == 1 and functions.IsQuestSequenced[100][1].v == false,
+    "A quest that is not sequenced records false, once")
+
+  state.dialogQuestID = 200
+  SendEvent(runtime, "QUEST_DETAIL")
+  AdvanceTo(runtime, 4)
+  assert(functions["C_QuestInfoSystem.GetQuestClassification"][200] ~= nil, "The offered quest is sampled by QuestDialog")
+  assert(functions.IsBreadcrumbQuest[200] == nil and functions.IsQuestSequenced[200] == nil,
+    "An offered quest that is not in the log has no log flags")
+
+  state.logged, state.dialogQuestID = { 100, 200 }, 0
+  SendEvent(runtime, "QUEST_ACCEPTED", 200)
+  assert(functions.IsBreadcrumbQuest[200][1].v == true and functions.IsQuestSequenced[200][1].v == true,
+    "Accepting a quest records its log flags")
+
+  -- A turned-in quest: the log lists it for some more frames.
+  AdvanceTo(runtime, 6)
+  state.turnedIn = { [200] = true }
+  SendEvent(runtime, "UNIT_QUEST_LOG_CHANGED", "player")
+  local onQuest = functions["C_QuestLog.IsOnQuest"][200]
+  assert(onQuest[#onQuest].v == false and functions.QuestLog[#functions.QuestLog].v[2] == 200,
+    "The sample sees a listed quest the player is not on")
+  assert(#functions.IsBreadcrumbQuest[200] == 1 and #functions.IsQuestSequenced[200] == 1,
+    "A listed quest the player is no longer on is not asked")
+
+  AdvanceTo(runtime, 6.05)
+  state.logged = { 100 }
+  SendEvent(runtime, "QUEST_REMOVED", 200)
+  AdvanceTo(runtime, 8)
+  assert(functions.QuestLog[#functions.QuestLog].v[2] == nil, "The quest left the log")
+  assert(#functions.IsBreadcrumbQuest[200] == 1 and #functions.IsQuestSequenced[200] == 1,
+    "A quest that left the log is not asked by the probes after its removal")
+end
+
+local function TestQuestLogFlagsChangeOnly()
+  local state = LoggedQuestRuntime()
+  local runtime = state.runtime
+  state.logged, state.breadcrumbs = { 100, 200 }, { [200] = true }
+  runtime.core.StartCapture("logged quest flag changes")
+  AdvanceTo(runtime, 2)
+
+  state.breadcrumbs, state.sequenced = { [100] = true, [200] = true }, { [100] = true }
+  runtime.now = 10
+  SendEvent(runtime, "QUEST_LOG_UPDATE")
+  AdvanceTo(runtime, 12)
+
+  local functions = Session(runtime).functions --[[@as table<string, any>]]
+  local breadcrumb, sequenced = functions.IsBreadcrumbQuest[100], functions.IsQuestSequenced[100]
+  assert(#breadcrumb == 2 and breadcrumb[2].v == true and breadcrumb[2].t == 10, "A changed breadcrumb flag is appended once")
+  assert(#sequenced == 2 and sequenced[2].v == true and sequenced[2].t == 10, "A changed sequenced flag is appended once")
+  assert(#functions.IsBreadcrumbQuest[200] == 1 and #functions.IsQuestSequenced[200] == 1,
+    "Another quest's unchanged flags are not appended")
+end
+
+local function TestQuestLogFlagsFailedAndAbsentApis()
+  local state = LoggedQuestRuntime()
+  state.logged = { 100 }
+  state.runtime.env.IsBreadcrumbQuest = function() error("Breadcrumb data unavailable") end
+  state.runtime.core.StartCapture("failing flag")
+  AdvanceTo(state.runtime, 2)
+  local functions = Session(state.runtime).functions --[[@as table<string, any>]]
+  assert(functions.IsBreadcrumbQuest == nil, "A failed call records nothing")
+  assert(functions.IsQuestSequenced[100][1].v == false and functions["C_QuestLog.GetInfo"][100] ~= nil,
+    "A failing flag does not block the other quest APIs")
+
+  -- Classic clients have neither flag.
+  local classic = LoggedQuestRuntime()
+  classic.logged = { 100 }
+  classic.runtime.env.IsBreadcrumbQuest, classic.runtime.env.IsQuestSequenced = nil, nil
+  classic.runtime.core.StartCapture("no flags")
+  AdvanceTo(classic.runtime, 2)
+  functions = Session(classic.runtime).functions --[[@as table<string, any>]]
+  assert(functions["C_QuestLog.GetInfo"][100] ~= nil, "The quest itself is sampled")
+  assert(functions.IsBreadcrumbQuest == nil and functions.IsQuestSequenced == nil, "Absent APIs create no stream")
 end
 
 local function TestQuestLogDefersInitialSample()
@@ -4171,6 +4364,8 @@ local tests = {
   { name = "frame heartbeat records the first frame updates and gaps", run = TestFrameHeartbeatRecordsFirstFramesAndGaps },
   { name = "quest dialog records reward items per type and index", run = TestQuestDialogRecordsRewardItems },
   { name = "quest dialog records Mists reward currencies up to the maximum", run = TestQuestDialogRecordsMistsRewardCurrencies },
+  { name = "quest dialog records Forever reward currency amounts", run = TestQuestDialogRecordsForeverRewardCurrencies },
+  { name = "quest dialog skips failed and absent reward currency APIs", run = TestQuestDialogSkipsFailedRewardCurrencies },
   { name = "display records screen size and only allowlisted CVars", run = TestDisplayRecordsOnlyAllowlistedCVars },
   { name = "nameplates record only world creatures, change-only per token", run = TestNameplatesRecordOnlyWorldCreatures },
   { name = "restricted unit identity does not interrupt capture", run = TestRestrictedUnitIdentityDoesNotInterruptCapture },
@@ -4180,6 +4375,9 @@ local tests = {
   { name = "greeting close cancels delayed samples", run = TestGreetingClose },
   { name = "greeting capture restart resets probes", run = TestGreetingRestart },
   { name = "greeting records quest ids per index", run = TestGreetingQuestIDs },
+  { name = "quest log flags are recorded only while on the quest", run = TestQuestLogFlagsOnlyWhileOnQuest },
+  { name = "quest log flags append only on change", run = TestQuestLogFlagsChangeOnly },
+  { name = "quest log flags skip failed and absent APIs", run = TestQuestLogFlagsFailedAndAbsentApis },
   { name = "quest flags sampled for detail, gossip and greeting quests", run = TestQuestFlagsSampledForDialogQuests },
   { name = "quest flags record real nil once and skip failed calls", run = TestQuestFlagsNilAndFailedCalls },
   { name = "quest flags append only on change, including tables", run = TestQuestFlagsChangeOnly },

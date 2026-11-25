@@ -426,7 +426,8 @@ Called with a quest ID as the argument.
 | `GetNumQuestLogRewards` | scalar number/nil | Reward count |
 | `GetQuestLogRewardMoney` | scalar number/nil | Reward money |
 | `GetQuestTagInfo` | tuple (n varies) | Tag info |
-| `IsBreadcrumbQuest` | scalar boolean | Forever only; undocumented, called with the quest ID |
+| `IsBreadcrumbQuest` | scalar boolean | Forever only, undocumented; only while on the quest since schema 22, see SCHEMA_SPEC for older readings |
+| `IsQuestSequenced` | scalar boolean | Forever only, undocumented; only while on the quest |
 | `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | Forever only; questLineName/questName raw, other fields raw; includes hidden quest lines |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar number | Forever only; `Enum.QuestClassification` |
 
@@ -452,6 +453,12 @@ Called with a quest ID as the argument.
 | `UnitGUID` | scalar string or nil | GUID; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
 | `UnitGUIDIsSecret` | scalar boolean | Synthetic: whether `UnitGUID(token)` returned a secret value; also for nameplate tokens |
+
+### Parameterized by item GUID (string)
+
+| Function key | Return type | Description |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar number | Forever only; item ID of an `Item-` GUID in `UnitGUID`, such as the item that starts a quest |
 
 ### Parameterized by loot slot index (number)
 
