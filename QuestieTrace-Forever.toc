@@ -61,6 +61,7 @@ Modules/Trackers/UnitInteraction.lua
 Modules/Trackers/GameObject.lua
 Modules/Trackers/UnitState.lua
 Modules/Trackers/GroupState.lua
+Modules/Trackers/GhostState.lua
 Modules/Trackers/SkillLines.lua
 Modules/Trackers/SpellBook.lua
 Modules/Trackers/ResetTime.lua

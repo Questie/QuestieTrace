@@ -81,6 +81,7 @@ Modules/                  - Core modules and tracking systems
         UnitInteraction.lua    - Unit interaction and nameplate unit tracking
         UnitState.lua          - Unit state (level/classification/reaction) tracking
         GroupState.lua         - Group/raid state tracking
+        GhostState.lua         - Whether the player is a ghost
         SkillLines.lua         - Skill lines tracking
         SpellBook.lua          - Spell book tracking
         ResetTime.lua          - Daily/weekly reset and realm calendar time tracking
