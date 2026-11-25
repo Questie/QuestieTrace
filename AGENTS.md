@@ -90,6 +90,7 @@ Modules/                  - Core modules and tracking systems
         Display.lua            - Screen size, UI scale and allowlisted UI CVars
         PlayerProgress.lua     - Experience, rested bonus and money
         ItemInfo.lua           - When item data an addon asked for arrives
+        TrainerServices.lua    - What trainers teach (spells, recipes, requirements)
         FrameHeartbeat.lua     - Addon frame updates at login and after gaps
     Dumps/                - Data dump providers
         MapHierarchy.lua   - C_Map hierarchy data dump

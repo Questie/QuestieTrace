@@ -245,6 +245,7 @@ successful observed returns.
 | PlayerProgress | `Trackers/PlayerProgress.lua` | `UnitXP["player"]`, `UnitXPMax["player"]`, `GetXPExhaustion`, `GetMoney` | Init + event-driven | `PLAYER_ENTERING_WORLD`, `PLAYER_XP_UPDATE`, `PLAYER_LEVEL_UP`, `UPDATE_EXHAUSTION`, `PLAYER_MONEY` |
 | ItemInfo | `Trackers/ItemInfo.lua` | `C_Item.IsItemDataCachedByID[itemID]` for items an addon asked about while uncached | `hooksecurefunc` post-hook on item data requests + private triggers | None; `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` are private triggers and are not recorded |
 | Merchant | `Trackers/Merchant.lua` | `GetMerchantNumItems`, `GetMerchantFilter`, and per slot `GetMerchantItemInfo[index]`, `C_MerchantFrame.GetItemInfo[index]`, `GetMerchantItemLink[index]`, `GetMerchantItemID[index]` | Event + window lifecycle + private update trigger | `MERCHANT_SHOW`, `MERCHANT_CLOSED`; `MERCHANT_UPDATE`, `MERCHANT_FILTER_ITEM_UPDATE`, `ITEM_DATA_LOAD_RESULT` and `GET_ITEM_INFO_RECEIVED` are private triggers and are not recorded |
+| TrainerServices | `Trackers/TrainerServices.lua` | `TrainerServices[npcID][service]` (synthetic), `C_Trainer.GetTrainerType` or `IsTradeskillTrainer`, `GetTrainerServiceTypeFilter[type]` | Event + window lifecycle + private update trigger | `TRAINER_SHOW`, `TRAINER_CLOSED`; `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE` are private triggers and are not recorded |
 | FrameHeartbeat | `Trackers/FrameHeartbeat.lua` | None; writes `session.frameUpdates` | `OnUpdate` while capturing | None |
 | GameObject | `Trackers/GameObject.lua` | `GameObjectName`, `GameObjectGUID` (synthetic) | TooltipDataProcessor callback (Modern/Forever only) | None (uses `TooltipDataProcessor.AddTooltipPostCall`) |
 
@@ -491,7 +492,19 @@ Which event reports arriving data depends on the client. In game, opening a vend
 
 ---
 
-## 20) Change detection
+## 20) TrainerServices tracker behavior
+
+`TrainerServices[npcID][service]` is what a trainer teaches, one change-only stream per service. The value holds `name`, `rank` (the text behind the name), `type` (`"available"`, `"unavailable"` or `"used"` for this player), `level` (required), `cost` (copper, or training points for pet skills on Forever), `skill` and `skillRank` (required skill), and `spellID` or `itemID` where the client tells: on Forever what the service's tooltip shows (`C_TooltipInfo.GetTrainerService`), elsewhere the item ID in `GetTrainerServiceItemLink`, if it has one. Headers of the Classic list are left out.
+
+The service key is the name and the required level (`"Fireball:6"`), not the list index, which names another service at the next trainer and after something was learned, and not the rank, which can arrive after the name. Of two services with one key only the first is recorded. `npcID` is the ID in `UnitGUID("npc")` when the sample is taken; without a world NPC (hunters train their pet in the same window) nothing is recorded.
+
+The kind of trainer is `C_Trainer.GetTrainerType` on Forever and `IsTradeskillTrainer` elsewhere, and the player's list filters are `GetTrainerServiceTypeFilter[type]`. A service that a filter or a collapsed Classic header hides is not in the list and so not recorded; what was recorded before stays. The tracker only reads and changes nothing in the window.
+
+`TRAINER_SHOW` and, on a private frame, `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE`, which Blizzard's trainer window redraws on, schedule one sample 0.1 seconds later; further events until then share it. Closing the window or stopping the capture drops it. A sample reads every service; its ID only until the client has it, since a tooltip is costly to build. With 100 services and nothing changed, a sample took 0.3 ms in desktop Lua 5.1 without the client's own calls.
+
+---
+
+## 21) Change detection
 
 Trackers only append entries when values change. The comparison method
 depends on the value type:

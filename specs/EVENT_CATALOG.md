@@ -172,8 +172,8 @@ recorded as `C_Item.GetItemIDByGUID[itemGUID]` on clients that have that API
   each client fires them for was not checked in a client.
 - `MERCHANT_SHOW` *(also Merchant)*
 - `MERCHANT_CLOSED` *(also Merchant)*
-- `TRAINER_SHOW`
-- `TRAINER_CLOSED`
+- `TRAINER_SHOW` *(also TrainerServices)*
+- `TRAINER_CLOSED` *(also TrainerServices)*
 - `MAIL_SHOW`
 - `MAIL_CLOSED` *(never seen on any client; `PLAYER_INTERACTION_MANAGER_FRAME_HIDE(17)` tells instead)*
 - `AUCTION_HOUSE_SHOW`
@@ -353,6 +353,15 @@ Samples the open merchant's slots; see TRACKER_SPEC section 19.
   recorded)* -- the same, registered only while an item of the open window is
   missing, and only for that item.
 
+### TrainerServices tracker
+
+Samples the open trainer's services; see TRACKER_SPEC section 20.
+
+- `TRAINER_SHOW`
+- `TRAINER_CLOSED`
+- `TRAINER_UPDATE`, `TRAINER_SERVICE_INFO_NAME_UPDATE` *(private triggers, not
+  recorded)* -- sample an open window again when its list changes.
+
 ### FrameHeartbeat tracker
 
 No events. An `OnUpdate` frame, shown only while capturing, writes
@@ -478,9 +487,10 @@ dropped and never recorded or dispatched to trackers.
   never recorded in the main event stream: Position's movement transitions
   (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), ItemCount's
   `BAG_UPDATE_DELAYED`, Display's `CVAR_UPDATE`, ItemInfo's
-  `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`, and Merchant's
+  `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`, Merchant's
   `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE`, plus, while an item of
-  the open window is missing, the two item data events.
+  the open window is missing, the two item data events, and TrainerServices'
+  `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE`.
 - `LOOT_OPENED` and `LOOT_READY` are different events. The Loot tracker
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).

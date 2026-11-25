@@ -406,6 +406,8 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `GetNumRewardCurrencies` | scalar (number) | QuestDialog; reward currency count, on clients that have it (Mists). Schema 15+ |
 | `GetMaxRewardCurrencies` | scalar (number) | QuestDialog; reward currency slots Mists' quest frame reads, on clients that have it. Schema 15+ |
 | `C_QuestLog.GetQuestTimers` | object (QuestTimerInfo[]) | QuestLog; raw table, empty when no timer runs. A running timer appends on every quest-log sample. Schema 15+ |
+| `C_Trainer.GetTrainerType` | scalar (number) | TrainerServices; `Enum.TrainerType` of the open trainer (0 general, 2 tradeskills, 3 pet). Only present when the API exists (Forever). Schema 22+ |
+| `IsTradeskillTrainer` | scalar (boolean) | TrainerServices; only present without `C_Trainer.GetTrainerType`. Schema 22+ |
 | `GetPhysicalScreenSize` | tuple (n=2) | Display; width, height in pixels. Schema 15+ |
 | `UIParent:GetScale` | scalar (number) | Display; `UIParent:GetScale()` method call. Schema 15+ |
 | `GetScreenWidth` | scalar (number) | Display; UIParent units. Schema 15+ |
@@ -553,6 +555,18 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 | `GetSpellBookItemName` | tuple (n varies) | observed spellbook name API return; not on Forever (schema 22+) |
 | `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info API return; not on Forever (schema 22+) |
 | `IsPassiveSpell` | scalar (number/nil) | observed passive marker return; not on Forever (schema 22+) |
+
+### Parameterized by trainer service type (`"available"`, `"unavailable"`, `"used"`)
+
+| Function key | Return type | Notes |
+|---|---|---|
+| `GetTrainerServiceTypeFilter` | scalar (boolean) | TrainerServices; whether the open trainer's list shows services of that type. Schema 22+ |
+
+### Nested parameterized by NPC ID and service
+
+| Function key | Shape | Return type | Notes |
+|---|---|---|---|
+| `TrainerServices` | `[npcID][service]` | object (TrainerService) | *(synthetic)* a service the trainer taught, keyed by name and required level (`"Fireball:6"`); see TRACKER_SPEC section 20. Entries are not removed when a service leaves the list. Schema 22+ |
 
 ### Parameterized by map ID (number)
 

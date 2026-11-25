@@ -504,7 +504,7 @@ Called with a quest ID as the argument.
 
 ## 10) Synthetic functions
 
-Three function keys are **not** direct WoW API names. They are computed by
+Four function keys are **not** direct WoW API names. They are computed by
 the capture system but stored identically to other streams:
 
 | Function key | Value type | Description |
@@ -512,8 +512,9 @@ the capture system but stored identically to other streams:
 | `QuestLog` | object (number[]) | Array of quest IDs currently in the player's quest log. Computed internally during capture from `C_QuestLog.GetInfo`, or the legacy `GetQuestLogTitle` where that is not recorded (this internal lookup is not itself recorded to the trace). |
 | `FactionOrder` | object (number[]) | Ordered array of faction IDs as displayed in the reputation panel. Computed internally during capture from whichever of `C_Reputation.GetFactionDataByIndex`/`GetNumFactions` or the legacy `GetFactionInfo`/`GetNumFactions` globals exist, expanding headers as needed (not itself recorded to the trace). |
 | `SpellBook` | object (number[]) | Ordered unique spell IDs discovered by enumerating spellbook slots. |
+| `TrainerServices` | object | What a trainer teaches, nested by NPC ID and service: `functions["TrainerServices"][331]["Fireball:6"]`. The value has `name`, `rank`, `type`, `level`, `cost`, `skill`, `skillRank`, `spellID` and `itemID`; those the client has no answer for are missing. |
 
-These are read like any parameterless function:
+The first three are read like any parameterless function:
 
 ```lua
 local questIDs = valueAt(getStream(session, "QuestLog"), target_t)

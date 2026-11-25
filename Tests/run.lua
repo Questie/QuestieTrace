@@ -2854,6 +2854,53 @@ local function TestMerchantEmptyVendor()
     "No item streams should exist for empty vendor")
 end
 
+local function TestTrainerServicesRecordedPerNpc()
+  local runtime = NewRuntime({ "Modules/Trackers/TrainerServices.lua" })
+  local env = runtime.env
+  local guid, serviceType = "Creature-0-4621-1-167-331-000036BB3E", "available"
+  env.UnitGUID = function(token) if token == "npc" then return guid end end
+  env.UnitExists = function(token) return token == "npc" end
+  env.UnitIsPlayer = function() return guid:find("^Player") ~= nil end
+  env.UnitPlayerControlled = env.UnitIsPlayer
+  env.IsTradeskillTrainer = function() return false end
+  env.GetNumTrainerServices = function() return 1 end
+  env.GetTrainerServiceInfo = function() return "Fireball", "Rank 2", serviceType, false end
+  env.GetTrainerServiceLevelReq = function() return 6 end
+  env.GetTrainerServiceCost = function() return 100, false end
+  env.GetTrainerServiceSkillReq = function() return nil, 0, true end
+  env.GetTrainerServiceItemLink = function() return nil end
+  env.GetTrainerServiceTypeFilter = function() return true end
+
+  runtime.core.StartCapture("trainer services")
+  SendEvent(runtime, "TRAINER_SHOW")
+  AdvanceTo(runtime, 1)
+  serviceType = "used"
+  SendEvent(runtime, "TRAINER_UPDATE")
+  SendEvent(runtime, "TRAINER_SERVICE_INFO_NAME_UPDATE")
+  AdvanceTo(runtime, 2)
+
+  local session = Session(runtime)
+  local streams = session.functions.TrainerServices --[[@as table<number, table<string, FunctionStreamEntry[]>>]]
+  local fireball = streams[331]["Fireball:6"]
+  assert(#fireball == 2 and fireball[1].v.type == "available" and fireball[2].v.type == "used",
+    "Services are recorded when the window opens and on updates")
+  assert(#session.events == 1 and session.events[1].e == "TRAINER_SHOW", "Trainer updates are never recorded")
+
+  -- Privacy: a player behind the npc token is not recorded.
+  guid = "Player-4618-0053656F"
+  serviceType = "unavailable"
+  SendEvent(runtime, "TRAINER_SHOW")
+  AdvanceTo(runtime, 3)
+  for npcID in pairs(streams) do assert(npcID == 331, "Only NPC IDs are keys") end
+  assert(#fireball == 2, "A player's window adds nothing")
+
+  guid = "Creature-0-4621-1-167-331-000036BB3E"
+  SendEvent(runtime, "TRAINER_UPDATE")
+  runtime.core.StopCapture()
+  AdvanceTo(runtime, 4)
+  assert(#fireball == 2, "A pending sample is dropped when the capture stops")
+end
+
 local function TestMerchantUpdatesArePrivateTriggers()
   local runtime = NewRuntime({ "Modules/Trackers/Merchant.lua" })
   local link, reads = nil, 0
@@ -4639,6 +4686,7 @@ local tests = {
   { name = "Merchant close probes known indices", run = TestMerchantCloseProbesKnownIndices },
   { name = "Merchant records changed items", run = TestMerchantRecordsChangedItems },
   { name = "Merchant empty vendor", run = TestMerchantEmptyVendor },
+  { name = "Trainer services recorded per NPC", run = TestTrainerServicesRecordedPerNpc },
   { name = "Merchant updates are private triggers", run = TestMerchantUpdatesArePrivateTriggers },
   { name = "quest poi tracker records quest log pois", run = TestQuestPOTracker },
   { name = "quest poi tracker handles QUEST_POI_UPDATE", run = TestQuestPOTrackerQuestPOIUpdate },
