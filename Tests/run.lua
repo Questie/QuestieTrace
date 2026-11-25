@@ -3771,9 +3771,10 @@ function tooltipLine.QuestObjective(text)
 end
 
 ---@param name string
+---@param hasGUID boolean? false for a line without the player's GUID
 ---@return table<string, any>
-function tooltipLine.QuestPlayer(name)
-  return tooltipLine.Any({ type = 18, leftText = name, guid = "Player-1-" .. name })
+function tooltipLine.QuestPlayer(name, hasGUID)
+  return tooltipLine.Any({ type = 18, leftText = name, guid = hasGUID ~= false and "Player-1-" .. name or nil })
 end
 
 ---@class TooltipTestRuntime : TestRuntime
@@ -3801,7 +3802,10 @@ local function NewTooltipRuntime()
   env.UnitExists = function(token) return token == "mouseover" and mouseoverGUID ~= nil end
   env.UnitIsPlayer = function() return false end
   env.UnitPlayerControlled = function() return false end
-  env.UnitGUID = function(token) if token == "mouseover" then return mouseoverGUID end end
+  env.UnitGUID = function(token)
+    if token == "mouseover" then return mouseoverGUID end
+    if token == "player" then return "Player-1-Cruxdruid" end
+  end
 
   -- The tooltip itself is passed as nil: a tracker that touches it fails the test.
   function runtime.HoverUnit(guid, ...)
@@ -3941,34 +3945,74 @@ function tooltipQuestTests.TooltipQuestObjectivesOfPartyMembersAreNeverRecorded(
   local runtime = NewTooltipRuntime()
   runtime.core.StartCapture("party members' tooltip lines")
   local lines = {
-    -- In a group the player's own progress is below a name as well.
+    -- In a group the client lists every member below a name, the player too, first or not.
     tooltipLine.QuestTitle(747),
     tooltipLine.QuestPlayer("Cruxdruid"),
-    tooltipLine.QuestObjective("1/7 Grouped own progress"),
+    tooltipLine.QuestObjective("1/7 Own progress"),
+    tooltipLine.QuestObjective("1/7 Own progress, next objective"),
     tooltipLine.QuestPlayer("Bobmember"),
     tooltipLine.QuestObjective("2/7 Grouped member progress"),
     tooltipLine.QuestObjective("3/7 Grouped member progress, next objective"),
+    tooltipLine.QuestTitle(4402),
+    tooltipLine.QuestPlayer("Bobmember"),
+    tooltipLine.QuestObjective("2/7 Grouped member progress of another quest"),
+    tooltipLine.QuestPlayer("Cruxdruid"),
+    tooltipLine.QuestObjective("1/7 Own progress of another quest"),
+    -- Only a member's progress is listed.
+    tooltipLine.QuestTitle(97279),
+    tooltipLine.QuestPlayer("Bobmember"),
+    tooltipLine.QuestObjective("2/7 Grouped member progress alone"),
     -- The next quest is the player's alone again.
     tooltipLine.QuestTitle(844),
     tooltipLine.QuestObjective("4/7 Own progress"),
     tooltipLine.QuestPlayer("Bobmember"),
     tooltipLine.QuestObjective("5/7 Member progress below own"),
+    -- Without a GUID, a name is nobody's the recording knows.
+    tooltipLine.QuestPlayer("Cruxdruid", false),
+    tooltipLine.QuestObjective("5/7 Progress below a name without a GUID"),
     -- A name in a line of another type (Forever sends several lines without their own type) is no different.
     tooltipLine.QuestTitle(845),
     tooltipLine.Any({ type = 0, leftText = "Bobmember" }),
     tooltipLine.QuestObjective("6/7 Member progress below an untyped name"),
+    tooltipLine.QuestPlayer("Cruxdruid"),
+    tooltipLine.QuestObjective("6/7 Progress below an untyped name and the player's"),
+    tooltipLine.QuestTitle(98321),
+    tooltipLine.Any({ type = 0, leftText = "Cruxdruid", guid = "Player-1-Cruxdruid" }),
+    tooltipLine.QuestObjective("6/7 Progress below the player in a line of another type"),
     -- A quest only a member has, should the client list it without the member's name.
     tooltipLine.QuestTitle(999),
     tooltipLine.QuestObjective("7/7 Progress of a member alone"),
+    tooltipLine.QuestPlayer("Cruxdruid"),
+    tooltipLine.QuestObjective("7/7 Quest the player is not alone on"),
   }
   runtime.HoverUnit(PLAINSTRIDER, unpack(lines))
   runtime.HoverObject("Plainstrider Nest", nil, unpack(lines))
 
-  AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 844, "4/7 Own progress" } })
-  AssertObjectQuestObjectives(runtime, { { "Plainstrider Nest", "", 844, "4/7 Own progress" } })
+  AssertUnitQuestObjectives(runtime, {
+    { PLAINSTRIDER, 747, "1/7 Own progress" },
+    { PLAINSTRIDER, 747, "1/7 Own progress, next objective" },
+    { PLAINSTRIDER, 4402, "1/7 Own progress of another quest" },
+    { PLAINSTRIDER, 844, "4/7 Own progress" },
+  })
+  AssertObjectQuestObjectives(runtime, {
+    { "Plainstrider Nest", "", 747, "1/7 Own progress" },
+    { "Plainstrider Nest", "", 747, "1/7 Own progress, next objective" },
+    { "Plainstrider Nest", "", 4402, "1/7 Own progress of another quest" },
+    { "Plainstrider Nest", "", 844, "4/7 Own progress" },
+  })
   for _, text in ipairs({ "Cruxdruid", "Bobmember", "Player-1", "Grouped", "below", "alone" }) do
     assert(not ContainsString(Session(runtime), text), "the session must not contain " .. text)
   end
+end
+
+function tooltipQuestTests.TooltipQuestObjectivesBelowAHiddenPlayerAreNeverRecorded()
+  local runtime = NewTooltipRuntime()
+  runtime.env.issecretvalue = function(value) return value == "Player-1-Cruxdruid" end
+  runtime.core.StartCapture("hidden tooltip player")
+  runtime.HoverUnit(PLAINSTRIDER, tooltipLine.QuestTitle(747), tooltipLine.QuestPlayer("Cruxdruid"),
+    tooltipLine.QuestObjective("1/7 Progress of a hidden player"))
+
+  AssertUnitQuestObjectives(runtime, {})
 end
 
 function tooltipQuestTests.TooltipQuestObjectivesRedactPlayerNames()
@@ -4281,6 +4325,7 @@ local tests = {
   { name = "should record a quest objective once per npc, whatever its progress or spawn", run = tooltipQuestTests.UnitTooltipQuestObjectivesAreRecordedOncePerNpc },
   { name = "should record tooltip quest objectives again in the next capture", run = tooltipQuestTests.TooltipQuestObjectivesAreRecordedAgainInTheNextCapture },
   { name = "should never record party members' tooltip quest progress", run = tooltipQuestTests.TooltipQuestObjectivesOfPartyMembersAreNeverRecorded },
+  { name = "should never record tooltip quest progress below a hidden player", run = tooltipQuestTests.TooltipQuestObjectivesBelowAHiddenPlayerAreNeverRecorded },
   { name = "should redact player names in tooltip quest objectives", run = tooltipQuestTests.TooltipQuestObjectivesRedactPlayerNames },
   { name = "should skip unreadable tooltip quest lines", run = tooltipQuestTests.TooltipQuestObjectivesSkipUnreadableLines },
   { name = "should skip tooltip quest objectives without a quest or a text", run = tooltipQuestTests.TooltipQuestObjectivesNeedAQuestAndAText },

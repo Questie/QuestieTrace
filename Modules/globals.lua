@@ -363,16 +363,24 @@ local function GetOrCreate(parent, key)
   return child
 end
 
+---@param guid any
+---@return boolean
+local function IsPlayersGUID(guid)
+  local readableGUID = Readable(guid, "string")
+  return readableGUID ~= nil and readableGUID == Readable(UnitGUID("player"), "string")
+end
+
 --- Create a reader for the quest objectives the client itself lists in NPC and object
 --- tooltips (Forever): a QuestTitle line with the quest ID, directly followed by the
 --- QuestObjective lines. `record` is called once per NPC or object, quest and objective.
 --- Progress ("3/8") makes no new objective and another spawn no new NPC, so hovering the
 --- same kind of NPC again records nothing.
 ---
---- Privacy: in a group the client lists each member's progress below a QuestPlayer line
---- with that member's name. Any line that is not a quest objective ends the quest here, so
---- no name is read and no progress below one is taken for the player's, whatever the type
---- of the line with the name. Quests that are not in the player's log are skipped.
+--- Privacy: in a group the client lists the progress of every member, the player included,
+--- below a QuestPlayer line with that member's name and GUID. Only what follows the player's
+--- own line is read: the GUID is compared and not kept, and no name is read. Any other line
+--- that is not a quest objective ends the quest, so no progress below a name is taken for the
+--- player's, whatever the type of the line. Quests that are not in the player's log are skipped.
 ---@param record fun(questID: number, objective: string, guid: string, objectName: string?)
 ---@return (fun(lines: TooltipDataLine[]?, guid: string, objectName: string?))? read nil on clients without these line types
 function Core.CreateTooltipQuestReader(record)
@@ -388,7 +396,9 @@ function Core.CreateTooltipQuestReader(record)
     local entity = guid:match("^%a+%-%d+%-%d+%-%d+%-%d+%-(%d+)%-") or objectName
     if (not entity) or (not lines) then return end
 
-    ---@type number?
+    ---@type number? The quest of the last title, if the player is on it
+    local titleQuestID
+    ---@type number? The quest the next objectives are the player's of
     local questID
     for _, line in ipairs(lines) do
       local lineType = Readable(line.type, "number")
@@ -404,9 +414,13 @@ function Core.CreateTooltipQuestReader(record)
         end
       elseif lineType == lineTypes.QuestTitle then
         local id = Readable(line.id, "number")
-        questID = id and C_QuestLog.IsOnQuest(id) and id or nil
+        titleQuestID = id and C_QuestLog.IsOnQuest(id) and id or nil
+        questID = titleQuestID
       else
-        questID = nil
+        local isOwnLine = lineType ~= nil and lineType == lineTypes.QuestPlayer and IsPlayersGUID(line.guid)
+        questID = isOwnLine and titleQuestID or nil
+        -- A name in a line of another type: nothing below it is certain any more.
+        if not isOwnLine and lineType ~= lineTypes.QuestPlayer then titleQuestID = nil end
       end
     end
   end
