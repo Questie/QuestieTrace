@@ -621,6 +621,11 @@ mod tests {
             "Kanonier",
             "exactly the minimum of both"
         );
+        assert_eq!(
+            newest_name_of(&[("Kanonier", 8), ("Kanonierin", 4)]),
+            "Kanonierin",
+            "enough of a share, too few sessions"
+        );
         // A weak variant of a strong newest name is not considered, however short.
         assert_eq!(newest_name_of(&[("Kanonier", 4), ("Kanonierin", 40)]), "Kanonierin");
     }
@@ -657,6 +662,20 @@ mod tests {
     #[test]
     fn agreement_picks_the_value_of_the_most_sessions_not_the_newest() {
         assert_eq!(seen_in_sessions(&[("Tailor", 3), ("Leatherworker", 1)]).aggregate_agreed()[&1], "Tailor");
+    }
+
+    /// Not in the TS tests: sessions decide, not how often one session observed a value.
+    #[test]
+    fn agreement_counts_sessions_not_observations() {
+        let mut sessions = Sessions::default();
+        let mut summary = ScalarSummary::default();
+        let one = sessions.add(Some(100.0));
+        summary.add((0..10).map(|t| obs(1, "Leatherworker", Confidence::High, f64::from(t), one)), &sessions);
+        for time in [200.0, 300.0, 400.0] {
+            let session = sessions.add(Some(time));
+            summary.add([obs(1, "Tailor", Confidence::High, 1.0, session)], &sessions);
+        }
+        assert_eq!(summary.aggregate_agreed()[&1], "Tailor");
     }
 
     #[test]
