@@ -286,15 +286,64 @@ describe("TrainerServices tracker", function()
     it("should append one entry for a service that changed", function()
       Open(MAGE_TRAINER, { Fireball(), Polymorph() })
       AdvanceTo(1)
+      services[2].type = "available"
+      FirePrivate("TRAINER_UPDATE")
+      AdvanceTo(2)
+
+      assert.are.same({ 1, 2 }, { #Streams(331)["Fireball:6"], #Streams(331)["Polymorph:8"] })
+      assert.are.same(
+        { name = "Polymorph", type = "available", level = 8, cost = 200, spellID = 118 },
+        Streams(331)["Polymorph:8"][2].v
+      )
+    end)
+
+    -- In game, 47 of 49 known services of a trainer had level 0, 23 of them with the name of another.
+    it("should record every rank of a spell the player knows, without the level the client gives", function()
+      Visit(MAGE_TRAINER, {
+        { name = "Fireball", rank = "Rank 1", type = "used", level = 0, cost = 10, spellID = 133 },
+        { name = "Fireball", rank = "Rank 2", type = "used", level = 0, cost = 100, spellID = 143 },
+        { name = "Fireball", rank = "Rank 3", type = "unavailable", level = 12, cost = 300, spellID = 145 },
+        { name = "Conjure Water", rank = "", type = "used", level = 0, cost = 20, spellID = 5504 },
+        -- A few known services do have their level.
+        { name = "Frost Armor", rank = "Rank 2", type = "used", level = 10, cost = 400, spellID = 7300 },
+      })
+
+      local values = {}
+      for key, stream in pairs(Streams(331)) do
+        assert.are.equal(1, #stream)
+        values[key] = stream[1].v
+      end
+      assert.are.same({
+        ["Fireball:0:Rank 1"] = { name = "Fireball", rank = "Rank 1", type = "used", cost = 10, spellID = 133 },
+        ["Fireball:0:Rank 2"] = { name = "Fireball", rank = "Rank 2", type = "used", cost = 100, spellID = 143 },
+        ["Fireball:12"] = { name = "Fireball", rank = "Rank 3", type = "unavailable", level = 12, cost = 300, spellID = 145 },
+        ["Conjure Water:0"] = { name = "Conjure Water", type = "used", cost = 20, spellID = 5504 },
+        ["Frost Armor:10"] = { name = "Frost Armor", rank = "Rank 2", type = "used", level = 10, cost = 400, spellID = 7300 },
+      }, values)
+    end)
+
+    it("should keep what it recorded of a spell when the player learns it", function()
+      Open(MAGE_TRAINER, { Fireball() })
+      AdvanceTo(1)
+      services[1].type, services[1].level = "used", 0
+      FirePrivate("TRAINER_UPDATE")
+      AdvanceTo(2)
+
+      assert.are.same({ 1, 6 }, { #Streams(331)["Fireball:6"], Streams(331)["Fireball:6"][1].v.level })
+      assert.are.equal("used", Streams(331)["Fireball:0:Rank 2"][1].v.type)
+    end)
+
+    it("should continue a recipe's entries when the player learns it", function()
+      Open(COOKING_TRAINER, { HerbBakedEgg() })
+      AdvanceTo(1)
       services[1].type = "used"
       FirePrivate("TRAINER_UPDATE")
       AdvanceTo(2)
 
-      assert.are.same({ 1, 2 }, { #Streams(331)["Polymorph:8"], #Streams(331)["Fireball:6"] })
-      assert.are.same(
-        { name = "Fireball", rank = "Rank 2", type = "used", level = 6, cost = 100, spellID = 143 },
-        Streams(331)["Fireball:6"][2].v
-      )
+      local egg = Streams(1355)["Herb Baked Egg:0"]
+      assert.are.same({ "unavailable", "used" }, { egg[1].v.type, egg[2].v.type })
+      assert.are.same({ 0, 6888, 6888 }, { egg[1].v.level, egg[1].v.itemID, egg[2].v.itemID })
+      assert.is_nil(egg[2].v.level)
     end)
 
     it("should record services that appear after the window opened", function()

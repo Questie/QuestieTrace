@@ -581,7 +581,7 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 
 | Function key | Shape | Return type | Notes |
 |---|---|---|---|
-| `TrainerServices` | `[npcID][service]` | object (TrainerService) | *(synthetic)* a service the trainer taught, keyed by name and required level (`"Fireball:6"`); see TRACKER_SPEC section 20. Entries are not removed when a service leaves the list. Schema 22+ |
+| `TrainerServices` | `[npcID][service]` | object (TrainerService) | *(synthetic)* a service the trainer taught, keyed by name and required level (`"Fireball:6"`), on Forever by name, 0 and rank for a service the player knows (`"Fireball:0:Rank 2"`); see TRACKER_SPEC section 20. Entries are not removed when a service leaves the list. Schema 22+ |
 
 ### Parameterized by map ID (number)
 

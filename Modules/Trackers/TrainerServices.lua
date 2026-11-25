@@ -20,6 +20,8 @@ local C_After = C_Timer.After
 --   What a trainer teaches. The service key is its name and required level
 --   ("Fireball:6"): the list index names another service at the next trainer
 --   and after something was learned, and the rank text can arrive late.
+--   Forever has no level for services the player knows, so there the rank
+--   tells them apart ("Fireball:0:Rank 2").
 --   Change-only, so the same trainer visited again adds only what changed.
 ---------------------------------------------------------------------------
 
@@ -27,7 +29,7 @@ local C_After = C_Timer.After
 ---@field name string
 ---@field rank string? The text behind the name, e.g. "Rank 2"
 ---@field type string? "available", "unavailable" or "used", for this player
----@field level number? Required level
+---@field level number? Required level; Forever has none for services the player knows
 ---@field cost number Copper; training points for pet skills on Forever
 ---@field skill string? Name of the required skill
 ---@field skillRank number? Required rank of that skill
@@ -88,6 +90,8 @@ end
 local function ReadServiceInfo(index)
   if getTrainerType then
     local name, serviceType, _, level, rank = GetTrainerServiceInfo(index)
+    -- The client answers 0 for a service the player knows, whatever it requires.
+    if serviceType == "used" and level == 0 then level = nil end
     return name, rank, serviceType, level
   end
   local name, rank, serviceType = GetTrainerServiceInfo(index)
@@ -150,6 +154,15 @@ local function AppendService(streams, key, index, service, t, tp)
   AppendIfChanged(stream, t, tp, service)
 end
 
+---@param service TrainerService
+---@return string
+local function GetServiceKey(service)
+  local key = ("%s:%s"):format(service.name, tostring(service.level or 0))
+  -- The ranks of a known spell are all without a level. Its rank text is there, as the player has the spell.
+  if not service.level and service.rank then key = key .. ":" .. service.rank end
+  return key
+end
+
 ---@param npcID number
 ---@param t number
 ---@param tp number
@@ -159,7 +172,7 @@ local function SampleServices(npcID, t, tp)
   for index = 1, GetNumTrainerServices() do
     local service = ReadService(index)
     if service then
-      local key = ("%s:%s"):format(service.name, tostring(service.level))
+      local key = GetServiceKey(service)
       -- Of two services with one key only the first is recorded: both would
       -- append to the same stream on every sample.
       if not seenServices[key] then
