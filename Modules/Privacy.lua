@@ -205,18 +205,22 @@ end
 local CHAT_MSG_NAME_ARG_INDICES = { [2] = true, [5] = true }
 ---@type number
 local CHAT_MSG_GUID_ARG_INDEX = 12
+--- `discordInfo`: the sender's Discord names and user ID.
+---@type number
+local CHAT_MSG_DISCORD_ARG_INDEX = 18
 
 --- Scrub the argument shape shared by every `CHAT_MSG_*` event QuestieTrace
 --- records: `text, playerName, languageName, channelName, playerName2,
 --- specialFlags, zoneChannelID, channelIndex, channelBaseName, languageID,
 --- lineID, guid, bnSenderID, isMobile, isSubtitle, hideSenderInLetterbox,
---- supressRaidIcons`.
+--- supressRaidIcons, discordInfo`.
 ---
 --- The literal `playerName`/`playerName2` values are used to redact that
 --- name from `text`, as a whole word (see RedactNames; this catches names even when the
 --- subject isn't grouped with the local player, e.g. a duel/trade request),
 --- then `Core.SanitizeText` is applied as a second pass for the local
---- player/roster. The name args and any player GUID are then discarded.
+--- player/roster. The name args, the Discord information and any player GUID
+--- are then discarded.
 --- The input is never mutated; a new PackedArgs is returned.
 ---@param args PackedArgs
 ---@return PackedArgs sanitized
@@ -243,12 +247,50 @@ function Core.SanitizeChatMsgArgs(args)
   for index in pairs(CHAT_MSG_NAME_ARG_INDICES) do
     out[index] = nil
   end
+  out[CHAT_MSG_DISCORD_ARG_INDEX] = nil
 
   local guidKind = Core.ParseGUIDKind(out[CHAT_MSG_GUID_ARG_INDEX])
   if guidKind ~= "npc" and guidKind ~= "object" and guidKind ~= "item" then
     out[CHAT_MSG_GUID_ARG_INDEX] = nil
   end
 
+  return out
+end
+
+---------------------------------------------------------------------------
+-- Other events with personal arguments
+---------------------------------------------------------------------------
+
+--- Scrub `QUEST_ACCEPT_CONFIRM(name, questTitle, questID)`: `name` is the
+--- character who shares an escort quest.
+---@param args PackedArgs
+---@return PackedArgs sanitized
+function Core.SanitizeQuestAcceptConfirmArgs(args)
+  local out = Core.CopyPacked(args)
+  out[1] = nil
+  return out
+end
+
+--- Scrub `GROUP_JOINED`/`GROUP_LEFT(category, partyGUID)`: the party's GUID
+--- would link the recordings of its members.
+---@param args PackedArgs
+---@return PackedArgs sanitized
+function Core.SanitizeGroupArgs(args)
+  local out = Core.CopyPacked(args)
+  out[2] = nil
+  return out
+end
+
+--- Scrub `UI_INFO_MESSAGE(errorType, message)`: the message can name a group
+--- member, e.g. one who accepts a shared quest.
+---@param args PackedArgs
+---@return PackedArgs sanitized
+function Core.SanitizeInfoMessageArgs(args)
+  local out = Core.CopyPacked(args)
+  if issecretvalue and issecretvalue(out[2]) then
+    out[2] = nil
+  end
+  out[2] = Core.SanitizeText(out[2])
   return out
 end
 

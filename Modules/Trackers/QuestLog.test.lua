@@ -77,6 +77,17 @@ local function InitAndSample(tracker, capture, env)
   env.pendingSamples = {}
 end
 
+--- Mock issecurevariable: the functions in `addonFunctions` were defined by another addon.
+---@param env table<string, any>
+---@param addonFunctions table<string, boolean>
+local function MockSecureVariables(env, addonFunctions)
+  env.issecurevariable = function(tbl, name)
+    assert(tbl == env or tbl == env.C_QuestLog or tbl == env.C_Reputation, "only the client's tables are looked up")
+    if addonFunctions[name] then return false, "OtherAddon" end
+    return true, nil
+  end
+end
+
 describe("QuestLog tracker", function()
   ---@type table<string, any>
   local env
@@ -203,6 +214,7 @@ describe("QuestLog tracker", function()
       if not row then return nil end
       return row.title, 3, nil, false, false, nil, 1, row.questID
     end
+    MockSecureVariables(env, {})
 
     local capture = NewCapture()
     InitAndSample(tracker, capture, env)
@@ -212,5 +224,105 @@ describe("QuestLog tracker", function()
     local titleTuple = titleStream[100][1].v
     assert.are.equal("Legacy Quest", titleTuple[1])
     assert.are.equal(100, titleTuple[8])
+  end)
+
+  it("should not record quest log globals that another addon brought back", function()
+    env.questLogRows = { { title = "Quest", questID = 100 } }
+    env.GetQuestLogTitle = function() return "Quest" end
+    env.GetQuestLogIndexByID = function() return 1 end
+    MockSecureVariables(env, { GetQuestLogTitle = true, GetQuestLogIndexByID = true })
+
+    local capture = NewCapture()
+    InitAndSample(tracker, capture, env)
+
+    local functions = capture.session.functions
+    assert.is_nil(functions["GetQuestLogTitle"])
+    assert.is_nil(functions["GetQuestLogIndexByID"])
+    assert.are.equal("Quest", functions["C_QuestLog.GetInfo"][100][1].v.title)
+    assert.are.equal(1, functions["C_QuestLog.GetLogIndexForQuestID"][100][1].v)
+  end)
+
+  it("should decide for each quest log global on its own", function()
+    env.questLogRows = { { title = "Quest", questID = 100 } }
+    env.GetQuestLogTitle = function() return "Quest" end
+    env.GetQuestLogIndexByID = function() return 1 end
+
+    MockSecureVariables(env, { GetQuestLogTitle = true })
+    local capture = NewCapture()
+    InitAndSample(tracker, capture, env)
+    assert.is_nil(capture.session.functions["GetQuestLogTitle"])
+    assert.are.equal(1, capture.session.functions["GetQuestLogIndexByID"][100][1].v)
+
+    MockSecureVariables(env, { GetQuestLogIndexByID = true })
+    capture = NewCapture()
+    InitAndSample(tracker, capture, env)
+    assert.are.equal("Quest", capture.session.functions["GetQuestLogTitle"][100][1].v[1])
+    assert.is_nil(capture.session.functions["GetQuestLogIndexByID"])
+  end)
+
+  it("should keep recording quest log globals where the client has no replacement, even if another addon wrapped them", function()
+    -- Classic Era, TBC and Mists have neither C_QuestLog.GetInfo nor C_QuestLog.GetLogIndexForQuestID.
+    env.C_QuestLog = { IsOnQuest = function() return true end }
+    env.GetQuestLogTitle = function(index)
+      if index == 1 then return "Quest", 3, nil, false, false, nil, 1, 100 end
+    end
+    env.GetQuestLogIndexByID = function(questID) if questID == 100 then return 1 end end
+    MockSecureVariables(env, { GetQuestLogTitle = true, GetQuestLogIndexByID = true })
+
+    local capture = NewCapture()
+    InitAndSample(tracker, capture, env)
+
+    assert.are.equal("Quest", capture.session.functions["GetQuestLogTitle"][100][1].v[1])
+    assert.are.equal(1, capture.session.functions["GetQuestLogIndexByID"][100][1].v)
+  end)
+
+  --- A client with its own old quest log globals, on which another addon added the newer functions.
+  local function OldClientWithAddonShims()
+    env.questLogRows = { { title = "Shim Quest", questID = 999 } }
+    env.GetQuestLogTitle = function(index)
+      if index == 1 then return "Quest", 3, nil, false, false, nil, 1, 100 end
+    end
+    env.GetQuestLogIndexByID = function(questID) if questID == 100 then return 1 end end
+    MockSecureVariables(env, { GetInfo = true, GetLogIndexForQuestID = true })
+  end
+
+  it("should not record the newer quest log functions another addon added to a client with the old globals", function()
+    OldClientWithAddonShims()
+
+    local capture = NewCapture()
+    InitAndSample(tracker, capture, env)
+
+    local functions = capture.session.functions
+    assert.is_nil(functions["C_QuestLog.GetInfo"])
+    assert.is_nil(functions["C_QuestLog.GetLogIndexForQuestID"])
+    assert.are.equal("Quest", functions["GetQuestLogTitle"][100][1].v[1])
+    assert.are.equal(1, functions["GetQuestLogIndexByID"][100][1].v)
+  end)
+
+  it("should read the quest list from the client's own function, not from an addon's", function()
+    OldClientWithAddonShims()
+
+    local capture = NewCapture()
+    InitAndSample(tracker, capture, env)
+
+    assert.are.same({ 100 }, capture.session.functions["QuestLog"][1].v)
+  end)
+
+  it("should record every quest log function where none can be told to be the client's own", function()
+    env.questLogRows = { { title = "Quest", questID = 100 } }
+    env.GetQuestLogTitle = function(index)
+      if index == 1 then return "Wrapped", 3, nil, false, false, nil, 1, 100 end
+    end
+    env.GetQuestLogIndexByID = function(questID) if questID == 100 then return 1 end end
+    MockSecureVariables(env, { GetInfo = true, GetLogIndexForQuestID = true, GetQuestLogTitle = true, GetQuestLogIndexByID = true })
+
+    local capture = NewCapture()
+    InitAndSample(tracker, capture, env)
+
+    local functions = capture.session.functions
+    assert.are.equal("Quest", functions["C_QuestLog.GetInfo"][100][1].v.title)
+    assert.are.equal("Wrapped", functions["GetQuestLogTitle"][100][1].v[1])
+    assert.are.equal(1, functions["C_QuestLog.GetLogIndexForQuestID"][100][1].v)
+    assert.are.equal(1, functions["GetQuestLogIndexByID"][100][1].v)
   end)
 end)

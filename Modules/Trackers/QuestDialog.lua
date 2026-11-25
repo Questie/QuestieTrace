@@ -44,9 +44,11 @@ local C_After = C_Timer.After
 -- GetQuestCurrencyInfo("reward", index) -> name, texture, count, quality
 -- GetQuestCurrencyID("reward", index)   -> number? currencyID
 --   read for index 1..GetMaxRewardCurrencies(); stored as functions[key]["reward"][index].
+-- C_QuestOffer.GetQuestRewardCurrencyInfo("reward", index) -> QuestRewardCurrencyInfo? (Forever only)
+--   same indices; stored as functions[key]["reward"][index], reduced to
+--   { currencyID, baseRewardAmount, totalRewardAmount }; documented to be nil for an empty slot.
 --
 -- Quest flags, keyed by quest ID (Forever only):
--- IsBreadcrumbQuest(questID)                        -> isBreadcrumb (undocumented)
 -- C_QuestLine.GetQuestLineInfo(questID)             -> QuestLineInfo?
 -- C_QuestInfoSystem.GetQuestClassification(questID) -> Enum.QuestClassification
 ---------------------------------------------------------------------------
@@ -340,9 +342,6 @@ end
 local function BuildQuestFlagDefs()
   ---@type QuestFlagStreamDef[]
   local defs = {}
-  if type(IsBreadcrumbQuest) == "function" then
-    defs[#defs + 1] = { key = "IsBreadcrumbQuest", fn = IsBreadcrumbQuest }
-  end
   if HasMethod(C_QuestLine, "GetQuestLineInfo") then
     defs[#defs + 1] = { key = "C_QuestLine.GetQuestLineInfo", fn = C_QuestLine.GetQuestLineInfo }
   end
@@ -406,6 +405,22 @@ end
 ---@class QuestListReader
 ---@field key string Global API name, called as key(itemType, index)
 ---@field packed boolean Store all returns as a packed tuple instead of the first return
+---@field fn function? Called instead of the global API
+
+---Read a reward currency of the quest dialog, reduced to which currency and how
+---much: its name, icon and quality belong to the currency. The quest frame shows
+---the total amount; the base amount leaves bonuses out.
+---@param itemType string
+---@param index number
+---@return { currencyID: number, baseRewardAmount: number, totalRewardAmount: number }?
+local function ReadRewardCurrency(itemType, index)
+  local info = C_QuestOffer.GetQuestRewardCurrencyInfo(itemType, index)
+  if not info then return nil end
+  return { currencyID = info.currencyID, baseRewardAmount = info.baseRewardAmount, totalRewardAmount = info.totalRewardAmount }
+end
+
+---@type QuestListReader Forever only; `fn` is set at capture start when the client has the API.
+local rewardCurrencyReader = { key = "C_QuestOffer.GetQuestRewardCurrencyInfo", packed = false }
 
 ---@type QuestListReader[]
 local ITEM_READERS = {
@@ -416,6 +431,7 @@ local ITEM_READERS = {
 local CURRENCY_READERS = {
   { key = "GetQuestCurrencyInfo", packed = true },
   { key = "GetQuestCurrencyID", packed = false },
+  rewardCurrencyReader,
 }
 
 ---Quest dialog lists read per index, each for indices 1..its bound API.
@@ -426,7 +442,8 @@ local QUEST_DIALOG_LISTS = {
   { itemType = "required", bound = "GetNumQuestItems", readers = ITEM_READERS },
   -- Mists' quest frame reads reward currencies up to GetMaxRewardCurrencies(),
   -- past GetNumRewardCurrencies() (Wrath/QuestInfo.lua). Classic frames never
-  -- read required currencies. Clients without these APIs read nothing.
+  -- read required currencies. Forever has the maximum and the ID of these APIs,
+  -- and its own reader for the amount. Clients without these APIs read nothing.
   { itemType = "reward", bound = "GetMaxRewardCurrencies", readers = CURRENCY_READERS },
 }
 
@@ -471,7 +488,7 @@ local function SampleQuestItems(t, tp)
     if ok and type(count) == "number" then
       for index = 1, count do
         for _, reader in ipairs(list.readers) do
-          SampleQuestItemStream(t, tp, reader.key, _G[reader.key], list.itemType, index, reader.packed)
+          SampleQuestItemStream(t, tp, reader.key, reader.fn or _G[reader.key], list.itemType, index, reader.packed)
         end
       end
     end
@@ -579,6 +596,7 @@ Core.RegisterTracker({
     delayedSampleToken = 0
     flatStreamDefs = BuildFlatStreamDefs()
     questFlagDefs = BuildQuestFlagDefs()
+    rewardCurrencyReader.fn = HasMethod(C_QuestOffer, "GetQuestRewardCurrencyInfo") and ReadRewardCurrency or nil
 
     SampleQuestDialog(capture)
     ScheduleDelayedSamples(capture)

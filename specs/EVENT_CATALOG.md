@@ -87,7 +87,7 @@ is a player's, or that does not classify as `"npc"`/`"object"`/`"item"` per
 
 ### UnitLevel tracker
 
-Triggers `UnitLevel("player")` sampling.
+Triggers `UnitLevel("player")` and trivial quest range sampling.
 
 - `PLAYER_LEVEL_UP`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
@@ -133,11 +133,16 @@ Triggers observed `UnitGUID` and packed observed `UnitName` sampling for
 are sampled on every event without synthesizing `UnitName` from `UnitExists`.
 
 Privacy: any of these tokens can resolve to another player character (e.g.
-targeting a party member), not just an NPC. `Core.ParseGUIDKind` classifies
-the observed `UnitGUID` before it is stored; if it resolves to `"player"` (or
-an unrecognized kind), neither the GUID nor the paired `UnitName` observation
-for that token/cycle is recorded. A `nil` GUID (no unit present) is still
-recorded, since that reflects a state transition rather than PII.
+targeting a party member, or the trade partner on `npc`), not just an NPC.
+`Core.ParseGUIDKind` classifies the observed `UnitGUID` before it is stored.
+Players and their pets and minions are recorded as no unit, with an empty
+name; for an unrecognized kind, neither the GUID nor the paired `UnitName`
+observation is recorded. A `nil` GUID (no unit present) is still recorded,
+since that reflects a state transition rather than PII.
+
+An item that starts a quest is an `Item-` GUID on `"questnpc"`. Its item ID is
+recorded as `C_Item.GetItemIDByGUID[itemGUID]` on clients that have that API
+(Forever), where `QUEST_DETAIL` reports `questStartItemID` 0.
 
 **From `player_state` (shared with other trackers):**
 - `PLAYER_TARGET_CHANGED`
@@ -150,7 +155,7 @@ recorded, since that reflects a state transition rather than PII.
 - `QUEST_COMPLETE`
 - `QUEST_GREETING`
 - `QUEST_FINISHED`
-- `QUEST_ACCEPT_CONFIRM`
+- `QUEST_ACCEPT_CONFIRM` *(without the name of the player who shares the quest)*
 - `GOSSIP_SHOW`
 - `GOSSIP_CLOSED`
 
@@ -159,12 +164,18 @@ recorded, since that reflects a state transition rather than PII.
 - `QUEST_TURNED_IN`
 
 **From `npc_interaction` (new category):**
-- `MERCHANT_SHOW`
-- `MERCHANT_CLOSED`
-- `TRAINER_SHOW`
-- `TRAINER_CLOSED`
+- `PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, `PLAYER_INTERACTION_MANAGER_FRAME_HIDE`
+  (schema 22+) -- the argument is an `Enum.PlayerInteractionType` number, e.g.
+  1 trade, 3 gossip, 4 quest giver, 5 merchant, 14 tabard vendor, 17 mailbox,
+  18 spirit healer, 20 innkeeper. They come in addition to a window's own
+  events, and several types can follow each other with one NPC. Which types
+  each client fires them for was not checked in a client.
+- `MERCHANT_SHOW` *(also Merchant)*
+- `MERCHANT_CLOSED` *(also Merchant)*
+- `TRAINER_SHOW` *(also TrainerServices)*
+- `TRAINER_CLOSED` *(also TrainerServices)*
 - `MAIL_SHOW`
-- `MAIL_CLOSED`
+- `MAIL_CLOSED` *(never seen on any client; `PLAYER_INTERACTION_MANAGER_FRAME_HIDE(17)` tells instead)*
 - `AUCTION_HOUSE_SHOW`
 - `AUCTION_HOUSE_CLOSED`
 - `BANKFRAME_OPENED`
@@ -210,7 +221,7 @@ Privacy: sampling is guarded with `UnitExists(token)`, `not UnitIsPlayer(token)`
 and `not UnitPlayerControlled(token)` (restricted answers count as
 player-controlled), so only NPCs are sampled, never players or their pets. No names,
 GUIDs, or free text are recorded by this sampling. The tracker's tooltip streams are
-not event-driven; see TRACKER_SPEC section 19.
+not event-driven; see TRACKER_SPEC section 21.
 
 - `PLAYER_TARGET_CHANGED`
 - `UPDATE_MOUSEOVER_UNIT`
@@ -225,13 +236,33 @@ Triggers `IsInGroup` and `GetNumGroupMembers` sampling.
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
 - `SPELLS_CHANGED` *(login-time sampling)*
 
+### GhostState tracker
+
+Triggers `UnitIsGhost("player")` sampling. `PLAYER_DEAD` and `PLAYER_UNGHOST`
+are recorded since schema 22; like `PLAYER_ALIVE` they have no arguments.
+
+- `PLAYER_DEAD`
+- `PLAYER_ALIVE` -- fires when the player releases the spirit, and when a
+  resurrection is accepted before that
+- `PLAYER_UNGHOST`
+- `PLAYER_ENTERING_WORLD` *(login-time sampling)*
+
 ### SkillLines tracker
 
-Triggers skill window, profession-tab, and trade-skill-line sampling.
+Triggers skill window and profession-tab sampling.
 Expands all skill headers before sampling so hidden child rows are visible
 to `GetSkillLineInfo(index)` when that legacy global exists (no synthesized
-fallback when it doesn't). `C_TradeSkillUI.*` trade-skill-line data is
-tracked independently whenever that API exists.
+fallback when it doesn't). On Forever the skills are read through
+`C_SkillInfo` instead; headers that are collapsed are opened for the read and
+collapsed again.
+
+Opening and closing a header fires `SKILL_LINES_CHANGED` during the call. The
+tracker does not sample for those, but they are in the event stream.
+
+The events come in bursts and one sample reads every skill, so at most one
+sample every 0.1 seconds is taken: the first event samples at once, later ones
+together 0.1 seconds after that sample. A sample still waiting when the
+capture stops is taken then.
 
 - `SKILL_LINES_CHANGED`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
@@ -253,7 +284,8 @@ exists on the client. Uses coalesced re-sampling (see Pattern 3 in TRACKER_SPEC.
 Triggers raw player-spellbook sampling and `PlayerKnownSpells` delta
 updates. Enumerates spellbook slots starting at 1 until
 `GetSpellBookItemName(slot, "spell")` returns nil, which includes
-profession tabs in Classic Era.
+profession tabs in Classic Era. On Forever the slots are read through
+`C_SpellBook.GetSpellBookItemType` instead.
 
 - `SPELLS_CHANGED`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
@@ -310,6 +342,27 @@ TRACKER_SPEC section 17.
   loads requested through `C_Item.RequestLoadItemDataByID`, which do not fire
   `GET_ITEM_INFO_RECEIVED` (Forever 1.60.1).
 
+### Merchant tracker
+
+Samples the open merchant's slots; see TRACKER_SPEC section 19.
+
+- `MERCHANT_SHOW`
+- `MERCHANT_CLOSED`
+- `MERCHANT_UPDATE`, `MERCHANT_FILTER_ITEM_UPDATE` *(private triggers, not
+  recorded)* -- sample an open window again when item data arrives.
+- `ITEM_DATA_LOAD_RESULT`, `GET_ITEM_INFO_RECEIVED` *(private triggers, not
+  recorded)* -- the same, registered only while an item of the open window is
+  missing, and only for that item.
+
+### TrainerServices tracker
+
+Samples the open trainer's services; see TRACKER_SPEC section 20.
+
+- `TRAINER_SHOW`
+- `TRAINER_CLOSED`
+- `TRAINER_UPDATE`, `TRAINER_SERVICE_INFO_NAME_UPDATE` *(private triggers, not
+  recorded)* -- sample an open window again when its list changes.
+
 ### FrameHeartbeat tracker
 
 No events. An `OnUpdate` frame, shown only while capturing, writes
@@ -326,9 +379,9 @@ No events. Sampled once at capture start (`t=0`).
 ### Initialization
 
 Events related to addon loading, login, and logout. `ADDON_LOADED` is
-filtered so only the addon's own load event is recorded in the stream.
+registered, but never recorded: only the addon's own passes the filter, and it
+fires before the capture starts at `PLAYER_LOGIN`.
 
-- `ADDON_LOADED` (filtered: only recorded when `addonName == "QuestieTrace"`)
 - `PLAYER_LOGOUT` *(also ResetTime + auto-save handling)*
 - `PLAYER_LEAVING_WORLD`
 - `LOADING_SCREEN_ENABLED` -- Questie's quest log cache treats objective
@@ -358,7 +411,7 @@ to trackers for login-time data sampling (see tracker sections above).
 - `PLAYER_EQUIPMENT_CHANGED`
 - `SKILL_LINES_CHANGED`
 - `NEW_RECIPE_LEARNED`
-- `UI_INFO_MESSAGE`
+- `UI_INFO_MESSAGE` *(names redacted)*
 - `CURRENCY_DISPLAY_UPDATE`
 
 ### Map/zone (not used by position tracker)
@@ -398,8 +451,8 @@ dropped and never recorded or dispatched to trackers.
 
 ### Group/world
 
-- `GROUP_JOINED`
-- `GROUP_LEFT`
+- `GROUP_JOINED` *(without the party GUID)*
+- `GROUP_LEFT` *(without the party GUID)*
 - `GROUP_ROSTER_UPDATE`
 - `NAME_PLATE_UNIT_ADDED` *(also UnitInteraction nameplate sampling)*
 - `NAME_PLATE_UNIT_REMOVED`
@@ -434,14 +487,17 @@ dropped and never recorded or dispatched to trackers.
   Private sampling triggers are registered on a tracker's own frame and are
   never recorded in the main event stream: Position's movement transitions
   (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), ItemCount's
-  `BAG_UPDATE_DELAYED`, Display's `CVAR_UPDATE` and ItemInfo's
-  `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`.
+  `BAG_UPDATE_DELAYED`, Display's `CVAR_UPDATE`, ItemInfo's
+  `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`, Merchant's
+  `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE`, plus, while an item of
+  the open window is missing, the two item data events, and TrainerServices'
+  `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE`.
 - `LOOT_OPENED` and `LOOT_READY` are different events. The Loot tracker
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).
 - `ADDON_LOADED` fires for every addon. An event filter in `OnEvent`
-  skips it unless `addonName == "QuestieTrace"`, so only the addon's
-  own load appears in the event stream.
+  skips it unless `addonName == "QuestieTrace"`. The addon's own load
+  comes before capture start, so none appears in the event stream.
 - `PLAYER_LOGIN` triggers auto-start (if consent is granted and no
   capture is active). Auto-start runs before `ProcessTrackedEvent` so
   `PLAYER_LOGIN` is recorded as the first event in the session.

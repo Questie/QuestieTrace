@@ -118,9 +118,9 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
 
   // -- Reputation.lua ---------------------------------------------------------
   //
-  // Only present when the legacy GetFactionInfoByID global exists on the
-  // capturing client, independently of whether C_Reputation.GetFactionDataByID
-  // also exists (a client exposing both records both streams).
+  // The legacy GetFactionInfoByID. Left out where it is another addon's and
+  // C_Reputation.GetFactionDataByID is the client's own; without the newer
+  // function it is recorded whoever defined it (TRACKER_SPEC section 8).
   // C_Reputation.GetFactionDataByID stores a plain table, rendered without a
   // tuple schema.
 
@@ -146,10 +146,9 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
   // -- SkillLines.lua --------------------------------------------------------
   //
   // Only present when the legacy GetNumSkillLines/GetSkillLineInfo globals
-  // exist; there is no synthesized fallback derived from professions or
-  // C_TradeSkillUI on clients that lack them. C_TradeSkillUI.* streams are
-  // tracked independently and store plain tables, rendered without a tuple
-  // schema.
+  // exist; there is no synthesized fallback derived from professions on
+  // clients that lack them. C_SkillInfo.GetSkillLineInfoByID (Forever) stores
+  // plain tables, rendered without a tuple schema.
 
   "GetSkillLineInfo": [
     { name: "skillName", type: "string" },

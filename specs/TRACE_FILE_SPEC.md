@@ -347,7 +347,11 @@ Called with no arguments. Stream is a flat `{t, tp, v}` array.
 | `GetNumLootItems` | scalar number | Number of loot slots (0 when no loot window) |
 | `IsInGroup` | scalar boolean | Whether in a party/raid |
 | `GetNumGroupMembers` | scalar number | Party/raid size (0 when solo) |
-| `GetQuestGreenRange` | scalar number | XP green-range threshold |
+| `C_QuestLog.GetTrivialRange` | scalar number | Trivial quest range; Forever only |
+| `GetQuestGreenRange` | scalar number | Trivial quest range on the other clients |
+| `C_GameRules.IsHardcoreActive` | scalar boolean | Hardcore realm; t=0 only |
+| `C_Seasons.HasActiveSeason` | scalar boolean | Seasonal realm; t=0 only, not on Forever |
+| `C_Seasons.GetActiveSeason` | scalar number/nil | `Enum.SeasonID`; t=0 only, not on Forever |
 | `C_GossipInfo.GetAvailableQuests` | object (table[]) | Array of available quests from an NPC |
 | `C_GossipInfo.GetActiveQuests` | object (table[]) | Array of active quests at an NPC |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar number | Gossip available count |
@@ -376,7 +380,6 @@ Called with no arguments. Stream is a flat `{t, tp, v}` array.
 | `C_DateAndTime.GetSecondsUntilDailyReset` | scalar number | Only present when this API exists |
 | `GetNumSkillLines` | scalar number | Legacy global; only present when it exists, no synthesized fallback |
 | `GetProfessions` | tuple (n=5) | Profession tab indices |
-| `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object number[] | Tracked independently whenever the API exists |
 | `QuestLog` | object number[] | Synthetic active quest IDs in quest-log order |
 | `FactionOrder` | object number[] | Synthetic faction IDs in display order |
 | `SpellBook` | object number[] | Synthetic ordered known spell IDs from slots |
@@ -388,6 +391,7 @@ Called with `"player"` as the argument.
 | Function key | Return type | Description |
 |---|---|---|
 | `UnitLevel` | scalar number | Player level |
+| `UnitIsGhost` | scalar boolean | Whether the player is a ghost |
 | `UnitRace` | tuple (n=3) | localizedName, englishName, raceID |
 | `UnitClass` | tuple (n=3) | localizedName, englishName, classID |
 | `UnitClassBase` | tuple (n=2) | classFilename, classID |
@@ -407,13 +411,13 @@ Called with a quest ID as the argument.
 | `C_QuestLog.IsOnQuest` | scalar boolean/nil | Raw API result; probed again after quest leaves log |
 | `C_QuestLog.IsQuestFlaggedCompleted` | scalar boolean/nil | Raw API result; related to but not derived from `GetQuestsCompleted` |
 | `C_QuestLog.GetQuestObjectives` | object (table[]/nil) | Raw API result; probed again after quest leaves log |
-| `C_QuestLog.GetInfo` | object (table) | Raw API result, keyed by questID after resolving current quest log index |
+| `C_QuestLog.GetInfo` | object (table) | Raw API result, keyed by questID after resolving current quest log index. Before schema 22 also another addon's on clients without it |
 | `C_QuestLog.GetQuestTagInfo` | object (table/nil) | Raw API result |
 | `C_QuestLog.IsComplete` | scalar boolean/nil | Raw API result |
 | `C_QuestLog.IsFailed` | scalar boolean/nil | Raw API result |
 | `C_QuestLog.GetLogIndexForQuestID` | scalar number/nil | Raw API result |
-| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, only present when this global exists -- not synthesized from `C_QuestLog.*` |
-| `GetQuestLogIndexByID` | scalar number/nil | Legacy global; raw API result |
+| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple. Left out where it is another addon's and `C_QuestLog.GetInfo` is the client's own (see TRACKER_SPEC section 8) -- not synthesized from `C_QuestLog.*`. Before schema 22 also another addon's on Forever |
+| `GetQuestLogIndexByID` | scalar number/nil | Legacy global; raw API result. Left out where it is another addon's and `C_QuestLog.GetLogIndexForQuestID` is the client's own (see TRACKER_SPEC section 8), independently of `GetQuestLogTitle`. Before schema 22 also another addon's on Forever |
 | `GetQuestLogQuestText` | tuple (n=2) | questDescription, questObjectives |
 | `QuestLogZone` | scalar string/nil | Derived: header/zone title immediately preceding this quest in the quest log |
 | `GetQuestTimers` | scalar number/nil | Derived questId-keyed seconds-left |
@@ -421,7 +425,8 @@ Called with a quest ID as the argument.
 | `GetNumQuestLogRewards` | scalar number/nil | Reward count |
 | `GetQuestLogRewardMoney` | scalar number/nil | Reward money |
 | `GetQuestTagInfo` | tuple (n varies) | Tag info |
-| `IsBreadcrumbQuest` | scalar boolean | Forever only; undocumented, called with the quest ID |
+| `IsBreadcrumbQuest` | scalar boolean | Forever only, undocumented; only while on the quest since schema 22, see SCHEMA_SPEC for older readings |
+| `IsQuestSequenced` | scalar boolean | Forever only, undocumented; only while on the quest |
 | `C_QuestLine.GetQuestLineInfo` | object (QuestLineInfo/nil) | Forever only; questLineName/questName raw, other fields raw; includes hidden quest lines |
 | `C_QuestInfoSystem.GetQuestClassification` | scalar number | Forever only; `Enum.QuestClassification` |
 
@@ -446,6 +451,13 @@ Called with a quest ID as the argument.
 |---|---|---|
 | `UnitGUID` | scalar string or nil | GUID; nil when no unit |
 | `UnitName` | packed tuple (n varies) | observed `UnitName(token)` returns; no synthetic `UnitExists` mapping |
+| `UnitGUIDIsSecret` | scalar boolean | Synthetic: whether `UnitGUID(token)` returned a secret value; also for nameplate tokens |
+
+### Parameterized by item GUID (string)
+
+| Function key | Return type | Description |
+|---|---|---|
+| `C_Item.GetItemIDByGUID` | scalar number | Forever only; item ID of an `Item-` GUID in `UnitGUID`, such as the item that starts a quest |
 
 ### Parameterized by loot slot index (number)
 
@@ -459,13 +471,13 @@ Called with a quest ID as the argument.
 | `GetSpellBookItemInfo` | tuple (n varies) | observed spellbook info return |
 | `IsPassiveSpell` | scalar number/nil | observed passive marker return |
 
-### Parameterized by skill/profession index / trade-skill line ID (number)
+### Parameterized by skill/profession index (number)
 
 | Function key | Return type | Description |
 |---|---|---|
 | `GetSkillLineInfo` | tuple (n=13) | Legacy global; only present when `GetNumSkillLines` exists, no synthesized fallback |
+| `C_SkillInfo.GetSkillLineInfoByID` | object (table) | Forever only (schema 22+); `{ rank, maxRank, modifier, tempPoints }` keyed by skill ID, no value when the skill is unlearned |
 | `GetProfessionInfo` | tuple (n=10) | Profession tab information |
-| `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
 ### Parameterized by map ID (number)
 
@@ -477,7 +489,7 @@ Called with a quest ID as the argument.
 
 | Function key | Return type | Description |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists) |
+| `GetFactionInfoByID` | tuple (n=16) | Legacy global; raw tuple. Left out where it is another addon's and `C_Reputation.GetFactionDataByID` is the client's own (see TRACKER_SPEC section 8). Before schema 22 also another addon's on Forever (n=8) |
 | `C_Reputation.GetFactionDataByID` | object (table) | Raw API result |
 
 ### Delta streams (in `functionsDelta`)
@@ -486,22 +498,23 @@ Called with a quest ID as the argument.
 |---|---|
 | `C_QuestLog.GetAllCompletedQuestIDs` | Set of completed quest IDs (see section 5) |
 | `GetQuestsCompleted` | Legacy global; independent set of completed quest IDs, tracked whenever this global exists (see section 5) |
-| `PlayerKnownSpells` | Set of known spell IDs discovered from spellbook slots |
+| `PlayerKnownSpells` | Set of known spell IDs discovered from spellbook slots; empty on Forever before schema 22 |
 
 ---
 
 ## 10) Synthetic functions
 
-Three function keys are **not** direct WoW API names. They are computed by
+Four function keys are **not** direct WoW API names. They are computed by
 the capture system but stored identically to other streams:
 
 | Function key | Value type | Description |
 |---|---|---|
-| `QuestLog` | object (number[]) | Array of quest IDs currently in the player's quest log. Computed internally during capture from whichever of `C_QuestLog.GetInfo` or the legacy `GetQuestLogTitle` global exists (this internal lookup is not itself recorded to the trace). |
+| `QuestLog` | object (number[]) | Array of quest IDs currently in the player's quest log. Computed internally during capture from `C_QuestLog.GetInfo`, or the legacy `GetQuestLogTitle` where that is not recorded (this internal lookup is not itself recorded to the trace). |
 | `FactionOrder` | object (number[]) | Ordered array of faction IDs as displayed in the reputation panel. Computed internally during capture from whichever of `C_Reputation.GetFactionDataByIndex`/`GetNumFactions` or the legacy `GetFactionInfo`/`GetNumFactions` globals exist, expanding headers as needed (not itself recorded to the trace). |
 | `SpellBook` | object (number[]) | Ordered unique spell IDs discovered by enumerating spellbook slots. |
+| `TrainerServices` | object | What a trainer teaches, nested by NPC ID and service: `functions["TrainerServices"][331]["Fireball:6"]`. The value has `name`, `rank`, `type`, `level`, `cost`, `skill`, `skillRank`, `spellID` and `itemID`; those the client has no answer for are missing. |
 
-These are read like any parameterless function:
+The first three are read like any parameterless function:
 
 ```lua
 local questIDs = valueAt(getStream(session, "QuestLog"), target_t)
