@@ -4822,6 +4822,13 @@ function tooltipTests.ObjectivesThatDifferInOtherNumbersAreApart()
   runtime.HoverUnit(tooltipTests.GREATER_PLAINSTRIDER, tooltipTests.line.QuestTitle(747), tooltipTests.line.QuestPlayer("Bobmember"),
     tooltipTests.line.QuestObjective("0/1 Beacon", nil, 1), tooltipTests.line.QuestObjective("1/1 Beacon", 1, 1))
   assert(#progress["#/# Beacon"] == 1 and #progress["#/# Beacon (2)"] == 1, "nothing changed, so nothing may be recorded")
+  -- One whose text is hidden may be any of them, so the member's later ones are left out, the next member's are not.
+  runtime.members.party2 = "Player-1-Kimmember"
+  runtime.HoverUnit(tooltipTests.GREATER_PLAINSTRIDER, tooltipTests.line.QuestTitle(747), tooltipTests.line.QuestPlayer("Bobmember"),
+    tooltipTests.line.QuestObjective(nil, 0, 1), tooltipTests.line.QuestObjective("1/1 Beacon", 1, 1),
+    tooltipTests.line.QuestPlayer("Kimmember"), tooltipTests.line.QuestObjective("1/1 Beacon", 1, 1))
+  assert(#progress["#/# Beacon"] == 1 and #progress["#/# Beacon (2)"] == 1, "the hidden objective must not be taken for another")
+  assert(Session(runtime).functions.TooltipPartyProgress[747].party2["#/# Beacon"][1].v == 1, "the next member must still be recorded")
 end
 
 function tooltipTests.PartyProgressIsReadAgainAfterARosterChange()

@@ -243,6 +243,8 @@ local function RecordPartyProgress(capture, lines, defaultQuestID)
       who, sameText = GetMember(line.guid), {}
     elseif line and lineType == lineTypes.QuestObjective then
       local text, have = Readable(line.leftText, "string"), Readable(line.numFulfilled, "number")
+      -- Without its text an objective can be any of those with the same text, so the member's later ones have no place.
+      if not text then who = nil end
       if questID and text and who and who ~= "self" and who ~= "other" then
         RecordMemberProgress(capture, questID, who, text, have, sameText)
       end
