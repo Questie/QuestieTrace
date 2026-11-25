@@ -9,8 +9,8 @@ local ADDON_NAME = "QuestieTrace"
 local SCHEMA_VERSION = 22
 ---@type number Safety cap on QuestieTraceCharacter.sessions -- a pure size
 --- backstop for players who never open the export window, not a substitute
---- for reporting. Oldest sessions are dropped first; there is no
---- "already-exported" concept to prefer evicting, since reported sessions
+--- for reporting. The sessions with the fewest events are dropped first; there
+--- is no "already-exported" concept to prefer evicting, since reported sessions
 --- are deleted immediately by Core.DeleteReportedSessions().
 local MAX_SESSIONS = 10
 
@@ -561,19 +561,30 @@ function Core.DiscardCapture()
   QuestieTraceCharacter.currentSession = nil
 end
 
---- Drop the oldest saved sessions once the count exceeds MAX_SESSIONS.
+--- Drop the saved sessions with the fewest events (the oldest of equal ones)
+--- once the count exceeds MAX_SESSIONS. Players reload often, so dropping the
+--- oldest instead would let a few short sessions push out a long one. Events
+--- and not duration, because standing idle takes time but records nothing.
 --- A pure size backstop for players who never report/export -- reported
 --- sessions are already deleted immediately by Core.DeleteReportedSessions(),
 --- so there is no "prefer evicting already-exported sessions" tie-break here.
 local function PruneSessionsIfNeeded()
+  ---@type EncodedSessionRecord[]
   local sessions = QuestieTraceCharacter.sessions
   while #sessions > MAX_SESSIONS do
-    table.remove(sessions, 1)
+    local fewestEvents = 1
+    for i = 2, #sessions do
+      if sessions[i].eventCount < sessions[fewestEvents].eventCount then
+        fewestEvents = i
+      end
+    end
+    table.remove(sessions, fewestEvents)
   end
 end
 
---- Save the current capture session to SavedVariables.
+--- Save the current capture session to SavedVariables, unless it has no events.
 ---@param nameOverride string? Optional name override for the session
+---@return EncodedSessionRecord? record The encoded session, even if pruning dropped it again. Nil if it had no events or could not be encoded.
 function Core.SaveCapture(nameOverride)
   if capture.active then
     Core.StopCapture()
@@ -598,15 +609,19 @@ function Core.SaveCapture(nameOverride)
   -- A session that cannot be encoded is dropped on purpose: encoding is not
   -- expected to fail, and retrying is not worth the extra code.
   local record = EncodeSessionRecord(session)
-  if record then
-    QuestieTraceCharacter.sessions[#QuestieTraceCharacter.sessions + 1] = record
-    QuestieTraceCharacter.lastSavedSession = session.name
+  if record and record.eventCount > 0 then
+    local sessions = QuestieTraceCharacter.sessions
+    sessions[#sessions + 1] = record
+    PruneSessionsIfNeeded()
+    -- The newest one kept, because pruning may have dropped this session again.
+    QuestieTraceCharacter.lastSavedSession = sessions[#sessions].name
+  else
+    record = nil
   end
-
-  PruneSessionsIfNeeded()
 
   capture.session = nil
   QuestieTraceCharacter.currentSession = nil
+  return record
 end
 
 ---------------------------------------------------------------------------
