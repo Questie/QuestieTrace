@@ -411,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn trusts_is_breadcrumb_quest_true_for_optionality_and_false_to_rule_the_pair_out() {
+    fn lets_is_breadcrumb_quest_rule_a_pair_out_but_not_make_it_optional() {
         let flagged = |is_breadcrumb| QuestEpisode {
             quest_info: Some(
                 [(
@@ -426,9 +426,11 @@ mod tests {
             ..does_breadcrumb()
         };
         let flagged_only = [flagged(true)];
-        let denied = [flagged(false), skips_breadcrumb(), skips_breadcrumb()];
+        let flagged_and_free = [flagged(true), skips_breadcrumb(), skips_breadcrumb()];
+        let denied = [flagged(false), flagged(true), skips_breadcrumb(), skips_breadcrumb()];
 
-        assert!(edges(&run(&flagged_only, base_quests())).contains(&breadcrumb_edge()));
-        assert!(run(&denied, base_quests()).candidates.is_empty());
+        assert!(run(&flagged_only, base_quests()).candidates.is_empty(), "true is no evidence of being optional");
+        assert!(edges(&run(&flagged_and_free, base_quests())).contains(&breadcrumb_edge()));
+        assert!(run(&denied, base_quests()).candidates.is_empty(), "one false in the log rules it out");
     }
 }

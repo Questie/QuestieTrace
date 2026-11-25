@@ -20,7 +20,7 @@ use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use trace_data::stream::{entry_t, entry_v, get_stream, Stream};
+use trace_data::stream::{entry_t, entry_tp, entry_v, get_stream, Stream};
 use trace_data::value::{format_number, to_json};
 use trace_data::{Event, JsKey, KeyRef, Session, Value};
 
@@ -419,11 +419,6 @@ fn read_quest_info(session: &Session) -> Option<BTreeMap<QuestId, QuestClientInf
             apply(info.entry(quest_id).or_default(), value);
         }
     };
-    each("IsBreadcrumbQuest", &|target, value| {
-        if let Some(is_breadcrumb) = value.as_bool() {
-            target.is_breadcrumb = Some(is_breadcrumb);
-        }
-    });
     each("C_QuestLine.GetQuestLineInfo", &|target, value| {
         if let Some(quest_line_id) = as_positive_int(value.get("questLineID")) {
             target.quest_line_id = Some(quest_line_id);
@@ -434,8 +429,60 @@ fn read_quest_info(session: &Session) -> Option<BTreeMap<QuestId, QuestClientInf
             target.classification = Some(classification);
         }
     });
+    for (quest_id, is_breadcrumb) in read_breadcrumb_flags(session) {
+        info.entry(quest_id).or_default().is_breadcrumb = Some(is_breadcrumb);
+    }
     info.retain(|_, quest| *quest != QuestClientInfo::default());
     (!info.is_empty()).then_some(info)
+}
+
+/// Since this schema the quest log tracker reads IsBreadcrumbQuest, and only in a sample that finds
+/// the quest in the log, so every reading counts.
+const FLAG_READ_ONLY_IN_LOG_SCHEMA: f64 = 22.0;
+
+/// Before that the quest dialog tracker read it for any quest, next to the quest log tracker reading
+/// the log, so a flag read this close (seconds) to the quest entering or leaving the log may belong
+/// to either state.
+const LOG_CHANGE_MARGIN: f64 = 1.0;
+
+/// Per quest, the latest IsBreadcrumbQuest read while the quest was in the log. Out of the log the
+/// client answers false for every quest (of 301,583 readings, 35 were true).
+fn read_breadcrumb_flags(session: &Session) -> Vec<(QuestId, bool)> {
+    let (Some(flags), Some(log)) = (
+        session.function("IsBreadcrumbQuest").and_then(Value::as_object),
+        session.function("C_QuestLog.IsOnQuest"),
+    ) else {
+        return Vec::new();
+    };
+    let read_only_in_log = session
+        .field("schemaVersion")
+        .and_then(Value::as_num)
+        .is_some_and(|version| version >= FLAG_READ_ONLY_IN_LOG_SCHEMA);
+    let mut latest = Vec::new();
+    for (key, stream) in flags.entries() {
+        let Some(quest_id) = quest_id_key(key) else { continue };
+        let on_quest = log.get(KeyRef::Str(&quest_id.to_string())).and_then(Value::as_array).unwrap_or_default();
+        let in_log_at = |tp: f64| {
+            on_quest
+                .iter()
+                .rev()
+                .find(|entry| entry_tp(entry) <= tp)
+                .and_then(entry_v)
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        };
+        let steadily_in_log = |tp: f64| [tp - LOG_CHANGE_MARGIN, tp, tp + LOG_CHANGE_MARGIN].into_iter().all(in_log_at);
+        let in_log = stream
+            .as_array()
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .filter(|entry| read_only_in_log || steadily_in_log(entry_tp(entry)));
+        if let Some(is_breadcrumb) = in_log.filter_map(entry_v).find_map(Value::as_bool) {
+            latest.push((quest_id, is_breadcrumb));
+        }
+    }
+    latest
 }
 
 // ---------------------------------------------------------------------------
@@ -1858,6 +1905,8 @@ mod tests {
     #[test]
     fn keeps_the_latest_flag_values_per_quest() {
         let result = TraceBuilder::new()
+            .frame(5.0)
+            .sample_param("C_QuestLog.IsOnQuest", "92579", json!(true))
             .frame(10.0)
             .sample_param("IsBreadcrumbQuest", "92579", json!(false))
             .frame(20.0)
@@ -1872,6 +1921,63 @@ mod tests {
         };
         let expected = BTreeMap::from([(92579, info(Some(true), Some(5678), None)), (92580, info(None, None, Some(6)))]);
         assert_eq!(result.episode.quest_info, Some(expected));
+    }
+
+    /// The breadcrumb flag of 92579 after samples of (stream, time, value), recorded by schema 21.
+    fn breadcrumb_flag(samples: &[(&str, f64, bool)]) -> Option<bool> {
+        breadcrumb_flag_of_schema(21, samples)
+    }
+
+    fn breadcrumb_flag_of_schema(version: u32, samples: &[(&str, f64, bool)]) -> Option<bool> {
+        let mut builder = TraceBuilder::new();
+        builder.session["schemaVersion"] = json!(version);
+        for &(stream, time, value) in samples {
+            builder = builder.frame(time).sample_param(stream, "92579", json!(value));
+        }
+        builder.build().episode.quest_info.and_then(|info| info[&92579].is_breadcrumb)
+    }
+
+    const FLAG: &str = "IsBreadcrumbQuest";
+    const ON_QUEST: &str = "C_QuestLog.IsOnQuest";
+
+    #[test]
+    fn reads_the_breadcrumb_flag_only_while_the_quest_is_in_the_log() {
+        // Offered (always false), accepted, turned in (false again).
+        let accepted = [
+            (FLAG, 5.0, false),
+            (ON_QUEST, 10.0, true),
+            (FLAG, 20.0, true),
+            (ON_QUEST, 30.0, false),
+            (FLAG, 40.0, false),
+        ];
+        assert_eq!(breadcrumb_flag(&accepted), Some(true));
+        assert_eq!(breadcrumb_flag(&[(FLAG, 5.0, false)]), None, "never in the log");
+        assert_eq!(breadcrumb_flag(&[(ON_QUEST, 1.0, false), (FLAG, 5.0, false)]), None);
+        assert_eq!(breadcrumb_flag(&[(ON_QUEST, 1.0, true), (FLAG, 5.0, false)]), Some(false));
+    }
+
+    /// The two values come from different trackers, so one may be older than the other by a moment.
+    #[test]
+    fn ignores_a_breadcrumb_flag_read_within_a_second_of_the_quest_entering_or_leaving_the_log() {
+        assert_eq!(breadcrumb_flag(&[(ON_QUEST, 10.0, true), (FLAG, 10.5, false)]), None);
+        assert_eq!(breadcrumb_flag(&[(ON_QUEST, 1.0, true), (FLAG, 9.5, false), (ON_QUEST, 10.0, false)]), None);
+        assert_eq!(
+            breadcrumb_flag(&[(ON_QUEST, 1.0, true), (FLAG, 8.5, false), (ON_QUEST, 10.0, false)]),
+            Some(false)
+        );
+    }
+
+    /// Since schema 22 the sample that finds the quest in the log reads the flag too, and it is
+    /// written again only when it changes, so most quests have this one reading.
+    #[test]
+    fn counts_the_breadcrumb_flag_read_as_the_quest_enters_the_log_since_schema_22() {
+        let accepted = [(ON_QUEST, 5.0, false), (ON_QUEST, 10.0, true), (FLAG, 10.0, false), (ON_QUEST, 60.0, false)];
+        assert_eq!(breadcrumb_flag_of_schema(22, &accepted), Some(false));
+        assert_eq!(breadcrumb_flag_of_schema(21, &accepted), None);
+        let in_log_from_the_start = [(ON_QUEST, 0.0, true), (FLAG, 0.0, true)];
+        assert_eq!(breadcrumb_flag_of_schema(23, &in_log_from_the_start), Some(true));
+        let changed = [(ON_QUEST, 10.0, true), (FLAG, 10.0, false), (FLAG, 10.5, true)];
+        assert_eq!(breadcrumb_flag_of_schema(22, &changed), Some(true), "the latest one");
     }
 
     #[test]

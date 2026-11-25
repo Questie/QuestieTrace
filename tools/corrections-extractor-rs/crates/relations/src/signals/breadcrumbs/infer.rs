@@ -94,8 +94,7 @@ pub struct PairJudgement {
 /// None unless the pair is both optional and dependent and the client did not deny it.
 pub fn judge_pair(pair: &PairTally) -> Option<PairJudgement> {
     let count = |kind| pair.count(kind);
-    let flagged = count(ObservationKind::Flagged);
-    if count(ObservationKind::NotFlagged) > flagged {
+    if count(ObservationKind::NotFlagged) > 0 {
         return None;
     }
     let free = count(ObservationKind::Free);
@@ -103,7 +102,7 @@ pub fn judge_pair(pair: &PairTally) -> Option<PairJudgement> {
         .into_iter()
         .filter(|&kind| kind != ObservationKind::ServerDrop || count(kind) >= MIN_SERVER_DROP_CHARACTERS)
         .collect();
-    if (free == 0 && flagged == 0) || pair.characters_of(dependent_kinds.iter().copied()) == 0 {
+    if free == 0 || pair.characters_of(dependent_kinds.iter().copied()) == 0 {
         return None;
     }
     let shown = pair.characters_of([ObservationKind::ShowB, ObservationKind::ShowT]);
@@ -111,16 +110,15 @@ pub fn judge_pair(pair: &PairTally) -> Option<PairJudgement> {
         return None;
     }
 
-    // Chains rarely leak even one free character, so one already says a lot; the client flag settles it.
-    let free_optional = if free > 0 { 1.0 - 0.2 * 0.4_f64.powi(free as i32 - 1) } else { 0.0 };
-    let optional = free_optional.max(if flagged > 0 { 0.9 } else { 0.0 });
+    // Chains rarely leak even one free character, so one already says a lot.
+    let optional = 1.0 - 0.2 * 0.4_f64.powi(free as i32 - 1);
     let doubt: f64 = dependent_kinds
         .iter()
         .map(|&kind| (1.0 - dependent_weight(kind)).powi(count(kind).min(2) as i32))
         .product();
     // A character that only got T after completing B (a chain) outweighs two that got it freely.
     let unlock = count(ObservationKind::Unlock);
-    let not_chain = if free + unlock == 0 { 1.0 } else { free as f64 / (free + 2 * unlock) as f64 };
+    let not_chain = free as f64 / (free + 2 * unlock) as f64;
     let score = optional * (1.0 - doubt) * not_chain * if shown > 0 { SHOWN_PENALTY } else { 1.0 };
 
     let evidence = ObservationKind::ALL

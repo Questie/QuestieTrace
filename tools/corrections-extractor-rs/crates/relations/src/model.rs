@@ -296,7 +296,9 @@ impl OfferSnapshot {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuestClientInfo {
-    /// Raw IsBreadcrumbQuest(questID). Undocumented API: a hint, to verify against behaviour.
+    /// IsBreadcrumbQuest(questID) while the quest was in the log. Undocumented API. True for every
+    /// quest with nothing left to do but turn it in, breadcrumbs among them, so only false says
+    /// something: 160 of 162 breadcrumbs Questie lists answer true, as do 1,266 of 3,280 other quests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_breadcrumb: Option<bool>,
     /// C_QuestLine.GetQuestLineInfo(questID).questLineID

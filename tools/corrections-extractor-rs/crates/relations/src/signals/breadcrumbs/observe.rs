@@ -22,8 +22,6 @@ pub enum ObservationKind {
     // Optional
     /// T offered, taken or done while B was neither done nor in the log.
     Free,
-    /// The client's IsBreadcrumbQuest(B) returned true.
-    Flagged,
     // Dependent
     /// B left the log without a turn-in as T was accepted.
     ServerDrop,
@@ -40,12 +38,12 @@ pub enum ObservationKind {
     ShowB,
     /// T offered or accepted while B was in the log.
     ShowT,
-    /// IsBreadcrumbQuest(B) returned false.
+    /// IsBreadcrumbQuest(B) returned false while B was in the log.
     NotFlagged,
 }
 
 impl ObservationKind {
-    pub const OPTIONAL: [ObservationKind; 2] = [ObservationKind::Free, ObservationKind::Flagged];
+    pub const OPTIONAL: [ObservationKind; 1] = [ObservationKind::Free];
     pub const DEPENDENT: [ObservationKind; 4] = [
         ObservationKind::ServerDrop,
         ObservationKind::Reveal,
@@ -59,9 +57,8 @@ impl ObservationKind {
         ObservationKind::NotFlagged,
     ];
     /// Every kind, in declaration order.
-    pub const ALL: [ObservationKind; 10] = [
+    pub const ALL: [ObservationKind; 9] = [
         ObservationKind::Free,
-        ObservationKind::Flagged,
         ObservationKind::ServerDrop,
         ObservationKind::Reveal,
         ObservationKind::AutoPop,
@@ -76,7 +73,6 @@ impl ObservationKind {
     pub fn name(self) -> &'static str {
         match self {
             ObservationKind::Free => "free",
-            ObservationKind::Flagged => "flagged",
             ObservationKind::ServerDrop => "serverDrop",
             ObservationKind::Reveal => "reveal",
             ObservationKind::AutoPop => "autoPop",
@@ -382,18 +378,17 @@ impl Observer<'_> {
         }
     }
 
-    /// IsBreadcrumbQuest(B), for every target B is linked to.
+    /// IsBreadcrumbQuest(B) false in the log, for every target B is linked to. True says nothing:
+    /// it is also the answer for quests that are no breadcrumbs.
     fn client_flags(&mut self) {
         let Some(quest_info) = &self.episode.quest_info else { return };
         for (&breadcrumb, info) in quest_info {
-            let Some(is_breadcrumb) = info.is_breadcrumb else { continue };
-            let kind = if is_breadcrumb {
-                ObservationKind::Flagged
-            } else {
-                ObservationKind::NotFlagged
-            };
+            if info.is_breadcrumb != Some(false) {
+                continue;
+            }
             for target in self.links.targets_of(breadcrumb) {
-                self.add(breadcrumb, target, kind, 0.0, format!("IsBreadcrumbQuest({breadcrumb}) = {is_breadcrumb}"));
+                let text = format!("IsBreadcrumbQuest({breadcrumb}) = false in the log");
+                self.add(breadcrumb, target, ObservationKind::NotFlagged, 0.0, text);
             }
         }
     }
