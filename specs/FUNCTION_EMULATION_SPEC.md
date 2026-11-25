@@ -257,7 +257,7 @@ end
 
 ## 5) Event replay
 
-Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount), `CVAR_UPDATE` (Display), `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` (ItemInfo), and `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE` (Merchant). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams, and the item data events from the switches to `true` in `C_Item.IsItemDataCachedByID`.
+Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount), `CVAR_UPDATE` (Display), `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` (ItemInfo), and `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE` (Merchant, which also uses the item data events). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams, and the item data events from the switches to `true` in `C_Item.IsItemDataCachedByID`.
 
 ## 6) Known limits
 

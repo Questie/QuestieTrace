@@ -349,6 +349,9 @@ Samples the open merchant's slots; see TRACKER_SPEC section 19.
 - `MERCHANT_CLOSED`
 - `MERCHANT_UPDATE`, `MERCHANT_FILTER_ITEM_UPDATE` *(private triggers, not
   recorded)* -- sample an open window again when item data arrives.
+- `ITEM_DATA_LOAD_RESULT`, `GET_ITEM_INFO_RECEIVED` *(private triggers, not
+  recorded)* -- the same, registered only while an item of the open window is
+  missing, and only for that item.
 
 ### FrameHeartbeat tracker
 
@@ -476,7 +479,8 @@ dropped and never recorded or dispatched to trackers.
   (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), ItemCount's
   `BAG_UPDATE_DELAYED`, Display's `CVAR_UPDATE`, ItemInfo's
   `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT`, and Merchant's
-  `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE`.
+  `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE`, plus, while an item of
+  the open window is missing, the two item data events.
 - `LOOT_OPENED` and `LOOT_READY` are different events. The Loot tracker
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).

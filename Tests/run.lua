@@ -146,6 +146,7 @@ local function NewRuntime(trackerFiles)
     ---@param self table<string, any>
     ---@param event string
     frame.RegisterEvent = function(self, event) self.registered[event] = true end
+    frame.UnregisterEvent = function(self, event) self.registered[event] = nil end
     ---@param self table<string, any>
     ---@param name string
     ---@param callback function

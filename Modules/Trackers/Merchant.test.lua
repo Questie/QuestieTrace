@@ -24,6 +24,7 @@ local function LoadMerchantTracker(env)
   env.CreateFrame = function()
     return {
       RegisterEvent = function(_, event) frame.registered[event] = true end,
+      UnregisterEvent = function(_, event) frame.registered[event] = nil end,
       SetScript = function(_, name, callback) frame[name] = callback end,
     }
   end
@@ -228,6 +229,99 @@ describe("Merchant tracker", function()
       assert.is_nil(info[2][1].v[1].name)
       assert.are.equal("Coarse Thread", info[2][2].v[1].name)
       assert.are.equal(1, #info[1])
+    end)
+
+    for _, event in ipairs({ "ITEM_DATA_LOAD_RESULT", "GET_ITEM_INFO_RECEIVED" }) do
+      it("should record an item whose data only " .. event .. " reports", function()
+        Open({ Item(3371, "Empty Vial", true), Item(2320, "Coarse Thread", false) })
+        assert(items)[2].isLoaded = true
+        FirePrivate(event, 2320, true)
+        AdvanceTo(1)
+
+        assert.are.same({ Link(2) }, Values("GetMerchantItemLink", 2))
+      end)
+
+      it("should not sample for a " .. event .. " about an item the merchant is not waiting for", function()
+        Open({ Item(3371, "Empty Vial", true), Item(2320, "Coarse Thread", false) })
+        samplesTaken = 0
+        -- What an auction house scan of another addon fires, an item the merchant sells already, and a failed load.
+        for itemID = 1, 1000 do FirePrivate(event, itemID, true) end
+        FirePrivate(event, 3371, true)
+        FirePrivate(event, 2320, false)
+        FirePrivate(event, nil, true)
+        assert.are.equal(0, #timers)
+        AdvanceTo(5)
+        assert.are.equal(0, samplesTaken)
+      end)
+
+      it("should take one sample for a burst of " .. event, function()
+        Open({ Item(3371, "Empty Vial", false), Item(2320, "Coarse Thread", false), Item(2321, "Fine Thread", false) })
+        for index, itemID in ipairs({ 3371, 2320, 2321 }) do
+          assert(items)[index].isLoaded = true
+          FirePrivate(event, itemID, true)
+        end
+        samplesTaken = 0
+        AdvanceTo(5)
+
+        assert.are.equal(1, samplesTaken)
+        assert.are.same({ Link(3) }, Values("GetMerchantItemLink", 3))
+      end)
+
+      it("should listen to " .. event .. " only while an item of the open merchant is missing", function()
+        assert.is_nil(frame.registered[event], "no merchant was opened yet")
+        Open({ Item(3371, "Empty Vial", true) })
+        assert.is_nil(frame.registered[event], "the window is complete")
+        Close()
+
+        Open({ Item(3371, "Empty Vial", false) })
+        assert.is_true(frame.registered[event], "an item is missing")
+        assert(items)[1].isLoaded = true
+        FirePrivate(event, 3371, true)
+        AdvanceTo(1)
+        assert.is_nil(frame.registered[event], "the window became complete")
+        Close()
+
+        Open({ Item(3371, "Empty Vial", false) })
+        assert.is_true(frame.registered[event])
+        Close()
+        assert.is_nil(frame.registered[event], "the window was closed")
+
+        Open({ Item(3371, "Empty Vial", false) })
+        tracker.OnCaptureStopped(capture)
+        assert.is_nil(frame.registered[event], "the capture stopped")
+      end)
+    end
+
+    it("should not listen for items when the missing slot has no item ID, as a currency", function()
+      Open({ Item(3371, "Empty Vial", true), { name = "Honor Points", isLoaded = false } })
+
+      assert.is_nil(frame.registered["ITEM_DATA_LOAD_RESULT"])
+      assert.is_nil(frame.registered["GET_ITEM_INFO_RECEIVED"])
+      samplesTaken = 0
+      FirePrivate("MERCHANT_UPDATE")
+      AdvanceTo(1)
+      assert.are.equal(1, samplesTaken, "updates of the window still sample it")
+    end)
+
+    it("should not wait for item data on clients that know no slot's item ID", function()
+      env.GetMerchantItemID = nil
+      tracker = LoadMerchantTracker(env)
+      capture = NewCapture()
+      tracker.Init(capture)
+      Open({ Item(3371, "Empty Vial", false) })
+
+      assert.is_nil(frame.registered["ITEM_DATA_LOAD_RESULT"])
+    end)
+
+    it("should not listen for a previous window's missing items", function()
+      Open({ Item(3371, "Empty Vial", false) })
+      Close()
+      Open({ Item(2320, "Coarse Thread", false) })
+      samplesTaken = 0
+      FirePrivate("ITEM_DATA_LOAD_RESULT", 3371, true)
+      assert.are.equal(0, #timers)
+      FirePrivate("ITEM_DATA_LOAD_RESULT", 2320, true)
+      assert.are.equal(1, #timers)
     end)
 
     it("should sample again when the filter learns about an item", function()
