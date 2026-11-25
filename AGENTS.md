@@ -442,7 +442,7 @@ Bump `SCHEMA_VERSION` in `QuestieTrace.lua` whenever a tracker changes what or h
 (e.g. new/removed streams, changed values), so traces from before and after the change can be told apart.
 
 - Add what changed to `specs/SCHEMA_CHANGELOG.md` in the same PR, under the version it ships in, with what sessions
-  below it have instead. Do this for every such change, also while `SCHEMA_VERSION` is still unreleased and needs no bump.
+  below it have instead. Do this for every such change, also while no release tag has the current `SCHEMA_VERSION` and it needs no bump.
 - When you read traces, look there for which versions have a piece of data and which form to prefer.
 - Update the current-version expectations in `Modules/Consent.test.lua` and `Tests/run.lua` (leave legacy fixtures alone).
 - Commit the bump on its own as `chore: bump schema version to <N>`.

@@ -2,7 +2,7 @@
 
 What changed in the recorded data with each `SCHEMA_VERSION`, newest first. A session's `schemaVersion` says which rules it was recorded by. Use this to tell which sessions have a piece of data, whether an older one is worth less, and which form to prefer where a better one came in.
 
-**When you change what or how something is recorded, add a line here in the same PR**, under the version it ships in: the current `SCHEMA_VERSION` while that is unreleased, else the next one. Say what changed, what it replaces, and what older sessions have instead, so a consumer can apply the better form to new sessions and fall back for old ones.
+**When you change what or how something is recorded, add a line here in the same PR**, under the version it ships in: the current `SCHEMA_VERSION` while no release tag has it, else the next one. Say what changed, what it replaces, and what older sessions have instead, so a consumer can apply the better form to new sessions and fall back for old ones.
 
 **A version alone does not always tell.** Several releases share one version, so a later release can have added something without a new number. Those lines say *from vX.Y.Z*. For them, look at whether the stream is in the session, not at its version. Sessions do not say which release recorded them.
 
@@ -13,9 +13,9 @@ What changed in the recorded data with each `SCHEMA_VERSION`, newest first. A se
 
 Streams are listed with their exact names in [SCHEMA_SPEC.md](./SCHEMA_SPEC.md). The entries were checked against the streams in the code of each release tag and the release that first contains each commit.
 
-Releases and their version: 9 = v1.0.0, v1.0.1 · 10 = v1.1.0, v1.1.1 · 11 = v1.2.0 · 12 = v1.3.0, v1.4.0 · 13 = v1.5.0, v1.6.0 · 14 = v1.6.1 · 15 = v1.7.0 · 16 = v1.8.0 to v1.9.1 · 17 = v1.9.2 · 18 = v1.10.0 to v1.12.0 · 19 = v1.13.0, v1.13.1 · 20 = v1.13.2 · 21 = v1.14.0 · 22 = not released.
+Releases and their version: 9 = v1.0.0, v1.0.1 · 10 = v1.1.0, v1.1.1 · 11 = v1.2.0 · 12 = v1.3.0, v1.4.0 · 13 = v1.5.0, v1.6.0 · 14 = v1.6.1 · 15 = v1.7.0 · 16 = v1.8.0 to v1.9.1 · 17 = v1.9.2 · 18 = v1.10.0 to v1.12.0 · 19 = v1.13.0, v1.13.1 · 20 = v1.13.2 · 21 = v1.14.0. For later releases, `git show <tag>:QuestieTrace.lua` has the number, so this list does not have to be kept up to date.
 
-## 22 (unreleased)
+## 22
 
 - **Added** `PlayerKnownSpells` through `C_SpellBook` and `C_SkillInfo.GetSkillLineInfoByID` on Forever, where neither spells nor skills were recorded before. Skills are keyed by skill ID, also those under a collapsed header.
 - **Added** `C_Item.GetItemIDByGUID[itemGUID]` for item GUIDs in `UnitGUID`: the item that starts a quest. **Consumers**: Forever's `QUEST_DETAIL` reports `questStartItemID` 0, so this is the only source.
