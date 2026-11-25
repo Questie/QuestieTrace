@@ -247,6 +247,7 @@ successful observed returns.
 | Merchant | `Trackers/Merchant.lua` | `GetMerchantNumItems`, `GetMerchantFilter`, and per slot `GetMerchantItemInfo[index]`, `C_MerchantFrame.GetItemInfo[index]`, `GetMerchantItemLink[index]`, `GetMerchantItemID[index]` | Event + window lifecycle + private update trigger | `MERCHANT_SHOW`, `MERCHANT_CLOSED`; `MERCHANT_UPDATE`, `MERCHANT_FILTER_ITEM_UPDATE`, `ITEM_DATA_LOAD_RESULT` and `GET_ITEM_INFO_RECEIVED` are private triggers and are not recorded |
 | TrainerServices | `Trackers/TrainerServices.lua` | `TrainerServices[npcID][service]` (synthetic), `C_Trainer.GetTrainerType` or `IsTradeskillTrainer`, `GetTrainerServiceTypeFilter[type]` | Event + window lifecycle + private update trigger | `TRAINER_SHOW`, `TRAINER_CLOSED`; `TRAINER_UPDATE` and `TRAINER_SERVICE_INFO_NAME_UPDATE` are private triggers and are not recorded |
 | FrameHeartbeat | `Trackers/FrameHeartbeat.lua` | None; writes `session.frameUpdates` | `OnUpdate` while capturing | None |
+| ObjectCast | `Trackers/ObjectCast.lua` | `ObjectCast` (synthetic) | Private event frame while capturing (Forever only) | `UNIT_SPELLCAST_SENT` *(private, not recorded)* |
 | GameObject | `Trackers/GameObject.lua` | `GameObjectName`, `GameObjectGUID` (synthetic) | TooltipDataProcessor callback (Modern/Forever only) | None (uses `TooltipDataProcessor.AddTooltipPostCall`) |
 
 ---

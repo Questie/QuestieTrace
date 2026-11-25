@@ -226,6 +226,18 @@ GUIDs, or free text are recorded by this tracker.
 - `PLAYER_TARGET_CHANGED`
 - `UPDATE_MOUSEOVER_UNIT`
 
+### ObjectCast tracker
+
+Records the name of the world object a spell was cast on. Forever only.
+
+Privacy: the event's `target` is a player's name for a heal or buff, so the event
+is never recorded itself, and the target only when the spell is in
+`Core.OBJECT_SPELLS`. That list is generated from the client's spell data
+(`tools/generate-object-spells.py`): its spells target game objects, or objects and
+items, and no unit other than the player. The name is sanitized, restricted (secret) values are skipped.
+
+- `UNIT_SPELLCAST_SENT` *(private trigger, not recorded)*
+
 ### GroupState tracker
 
 Triggers `IsInGroup` and `GetNumGroupMembers` sampling.

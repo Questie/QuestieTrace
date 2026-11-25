@@ -2192,6 +2192,148 @@ function lootNameTests.AnErroringApiDoesNotLoseTheLoot()
   assert(next(functions.UnitNameFromGUID) == nil, "No name must be recorded")
 end
 
+---@type table<string, any> A table, because a Lua chunk can have 200 local variables at most
+local objectCastTests = {
+  OPENING = 6247, MINING = 3564, HERBALISM = 2366, HEAL = 2061, ARCANE_INTELLECT = 1459, TERMITE_BARREL = 18952,
+}
+
+---@class ObjectCastRuntime : TestRuntime
+---@field Cast fun(spellID: any, target: any, unit: any?) Fire UNIT_SPELLCAST_SENT a second later
+
+---The object cast tracker with the generated spell list.
+---@return ObjectCastRuntime
+function objectCastTests.NewRuntime()
+  local runtime = NewRuntime({ "Modules/ObjectSpells.lua", "Modules/Trackers/ObjectCast.lua" }) --[[@as ObjectCastRuntime]]
+  runtime.env.UnitName = function(token) if token == "player" then return "Cruxdruid" end end
+
+  function runtime.Cast(spellID, target, unit)
+    AdvanceTo(runtime, runtime.now + 1)
+    SendEvent(runtime, "UNIT_SPELLCAST_SENT", unit or "player", target, "Cast-3-0-0-0-0-0000", spellID)
+  end
+  return runtime
+end
+
+---Assert what the stream holds, as { spell ID, target } rows.
+---@param runtime TestRuntime
+---@param expected any[][]
+function objectCastTests.AssertCasts(runtime, expected)
+  local casts = Session(runtime).functions.ObjectCast
+  for row = 1, math.max(#expected, #casts) do
+    local where = "row " .. row
+    assert(expected[row], where .. " must not be recorded, got " .. tostring(casts[row] and casts[row].v.target))
+    assert(casts[row] and casts[row].v.target == expected[row][2], where .. " must have the target")
+    assert(casts[row].v.spellID == expected[row][1], where .. " must have the spell")
+  end
+end
+
+function objectCastTests.CastsOnObjectsAreRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  AdvanceTo(runtime, 100)
+  runtime.core.StartCapture("object casts")
+
+  runtime.Cast(t.OPENING, "Kobold Tracks")
+  runtime.Cast(t.OPENING, "Kobold Tracks")
+  runtime.Cast(t.MINING, "Tin Vein")
+  runtime.Cast(t.HERBALISM, "Wilted Peacebloom")
+
+  t.AssertCasts(runtime, {
+    { t.OPENING, "Kobold Tracks" }, { t.OPENING, "Kobold Tracks" }, { t.MINING, "Tin Vein" }, { t.HERBALISM, "Wilted Peacebloom" },
+  })
+  local casts = Session(runtime).functions.ObjectCast
+  assert(casts[1].t == 1 and casts[2].t == 2, "every cast must have its own time since the capture started, so a click can be placed")
+end
+
+function objectCastTests.CastsOnUnitsAreNeverRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("heals and buffs")
+
+  -- Spells that can target a player send the player's name as the target.
+  runtime.Cast(t.HEAL, "Somebody")
+  runtime.Cast(t.ARCANE_INTELLECT, "Somebody")
+  runtime.Cast(t.TERMITE_BARREL, "Somebody")
+  runtime.Cast(999999999, "Somebody")
+
+  t.AssertCasts(runtime, {})
+end
+
+function objectCastTests.CastsOfOtherUnitsAreNeverRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("other casters")
+
+  runtime.Cast(t.OPENING, "Solid Chest", "party1")
+  runtime.Cast(t.OPENING, "Solid Chest", "pet")
+  runtime.Cast(t.OPENING, "Solid Chest", "target")
+
+  t.AssertCasts(runtime, {})
+end
+
+function objectCastTests.TheRawEventIsNotRecorded()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("raw event")
+
+  runtime.Cast(t.OPENING, "Solid Chest")
+  runtime.Cast(t.HEAL, "Somebody")
+
+  for _, event in ipairs(Session(runtime).events) do
+    assert(event.e ~= "UNIT_SPELLCAST_SENT", "The event's arguments can hold a player's name")
+  end
+end
+
+function objectCastTests.SecretAndUnreadableCastsAreSkipped()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  -- Secret values keep their ordinary type: only issecretvalue tells them apart.
+  local hidden = {}
+  runtime.env.issecretvalue = function(value) return hidden[value] == true end
+  runtime.core.StartCapture("secrets")
+
+  hidden = { ["Hidden Object"] = true, [t.MINING] = true }
+  runtime.Cast(t.OPENING, "Hidden Object")
+  runtime.Cast(t.MINING, "Solid Chest")
+  runtime.Cast(t.OPENING, "")
+  runtime.Cast(t.OPENING, nil)
+  runtime.Cast(t.OPENING, 42)
+  runtime.Cast("6247", "Solid Chest")
+  hidden = { player = true }
+  runtime.Cast(t.OPENING, "Hidden caster")
+  hidden = {}
+  runtime.Cast(t.OPENING, "Solid Chest")
+
+  t.AssertCasts(runtime, { { t.OPENING, "Solid Chest" } })
+end
+
+function objectCastTests.PlayerNamesInTargetsAreRedacted()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.core.StartCapture("redaction")
+
+  runtime.Cast(t.OPENING, "Cruxdruid's Chest")
+
+  t.AssertCasts(runtime, { { t.OPENING, "<name>'s Chest" } })
+end
+
+function objectCastTests.NothingIsRecordedOutsideACapture()
+  local t = objectCastTests
+  local runtime = t.NewRuntime()
+  runtime.Cast(t.OPENING, "Before")
+  runtime.core.StartCapture("first")
+  runtime.Cast(t.OPENING, "During")
+  local first = Session(runtime)
+  runtime.core.StopCapture()
+  runtime.Cast(t.OPENING, "After")
+  assert(#first.functions.ObjectCast == 1, "Nothing must be recorded after the capture")
+
+  runtime.core.StartCapture("second")
+  runtime.Cast(t.OPENING, "Again")
+
+  t.AssertCasts(runtime, { { t.OPENING, "Again" } })
+  assert(#first.functions.ObjectCast == 1, "A new capture must not write to the old one")
+end
+
 local function TestUnitInteractionSkipsUnrecognizedGuidKind()
   local runtime = NewRuntime({ "Modules/Trackers/UnitInteraction.lua" })
   runtime.env.UnitGUID = function(token)
@@ -4812,6 +4954,13 @@ local tests = {
   { name = "Loot allows a multi-pair all-npc source tuple", run = TestLootAllowsMultiPairAllNpcSourceTuple },
   { name = "Loot skips a multi-pair source tuple with any player guid", run = TestLootSkipsMultiPairSourceTupleWithAnyPlayerGuid },
   { name = "Loot skips an unrecognized (non npc/object/item) guid kind", run = TestLootSkipsUnrecognizedGuidKind },
+  { name = "ObjectCast records casts on objects", run = objectCastTests.CastsOnObjectsAreRecorded },
+  { name = "ObjectCast never records casts on units", run = objectCastTests.CastsOnUnitsAreNeverRecorded },
+  { name = "ObjectCast never records the casts of other units", run = objectCastTests.CastsOfOtherUnitsAreNeverRecorded },
+  { name = "ObjectCast does not record the raw event", run = objectCastTests.TheRawEventIsNotRecorded },
+  { name = "ObjectCast skips secret and unreadable casts", run = objectCastTests.SecretAndUnreadableCastsAreSkipped },
+  { name = "ObjectCast redacts player names in targets", run = objectCastTests.PlayerNamesInTargetsAreRedacted },
+  { name = "ObjectCast records nothing outside a capture", run = objectCastTests.NothingIsRecordedOutsideACapture },
   { name = "Loot names a looted object by its GUID", run = lootNameTests.LootedObjectIsNamed },
   { name = "Loot reads a looted object's name once", run = lootNameTests.LootedObjectIsNamedOnce },
   { name = "Loot names a looted object again in the next capture", run = lootNameTests.LootedObjectIsNamedAgainInTheNextCapture },

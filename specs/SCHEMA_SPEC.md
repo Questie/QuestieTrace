@@ -421,6 +421,7 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `FactionOrder` | object (number[]) | *(synthetic)* known faction IDs in display order |
 | `SpellBook` | object (number[]) | *(synthetic)* ordered unique spell IDs from slot enumeration; through `C_SpellBook` on Forever (schema 22+) |
 | `GameObjectName` | scalar (string) | *(synthetic)* game object name extracted from TooltipDataProcessor Object tooltips (UnitName line, else the first line); player names redacted |
+| `ObjectCast` | `{ spellID: number, target: string }` | *(synthetic)* the spell and the name of the world object (or item, for a spell that opens both) it was cast on, from `UNIT_SPELLCAST_SENT`; one entry per cast attempt of a `Core.OBJECT_SPELLS` spell (opening, gathering, mining, ...), none for a click without a cast; has no object ID. Player names redacted; restricted (secret) values skipped. ObjectCast tracker; Forever only. Schema 22+ |
 | `GameObjectGUID` | scalar (string) | *(synthetic)* object GUID of the tooltip each `GameObjectName` sample came from, written together with it at the same `t`; `""` when the tooltip has no readable object GUID (always on Forever). Schema 19+ |
 
 ### Parameterized by `"player"`
