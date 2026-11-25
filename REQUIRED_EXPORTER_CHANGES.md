@@ -70,7 +70,15 @@ It is also the tool most sensitive to `tp`:
 
 **Corrections extractor: passed on 2026-11-25.** Over the whole local checkout, 199,967 submissions received from 2026-09-17 to 2026-11-13, the tool was run from the JSON files and from packs made of them with `tp` rounded for `schemaVersion` 9 to 18 (`trace-compactor backfill --tp-schema 9,10,11,12,13,14,15,16,17,18`). Every output file is identical apart from its timestamp, and both runs report the same counts: 629 submissions partly decoded, 108,077 older copies of sessions ignored, and the same one submission skipped with the same message. The packs are 25.2% of the JSON: 98.6 GiB for 391.4 GiB. The run from JSON took 17 minutes and the run from packs 19.
 
-**The relations pipeline has not been run from packs yet.** It is the tool that is sensitive to `tp`, so `tp` rounding is not settled until it has.
+**Relations pipeline: the same final output, on 2026-11-25**, from the same submissions and the same packs, at commit `d0c1419` with QuestieDB master `4377c98`. Everything in `output/` is identical apart from timestamps, and so are `relations.json`, the catalog, the ground truth, every candidate's score and counts, and every report but one. The differences, all of them:
+
+- 58.7 million times in `episodes.jsonl` and 88 thousand in the candidates' evidence differ, by half a microsecond at most. That is the rounding.
+- In `candidates/cooccurrence.json`, one candidate of quest 98252 lists two of its examples in the other order. Its score and counts are the same.
+- In `reports/handoff-timing.json`, two delays fall on the other side of a histogram's limit (0.1 s and 1 s), of 2.2 and 2.9 million. The report is for choosing windows by eye; nothing reads it.
+
+The last two are what was expected of values that lie within a microsecond of a limit, and are for the owner to accept.
+
+It covers the `schemaVersion`s of that checkout, 9 to 18. Versions 19 to 22, recorded since 2026-11-19, are in no parity run yet and keep exact `tp`.
 
 What was planned:
 
