@@ -39,13 +39,13 @@ local function NewCapture()
   }
 end
 
---- Mock issecurevariable: the globals in `addonGlobals` were defined by another addon.
+--- Mock issecurevariable: the functions in `addonFunctions` were defined by another addon.
 ---@param env table<string, any>
----@param addonGlobals table<string, boolean>
-local function MockSecureVariables(env, addonGlobals)
+---@param addonFunctions table<string, boolean>
+local function MockSecureVariables(env, addonFunctions)
   env.issecurevariable = function(tbl, name)
-    assert(tbl == env, "only globals are looked up")
-    if addonGlobals[name] then return false, "OtherAddon" end
+    assert(tbl == env or tbl == env.C_QuestLog or tbl == env.C_Reputation, "only the client's tables are looked up")
+    if addonFunctions[name] then return false, "OtherAddon" end
     return true, nil
   end
 end
@@ -233,6 +233,23 @@ describe("Reputation tracker", function()
     local capture = NewCapture()
     tracker.Init(capture)
 
+    assert.are.equal("Stormwind", capture.session.functions["GetFactionInfoByID"][42][1].v[1])
+  end)
+
+  it("should not record a GetFactionDataByID another addon added to a client with the old global", function()
+    env.C_Reputation = { GetFactionDataByID = function() return { name = "Shim", factionID = 42, currentStanding = 0 } end }
+    env.GetNumFactions = function() return 1 end
+    env.GetFactionInfo = function()
+      return "Stormwind", "desc", 5, 0, 100, 50, false, false, false, false, true, true, false, 42
+    end
+    env.GetFactionInfoByID = env.GetFactionInfo
+    MockSecureVariables(env, { GetFactionDataByID = true })
+
+    tracker = select(2, LoadReputationTracker(env))
+    local capture = NewCapture()
+    tracker.Init(capture)
+
+    assert.is_nil(next(capture.session.functions["C_Reputation.GetFactionDataByID"]))
     assert.are.equal("Stormwind", capture.session.functions["GetFactionInfoByID"][42][1].v[1])
   end)
 end)

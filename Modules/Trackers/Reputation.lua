@@ -13,9 +13,9 @@ local DeepCompare = Core.DeepCompare
 --
 -- C_Reputation.GetFactionDataByID(factionID) -> table data (raw, as returned)
 --
--- GetFactionInfoByID(factionID) -> string  name,     -- legacy global, only
---                                  string  description,  -- recorded when it is
---                                  number  standingID,   -- the client's own
+-- GetFactionInfoByID(factionID) -> string  name,     -- legacy global, see
+--                                  string  description,  -- Core.GetClientFunctions
+--                                  number  standingID,
 --                                  number  barMin,
 --                                  number  barMax,
 --                                  number  barValue,
@@ -57,6 +57,8 @@ local factionOrder    -- ordered array of known factionIDs
 local collecting      -- recursion guard for ExpandFactionHeader
 ---@type function?
 local getFactionInfoByID -- the legacy global, if it is recorded on this client
+---@type function?
+local getFactionDataByID -- C_Reputation.GetFactionDataByID, if it is recorded on this client
 
 --- Number of factions visible in the reputation panel, from whichever real
 --- API exists. Used only to bound CollectFactionIDs' iteration; not recorded.
@@ -150,8 +152,8 @@ end
 ---@param tp number
 ---@param factionID number
 local function SampleFaction(t, tp, factionID)
-  if C_Reputation and C_Reputation.GetFactionDataByID then
-    local ok, value = pcall(C_Reputation.GetFactionDataByID, factionID)
+  if getFactionDataByID then
+    local ok, value = pcall(getFactionDataByID, factionID)
     if ok then
       AppendFactionIfChanged("C_Reputation.GetFactionDataByID", factionID, t, tp, value)
     end
@@ -225,7 +227,7 @@ Core.RegisterTracker({
     functions["C_Reputation.GetFactionDataByID"] = {}
     factionOrder = {}
     collecting = false
-    getFactionInfoByID = Core.GetOldGlobal("GetFactionInfoByID", C_Reputation and C_Reputation.GetFactionDataByID)
+    getFactionInfoByID, getFactionDataByID = Core.GetClientFunctions("GetFactionInfoByID", C_Reputation, "GetFactionDataByID")
 
     CollectAndSample(capture)
   end,

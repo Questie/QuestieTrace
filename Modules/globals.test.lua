@@ -277,4 +277,80 @@ describe("globals", function()
       assert.are.equal(0, sampleCount)
     end)
   end)
+
+  describe("GetClientFunctions", function()
+    local OLD = function() end
+    local NEW = function() end
+
+    --- The old global and the newer function, each nil, the client's own or another addon's.
+    ---@param old "client"|"addon"|nil
+    ---@param new "client"|"addon"|nil
+    ---@return function? old, function? new
+    local function Pick(old, new)
+      env.GetOldThing = old and OLD or nil
+      env.C_Things = { GetThing = new and NEW or nil }
+      env.issecurevariable = function(tbl, name)
+        if tbl == env and name == "GetOldThing" then return old == "client", "OtherAddon" end
+        if tbl == env.C_Things and name == "GetThing" then return new == "client", "OtherAddon" end
+        error("unexpected lookup of " .. tostring(name))
+      end
+      return Core.GetClientFunctions("GetOldThing", env.C_Things, "GetThing")
+    end
+
+    it("should return both functions when both are the client's own", function()
+      local old, new = Pick("client", "client")
+      assert.are.equal(OLD, old)
+      assert.are.equal(NEW, new)
+    end)
+
+    it("should leave out the old global of another addon where the client has the replacement", function()
+      local old, new = Pick("addon", "client")
+      assert.is_nil(old)
+      assert.are.equal(NEW, new)
+    end)
+
+    it("should leave out another addon's replacement where the old global is the client's own", function()
+      local old, new = Pick("client", "addon")
+      assert.are.equal(OLD, old)
+      assert.is_nil(new)
+    end)
+
+    it("should keep both where neither can be told to be the client's own", function()
+      local old, new = Pick("addon", "addon")
+      assert.are.equal(OLD, old)
+      assert.are.equal(NEW, new)
+    end)
+
+    it("should keep the only one there is, whoever defined it", function()
+      for _, owner in ipairs({ "client", "addon" }) do
+        local old, new = Pick(owner, nil)
+        assert.are.equal(OLD, old)
+        assert.is_nil(new)
+        old, new = Pick(nil, owner)
+        assert.is_nil(old)
+        assert.are.equal(NEW, new)
+      end
+    end)
+
+    it("should return nothing where the client has neither, or not even the table", function()
+      local old, new = Pick(nil, nil)
+      assert.is_nil(old)
+      assert.is_nil(new)
+      env.GetOldThing = OLD
+      old, new = Core.GetClientFunctions("GetOldThing", nil, "GetThing")
+      assert.are.equal(OLD, old)
+      assert.is_nil(new)
+    end)
+
+    it("should ignore a replacement or an old global that is not a function", function()
+      env.GetOldThing, env.C_Things = "not a function", { GetThing = NEW }
+      local old, new = Core.GetClientFunctions("GetOldThing", env.C_Things, "GetThing")
+      assert.is_nil(old)
+      assert.are.equal(NEW, new)
+      env.GetOldThing, env.C_Things = OLD, { GetThing = true }
+      old, new = Core.GetClientFunctions("GetOldThing", env.C_Things, "GetThing")
+      assert.are.equal(OLD, old)
+      assert.is_nil(new)
+    end)
+  end)
 end)

@@ -118,9 +118,9 @@ const FUNCTION_SCHEMAS: Record<string, ReturnField[]> = {
 
   // -- Reputation.lua ---------------------------------------------------------
   //
-  // Only present when the legacy GetFactionInfoByID global is the capturing
-  // client's own, independently of whether C_Reputation.GetFactionDataByID
-  // also exists (a client exposing both records both streams).
+  // The legacy GetFactionInfoByID. Left out where it is another addon's and
+  // C_Reputation.GetFactionDataByID is the client's own; without the newer
+  // function it is recorded whoever defined it (TRACKER_SPEC section 8).
   // C_Reputation.GetFactionDataByID stores a plain table, rendered without a
   // tuple schema.
 
