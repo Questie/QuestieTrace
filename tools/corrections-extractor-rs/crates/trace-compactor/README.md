@@ -117,22 +117,27 @@ A pack is built and uploaded from memory.
 
 The last row has no bound short of the largest export the intake accepts. A submission whose build needs more than the machine has ends the run each time, before anything of that pack is written, and has to be packed on a larger machine.
 
+Measured on 2026-11-25 on one real hour, 1,307 submissions and 3,075 MiB of JSON in two packs, with 8 threads, `--build-input-mib 64` and `--pack-input-mib 2048`: 2.8 GiB at its peak. Before frames gave up the room zstd reserves for them, the same run needed 6.4 GiB. The rows are rules of thumb and have not been measured one by one.
+
 ## Backfill
 
 `trace-compactor backfill` packs the old archive, one JSON object per submission, into a local directory. It is a separate command with its own rules, because the old archive is in production and is only ever read:
 
 ```sh
-trace-compactor backfill --out DIR [--trace-data DIR] [--only PREFIX] [--tp-schema N,N,...]
+trace-compactor backfill --out DIR [--also-packed DIR]... [--trace-data DIR] [--only PREFIX]
+                         [--download-mb-per-second N] [--tp-schema N,N,...]
 ```
+
+`scripts/backfill-days.sh` runs it one day received at a time, for a run that is left alone for hours.
 
 - **What it writes:** `DIR/packs/backfill/YYYY/MM/DD/HH-<md5>.pack`, one pack per hour the submissions were received in, or several when an hour is larger than `--pack-input-mib`. Uploading `DIR/packs` is left to a sync tool.
 - **What it reads:** a trace-data checkout (`--trace-data`), the old bucket (the `SOURCE_S3_*` variables), or both. With the bucket, the bucket says which submissions exist, and a local file saves the download only when its MD5 is the ETag the bucket lists. The bucket is reached through a type that can list and download and nothing else.
-- **It packs what is in no pack under `DIR` yet**, so it can be stopped and run again, and a later run catches up. A submission that reaches the old archive after its hour was packed, because it was accepted days after it was received, gets a pack of its own for that hour.
+- **How much it asks of the old bucket:** one listing of what `--only` names, or of everything without it, and one download of each submission it packs. `--download-mb-per-second` holds all threads together to a limit; small objects still arrive in short bursts with pauses between them.
+- **It packs what is in no pack under `DIR`, or under a directory named with `--also-packed`, yet**, so it can be stopped and run again, and a later run catches up. A submission that reaches the old archive after its hour was packed, because it was accepted days after it was received, gets a pack of its own for that hour.
 - **Only hours that ended `--settle-hours` ago** are packed (48 by default), since a recent submission can still be rejected and deleted.
 - **It deletes nothing.** A submission that is in a pack and no longer in the bucket was rejected since; it is reported, and stays packed until someone decides.
 - A pack is written under another name and renamed, so a file named `.pack` is always whole. Anything else under `DIR/packs` stops the run.
-
-One real hour, 1,490 submissions and 3,130 MiB of JSON, took 57 seconds on 32 cores and peaked at 12.7 GiB of memory with `--build-input-mib 256`: every thread keeps the buffers of the largest submission it has built, on top of what the table above gives.
+- **What a run over days does not show.** A run with `--only` looks at nothing else, so it reports neither what was accepted late for another day nor what is gone from the bucket. Before the old bucket is retired, one run without `--only` has to find nothing left to pack, every pack's MD5 has to be the one in its name, and the checkout that the first packs were made from has to be compared with the bucket by checksum.
 
 ## Tests
 
