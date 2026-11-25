@@ -247,15 +247,9 @@ end
 local function SampleSubName(_, tooltipData)
   local capture = currentCapture
   if not subNameStream or not subNameGuidStream or not capture or not tooltipData then return end
-  local guid = tooltipData.guid
-  if Core.ParseGUIDKind(guid) ~= "npc" then return end
-
   -- Unit tooltips are hover-driven (world and unit frames), so only mouseover is tracked.
-  local token = "mouseover"
-  if not UnitExists(token) or UnitIsPlayer(token) or UnitPlayerControlled(token) then return end
-  local tokenGuid = UnitGUID(token)
-  if issecretvalue and issecretvalue(tokenGuid) then return end
-  if tokenGuid ~= guid then return end
+  local guid = Core.GetNpcTooltipGUID(tooltipData)
+  if not guid then return end
 
   local subName = ExtractSubName(tooltipData)
   if subName == nil then return end

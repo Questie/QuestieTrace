@@ -518,6 +518,14 @@ All tuple-returning functions MUST have `n` on every stored value.
 
 Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the NPC ID and only checks that `UnitName` is not nil, so replay answers `UnitName("nameplateN")` from the NPC ID. Players, player pets and minions (`Pet-` GUIDs, `UnitPlayerControlled`, including restricted answers), game objects, unrecognized or restricted GUIDs, and failed `UnitGUID` calls are withheld: their add records nil, meaning "no recordable unit on this token" rather than a nil from the client, so a reused token never keeps answering with its previous NPC. Instances are sampled too: Questie draws nameplate icons in dungeons on Classic clients, while Forever restricts GUIDs there, so its instance adds record nil. `NAME_PLATE_UNIT_REMOVED` writes no entry; between a removal and the next add the token keeps its last value.
 
+### Nested parameterized tooltip streams (synthetic)
+
+| Function key | Shape | Value | Notes |
+|---|---|---|---|
+| `Tooltip` | `[kind][key]` | `{ guid: string?, lines: TooltipTraceLine[] }` | `kind` is `unit` (NPC ID), `object` (object ID, or the name without a GUID), `quest` or `questProgress` (quest ID). One entry per different set of lines, numbers ignored; a line is `{ type, text?, id?, onQuest?, who?, have?, need?, done?, hidden? }`. Player names redacted; no text for lines that are a name by type. Forever only. See TRACKER_SPEC section 21. Schema 22+ |
+| `TooltipPartyProgress` | `[questID][who][objective]` | scalar (number) | Progress of a group member, whenever it changes. `who` is a group slot; `objective` is the text with its progress as `#/#`, and ` (2)` and so on when several have the same. Forever only. Schema 22+ |
+| `TooltipDropped` | leaf | scalar (number) | Changes the limits kept out, one entry updated in place. Schema 22+ |
+
 ### Parameterized by item GUID
 
 | Function key | Return type | Notes |

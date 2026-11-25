@@ -65,6 +65,17 @@ function Core.IsNpcUnit(token)
   return controlled ~= true
 end
 
+--- The GUID of the NPC a unit tooltip is for, if that NPC is under the mouse. Unit tooltips also show players, pets
+--- and their minions, and addons show tooltips of other units; those have none.
+---@param tooltipData TooltipData?
+---@return string? guid
+function Core.GetNpcTooltipGUID(tooltipData)
+  local guid = tooltipData and tooltipData.guid
+  if Core.ParseGUIDKind(guid) ~= "npc" or (not Core.IsNpcUnit("mouseover")) then return nil end
+  -- Core.IsNpcUnit has classified UnitGUID("mouseover"), so it is readable.
+  return UnitGUID("mouseover") == guid and guid or nil
+end
+
 --- Escape Lua pattern-magic characters so a literal string can be used as a gsub pattern.
 ---@param str string
 ---@return string
