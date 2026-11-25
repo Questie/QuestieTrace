@@ -5465,16 +5465,36 @@ function tooltipTests.QuestTooltipsAreKeptByQuest()
     "progress must be the tooltip's quest")
 end
 
+-- The versions one NPC had in a recording, for one kill quest.
+function tooltipTests.OneKillQuestLeavesRoomForTheNext()
+  local runtime = tooltipTests.NewRuntime()
+  local line = tooltipTests.line
+  local threat = line.Any({ type = 7, leftText = "100% Threat" })
+  runtime.core.StartCapture("kill quest")
+  for _, objective in ipairs({ line.QuestObjective("0/3 Plainstrider slain", 0, 3), line.QuestObjective("3/3 Plainstrider slain", 3, 3, true) }) do
+    for _, state in ipairs({ line.Plain("Beast"), line.Plain("Corpse") }) do
+      runtime.HoverUnit(tooltipTests.PLAINSTRIDER, state, line.QuestTitle(747), objective)
+      runtime.HoverUnit(tooltipTests.PLAINSTRIDER, state, line.QuestTitle(747), objective, threat)
+    end
+  end
+  assert(#tooltipTests.Stream(runtime, "unit", 2955) == 8, "each must be a version, got " .. #tooltipTests.Stream(runtime, "unit", 2955))
+
+  runtime.HoverUnit(tooltipTests.PLAINSTRIDER, line.Plain("Beast"), line.QuestTitle(747), line.QuestTitle(748))
+  local versions = tooltipTests.Stream(runtime, "unit", 2955)
+  assert(#versions == 9 and versions[9].v.lines[5].id == 748, "a quest accepted later must be stored")
+  assert(Session(runtime).functions.TooltipDropped == nil, "nothing was left out")
+end
+
 function tooltipTests.LimitsKeepTheSizeBounded()
   local runtime = tooltipTests.NewRuntime()
   runtime.core.StartCapture("limits")
-  for quest = 1, 20 do
+  for quest = 1, 30 do
     -- A refresh of a set of lines that was left out is not another one.
     for _ = 1, 5 do runtime.HoverUnit(tooltipTests.PLAINSTRIDER, tooltipTests.line.QuestTitle(quest)) end
   end
-  assert(#tooltipTests.Stream(runtime, "unit", 2955) == 8, "one NPC must have at most 8 versions, got " .. #tooltipTests.Stream(runtime, "unit", 2955))
+  assert(#tooltipTests.Stream(runtime, "unit", 2955) == 24, "one NPC must have at most 24 versions, got " .. #tooltipTests.Stream(runtime, "unit", 2955))
   local dropped = Session(runtime).functions.TooltipDropped
-  assert(#dropped == 1 and dropped[1].v == 12, "what is left out must be counted in one entry, got " .. tostring(dropped[1] and dropped[1].v))
+  assert(#dropped == 1 and dropped[1].v == 6, "what is left out must be counted in one entry, got " .. tostring(dropped[1] and dropped[1].v))
 
   for _ = 1, 2 do
     for npc = 1, 1005 do runtime.HoverUnit(string.format("Creature-0-5251-0-12-%d-000012345", 10000 + npc)) end
@@ -5482,7 +5502,7 @@ function tooltipTests.LimitsKeepTheSizeBounded()
   local count = 0
   for _ in pairs(Session(runtime).functions.Tooltip.unit) do count = count + 1 end
   assert(count == 1000, "1000 NPCs at most, got " .. count)
-  assert(dropped[1].v == 12 + 6, "the NPCs left out must be counted, got " .. dropped[1].v)
+  assert(dropped[1].v == 6 + 6, "the NPCs left out must be counted, got " .. dropped[1].v)
 
   local lines = {}
   for i = 1, 60 do lines[i] = tooltipTests.line.Plain("Line " .. i, 0) end
@@ -5642,6 +5662,7 @@ local tests = {
   { name = "tooltip: players pets and other units are not recorded", run = tooltipTests.PlayersPetsAndOtherUnitsAreNotRecorded },
   { name = "tooltip: objects are kept by ID or name", run = tooltipTests.ObjectsAreKeptByIDOrName },
   { name = "tooltip: quest tooltips are kept by quest", run = tooltipTests.QuestTooltipsAreKeptByQuest },
+  { name = "tooltip: one kill quest leaves room for the next", run = tooltipTests.OneKillQuestLeavesRoomForTheNext },
   { name = "tooltip: limits keep the size bounded", run = tooltipTests.LimitsKeepTheSizeBounded },
   { name = "tooltip: clients without the apis capture as before", run = tooltipTests.ClientsWithoutTheApisCaptureAsBefore },
   { name = "tooltip: tooltips without lines are skipped", run = tooltipTests.TooltipsWithoutLinesAreSkipped },

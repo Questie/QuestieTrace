@@ -43,8 +43,9 @@ local Core = QuestieTraceCore
 ---@field done boolean?
 ---@field hidden boolean? The client did not let the addon read the line's type
 
----@type number Entities of each kind with entries, and entries of each
-local MAX_ENTITIES, MAX_VERSIONS = 1000, 8
+---@type number Entities of each kind with entries, and entries of each. One kill quest alone can give an NPC 8: alive or
+---a corpse, with or without its threat, and done or not.
+local MAX_ENTITIES, MAX_VERSIONS = 1000, 24
 ---@type number Lines stored of one tooltip
 local MAX_LINES = 40
 ---@type number Entries of one party progress stream
