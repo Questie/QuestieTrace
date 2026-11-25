@@ -4818,6 +4818,10 @@ function tooltipTests.ObjectivesThatDifferInOtherNumbersAreApart()
   runtime.HoverUnit(tooltipTests.GREATER_PLAINSTRIDER, tooltipTests.line.QuestTitle(747), tooltipTests.line.QuestPlayer("Bobmember"),
     tooltipTests.line.QuestObjective("0/1 Beacon", 0, 1), tooltipTests.line.QuestObjective("1/1 Beacon", 1, 1))
   assert(progress["#/# Beacon"][1].v == 0 and progress["#/# Beacon (2)"][1].v == 1, "the second must have its own stream")
+  -- One whose progress is hidden keeps its place, so the next is not taken for it.
+  runtime.HoverUnit(tooltipTests.GREATER_PLAINSTRIDER, tooltipTests.line.QuestTitle(747), tooltipTests.line.QuestPlayer("Bobmember"),
+    tooltipTests.line.QuestObjective("0/1 Beacon", nil, 1), tooltipTests.line.QuestObjective("1/1 Beacon", 1, 1))
+  assert(#progress["#/# Beacon"] == 1 and #progress["#/# Beacon (2)"] == 1, "nothing changed, so nothing may be recorded")
 end
 
 function tooltipTests.PartyProgressIsReadAgainAfterARosterChange()

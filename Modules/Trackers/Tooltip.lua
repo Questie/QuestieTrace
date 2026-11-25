@@ -206,7 +206,7 @@ end
 ---@param questID number
 ---@param who string
 ---@param text string
----@param have number
+---@param have number? nil when the client hides it: the objective still keeps its place among the same texts
 ---@param sameText table<string, number>
 local function RecordMemberProgress(capture, questID, who, text, have, sameText)
   local folded = FoldProgress(text)
@@ -214,7 +214,7 @@ local function RecordMemberProgress(capture, questID, who, text, have, sameText)
   sameText[folded] = count
   local suffix = count > 1 and (" (" .. count .. ")") or ""
   local progressKey = questID .. "\1" .. who .. "\1" .. folded .. suffix
-  if lastProgress[progressKey] == have then return end
+  if not have or lastProgress[progressKey] == have then return end
   lastProgress[progressKey] = have
 
   local quests = GetOrCreate(capture.session.functions, "TooltipPartyProgress")
@@ -243,7 +243,7 @@ local function RecordPartyProgress(capture, lines, defaultQuestID)
       who, sameText = GetMember(line.guid), {}
     elseif line and lineType == lineTypes.QuestObjective then
       local text, have = Readable(line.leftText, "string"), Readable(line.numFulfilled, "number")
-      if questID and text and have and who and who ~= "self" and who ~= "other" then
+      if questID and text and who and who ~= "self" and who ~= "other" then
         RecordMemberProgress(capture, questID, who, text, have, sameText)
       end
     else
