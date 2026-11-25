@@ -486,7 +486,8 @@ fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) 
 
 /// lookups.ts `finalizeLookups`: per entity and locale, a Questie l10n module of every observed
 /// id (unlike the corrections, Classic ones too). Names can change over time (a renamed NPC), so
-/// the newest one wins. Subnames rarely change but are sometimes attached to the wrong NPC, so
+/// the newest one wins, except that an NPC that spawns as male and as female has both forms of its
+/// name, and the choice between them must not depend on the newest session. Subnames rarely change but are sometimes attached to the wrong NPC, so
 /// they need agreement between sessions. Object names never change, but a looted object can be
 /// named after a neighbour whose tooltip was last shown, so they need it too, unless no other name
 /// was observed (a rare object is seen in one session). Objective texts use the default policy.
@@ -494,7 +495,7 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
     let mut npcs = Vec::new();
     for locale in sorted_locales(&acc.npc_name) {
         let sub_names = values_for(&acc.npc_sub_name, &locale, ScalarSummary::aggregate_agreed);
-        let entries: Vec<(i64, Js)> = values_for(&acc.npc_name, &locale, ScalarSummary::aggregate_newest)
+        let entries: Vec<(i64, Js)> = values_for(&acc.npc_name, &locale, ScalarSummary::aggregate_newest_name)
             .into_iter()
             .map(|(id, name)| {
                 // "" means the NPC has no subname.
@@ -780,5 +781,39 @@ mod tests {
         for values in no_agreement {
             assert_eq!(with_object_names(values), (None, None), "{values:?}");
         }
+    }
+
+    /// NPC 30000's deDE lookup line after it was seen under each name in six sessions, the last name's newest.
+    fn npc_lookup(names: [&str; 2]) -> String {
+        let seen: Vec<(&str, f64)> = names
+            .iter()
+            .enumerate()
+            .flat_map(|(at, &name)| (0..6).map(move |n| (name, (at * 1000 + n) as f64)))
+            .collect();
+        let bundle = finalized(sightings(&seen, |staged, name| {
+            let german = Localized {
+                locale: "deDE".to_owned(),
+                value: name.to_owned(),
+            };
+            staged.lookups.npc_name = SessionScalars::new(vec![obs(NPC, german)]);
+        }));
+        let lookups = bundle.lookups.iter().find(|(name, _)| *name == "lookupNpcs").expect("npc lookups");
+        let (_, lua) = lookups.1.iter().find(|(locale, _)| locale == "deDE").expect("deDE lookups");
+        lua.lines().find(|line| line.contains("[30000]")).expect("the npc's line").trim().to_owned()
+    }
+
+    #[test]
+    fn writes_the_shorter_variant_of_an_npc_name_whichever_form_is_newest() {
+        for names in [
+            ["Nachtläufer der Defias", "Nachtläuferin der Defias"],
+            ["Nachtläuferin der Defias", "Nachtläufer der Defias"],
+        ] {
+            assert_eq!(npc_lookup(names), "[30000] = {\"Nachtläufer der Defias\",nil},");
+        }
+    }
+
+    #[test]
+    fn writes_the_newest_name_of_a_renamed_npc() {
+        assert_eq!(npc_lookup(["Axle Smoothslice", "Edine Sharphorn"]), "[30000] = {\"Edine Sharphorn\",nil},");
     }
 }

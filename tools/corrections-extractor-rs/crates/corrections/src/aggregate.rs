@@ -243,23 +243,7 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
     pub fn aggregate_newest(&self) -> IndexMap<i64, T> {
         self.entities
             .iter()
-            .map(|(&id, groups)| {
-                let mut all: Vec<&ScalarGroup<T>> = groups.values().collect();
-                let mut candidates: Vec<&ScalarGroup<T>> = all.iter().copied().filter(|g| g.timed_session_count >= NEWEST_MIN_SESSIONS).collect();
-                // Candidates were seen in timed sessions, so they all have a newest session time.
-                candidates.sort_by(|a, b| {
-                    let newest = |g: &ScalarGroup<T>| g.newest_session_time.unwrap_or(f64::NAN);
-                    newest_first(newest(a), newest(b)).then_with(|| default_order(a, b))
-                });
-                let winner = match candidates.first() {
-                    Some(winner) => *winner,
-                    None => {
-                        all.sort_by(|a, b| default_order(a, b));
-                        all[0]
-                    }
-                };
-                (id, winner.value.clone())
-            })
+            .map(|(&id, groups)| (id, newest_winner(groups.values().collect()).value.clone()))
             .collect()
     }
 
@@ -298,6 +282,55 @@ impl<T: Clone + Eq + Hash> ScalarSummary<T> {
     }
 }
 
+impl ScalarSummary<String> {
+    /// aggregate.ts `aggregateNewestNameScalarSummary`: like [`Self::aggregate_newest`], for names
+    /// that exist in several variants at once (a creature spawning as male and as female is named
+    /// "Nachtläufer" or "Nachtläuferin"): when the newest name has well supported near-identical
+    /// variants, the shortest of them wins (alphabetically on equal length), so the result does not
+    /// change with whichever session is newest. A name without such variants, such as a rename, is
+    /// decided as in [`Self::aggregate_newest`].
+    pub fn aggregate_newest_name(&self) -> IndexMap<i64, String> {
+        self.entities.iter().map(|(&id, groups)| (id, newest_name(groups.values().collect()))).collect()
+    }
+}
+
+/// The winner of [`ScalarSummary::aggregate_newest_name`] among one entity's names.
+fn newest_name(all: Vec<&ScalarGroup<String>>) -> String {
+    let best = all.iter().map(|group| group.timed_session_count).max().unwrap_or(0);
+    let is_strong =
+        |group: &ScalarGroup<String>| group.timed_session_count >= VARIANT_MIN_SESSIONS && group.timed_session_count as f64 >= best as f64 * VARIANT_MIN_SHARE;
+    let winner = newest_winner(all.clone());
+    if !is_strong(winner) {
+        return winner.value.clone();
+    }
+    let winner_name = utf16(&winner.value);
+    let variants = all
+        .into_iter()
+        .filter(|group| is_strong(group))
+        .map(|group| (utf16(&group.value), &group.value))
+        .filter(|(name, _)| edit_distance(name, &winner_name) <= VARIANT_MAX_EDIT_DISTANCE);
+    let shortest = variants.min_by(|(a, _), (b, _)| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+    shortest.expect("the winner is one of them").1.clone()
+}
+
+/// A JS string's units, which its length, indexing and `<` go by.
+fn utf16(text: &str) -> Vec<u16> {
+    text.encode_utf16().collect()
+}
+
+fn edit_distance(a: &[u16], b: &[u16]) -> usize {
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    for (i, unit) in a.iter().enumerate() {
+        let mut row = vec![i + 1];
+        for (j, other) in b.iter().enumerate() {
+            let replaced = previous[j] + usize::from(unit != other);
+            row.push(replaced.min(previous[j + 1] + 1).min(row[j] + 1));
+        }
+        previous = row;
+    }
+    previous[b.len()]
+}
+
 impl<T: Eq + Hash + crate::memory::HeapSize> ScalarSummary<T> {
     /// (value groups, approximate bytes) held.
     pub fn memory(&self) -> (usize, usize) {
@@ -317,6 +350,12 @@ impl<T: Eq + Hash + crate::memory::HeapSize> ScalarSummary<T> {
 /// Sessions a value needs before it can win by being the newest.
 const NEWEST_MIN_SESSIONS: usize = 2;
 
+/// Sessions a name needs to count as a variant, and its share of the sessions of the best supported name.
+const VARIANT_MIN_SESSIONS: usize = 5;
+const VARIANT_MIN_SHARE: f64 = 0.25;
+/// Gendered forms of one name differ by an ending or two ("Kanonier"/"Kanonierin").
+const VARIANT_MAX_EDIT_DISTANCE: usize = 3;
+
 /// Sessions a value needs before it can win by agreement.
 const AGREED_MIN_SESSIONS: usize = 2;
 /// How many times more sessions than the runner-up the winning value needs.
@@ -327,6 +366,18 @@ const AGREED_MIN_LEAD: usize = 2;
 fn newest_first(a: f64, b: f64) -> Ordering {
     let key = |x: f64| if x.is_nan() { f64::NEG_INFINITY } else { x + 0.0 };
     key(b).partial_cmp(&key(a)).expect("NaN was mapped away")
+}
+
+/// The winner of [`ScalarSummary::aggregate_newest`] among one entity's values, of which there is at least one.
+fn newest_winner<T>(mut all: Vec<&ScalarGroup<T>>) -> &ScalarGroup<T> {
+    let mut candidates: Vec<&ScalarGroup<T>> = all.iter().copied().filter(|g| g.timed_session_count >= NEWEST_MIN_SESSIONS).collect();
+    // Candidates were seen in timed sessions, so they all have a newest session time.
+    candidates.sort_by(|a, b| newest_first(session_time(a), session_time(b)).then_with(|| default_order(a, b)));
+    if let Some(winner) = candidates.first() {
+        return winner;
+    }
+    all.sort_by(|a, b| default_order(a, b));
+    all[0]
 }
 
 /// Values seen in no session with a server time sort as the oldest.
@@ -521,6 +572,66 @@ mod tests {
             }
         }
         summary
+    }
+
+    fn newest_name_of(values: &[(&str, usize)]) -> String {
+        seen_in_sessions(values).aggregate_newest_name()[&1].clone()
+    }
+
+    #[test]
+    fn the_shortest_of_the_well_supported_variants_of_a_name_wins_whichever_is_newest() {
+        assert_eq!(
+            newest_name_of(&[("Kanonier von Stormwind", 8), ("Kanonierin von Stormwind", 10)]),
+            "Kanonier von Stormwind"
+        );
+        assert_eq!(
+            newest_name_of(&[("Kanonierin von Stormwind", 10), ("Kanonier von Stormwind", 8)]),
+            "Kanonier von Stormwind"
+        );
+        assert_eq!(newest_name_of(&[("Kanonierin", 10), ("Kanonier", 10), ("Kanoniere", 10)]), "Kanonier");
+        assert_eq!(newest_name_of(&[("Wache", 20), ("Wachen", 20)]), "Wache");
+    }
+
+    #[test]
+    fn the_alphabetically_first_of_two_variants_of_equal_length_wins() {
+        assert_eq!(newest_name_of(&[("Magicus", 6), ("Magicum", 6)]), "Magicum");
+        assert_eq!(newest_name_of(&[("Magicum", 6), ("Magicus", 6)]), "Magicum");
+    }
+
+    #[test]
+    fn the_newest_name_wins_over_variants_with_too_few_sessions_or_too_small_a_share() {
+        assert_eq!(newest_name_of(&[("Kanonier", 40), ("Kanonierin", 4)]), "Kanonierin");
+        assert_eq!(newest_name_of(&[("Kanonier", 100), ("Kanonierin", 10)]), "Kanonierin");
+        assert_eq!(
+            newest_name_of(&[("Kanonier", 20), ("Kanonierin", 5)]),
+            "Kanonier",
+            "exactly the minimum of both"
+        );
+        // A weak variant of a strong newest name is not considered, however short.
+        assert_eq!(newest_name_of(&[("Kanonier", 4), ("Kanonierin", 40)]), "Kanonierin");
+    }
+
+    #[test]
+    fn the_newest_name_wins_over_names_that_are_not_its_variants() {
+        assert_eq!(newest_name_of(&[("Axle Smoothslice", 10), ("Edine Sharphorn", 10)]), "Edine Sharphorn");
+        assert_eq!(newest_name_of(&[("Wache", 10), ("Wachenab", 10)]), "Wache", "3 edits apart");
+        assert_eq!(newest_name_of(&[("Wache", 10), ("Wachenabc", 10)]), "Wachenabc", "4 edits apart");
+    }
+
+    #[test]
+    fn a_single_name_wins() {
+        assert_eq!(newest_name_of(&[("Kanonier", 1)]), "Kanonier");
+    }
+
+    #[test]
+    fn the_distance_between_names_counts_the_units_of_a_js_string() {
+        let distance = |a: &str, b: &str| edit_distance(&utf16(a), &utf16(b));
+        assert_eq!(distance("Wache", "Wache"), 0);
+        assert_eq!(distance("", "Wache"), 5);
+        assert_eq!(distance("Kanonier", "Kanonierin"), 2);
+        assert_eq!(distance("kitten", "sitting"), 3);
+        assert_eq!(distance("ä", "a"), 1);
+        assert_eq!(distance("𝄞", ""), 2, "two units");
     }
 
     #[test]
