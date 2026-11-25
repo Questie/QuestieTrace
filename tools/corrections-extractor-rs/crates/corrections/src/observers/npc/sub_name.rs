@@ -8,7 +8,7 @@
 //!
 //! NPCs without a subname show their level line there instead ("Level 28", "Stufe ?? (Boss)",
 //! "等级 10（精英）"), which older versions of the tracker did not tell apart. Such a value means "no
-//! subname".
+//! subname". A subname with a redacted player name ("<name>'s Escort") is not observed at all.
 //!
 //! Which NPC a subname belongs to depends on the tracker version:
 //! - With UnitSubNameGUID.mouseover (schema 21+), every subname has the GUID of the NPC its
@@ -36,6 +36,9 @@ use trace_data::stream::{entry_t, entry_tp, entry_v, get_stream};
 use trace_data::{KeyRef, Session, Value};
 
 const MOUSEOVER: &str = "mouseover";
+
+/// What the tracker's privacy filter replaces player names with (Core.SanitizeText).
+const REDACTED_NAME: &str = "<name>";
 
 /// Longest time (seconds) between a subname and the target change it is inferred for.
 const MAX_SECONDS_BEFORE_TARGET: f64 = 1.0;
@@ -94,10 +97,15 @@ fn observe_before_target_change(session: &Session, sub_names: &[Value]) -> Vec<O
 /// The subname of `sample`, observed at `t`, with the locale it was sampled in.
 fn observation(session: &Session, entity_id: i64, sample: &Value, t: f64) -> Option<Observation<Localized<String>>> {
     let sub_name = entry_v(sample).and_then(Value::as_str)?;
+    let no_sub_name = is_level_line(sub_name);
+    // Such a title belongs to a player-related unit (an escort).
+    if !no_sub_name && sub_name.contains(REDACTED_NAME) {
+        return None;
+    }
     let locale = locale_at(session, entry_t(sample))?;
     let value = Localized {
         locale: locale.to_owned(),
-        value: if is_level_line(sub_name) { String::new() } else { sub_name.to_owned() },
+        value: if no_sub_name { String::new() } else { sub_name.to_owned() },
     };
     Some(Observation::new(entity_id, value, Confidence::High, t))
 }
@@ -265,6 +273,35 @@ mod tests {
             value: String::new(),
         };
         assert_eq!(localized(functions), [none]);
+    }
+
+    // describe("observeSubName (npc) with redacted player names")
+
+    #[test]
+    fn does_not_observe_a_subname_that_contains_a_redacted_player_name() {
+        let functions = en_us(json!({
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "<name> Trainer" }] },
+            "UnitSubNameGUID": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Creature-0-5208-0-7-823-000031" }] },
+        }));
+        assert_eq!(observed(functions, vec![]), []);
+    }
+
+    #[test]
+    fn does_not_observe_such_a_subname_when_inferring_the_npc_from_the_target_either() {
+        let functions = en_us(json!({
+            "UnitGUID": { "target": [{ "t": 3.5, "tp": 3.5, "v": NORDUN }] },
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "<name>'s Escort" }] },
+        }));
+        assert_eq!(observed(functions, vec![]), []);
+    }
+
+    #[test]
+    fn still_observes_a_level_line_with_a_redacted_rank_as_no_subname() {
+        let functions = en_us(json!({
+            "UnitSubName": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Level 11 (<name>)" }] },
+            "UnitSubNameGUID": { "mouseover": [{ "t": 3, "tp": 3.1, "v": "Creature-0-5208-0-7-823-000031" }] },
+        }));
+        assert_eq!(observed(functions, vec![]), [(823, String::new(), Confidence::High, 3.0)]);
     }
 
     // describe("observeSubName (npc) without recorded guids")
