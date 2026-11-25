@@ -107,6 +107,7 @@ specs/                    - Design specifications
     TRACKER_SPEC.md       - Tracker interface specification
     EVENT_CATALOG.md      - Event catalog
     SCHEMA_SPEC.md        - Data schema specification
+    SCHEMA_CHANGELOG.md   - What changed in the recorded data with each schema version
     TRACE_FILE_SPEC.md    - Trace file format
     UI_SPEC.md            - UI specification
     FUNCTION_EMULATION_SPEC.md - Function emulation
@@ -440,6 +441,9 @@ Rules:
 Bump `SCHEMA_VERSION` in `QuestieTrace.lua` whenever a tracker changes what or how data is recorded
 (e.g. new/removed streams, changed values), so traces from before and after the change can be told apart.
 
+- Add what changed to `specs/SCHEMA_CHANGELOG.md` in the same PR, under the version it ships in, with what sessions
+  below it have instead. Do this for every such change, also while `SCHEMA_VERSION` is still unreleased and needs no bump.
+- When you read traces, look there for which versions have a piece of data and which form to prefer.
 - Update the current-version expectations in `Modules/Consent.test.lua` and `Tests/run.lua` (leave legacy fixtures alone).
 - Commit the bump on its own as `chore: bump schema version to <N>`.
 
@@ -453,6 +457,7 @@ All design decisions are documented in `specs/`. Before implementing significant
    - `ARCHITECTURE_SPEC.md` - Overall system design
    - `TRACKER_SPEC.md` - Tracker interface contract
    - `SCHEMA_SPEC.md` - Session data schema
+   - `SCHEMA_CHANGELOG.md` - What changed with each schema version
    - `EVENT_CATALOG.md` - Supported events
 
 ## WoW API Documentation
