@@ -1,14 +1,13 @@
 //! relations-review.md: what a person reads before trusting the Lua output. Ordered by value:
 //! Forever-new quests nobody has authored come first, most confident first; then authored quests
-//! where the evidence adds or disagrees; then Classic disagreements; then the numbers. Wowhead
-//! claims appear only as labelled context lines (see [`super::inputs`] for why).
+//! where the evidence adds or disagrees; then Classic disagreements; then the numbers.
 
 use super::contradicted::Contradicted;
 use super::crossval::{FittedKind, ScoredEdge};
 use super::edges::{Claim, Domain, EdgeKey, Reference};
 use super::meta::InputSummary;
 use super::resolve::Outcome;
-use super::views::{EdgeView, HintView, QuestView, Status};
+use super::views::{EdgeView, QuestView, Status};
 use crate::model::{QuestCatalog, QuestId, RelationField};
 use crate::text::to_fixed;
 use indexmap::IndexMap;
@@ -28,8 +27,6 @@ pub struct ReviewInput<'r, 's> {
     pub min_score: f64,
     pub review_score: f64,
     pub candidate_files: &'r [InputSummary],
-    /// Context-only files (Wowhead): shown, never scored. (signal, candidates)
-    pub context_files: &'r [(&'r str, usize)],
     pub and_sources: &'r [String],
     pub metrics_markdown: &'r str,
     /// Full model vs the model without signal-score columns.
@@ -113,37 +110,9 @@ fn outcome_text(edge: &EdgeView) -> String {
     }
 }
 
-/// "wowhead-requires-any" -> "Wowhead Requires Any".
-fn context_label(claim: &Claim) -> String {
-    let words: Vec<String> = claim
-        .signal()
-        .split('-')
-        .map(|word| {
-            let mut chars = word.chars();
-            chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
-        })
-        .collect();
-    format!("{} (untrusted, context only)", words.join(" "))
-}
-
 /// The first evidence text, when there is one.
 fn example<'c>(claim: &Claim<'c>) -> Option<&'c str> {
     claim.evidence.first().map(|evidence| evidence.text.as_str()).filter(|text| !text.is_empty())
-}
-
-fn context_line(claim: &Claim) -> String {
-    let example = example(claim).map_or_else(String::new, |text| format!(": {}", clip(text, 140)));
-    format!("{} {} (support {}){example}", context_label(claim), claim.score, claim.support)
-}
-
-fn hint_line(hint: &HintView, input: &ReviewInput) -> String {
-    let context: Vec<String> = hint.claims.iter().map(context_line).collect();
-    format!(
-        "- hint: **{}** {} · {}",
-        hint.field,
-        quest_label(hint.target, input.catalog),
-        context.join(" · ")
-    )
 }
 
 fn signed(value: f64, decimals: usize) -> String {
@@ -186,7 +155,6 @@ fn edge_block(edge: &EdgeView, input: &ReviewInput, evidence_lines: bool) -> Vec
             .collect();
         lines.push(format!("  - log-odds: {}", terms.join(" · ")));
     }
-    lines.extend(edge.context.iter().map(|claim| format!("  - {}", context_line(claim))));
     lines
 }
 
@@ -201,7 +169,6 @@ fn quest_block(view: &QuestView, edges: &[&EdgeView], input: &ReviewInput, refer
     for edge in edges {
         lines.extend(edge_block(edge, input, edge.is_written() || edge.outcome == Outcome::BelowThreshold));
     }
-    lines.extend(view.hints.iter().map(|hint| hint_line(hint, input)));
     if reference_only && !view.reference_only.is_empty() {
         let listed: Vec<String> = view
             .reference_only
@@ -257,7 +224,7 @@ pub fn render_review(input: &ReviewInput) -> String {
     let mut uncovered_near_miss: Vec<&QuestView> = uncovered
         .iter()
         .copied()
-        .filter(|view| written(view).next().is_none() && (!view.edges.is_empty() || !view.hints.is_empty()))
+        .filter(|view| written(view).next().is_none() && !view.edges.is_empty())
         .collect();
     uncovered_near_miss.sort_by(by_descending(max_shown));
     let authored: Vec<&QuestView> = forever.iter().copied().filter(|view| view.reference == Reference::Authored).collect();
@@ -299,11 +266,6 @@ pub fn render_review(input: &ReviewInput) -> String {
         .iter()
         .map(|file| format!("{} ({})", file.signal, file.candidates))
         .collect();
-    let context: Vec<String> = input
-        .context_files
-        .iter()
-        .map(|(signal, candidates)| format!("{signal} ({candidates})"))
-        .collect();
 
     let mut lines: Vec<String> = vec![
         "# Quest relation review".into(),
@@ -321,11 +283,6 @@ pub fn render_review(input: &ReviewInput) -> String {
          `silent` means the signal covered the quest but did not claim the relation."
             .into(),
         String::new(),
-        "**Wowhead is context only.** Questie's own relation data was scraped from Wowhead Series rows, so Wowhead agreeing with the \
-         references is circular. Its claims add nothing to any score, decision or metric; they appear as lines marked \
-         `(untrusted, context only)`, and as `hint:` lines on Forever-new quests where only Wowhead claims something."
-            .into(),
-        String::new(),
         "Status against reference data: **agree**; **new** (the reference field is empty, so the output fills it); **conflict** \
          (the reference has other values; for authored quests the authored value wins at load time)."
             .into(),
@@ -333,7 +290,7 @@ pub fn render_review(input: &ReviewInput) -> String {
         "## Summary".into(),
         String::new(),
         format!(
-            "- Forever-new quests without authored relations: **{}** with accepted relations ({} relations), {} with near misses or hints only.",
+            "- Forever-new quests without authored relations: **{}** with accepted relations ({} relations), {} with near misses only.",
             uncovered_accepted.len(),
             written_edges(&uncovered_accepted),
             uncovered_near_miss.len()
@@ -355,7 +312,6 @@ pub fn render_review(input: &ReviewInput) -> String {
             input.lua_file, input.lua_quests
         ),
         format!("- Inputs: {}.", inputs.join(", ")),
-        format!("- Context only, untrusted: {}.", or_none(context.join(", "))),
         format!("- AND (preQuestGroup) evidence trusted from: {}.", or_none(input.and_sources.join(", "))),
         format!("- Known prerequisites a few characters contradict (section 6): {}.", input.contradicted.len()),
         String::new(),
@@ -368,10 +324,7 @@ pub fn render_review(input: &ReviewInput) -> String {
         lines.extend(quest_block(view, &all_edges(view), input, false));
     }
 
-    lines.extend([
-        "## 1b. Forever-new quests without authored relations: near misses and hints only".into(),
-        String::new(),
-    ]);
+    lines.extend(["## 1b. Forever-new quests without authored relations: near misses only".into(), String::new()]);
     for view in &uncovered_near_miss {
         lines.extend(quest_block(view, &all_edges(view), input, false));
     }

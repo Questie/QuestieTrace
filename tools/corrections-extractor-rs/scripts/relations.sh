@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 # Runs the quest-relations pipeline (crates/relations) after checking every input, so a run stops
-# at once with the reason instead of halfway through. The scraper databases are fetched into the
-# gitignored data/scraper/ cache (scripts/fetch-scraper.sh) unless SCRAPER_DIR is given.
+# at once with the reason instead of halfway through.
 #
 # Usage: QUESTIEDB_DIR=<QuestieDB checkout> scripts/relations.sh [--twice] [RELATIONS_DIR]
 #
 #   QUESTIEDB_DIR       required: a QuestieDB checkout with master's corrections layout
 #   TRACE_DATA_DIR      trace-data checkout (default: trace-data next to the QuestieTrace checkout)
-#   SCRAPER_DIR         a scraper release folder (default: fetch SCRAPER_TAG into data/scraper/)
-#   SCRAPER_TAG         release to fetch (default: the latest)
 #   RELATIONS_TRACE_MODULES_DIR
 #                       optional: a dump's own forever*Traces.lua for the catalog; without it the
 #                       catalog uses the trace modules imported into QUESTIEDB_DIR
@@ -75,17 +72,6 @@ if grep -qE "$relation_fields" --exclude=foreverQuestRelationTraces.lua "$module
   note "WARNING: $modules already holds relation fields (an imported relations output?); the catalog will treat them as known"
 fi
 
-# --- scraper ----------------------------------------------------------------------------------
-if [ -n "${SCRAPER_DIR:-}" ]; then
-  scraper="$(realpath -m "$SCRAPER_DIR")"
-else
-  scraper="$("$tool/scripts/fetch-scraper.sh" "${SCRAPER_TAG:-latest}" | tail -1)"
-fi
-for game in forever classic; do
-  [ -f "$scraper/data/raw/$game.db" ] || fail "no data/raw/$game.db in $scraper (set SCRAPER_DIR or unset it to fetch one)"
-done
-note "scraper: $scraper"
-
 # --- memory -----------------------------------------------------------------------------------
 available_gb=$(($(awk '/MemAvailable/ {print $2}' /proc/meminfo) / 1024 / 1024))
 [ "$available_gb" -ge 6 ] || note "WARNING: $available_gb GB of memory available; a full run needs about 4.5 GB"
@@ -98,7 +84,7 @@ run() {
   note "running the pipeline into $1"
   # Through env: the optional trace-modules variable is an expansion, which a plain prefix
   # assignment would not take.
-  env TRACE_DATA_DIR="$trace_data" QUESTIEDB_DIR="$questie_db" SCRAPER_DIR="$scraper" RELATIONS_DIR="$1" \
+  env TRACE_DATA_DIR="$trace_data" QUESTIEDB_DIR="$questie_db" RELATIONS_DIR="$1" \
     RELATIONS_REQUIRE_FOREVER_VERSION=1 RELATIONS_OUTPUT_DIR="$1/output" \
     ${RELATIONS_TRACE_MODULES_DIR:+RELATIONS_TRACE_MODULES_DIR="$modules"} \
     "$tool/target/release/relations" pipeline

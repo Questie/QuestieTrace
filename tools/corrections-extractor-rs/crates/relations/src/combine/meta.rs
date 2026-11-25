@@ -69,8 +69,6 @@ pub struct RelationsMeta {
     pub authored: StatusCounts,
     /// Candidate files the model used.
     pub inputs: Vec<InputSummary>,
-    /// Shown to reviewers as context only (Wowhead), never scored.
-    pub context_only: Vec<String>,
     pub caveat: &'static str,
 }
 
@@ -153,7 +151,6 @@ mod tests {
             because: None,
             status,
             claims: &[],
-            context: &[],
             contributions: &[],
         };
         let relations = RelationSet::new();
@@ -165,7 +162,6 @@ mod tests {
             relations: &relations,
             edges,
             reference_only: vec![],
-            hints: vec![],
             note: None,
         };
         let views = [

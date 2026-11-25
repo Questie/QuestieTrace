@@ -7,13 +7,9 @@
 //! combine picks its candidates up like any other signal's. A signal returns only what it found
 //! ([`Findings`]); [`run_one`] adds what every candidates file shares (its name, the run's time).
 //!
-//! Two places outside the module go by signal name and may need a line:
-//!
-//! - `combine/assumptions.rs` (`phrase`): how the Lua module's `-- Assumption:` comment words the
-//!   signal's evidence, per field. Without an entry the comment just says `<name> signal`.
-//! - `combine/inputs.rs` (`is_context_only`): files named `wowhead` or `wowhead-...` are context
-//!   for reviewers only and never decide anything. A new source like that needs a name it
-//!   matches; a new signal must not match it.
+//! One place outside the module goes by signal name and may need a line: `combine/assumptions.rs`
+//! (`phrase`), how the Lua module's `-- Assumption:` comment words the signal's evidence, per field.
+//! Without an entry the comment just says `<name> signal`.
 
 use crate::config::Config;
 use crate::eligibility::is_forever_interface;

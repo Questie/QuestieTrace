@@ -38,6 +38,9 @@ memory settings. Tonight's results were guarded against it (see "How the results
 | combine | 2.5 s | 0.4 s |
 | **pipeline** | **296 s, 4.0 GB** | **30.6 s, 2.7 GB** |
 
+`source:wowhead` was removed from the Rust pipeline on November 25: its claims were context for
+reviewers and decided nothing.
+
 **Full archive** (133,039 submissions, 639,682 episodes, 64,702 characters): Rust 11 min 6 s, peak
 15.3 GB (ingest 364 s, signals 288 s, of which absence 171 s and cooccurrence 79 s). The deliverable:
 627 quests, 1,646 relations; for Forever-new quests without authored relations, 394 quests / 820

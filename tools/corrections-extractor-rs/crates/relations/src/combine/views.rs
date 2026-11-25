@@ -1,13 +1,9 @@
 //! Per-quest views of the resolution: every edge as seen from each quest it writes to (a
 //! breadcrumb is breadcrumbForQuestId on one side and breadcrumbs on the other), with its status
 //! against the quest's reference data. relations.json and the review both render these.
-//!
-//! Context-only claims (Wowhead, see [`super::inputs`]) ride along for reviewers: on the edges
-//! trace signals claim, and as hints on Forever-new quests where only Wowhead claims something.
-//! They are never part of an edge's score or outcome.
 
 use super::crossval::{Contribution, ScoredEdge};
-use super::edges::{Claim, Domain, Edge, EdgeKey, EdgeKind, QuestDomains, Reference, Truth};
+use super::edges::{Claim, Domain, EdgeKey, EdgeKind, QuestDomains, Reference, Truth};
 use super::resolve::{Outcome, Resolution};
 use crate::model::{QuestCatalog, QuestId, RelationField, RelationSet};
 use indexmap::IndexMap;
@@ -50,8 +46,6 @@ pub struct EdgeView<'s> {
     /// Only for edges written to the RelationSet.
     pub status: Option<Status>,
     pub claims: &'s [Claim<'s>],
-    /// Context-only claims on the same relationship (untrusted, never scored).
-    pub context: &'s [Claim<'s>],
     pub contributions: &'s [Contribution<'s>],
 }
 
@@ -72,14 +66,6 @@ impl EdgeView<'_> {
     }
 }
 
-/// A relationship only context-only sources claim.
-#[derive(Clone, Debug)]
-pub struct HintView<'s> {
-    pub field: RelationField,
-    pub target: QuestId,
-    pub claims: &'s [Claim<'s>],
-}
-
 #[derive(Clone, Debug)]
 pub struct QuestView<'s> {
     pub quest_id: QuestId,
@@ -92,8 +78,6 @@ pub struct QuestView<'s> {
     pub edges: Vec<EdgeView<'s>>,
     /// Reference edges the resolution did not write.
     pub reference_only: Vec<(RelationField, QuestId)>,
-    /// Forever-new quests only: what context-only sources claim that no trace signal does.
-    pub hints: Vec<HintView<'s>>,
     /// How the prerequisites were read as OR or AND.
     pub note: Option<&'s str>,
 }
@@ -174,19 +158,17 @@ struct Shown<'s> {
 pub struct ViewSources<'s> {
     pub scored: &'s [ScoredEdge<'s>],
     pub resolution: &'s Resolution,
-    pub context: &'s IndexMap<EdgeKey, Edge<'s>>,
     pub truth: &'s Truth<'s>,
     pub domains: &'s QuestDomains,
     pub catalog: &'s QuestCatalog,
 }
 
-/// One view per quest an edge at or above `min_shown` (or a written one) touches, per Forever-new
-/// quest with hints, and per authored quest; in the order they are first touched.
+/// One view per quest an edge at or above `min_shown` (or a written one) touches, and per authored
+/// quest; in the order they are first touched.
 pub fn build_quest_views<'s>(sources: &ViewSources<'s>, min_shown: f64) -> IndexMap<QuestId, QuestView<'s>> {
     let ViewSources {
         scored,
         resolution,
-        context,
         truth,
         domains,
         catalog,
@@ -203,7 +185,6 @@ pub fn build_quest_views<'s>(sources: &ViewSources<'s>, min_shown: f64) -> Index
             relations: resolution.relations.get(&quest_id).unwrap_or(&NO_RELATIONS),
             edges: Vec::new(),
             reference_only: Vec::new(),
-            hints: Vec::new(),
             note: resolution.notes.get(&quest_id).map(String::as_str),
         });
         index
@@ -226,9 +207,7 @@ pub fn build_quest_views<'s>(sources: &ViewSources<'s>, min_shown: f64) -> Index
             contributions: &[],
         }));
     let probability_of: FxHashMap<EdgeKey, f64> = scored.iter().map(|edge| (edge.key(), edge.probability)).collect();
-    let mut shown_keys = FxHashSet::default();
     for edge in shown {
-        shown_keys.insert(edge.key);
         let Some(decision) = resolution.decisions.get(&edge.key) else { continue };
         let written = decision.outcome.is_written();
         if !written && edge.probability < min_shown {
@@ -251,22 +230,8 @@ pub fn build_quest_views<'s>(sources: &ViewSources<'s>, min_shown: f64) -> Index
                 because: decision.because,
                 status: written.then(|| status_of(field, target, truth.get(&quest_id).copied())),
                 claims: edge.claims,
-                context: context.get(&edge.key).map_or(&[][..], |edge| edge.claims.as_slice()),
                 contributions: edge.contributions,
             });
-        }
-    }
-
-    for edge in context.values().filter(|edge| !shown_keys.contains(&edge.key)) {
-        for (quest_id, field, target) in perspectives(edge.key, &resolution.relations) {
-            if domains.is_forever_new(quest_id) {
-                let index = view_of(&mut views, quest_id);
-                views[index].hints.push(HintView {
-                    field,
-                    target,
-                    claims: &edge.claims,
-                });
-            }
         }
     }
 
@@ -289,7 +254,7 @@ pub fn build_quest_views<'s>(sources: &ViewSources<'s>, min_shown: f64) -> Index
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combine::edges::truth_lookup;
+    use crate::combine::edges::{truth_lookup, Edge};
     use crate::combine::resolve::{resolve_relations, ResolvableEdge, ResolveOptions};
     use crate::model::{GroundTruth, GroundTruthTiers};
     use std::collections::BTreeMap;
@@ -351,11 +316,10 @@ mod tests {
             },
         );
         let (truth_lookup, domains) = (truth_lookup(&truth), QuestDomains::new(&truth));
-        let (context, catalog) = (IndexMap::new(), QuestCatalog::default());
+        let catalog = QuestCatalog::default();
         let sources = ViewSources {
             scored: &scored,
             resolution: &resolution,
-            context: &context,
             truth: &truth_lookup,
             domains: &domains,
             catalog: &catalog,

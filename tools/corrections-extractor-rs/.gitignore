@@ -1,4 +1,5 @@
 target/
-# Scraper databases fetched by scripts/fetch-scraper.sh, and relations runs (scripts/relations.sh).
+# Relations runs (scripts/relations.sh), and the scraper databases it fetched into data/ until
+# November 2026, several GB where they are still around.
 /data/
 /relations-output*/
