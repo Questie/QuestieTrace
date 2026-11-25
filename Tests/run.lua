@@ -3861,7 +3861,10 @@ local PLAINSTRIDER_OTHER_SPAWN = "Creature-0-5251-0-12-2955-000067890"
 local GREATER_PLAINSTRIDER = "Creature-0-5251-0-12-3244-000012345"
 local STALLION = "Vehicle-0-5251-0-12-28605-000012345"
 
-local function TestUnitTooltipQuestObjectivesAreRecorded()
+---@type table<string, fun()> A table, because a Lua chunk can have 200 local variables at most
+local tooltipQuestTests = {}
+
+function tooltipQuestTests.UnitTooltipQuestObjectivesAreRecorded()
   local runtime = NewTooltipRuntime()
   runtime.core.StartCapture("unit tooltip quest objectives")
   runtime.HoverUnit(PLAINSTRIDER,
@@ -3880,7 +3883,7 @@ local function TestUnitTooltipQuestObjectivesAreRecorded()
   })
 end
 
-local function TestUnitTooltipQuestObjectivesAreRecordedOncePerNpc()
+function tooltipQuestTests.UnitTooltipQuestObjectivesAreRecordedOncePerNpc()
   local runtime = NewTooltipRuntime()
   runtime.core.StartCapture("unit tooltip quest objectives once")
   local title = tooltipLine.QuestTitle(747)
@@ -3909,7 +3912,7 @@ local function TestUnitTooltipQuestObjectivesAreRecordedOncePerNpc()
   AssertUnitQuestObjectives(runtime, expected)
 end
 
-local function TestTooltipQuestObjectivesAreRecordedAgainInTheNextCapture()
+function tooltipQuestTests.TooltipQuestObjectivesAreRecordedAgainInTheNextCapture()
   local runtime = NewTooltipRuntime()
   local lines = { tooltipLine.QuestTitle(747), tooltipLine.QuestObjective("0/7 Plainstrider Meat") }
   local function HoverBoth()
@@ -3934,7 +3937,7 @@ local function TestTooltipQuestObjectivesAreRecordedAgainInTheNextCapture()
   end
 end
 
-local function TestTooltipQuestObjectivesOfPartyMembersAreNeverRecorded()
+function tooltipQuestTests.TooltipQuestObjectivesOfPartyMembersAreNeverRecorded()
   local runtime = NewTooltipRuntime()
   runtime.core.StartCapture("party members' tooltip lines")
   local lines = {
@@ -3968,7 +3971,7 @@ local function TestTooltipQuestObjectivesOfPartyMembersAreNeverRecorded()
   end
 end
 
-local function TestTooltipQuestObjectivesRedactPlayerNames()
+function tooltipQuestTests.TooltipQuestObjectivesRedactPlayerNames()
   local runtime = NewTooltipRuntime()
   local env = runtime.env
   env.IsInGroup = function() return true end
@@ -3982,7 +3985,7 @@ local function TestTooltipQuestObjectivesRedactPlayerNames()
   AssertObjectQuestObjectives(runtime, { { "<name>'s Nest", "", 747, "0/1 <name> follows <name>" } })
 end
 
-local function TestTooltipQuestObjectivesSkipUnreadableLines()
+function tooltipQuestTests.TooltipQuestObjectivesSkipUnreadableLines()
   local runtime = NewTooltipRuntime()
   local secrets = {}
   runtime.env.issecretvalue = function(value) return value ~= nil and secrets[value] == true end
@@ -4034,7 +4037,7 @@ local function TestTooltipQuestObjectivesSkipUnreadableLines()
   AssertObjectQuestObjectives(runtime, objectExpected)
 end
 
-local function TestTooltipQuestObjectivesNeedAQuestAndAText()
+function tooltipQuestTests.TooltipQuestObjectivesNeedAQuestAndAText()
   local runtime = NewTooltipRuntime()
   runtime.core.StartCapture("tooltip objectives without a quest")
   runtime.HoverUnit(PLAINSTRIDER,
@@ -4053,7 +4056,7 @@ local function TestTooltipQuestObjectivesNeedAQuestAndAText()
   AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } })
 end
 
-local function TestUnitTooltipQuestObjectivesSkipPlayersPetsAndOtherUnits()
+function tooltipQuestTests.UnitTooltipQuestObjectivesSkipPlayersPetsAndOtherUnits()
   local runtime = NewTooltipRuntime()
   local env = runtime.env
   runtime.core.StartCapture("tooltip objectives of players and pets")
@@ -4088,7 +4091,7 @@ local function TestUnitTooltipQuestObjectivesSkipPlayersPetsAndOtherUnits()
   AssertUnitQuestObjectives(runtime, { { PLAINSTRIDER, 747, "0/7 Plainstrider Meat" } })
 end
 
-local function TestObjectTooltipQuestObjectivesAreRecorded()
+function tooltipQuestTests.ObjectTooltipQuestObjectivesAreRecorded()
   local runtime = NewTooltipRuntime()
   runtime.core.StartCapture("object tooltip quest objectives")
   local title = tooltipLine.QuestTitle(4402)
@@ -4105,7 +4108,7 @@ local function TestObjectTooltipQuestObjectivesAreRecorded()
   })
 end
 
-local function TestObjectTooltipQuestObjectivesUseAReadableGUID()
+function tooltipQuestTests.ObjectTooltipQuestObjectivesUseAReadableGUID()
   local runtime = NewTooltipRuntime()
   runtime.core.StartCapture("object tooltip quest objectives with GUIDs")
   local lines = { tooltipLine.QuestTitle(4402), tooltipLine.QuestObjective("0/10 Cactus Apple") }
@@ -4122,7 +4125,7 @@ local function TestObjectTooltipQuestObjectivesUseAReadableGUID()
   })
 end
 
-local function TestTooltipsWithoutQuestLinesAddNoStreams()
+function tooltipQuestTests.TooltipsWithoutQuestLinesAddNoStreams()
   local function AssertNoStreams(runtime)
     for key in pairs(Session(runtime).functions) do
       assert(not key:find("QuestObjective", 1, true), key .. " must not exist without a recorded quest objective")
@@ -4274,17 +4277,17 @@ local tests = {
   { name = "should record the object GUID together with the object name", run = TestGameObjectTrackerRecordsObjectGUID },
   { name = "should not record names from unit, player or pet tooltips", run = TestGameObjectTrackerSkipsNonObjectTooltips },
   { name = "should redact player names in object names", run = TestGameObjectTrackerRedactsPlayerNamesInObjectNames },
-  { name = "should record the quest objectives an npc tooltip lists", run = TestUnitTooltipQuestObjectivesAreRecorded },
-  { name = "should record a quest objective once per npc, whatever its progress or spawn", run = TestUnitTooltipQuestObjectivesAreRecordedOncePerNpc },
-  { name = "should record tooltip quest objectives again in the next capture", run = TestTooltipQuestObjectivesAreRecordedAgainInTheNextCapture },
-  { name = "should never record party members' tooltip quest progress", run = TestTooltipQuestObjectivesOfPartyMembersAreNeverRecorded },
-  { name = "should redact player names in tooltip quest objectives", run = TestTooltipQuestObjectivesRedactPlayerNames },
-  { name = "should skip unreadable tooltip quest lines", run = TestTooltipQuestObjectivesSkipUnreadableLines },
-  { name = "should skip tooltip quest objectives without a quest or a text", run = TestTooltipQuestObjectivesNeedAQuestAndAText },
-  { name = "should not record tooltip quest objectives of players, pets and other units", run = TestUnitTooltipQuestObjectivesSkipPlayersPetsAndOtherUnits },
-  { name = "should record the quest objectives an object tooltip lists", run = TestObjectTooltipQuestObjectivesAreRecorded },
-  { name = "should record object tooltip quest objectives per object ID when the GUID is readable", run = TestObjectTooltipQuestObjectivesUseAReadableGUID },
-  { name = "should add no quest objective streams without quest lines", run = TestTooltipsWithoutQuestLinesAddNoStreams },
+  { name = "should record the quest objectives an npc tooltip lists", run = tooltipQuestTests.UnitTooltipQuestObjectivesAreRecorded },
+  { name = "should record a quest objective once per npc, whatever its progress or spawn", run = tooltipQuestTests.UnitTooltipQuestObjectivesAreRecordedOncePerNpc },
+  { name = "should record tooltip quest objectives again in the next capture", run = tooltipQuestTests.TooltipQuestObjectivesAreRecordedAgainInTheNextCapture },
+  { name = "should never record party members' tooltip quest progress", run = tooltipQuestTests.TooltipQuestObjectivesOfPartyMembersAreNeverRecorded },
+  { name = "should redact player names in tooltip quest objectives", run = tooltipQuestTests.TooltipQuestObjectivesRedactPlayerNames },
+  { name = "should skip unreadable tooltip quest lines", run = tooltipQuestTests.TooltipQuestObjectivesSkipUnreadableLines },
+  { name = "should skip tooltip quest objectives without a quest or a text", run = tooltipQuestTests.TooltipQuestObjectivesNeedAQuestAndAText },
+  { name = "should not record tooltip quest objectives of players, pets and other units", run = tooltipQuestTests.UnitTooltipQuestObjectivesSkipPlayersPetsAndOtherUnits },
+  { name = "should record the quest objectives an object tooltip lists", run = tooltipQuestTests.ObjectTooltipQuestObjectivesAreRecorded },
+  { name = "should record object tooltip quest objectives per object ID when the GUID is readable", run = tooltipQuestTests.ObjectTooltipQuestObjectivesUseAReadableGUID },
+  { name = "should add no quest objective streams without quest lines", run = tooltipQuestTests.TooltipsWithoutQuestLinesAddNoStreams },
 }
 
 local failures = 0
