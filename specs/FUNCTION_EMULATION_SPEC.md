@@ -189,6 +189,9 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetLootSourceInfo(slot)` | `functions["GetLootSourceInfo"][slot]` |
 | `GetLootSlotLink(slot)` | `functions["GetLootSlotLink"][slot]` |
 | `GetLootSlotType(slot)` | `functions["GetLootSlotType"][slot]` |
+| `GetMerchantNumItems()` / `GetMerchantFilter()` | `functions["GetMerchantNumItems"]` / `functions["GetMerchantFilter"]` (the latter on clients that have it) |
+| `GetMerchantItemInfo(index)` (legacy) / `C_MerchantFrame.GetItemInfo(index)` | `functions["GetMerchantItemInfo"][index]` / `functions["C_MerchantFrame.GetItemInfo"][index]` (its one table, packed; valid up to `GetMerchantNumItems()`) |
+| `GetMerchantItemLink(index)` / `GetMerchantItemID(index)` | `functions["GetMerchantItemLink"][index]` / `functions["GetMerchantItemID"][index]` |
 | `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple; left out where it is another addon's and `C_Reputation.GetFactionDataByID` is the client's own, see TRACKER_SPEC section 8; ignore it on Forever before schema 22) |
 | `C_Reputation.GetFactionDataByID(factionID)` | `functions["C_Reputation.GetFactionDataByID"][factionID]` (raw table) |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
@@ -254,7 +257,7 @@ end
 
 ## 5) Event replay
 
-Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount), `CVAR_UPDATE` (Display), and `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` (ItemInfo). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams, and the item data events from the switches to `true` in `C_Item.IsItemDataCachedByID`.
+Iterate `session.events` in order and fire events whose `t` lies in the requested range. Private sampling triggers are not recorded in the main event stream: Position movement transitions (`PLAYER_STARTED_MOVING`, `PLAYER_STOPPED_MOVING`), `BAG_UPDATE_DELAYED` (ItemCount), `CVAR_UPDATE` (Display), `GET_ITEM_INFO_RECEIVED` and `ITEM_DATA_LOAD_RESULT` (ItemInfo), and `MERCHANT_UPDATE` and `MERCHANT_FILTER_ITEM_UPDATE` (Merchant, which also uses the item data events). Replay that needs `CVAR_UPDATE` can derive it from changes in the `GetCVar` streams, and the item data events from the switches to `true` in `C_Item.IsItemDataCachedByID`.
 
 ## 6) Known limits
 

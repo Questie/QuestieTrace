@@ -74,6 +74,7 @@ Modules/                  - Core modules and tracking systems
         UnitLevel.lua          - Unit level tracking
         Position.lua           - Position/coordinate tracking
         Loot.lua               - Loot tracking
+        Merchant.lua           - Merchant window slots (items, prices)
         Reputation.lua         - Reputation tracking
         QuestLog.lua           - Quest log tracking
         CompletedQuests.lua    - Completed quests tracking
