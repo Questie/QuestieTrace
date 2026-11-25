@@ -28,6 +28,7 @@ pub struct Accumulator {
     pub zone_or_sort: ScalarSummary<Num>,
     pub quest_name: ScalarSummary<String>,
     pub quest_level: ScalarSummary<Num>,
+    pub quest_frequency: ScalarSummary<Num>,
     pub objectives_text: ScalarSummary<QuestObjectivesTextValue>,
     pub objective_count: ScalarSummary<Num>,
     pub npc_name: ScalarSummary<String>,
@@ -110,6 +111,7 @@ impl Accumulator {
             zone_or_sort,
             quest_name,
             quest_level,
+            quest_frequency,
             objectives_text,
             objective_count,
             npc_name,
@@ -139,6 +141,7 @@ impl Accumulator {
         self.zone_or_sort.add_session(zone_or_sort, s, sessions);
         self.quest_name.add_session(quest_name, s, sessions);
         self.quest_level.add_session(quest_level, s, sessions);
+        self.quest_frequency.add_session(quest_frequency, s, sessions);
         self.objectives_text.add_session(objectives_text, s, sessions);
         self.objective_count.add_session(objective_count, s, sessions);
         self.npc_name.add_session(npc_name, s, sessions);
@@ -175,6 +178,7 @@ impl Accumulator {
         add("zoneOrSort (scalar)", self.zone_or_sort.memory());
         add("questName (scalar)", self.quest_name.memory());
         add("questLevel (scalar)", self.quest_level.memory());
+        add("questFrequency (scalar)", self.quest_frequency.memory());
         add("objectivesText (scalar)", self.objectives_text.memory());
         add("objectiveCount (scalar)", self.objective_count.memory());
         add("npcName (scalar)", self.npc_name.memory());

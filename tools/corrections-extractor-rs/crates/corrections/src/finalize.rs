@@ -16,7 +16,7 @@ use crate::observers::npc::{friendly_to_faction, level, rank, spawns_merge};
 use crate::observers::object::spawns_merge as object_spawns_merge;
 use crate::observers::quest::required_races::{merge_quest_factions, merge_required_races, summarize_reactions, ReactionSummary};
 use crate::observers::quest::turn_in_poi::turn_in_poi_spawns;
-use crate::observers::quest::{finished_by, objectives, quest_xp, reputation_reward, required_level, started_by, trigger_end};
+use crate::observers::quest::{finished_by, frequency, objectives, quest_xp, reputation_reward, required_level, started_by, trigger_end};
 use crate::observers::spawn::SpawnObservation;
 use crate::probes::Faction;
 use indexmap::{IndexMap, IndexSet};
@@ -283,6 +283,16 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
         &only_defined(acc.reputation_reward.merge(reputation_reward::merge)),
         |rewards| Js::Array(rewards.iter().map(|&(faction, amount)| Js::nums([faction, amount])).collect()),
     );
+
+    let daily: IndexMap<i64, ()> = acc
+        .quest_frequency
+        .aggregate_agreed()
+        .into_iter()
+        .filter(|(_, value)| value.0 == frequency::DAILY)
+        .map(|(id, _)| (id, ()))
+        .collect();
+    quests.field("questFlags", &daily, |()| Js::Num(frequency::QUEST_FLAG_DAILY as f64));
+    quests.field("specialFlags", &daily, |()| Js::Num(frequency::SPECIAL_FLAG_REPEATABLE as f64));
 
     // Quest givers and enders stand still, so they get a single spawn per zone.
     let mut quest_npc_ids = HashSet::new();
@@ -888,5 +898,37 @@ mod tests {
         }));
         let lookups = bundle.lookups.iter().find(|(name, _)| *name == "lookupItems").expect("item lookups");
         assert!(lookups.1[0].1.contains("[30000] = \"New Name\""), "{:?}", lookups.1[0].1);
+    }
+
+    /// `QUEST`'s record after it was in the log with these frequencies, one session each.
+    fn with_frequencies(values: &[(&str, f64)]) -> String {
+        let sessions = sightings(values, |staged, frequency| {
+            staged.quest_frequency = SessionScalars::new(vec![obs(QUEST, Num(frequency.parse().expect("a number")))]);
+        });
+        record(module(&finalized(sessions), "foreverQuestTraces.lua"), QUEST).unwrap_or_default()
+    }
+
+    #[test]
+    fn exports_the_flags_of_a_quest_two_sessions_saw_as_daily() {
+        let quest = with_frequencies(&[("1", 1000.0), ("1", 2000.0)]);
+        assert!(
+            quest.contains("[questKeys.questFlags] = 4096") && quest.contains("[questKeys.specialFlags] = 1"),
+            "{quest}"
+        );
+    }
+
+    #[test]
+    fn exports_no_flags_for_other_frequencies_or_without_agreement() {
+        let none: [&[(&str, f64)]; 5] = [
+            &[("0", 1000.0), ("0", 2000.0)],
+            &[("2", 1000.0), ("2", 2000.0)],
+            &[("3", 1000.0), ("3", 2000.0)],
+            &[("1", 1000.0)],
+            &[("1", 1000.0), ("1", 2000.0), ("0", 3000.0), ("0", 4000.0)],
+        ];
+        for values in none {
+            let quest = with_frequencies(values);
+            assert!(!quest.contains("questFlags") && !quest.contains("specialFlags"), "{values:?}: {quest}");
+        }
     }
 }
