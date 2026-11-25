@@ -44,7 +44,7 @@ Releases and their version: 9 = v1.0.0, v1.0.1 · 10 = v1.1.0, v1.1.1 · 11 = v1
 
 - **Added** `GameObjectGUID`, the GUID of the tooltip a `GameObjectName` came from (always `""` on Forever).
 - **Changed** `GameObjectName` on Forever is the first tooltip line when the client gives no name line. **Consumers**: below 19 `GameObjectName` is empty on Forever. In a sample, none of 48 sessions of versions 16 to 18 had a name, and 87% of 420 from 19 on.
-- **Changed** *from v1.13.1* names of crafters in tradeskill chat messages are redacted, and `UnitName` and `UnitGUID` are skipped when the client answers with a secret value.
+- **Changed** *from v1.13.1* names of crafters in tradeskill chat messages are redacted. Secret names are left out of the list the sanitizer redacts by, and a title is not taken from a tooltip whose mouseover GUID is secret. **Consumers**: secret GUIDs and their names were already skipped from v1.4.0.
 
 ## 18 (v1.10.0 to v1.12.0)
 
@@ -64,7 +64,7 @@ Releases and their version: 9 = v1.0.0, v1.0.1 · 10 = v1.1.0, v1.1.1 · 11 = v1
 ## 15 (v1.7.0)
 
 - **Added** quest rewards, item counts (`C_Item.GetItemCount`), item data arrival (`C_Item.IsItemDataCachedByID`), nameplates, display settings, the calendar time, explored map textures, completion texts and special items of quests, quest timer slots, reward currencies on Classic, experience, rested bonus and money, frame gaps (`frameUpdates`), full build info and `IsIndoors`.
-- **Changed** Nameplate GUIDs are sampled in instances too, and a withheld or failed one is recorded as nil. **Consumers**: the other unit GUIDs are not recorded in instances (see 12).
+- **Changed** Nameplate GUIDs are sampled in instances too, and a withheld or failed one is recorded as nil. **Consumers**: before this nameplates have nothing in instances; the other unit tokens were recorded there where the client let them (see 12).
 - **Changed** Player pets and minions are no longer recorded as unit interactions, the player's guild name is redacted, and player names are redacted as whole words only.
 - **Removed** The details of faction 1168, the player's guild. Its ID stays in `FactionOrder`.
 
@@ -81,7 +81,7 @@ Releases and their version: 9 = v1.0.0, v1.0.1 · 10 = v1.1.0, v1.1.1 · 11 = v1
 - **Added** `UnitLevel`, `UnitClassification` and `UnitReaction` of NPCs, and mouseover NPC interactions.
 - **Added** *from v1.4.0* vendor items (`GetMerchantItemInfo`, `C_MerchantFrame.GetItemInfo`), quest POIs (`C_QuestLog.GetQuestsOnMap`), `GameObjectName`, and the player's level at quest acceptance (`QuestAcceptLevel`, removed in 18).
 - **Changed** `GetLootSourceInfo` and `GetLootSlotLink` keep every successful sample instead of only changes, so loot can be joined by its exact time. **Consumers**: joining older sessions by time can silently lose loots.
-- **Changed** *from v1.4.0* GUIDs are not recorded in instances.
+- **Changed** *from v1.4.0* secret GUIDs, and the names that go with them, are skipped. Forever makes them secret in instances; readable ones are recorded there as everywhere.
 
 ## 11 (v1.2.0)
 
