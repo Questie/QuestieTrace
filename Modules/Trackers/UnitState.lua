@@ -16,12 +16,6 @@ local Core = QuestieTraceCore
 --   "" when the NPC has no title. mouseover only, Modern/Forever only.
 -- UnitSubNameGUID (synthetic) -> string: GUID of the NPC the title was shown for.
 --   Written together with UnitSubName, so both streams have the same length and times.
--- UnitQuestObjective (synthetic) -> string: objective text of a quest the NPC's tooltip
---   lists, from the same post-call (QuestObjective lines below a QuestTitle line).
---   mouseover only, Modern/Forever only, once per NPC ID, quest and objective.
--- UnitQuestObjectiveQuestID (synthetic) -> number: quest the objective belongs to.
--- UnitQuestObjectiveGUID (synthetic) -> string: GUID of the NPC the tooltip was for.
---   Written together with UnitQuestObjective, so all three have the same length and times.
 ---------------------------------------------------------------------------
 
 ---@type string[]
@@ -40,8 +34,6 @@ local combatStreams
 local subNameStream
 ---@type FunctionStreamEntry[]?
 local subNameGuidStream
----@type fun(lines: TooltipDataLine[]?, guid: string)?
-local readQuestObjectives
 ---@type FunctionStreamEntry[]?
 local targetDistanceStream
 
@@ -249,37 +241,16 @@ local function ExtractSubName(tooltipData)
   return nil
 end
 
----Record a quest objective an NPC's tooltip lists. The streams are created by their first entry,
----as only Forever's tooltip data lists quest objectives.
----@param questID number
----@param objective string
----@param guid string
-local function RecordQuestObjective(questID, objective, guid)
+---TooltipDataProcessor post-call for unit tooltips.
+---@param _ any tooltip (unused)
+---@param tooltipData TooltipData?
+local function SampleSubName(_, tooltipData)
   local capture = currentCapture
-  if (not capture) then return end
-  local t = GetTime() - capture.startedAt
-  local tp = GetTimePreciseSec() - capture.startedAtPrecise
-  ---@type table<string, table<string, FunctionStreamEntry[]>>
-  local functions = capture.session.functions
+  if not subNameStream or not subNameGuidStream or not capture or not tooltipData then return end
+  -- Unit tooltips are hover-driven (world and unit frames), so only mouseover is tracked.
+  local guid = Core.GetNpcTooltipGUID(tooltipData)
+  if not guid then return end
 
-  ---@param key string
-  ---@param value any
-  local function Append(key, value)
-    if (not functions[key]) then functions[key] = { mouseover = {} } end
-    local stream = functions[key].mouseover
-    stream[#stream + 1] = { t = t, tp = tp, v = value }
-  end
-  Append("UnitQuestObjective", objective)
-  Append("UnitQuestObjectiveQuestID", questID)
-  Append("UnitQuestObjectiveGUID", guid)
-end
-
----Record the NPC title an NPC's tooltip shows.
----@param capture CaptureState
----@param tooltipData TooltipData
----@param guid string
-local function SampleSubName(capture, tooltipData, guid)
-  if not subNameStream or not subNameGuidStream then return end
   local subName = ExtractSubName(tooltipData)
   if subName == nil then return end
   -- Both streams are written together, so each subname has the GUID of the NPC it was shown for at the same index.
@@ -295,34 +266,13 @@ local function SampleSubName(capture, tooltipData, guid)
   end
 end
 
----TooltipDataProcessor post-call for unit tooltips.
----@param _ any tooltip (unused)
----@param tooltipData TooltipData?
-local function SampleUnitTooltip(_, tooltipData)
-  local capture = currentCapture
-  if not capture or not tooltipData then return end
-  local guid = tooltipData.guid
-  if Core.ParseGUIDKind(guid) ~= "npc" then return end
-  ---@cast guid string
-
-  -- Unit tooltips are hover-driven (world and unit frames), so only mouseover is tracked.
-  local token = "mouseover"
-  if (not IsNpc(token)) then return end
-  local tokenGuid = UnitGUID(token)
-  if issecretvalue and issecretvalue(tokenGuid) then return end
-  if tokenGuid ~= guid then return end
-
-  SampleSubName(capture, tooltipData, guid)
-  if readQuestObjectives then readQuestObjectives(tooltipData.lines, guid) end
-end
-
 ---Register the TooltipDataProcessor unit hook (Modern/Forever only).
 local function RegisterUnitTooltipProcessor()
   if unitTooltipProcessorRegistered then return end
   if not TooltipDataProcessor or not TooltipDataProcessor.AddTooltipPostCall then return end
   if not Enum or not Enum.TooltipDataType or not Enum.TooltipDataType.Unit then return end
   if not Enum.TooltipDataLineType then return end
-  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, SampleUnitTooltip)
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, SampleSubName)
   unitTooltipProcessorRegistered = true
 end
 
@@ -347,7 +297,6 @@ Core.RegisterTracker({
     if not functions["UnitSubNameGUID"] then functions["UnitSubNameGUID"] = {} end
     functions["UnitSubNameGUID"]["mouseover"] = {}
     subNameGuidStream = functions["UnitSubNameGUID"]["mouseover"]
-    readQuestObjectives = Core.CreateTooltipQuestReader(RecordQuestObjective)
     if (not functions["CheckInteractDistance"]) then functions["CheckInteractDistance"] = {} end
     functions["CheckInteractDistance"]["target"] = { [FOLLOW_DISTANCE_INDEX] = {} }
     targetDistanceStream = functions["CheckInteractDistance"]["target"][FOLLOW_DISTANCE_INDEX]

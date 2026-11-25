@@ -220,8 +220,8 @@ player is in combat or when the answer is unavailable.
 Privacy: sampling is guarded with `UnitExists(token)`, `not UnitIsPlayer(token)`
 and `not UnitPlayerControlled(token)` (restricted answers count as
 player-controlled), so only NPCs are sampled, never players or their pets. No names,
-GUIDs, or free text are recorded by this sampling. The tracker's tooltip streams are
-not event-driven; see TRACKER_SPEC section 21.
+GUIDs, or free text are recorded by this sampling. Its tooltip streams are
+not event-driven, and the Tooltip tracker's are not either; see TRACKER_SPEC section 21.
 
 - `PLAYER_TARGET_CHANGED`
 - `UPDATE_MOUSEOVER_UNIT`

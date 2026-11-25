@@ -87,6 +87,7 @@ Modules/                  - Core modules and tracking systems
         SpellBook.lua          - Spell book tracking
         ResetTime.lua          - Daily/weekly reset and realm calendar time tracking
         ItemCount.lua          - Carried item counts (C_Item.GetItemCount)
+        Tooltip.lua            - Tooltips of NPCs, objects and quests, with the quests they list (Forever)
         Display.lua            - Screen size, UI scale and allowlisted UI CVars
         PlayerProgress.lua     - Experience, rested bonus and money
         ItemInfo.lua           - When item data an addon asked for arrives

@@ -15,11 +15,6 @@ local Core = QuestieTraceCore
 --             type: Enum.TooltipDataLineType (2 = UnitName; Forever sends the name as 0 = Default)
 --             leftText: string
 --             rightText: string
--- Synthetic streams from these tooltips:
---   GameObjectName, GameObjectGUID
---   GameObjectQuestObjective, GameObjectQuestObjectiveQuestID, GameObjectQuestObjectiveName,
---     GameObjectQuestObjectiveGUID: an objective text of a quest the tooltip lists (QuestObjective
---     lines below a QuestTitle line), once per object, quest and objective. Written together.
 
 ---@type CaptureState?
 local currentCapture
@@ -27,8 +22,6 @@ local currentCapture
 local modernNameStream
 ---@type FunctionStreamEntry[]?
 local modernGUIDStream
----@type fun(lines: TooltipDataLine[]?, guid: string, objectName: string?)?
-local readQuestObjectives
 ---@type boolean
 local modernTooltipProcessorRegistered = false
 
@@ -47,7 +40,7 @@ end
 ---(type 0) instead, and the name is then the first line, as on every tooltip.
 ---@param tooltipData TooltipData?
 ---@return string? name
-local function ExtractModernGameObject(tooltipData)
+function Core.GetObjectTooltipName(tooltipData)
   if (not tooltipData) or (not tooltipData.lines) then
     return nil
   end
@@ -55,7 +48,8 @@ local function ExtractModernGameObject(tooltipData)
   if tooltipData.type ~= Enum.TooltipDataType.Object then
     return nil
   end
-  if tooltipData.guid ~= nil and Core.ParseGUIDKind(tooltipData.guid) ~= "object" then
+  local guid = tooltipData.guid
+  if (issecretvalue and issecretvalue(guid)) or (guid ~= nil and Core.ParseGUIDKind(guid) ~= "object") then
     return nil
   end
   local lines = tooltipData.lines
@@ -65,7 +59,8 @@ local function ExtractModernGameObject(tooltipData)
   local nameLine = lines[1]
   for i = 1, #lines do
     local line = lines[i]
-    if line and line.type == Enum.TooltipDataLineType.UnitName then
+    local lineType = line and line.type
+    if lineType and not (issecretvalue and issecretvalue(lineType)) and lineType == Enum.TooltipDataLineType.UnitName then
       nameLine = line
       break
     end
@@ -81,32 +76,6 @@ local function ExtractModernGameObject(tooltipData)
   return Core.SanitizeText(text)
 end
 
----Record a quest objective an object's tooltip lists. The streams are created by their first entry,
----as only Forever's tooltip data lists quest objectives.
----@param questID number
----@param objective string
----@param guid string "" without a readable object GUID
----@param name string?
-local function RecordQuestObjective(questID, objective, guid, name)
-  local capture = currentCapture
-  if (not capture) then return end
-  local t = GetTime() - capture.startedAt
-  local tp = GetTimePreciseSec() - capture.startedAtPrecise
-  local functions = capture.session.functions
-
-  ---@param key string
-  ---@param value any
-  local function Append(key, value)
-    if (not functions[key]) then functions[key] = {} end
-    local stream = functions[key]
-    stream[#stream + 1] = { t = t, tp = tp, v = value }
-  end
-  Append("GameObjectQuestObjective", objective)
-  Append("GameObjectQuestObjectiveQuestID", questID)
-  Append("GameObjectQuestObjectiveName", name)
-  Append("GameObjectQuestObjectiveGUID", guid)
-end
-
 ---Sample Modern TooltipDataProcessor for game object info.
 ---@param _ any tooltip (unused)
 ---@param tooltipData TooltipData?
@@ -115,7 +84,7 @@ local function SampleModern(_, tooltipData)
   local t = GetTime() - currentCapture.startedAt
   local tp = GetTimePreciseSec() - currentCapture.startedAtPrecise
 
-  local name = ExtractModernGameObject(tooltipData)
+  local name = Core.GetObjectTooltipName(tooltipData)
   if not name then return end
   ---@cast tooltipData TooltipData
 
@@ -127,12 +96,9 @@ local function SampleModern(_, tooltipData)
   local guid = Core.ParseGUIDKind(tooltipData.guid) == "object" and tooltipData.guid or ""
   local prevName = modernNameStream[#modernNameStream]
   local prevGUID = modernGUIDStream[#modernGUIDStream]
-  if (not prevName) or prevName.v ~= name or (not prevGUID) or prevGUID.v ~= guid then
-    modernNameStream[#modernNameStream + 1] = { t = t, tp = tp, v = name }
-    modernGUIDStream[#modernGUIDStream + 1] = { t = t, tp = tp, v = guid }
-  end
-
-  if readQuestObjectives then readQuestObjectives(tooltipData.lines, guid, name) end
+  if prevName and prevName.v == name and prevGUID and prevGUID.v == guid then return end
+  modernNameStream[#modernNameStream + 1] = { t = t, tp = tp, v = name }
+  modernGUIDStream[#modernGUIDStream + 1] = { t = t, tp = tp, v = guid }
 end
 
 ---Register TooltipDataProcessor for Modern/Forever game object detection.
@@ -162,7 +128,6 @@ Core.RegisterTracker({
 
     modernNameStream = functions["GameObjectName"]
     modernGUIDStream = functions["GameObjectGUID"]
-    readQuestObjectives = Core.CreateTooltipQuestReader(RecordQuestObjective)
 
     -- Register TooltipDataProcessor for Modern/Forever
     RegisterTooltipDataProcessor()
