@@ -91,8 +91,8 @@ local function ReadServiceInfo(index)
   if getTrainerType then
     local name, serviceType, _, level, rank = GetTrainerServiceInfo(index)
     -- The client answers 0 for a service the player knows, whatever it requires.
-    if serviceType == "used" and level == 0 then level = nil end
-    return name, rank, serviceType, level
+    local hasNoLevel = serviceType == "used" and level == 0
+    return name, rank, serviceType, not hasNoLevel and level or nil
   end
   local name, rank, serviceType = GetTrainerServiceInfo(index)
   if serviceType == "header" then return nil end
