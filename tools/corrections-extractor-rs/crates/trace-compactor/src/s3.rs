@@ -22,7 +22,16 @@ use ureq::Body;
 /// How long a signed URL is accepted. A request starts within moments of being signed.
 const SIGNATURE_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
+/// How often a request is tried. The compactor runs again within the hour; a pass of the
+/// backfill is hours of downloads, which one short outage must not end. With the pause below,
+/// that is 6 seconds of waiting in all against about a minute.
 const ATTEMPTS: u32 = 3;
+const BACKFILL_ATTEMPTS: u32 = 8;
+
+/// More connections than any run has threads. Those kept for reuse are limited to three by
+/// default: with more threads than that, nearly every request then opens one, and looks up
+/// the provider's address to do so.
+const CONNECTIONS_KEPT: usize = 64;
 
 /// The longest one request may take, a pack upload included. Without it a connection that
 /// stalls would hold the run, and the timer that starts the next one, for good.
@@ -44,6 +53,8 @@ pub struct S3Bucket {
     bucket: rusty_s3::Bucket,
     credentials: Credentials,
     agent: ureq::Agent,
+    /// How often a request is tried before its failure is the run's.
+    attempts: u32,
     /// Between two attempts at one request, times the number of attempts made.
     pause: Duration,
     /// How fast whole objects and listings may be downloaded. None for no limit.
@@ -59,13 +70,13 @@ enum Failure {
     Final(anyhow::Error),
 }
 
-/// Runs `attempt` until it succeeds, fails for good, or has failed [`ATTEMPTS`] times.
-fn retrying<T>(pause: Duration, mut attempt: impl FnMut() -> Result<T, Failure>) -> Result<T> {
+/// Runs `attempt` until it succeeds, fails for good, or has failed `attempts` times.
+fn retrying<T>(attempts: u32, pause: Duration, mut attempt: impl FnMut() -> Result<T, Failure>) -> Result<T> {
     for tried in 1.. {
         match attempt() {
             Ok(answer) => return Ok(answer),
             Err(Failure::Final(error)) => return Err(error),
-            Err(Failure::Transient(error)) if tried == ATTEMPTS => return Err(error),
+            Err(Failure::Transient(error)) if tried == attempts => return Err(error),
             Err(Failure::Transient(_)) => std::thread::sleep(pause * tried),
         }
     }
@@ -104,12 +115,15 @@ impl S3Bucket {
             .timeout_recv_response(Some(LONGEST_ANSWER))
             .timeout_per_read(Some(LONGEST_SILENCE))
             .timeout_global(Some(LONGEST_REQUEST))
+            .max_idle_connections(CONNECTIONS_KEPT)
+            .max_idle_connections_per_host(CONNECTIONS_KEPT)
             .build()
             .new_agent();
         Ok(S3Bucket {
             bucket,
             credentials: Credentials::new(access_key, secret_key),
             agent,
+            attempts: ATTEMPTS,
             pause: Duration::from_secs(2),
             download_limit: None,
         })
@@ -162,7 +176,7 @@ impl S3Bucket {
 
     /// One page of a listing, and the token of the next page when there is one.
     fn list_page(&self, prefix: &str, continuation: Option<&str>) -> Result<(Vec<Listed>, Option<String>)> {
-        retrying(self.pause, || {
+        retrying(self.attempts, self.pause, || {
             let mut action = self.bucket.list_objects_v2(Some(&self.credentials));
             action.with_prefix(prefix);
             if let Some(token) = continuation {
@@ -203,7 +217,7 @@ impl S3Bucket {
     /// Stores `bytes` under `key` if they have this MD5, given in base64. The MD5 is part of
     /// what is signed, and a provider that keeps to S3 refuses a body that does not match it.
     fn put_with_md5(&self, key: &str, bytes: &[u8], md5: &str) -> Result<()> {
-        retrying(self.pause, || {
+        retrying(self.attempts, self.pause, || {
             let mut action = self.bucket.put_object(Some(&self.credentials), key);
             action.headers_mut().insert("content-md5", md5);
             let url = action.sign(SIGNATURE_LIFETIME);
@@ -225,7 +239,11 @@ impl ReadOnlyS3 {
     /// See [`S3Bucket::new`]. `download_limit` holds every thread's downloads together.
     pub fn new(endpoint: &str, region: &str, name: &str, access_key: &str, secret_key: &str, download_limit: Option<RateLimit>) -> Result<Self> {
         let bucket = S3Bucket::new(endpoint, region, name, access_key, secret_key)?;
-        Ok(ReadOnlyS3(S3Bucket { download_limit, ..bucket }))
+        Ok(ReadOnlyS3(S3Bucket {
+            attempts: BACKFILL_ATTEMPTS,
+            download_limit,
+            ..bucket
+        }))
     }
 }
 
@@ -252,7 +270,7 @@ impl Bucket for S3Bucket {
     }
 
     fn etag(&self, key: &str) -> Result<Option<String>> {
-        retrying(self.pause, || {
+        retrying(self.attempts, self.pause, || {
             let url = self.bucket.head_object(Some(&self.credentials), key).sign(SIGNATURE_LIFETIME);
             let response = self.agent.head(url.as_str()).call().map_err(|error| self.unanswered("check", key, error))?;
             match response.status().as_u16() {
@@ -271,7 +289,7 @@ impl Bucket for S3Bucket {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        retrying(self.pause, || {
+        retrying(self.attempts, self.pause, || {
             let url = self.bucket.get_object(Some(&self.credentials), key).sign(SIGNATURE_LIFETIME);
             let mut response = self.agent.get(url.as_str()).call().map_err(|error| self.unanswered("download", key, error))?;
             match response.status().as_u16() {
@@ -292,7 +310,7 @@ impl Bucket for S3Bucket {
         }
         // HTTP names the last byte, not the one after it.
         let header = format!("bytes={}-{}", range.start, range.end - 1);
-        retrying(self.pause, || {
+        retrying(self.attempts, self.pause, || {
             let url = self.bucket.get_object(Some(&self.credentials), key).sign(SIGNATURE_LIFETIME);
             let sent = self.agent.get(url.as_str()).header("range", &header).call();
             let mut response = sent.map_err(|error| self.unanswered("download", key, error))?;
@@ -321,7 +339,7 @@ impl Bucket for S3Bucket {
     }
 
     fn delete(&self, key: &str) -> Result<()> {
-        retrying(self.pause, || {
+        retrying(self.attempts, self.pause, || {
             let url = self.bucket.delete_object(Some(&self.credentials), key).sign(SIGNATURE_LIFETIME);
             let response = self
                 .agent
@@ -350,7 +368,7 @@ mod tests {
     fn a_request_is_sent_again_only_while_that_can_help() {
         let attempts = |outcomes: &[fn() -> Result<u32, Failure>]| {
             let mut made = 0;
-            let result = retrying(Duration::ZERO, || {
+            let result = retrying(3, Duration::ZERO, || {
                 made += 1;
                 outcomes[made - 1]()
             });
@@ -435,6 +453,75 @@ mod tests {
         // Without a limit it is quicker, so the time above was the limit's doing.
         let unlimited = timed(None);
         assert!(unlimited < limited, "{unlimited:?} against {limited:?}");
+    }
+
+    /// Eight threads that download at the same time, over and over, need eight connections. Each
+    /// further one is a lookup of the provider's address, and a run of hours once ended on one
+    /// that failed.
+    #[test]
+    fn connections_are_kept_for_as_many_threads_as_download_at_once() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let opened = Arc::new(AtomicUsize::new(0));
+        let counter = opened.clone();
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut connection = connection.unwrap();
+                // Answers request after request until the client closes.
+                std::thread::spawn(move || {
+                    let mut lines = BufReader::new(connection.try_clone().unwrap()).lines();
+                    while let Some(Ok(line)) = lines.next() {
+                        if line.is_empty() {
+                            connection.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 4\r\n\r\nbody").unwrap();
+                        }
+                    }
+                });
+            }
+        });
+
+        let (bucket, together) = (read_only(&address, None), Barrier::new(8));
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for _ in 0..5 {
+                        together.wait();
+                        assert_eq!(ReadBucket::get(&bucket, "a.json").unwrap().as_deref(), Some(&b"body"[..]));
+                    }
+                });
+            }
+        });
+
+        // Not all eight need to have been busy at one moment, but none is opened twice over.
+        let opened = opened.load(Ordering::SeqCst);
+        assert!(opened <= 8, "{opened} connections for 40 downloads of 8 threads");
+    }
+
+    /// The backfill waits out what the hourly compactor would leave to its next run.
+    #[test]
+    fn the_backfill_tries_a_download_again_after_several_failures() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let asked = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = asked.clone();
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                // The first six are closed without an answer.
+                if counter.fetch_add(1, Ordering::SeqCst) < 6 {
+                    continue;
+                }
+                let mut connection = connection.unwrap();
+                let _ = connection.read(&mut [0; 4096]);
+                let _ = connection.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 4\r\nconnection: close\r\n\r\nbody");
+            }
+        });
+        assert_eq!(ReadBucket::get(&read_only(&address, None), "a.json").unwrap().as_deref(), Some(&b"body"[..]));
+        assert_eq!(asked.load(Ordering::SeqCst), 7);
     }
 
     /// A download that ends early must not pass for the object.
