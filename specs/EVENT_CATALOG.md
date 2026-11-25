@@ -229,8 +229,18 @@ Triggers `IsInGroup` and `GetNumGroupMembers` sampling.
 Triggers skill window, profession-tab, and trade-skill-line sampling.
 Expands all skill headers before sampling so hidden child rows are visible
 to `GetSkillLineInfo(index)` when that legacy global exists (no synthesized
-fallback when it doesn't). `C_TradeSkillUI.*` trade-skill-line data is
-tracked independently whenever that API exists.
+fallback when it doesn't). On Forever the skills are read through
+`C_SkillInfo` instead; headers that are collapsed are opened for the read and
+collapsed again. `C_TradeSkillUI.*` trade-skill-line data is tracked
+independently whenever that API exists.
+
+Opening and closing a header fires `SKILL_LINES_CHANGED` during the call. The
+tracker does not sample for those, but they are in the event stream.
+
+The events come in bursts and one sample reads every skill, so at most one
+sample every 0.1 seconds is taken: the first event samples at once, later ones
+together 0.1 seconds after that sample. A sample still waiting when the
+capture stops is taken then.
 
 - `SKILL_LINES_CHANGED`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
@@ -252,7 +262,8 @@ exists on the client. Uses coalesced re-sampling (see Pattern 3 in TRACKER_SPEC.
 Triggers raw player-spellbook sampling and `PlayerKnownSpells` delta
 updates. Enumerates spellbook slots starting at 1 until
 `GetSpellBookItemName(slot, "spell")` returns nil, which includes
-profession tabs in Classic Era.
+profession tabs in Classic Era. On Forever the slots are read through
+`C_SpellBook.GetSpellBookItemType` instead.
 
 - `SPELLS_CHANGED`
 - `PLAYER_ENTERING_WORLD` *(login-time sampling)*
