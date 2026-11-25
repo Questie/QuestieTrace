@@ -74,7 +74,7 @@ It is also the tool most sensitive to `tp`:
 
 - 58.7 million times in `episodes.jsonl` and 88 thousand in the candidates' evidence differ, by half a microsecond at most. That is the rounding.
 - In `candidates/cooccurrence.json`, one candidate of quest 98252 lists two of its examples in the other order. Its score and counts are the same.
-- In `reports/handoff-timing.json`, two delays fall on the other side of a histogram's limit (0.1 s and 1 s), of 2.2 and 2.9 million. The report is for choosing windows by eye; nothing reads it.
+- In `reports/handoff-timing.json`, two delays fall on the other side of a histogram's limit (0.1 s and 1 s), of 2.3 and 2.9 million. The report is for choosing windows by eye; nothing reads it.
 
 The last two are what was expected of values that lie within a microsecond of a limit, and are for the owner to accept.
 
