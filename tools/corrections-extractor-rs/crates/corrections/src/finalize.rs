@@ -334,7 +334,7 @@ pub fn finalize(acc: &Accumulator, source_file_count: usize, generated_at: &str)
     });
     let object_zones = merge_with_extra(&acc.object_spawns, &object_turn_in, |_, obs| object_spawns_merge::merge_zone_id(obs));
     let mut objects = Records::default();
-    objects.field("name", &acc.object_name.aggregate_newest(), |name| Js::str(name));
+    objects.field("name", &acc.object_name.aggregate_agreed(), |name| Js::str(name));
     objects.field("spawns", &object_spawns, |spawns| zone_coordinates(spawns.iter().cloned()));
     objects.field("zoneID", &object_zones, |zone| Js::Num(*zone));
 
@@ -487,7 +487,9 @@ fn sorted_locales<T: Eq + Hash>(by_locale: &IndexMap<String, ScalarSummary<T>>) 
 /// lookups.ts `finalizeLookups`: per entity and locale, a Questie l10n module of every observed
 /// id (unlike the corrections, Classic ones too). Names can change over time (a renamed NPC), so
 /// the newest one wins. Subnames rarely change but are sometimes attached to the wrong NPC, so
-/// they need agreement between sessions. Objective texts use the default policy.
+/// they need agreement between sessions. Object names never change, but a looted object can be
+/// named after a neighbour whose tooltip was last shown, so they need it too. Objective texts use
+/// the default policy.
 fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, String)>)> {
     let mut npcs = Vec::new();
     for locale in sorted_locales(&acc.npc_name) {
@@ -519,11 +521,14 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
             quests.push((locale.clone(), write_lookup(LookupTable::Quest, &locale, &entries)));
         }
     }
-    let names = |by_locale: &IndexMap<String, ScalarSummary<String>>, table: LookupTable| -> Vec<(String, String)> {
+    let names = |by_locale: &IndexMap<String, ScalarSummary<String>>,
+                 table: LookupTable,
+                 aggregate: fn(&ScalarSummary<String>) -> IndexMap<i64, String>|
+     -> Vec<(String, String)> {
         sorted_locales(by_locale)
             .into_iter()
             .filter_map(|locale| {
-                let entries: Vec<(i64, Js)> = values_for(by_locale, &locale, ScalarSummary::aggregate_newest)
+                let entries: Vec<(i64, Js)> = values_for(by_locale, &locale, aggregate)
                     .into_iter()
                     .map(|(id, name)| (id, Js::Str(name)))
                     .collect();
@@ -537,8 +542,8 @@ fn finalize_lookups(acc: &LookupAccumulator) -> Vec<(&'static str, Vec<(String, 
     vec![
         ("lookupNpcs", npcs),
         ("lookupQuests", quests),
-        ("lookupItems", names(&acc.item_name, LookupTable::Item)),
-        ("lookupObjects", names(&acc.object_name, LookupTable::Object)),
+        ("lookupItems", names(&acc.item_name, LookupTable::Item, ScalarSummary::aggregate_newest)),
+        ("lookupObjects", names(&acc.object_name, LookupTable::Object, ScalarSummary::aggregate_agreed)),
     ]
 }
 
@@ -719,6 +724,51 @@ mod tests {
             let (npc, lookup) = with_sub_names(values);
             assert!(!npc.unwrap_or_default().contains("subName"), "{values:?}");
             assert_eq!(lookup, "[30000] = {\"Grimm\",nil},", "{values:?}");
+        }
+    }
+
+    const OBJECT: i64 = 300200;
+
+    /// Object 300200's record and its deDE lookup line after it was seen with these names.
+    fn with_object_names(values: &[(&str, f64)]) -> (Option<String>, Option<String>) {
+        let bundle = finalized(sightings(values, |staged, name| {
+            let german = Localized {
+                locale: "deDE".to_owned(),
+                value: name.to_owned(),
+            };
+            staged.object_name = SessionScalars::new(vec![obs(OBJECT, name.to_owned())]);
+            staged.lookups.object_name = SessionScalars::new(vec![obs(OBJECT, german)]);
+        }));
+        let lookups = bundle.lookups.iter().find(|(name, _)| *name == "lookupObjects").expect("object lookups");
+        let line = lookups
+            .1
+            .iter()
+            .find(|(locale, _)| locale == "deDE")
+            .and_then(|(_, lua)| lua.lines().find(|line| line.contains("[300200]")).map(|line| line.trim().to_owned()));
+        (record(module(&bundle, "foreverObjectTraces.lua"), OBJECT), line)
+    }
+
+    #[test]
+    fn exports_the_object_name_most_sessions_agree_on_not_the_newest() {
+        let (object, lookup) = with_object_names(&[("Dalaran Digest", 1000.0), ("Dalaran Digest", 2000.0), ("Leyline Focus", 3000.0)]);
+        assert!(object.expect("the object's record").contains("[objectKeys.name] = \"Dalaran Digest\""));
+        assert_eq!(lookup.as_deref(), Some("[300200] = \"Dalaran Digest\","));
+    }
+
+    #[test]
+    fn exports_no_object_name_without_agreement() {
+        let no_agreement: [&[(&str, f64)]; 2] = [
+            &[("Suspicious Chest", 1000.0), ("Wooden Chair", 2000.0)],
+            &[
+                ("Relic Coffer", 1.0),
+                ("Relic Coffer", 2.0),
+                ("Relic Coffer", 3.0),
+                ("Relic Coffer Door", 4.0),
+                ("Relic Coffer Door", 5.0),
+            ],
+        ];
+        for values in no_agreement {
+            assert_eq!(with_object_names(values), (None, None), "{values:?}");
         }
     }
 }
