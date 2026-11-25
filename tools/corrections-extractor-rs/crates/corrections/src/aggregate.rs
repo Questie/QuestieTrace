@@ -286,7 +286,7 @@ impl ScalarSummary<String> {
     /// aggregate.ts `aggregateNewestNameScalarSummary`: like [`Self::aggregate_newest`], for names
     /// that exist in several variants at once (a creature spawning as male and as female is named
     /// "Nachtläufer" or "Nachtläuferin"): when the newest name has well supported near-identical
-    /// variants, the shortest of them wins (alphabetically on equal length), so the result does not
+    /// variants (directly or through other such variants), the shortest of them wins (alphabetically on equal length), so the result does not
     /// change with whichever session is newest. A name without such variants, such as a rename, is
     /// decided as in [`Self::aggregate_newest`].
     pub fn aggregate_newest_name(&self) -> IndexMap<i64, String> {
@@ -303,13 +303,27 @@ fn newest_name(all: Vec<&ScalarGroup<String>>) -> String {
     if !is_strong(winner) {
         return winner.value.clone();
     }
-    let winner_name = utf16(&winner.value);
-    let variants = all
+    let strong: Vec<(Vec<u16>, &String)> = all
         .into_iter()
         .filter(|group| is_strong(group))
         .map(|group| (utf16(&group.value), &group.value))
-        .filter(|(name, _)| edit_distance(name, &winner_name) <= VARIANT_MAX_EDIT_DISTANCE);
-    let shortest = variants.min_by(|(a, _), (b, _)| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+        .collect();
+    // The variants connected to the winner through any chain of close strong names, so the group is
+    // the same whichever of them is newest.
+    let mut variants: Vec<usize> = strong.iter().position(|(_, name)| **name == winner.value).into_iter().collect();
+    let mut next = 0;
+    while next < variants.len() {
+        for (at, (name, _)) in strong.iter().enumerate() {
+            if !variants.contains(&at) && edit_distance(name, &strong[variants[next]].0) <= VARIANT_MAX_EDIT_DISTANCE {
+                variants.push(at);
+            }
+        }
+        next += 1;
+    }
+    let shortest = variants
+        .into_iter()
+        .map(|at| &strong[at])
+        .min_by(|(a, _), (b, _)| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
     shortest.expect("the winner is one of them").1.clone()
 }
 
@@ -616,6 +630,12 @@ mod tests {
         assert_eq!(newest_name_of(&[("Axle Smoothslice", 10), ("Edine Sharphorn", 10)]), "Edine Sharphorn");
         assert_eq!(newest_name_of(&[("Wache", 10), ("Wachenab", 10)]), "Wache", "3 edits apart");
         assert_eq!(newest_name_of(&[("Wache", 10), ("Wachenabc", 10)]), "Wachenabc", "4 edits apart");
+    }
+
+    #[test]
+    fn the_same_variant_of_a_chain_wins_whichever_end_of_the_chain_is_newest() {
+        assert_eq!(newest_name_of(&[("Wachenab", 10), ("Wache", 10), ("Wachenabcd", 10)]), "Wache");
+        assert_eq!(newest_name_of(&[("Wache", 10), ("Wachenabcd", 10), ("Wachenab", 10)]), "Wache");
     }
 
     #[test]
