@@ -465,6 +465,7 @@ Called with a quest ID as the argument.
 |---|---|---|
 | `GetLootSlotInfo` | tuple (n varies) | observed loot slot info return |
 | `GetLootSourceInfo` | tuple (n varies) | observed loot source return |
+| `UnitNameFromGUID` | tuple (n=1) | Forever only; keyed by object GUID, the name of a looted game object |
 | `GetLootSlotLink` | scalar string/nil | observed loot link return |
 | `GetLootSlotType` | scalar number/nil | observed loot type return |
 | `GetSpellBookItemName` | tuple (n varies) | observed spellbook name return |
