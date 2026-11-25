@@ -248,13 +248,12 @@ are recorded since schema 22; like `PLAYER_ALIVE` they have no arguments.
 
 ### SkillLines tracker
 
-Triggers skill window, profession-tab, and trade-skill-line sampling.
+Triggers skill window and profession-tab sampling.
 Expands all skill headers before sampling so hidden child rows are visible
 to `GetSkillLineInfo(index)` when that legacy global exists (no synthesized
 fallback when it doesn't). On Forever the skills are read through
 `C_SkillInfo` instead; headers that are collapsed are opened for the read and
-collapsed again. `C_TradeSkillUI.*` trade-skill-line data is tracked
-independently whenever that API exists.
+collapsed again.
 
 Opening and closing a header fires `SKILL_LINES_CHANGED` during the call. The
 tracker does not sample for those, but they are in the event stream.
@@ -358,9 +357,9 @@ No events. Sampled once at capture start (`t=0`).
 ### Initialization
 
 Events related to addon loading, login, and logout. `ADDON_LOADED` is
-filtered so only the addon's own load event is recorded in the stream.
+registered, but never recorded: only the addon's own passes the filter, and it
+fires before the capture starts at `PLAYER_LOGIN`.
 
-- `ADDON_LOADED` (filtered: only recorded when `addonName == "QuestieTrace"`)
 - `PLAYER_LOGOUT` *(also ResetTime + auto-save handling)*
 - `PLAYER_LEAVING_WORLD`
 - `LOADING_SCREEN_ENABLED` -- Questie's quest log cache treats objective
@@ -472,8 +471,8 @@ dropped and never recorded or dispatched to trackers.
   uses `LOOT_READY` (fires when loot data is available), not `LOOT_OPENED`
   (fires when the loot UI opens, data may not be ready).
 - `ADDON_LOADED` fires for every addon. An event filter in `OnEvent`
-  skips it unless `addonName == "QuestieTrace"`, so only the addon's
-  own load appears in the event stream.
+  skips it unless `addonName == "QuestieTrace"`. The addon's own load
+  comes before capture start, so none appears in the event stream.
 - `PLAYER_LOGIN` triggers auto-start (if consent is granted and no
   capture is active). Auto-start runs before `ProcessTrackedEvent` so
   `PLAYER_LOGIN` is recorded as the first event in the session.

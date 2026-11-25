@@ -51,9 +51,6 @@ local DeepCompare = Core.DeepCompare
 --                             number skillModifier,
 --                             number specializationIndex,
 --                             number specializationOffset
---
--- C_TradeSkillUI.GetAllProfessionTradeSkillLines() -> number[] skillLineIDs
--- C_TradeSkillUI.GetTradeSkillLineInfoByID(skillLineID) -> table info (raw)
 ---------------------------------------------------------------------------
 
 ---@type table<string, FunctionStreamEntry[]|table<string|number, FunctionStreamEntry[]>>
@@ -62,14 +59,10 @@ local functions
 local prevSkillLineInfo
 ---@type table<number, PackedArgs?>
 local prevProfessionInfo
----@type table<number, table?>
-local prevTradeSkillLineInfo
 ---@type table<number, boolean>
 local knownSkillLineIndices
 ---@type table<number, boolean>
 local knownProfessionIndices
----@type table<number, boolean>
-local knownTradeSkillLineIds
 ---@type boolean While this tracker opens or closes headers, which fires SKILL_LINES_CHANGED during the call
 local changingSkillHeaders
 ---@type SkillInfoApi?
@@ -361,52 +354,7 @@ local function SampleProfessions(t, tp)
   end
 end
 
---- Sample C_TradeSkillUI profession trade-skill lines. This is an
---- independent raw API tracked whenever it exists, not a fallback for
---- GetNumSkillLines/GetSkillLineInfo.
----@param t number
----@param tp number
-local function SampleTradeSkillLines(t, tp)
-  if type(C_TradeSkillUI) ~= "table"
-      or type(C_TradeSkillUI.GetAllProfessionTradeSkillLines) ~= "function"
-      or type(C_TradeSkillUI.GetTradeSkillLineInfoByID) ~= "function" then
-    return
-  end
-
-  local ok, skillLineIDs = SafeScalarCall(C_TradeSkillUI.GetAllProfessionTradeSkillLines)
-  if not ok or type(skillLineIDs) ~= "table" then return end
-
-  local stream = functions["C_TradeSkillUI.GetAllProfessionTradeSkillLines"]
-  local prev = stream[#stream]
-  if not prev or not DeepCompare(prev.v, skillLineIDs) then
-    ---@type number[]
-    local copy = {}
-    for i = 1, #skillLineIDs do copy[i] = skillLineIDs[i] end
-    stream[#stream + 1] = { t = t, tp = tp, v = copy }
-  end
-
-  ---@type table<number, boolean>
-  local seenSkillLineIds = {}
-  for _, skillLineID in ipairs(skillLineIDs) do
-    seenSkillLineIds[skillLineID] = true
-    knownTradeSkillLineIds[skillLineID] = true
-    local infoOk, info = SafeScalarCall(C_TradeSkillUI.GetTradeSkillLineInfoByID, skillLineID)
-    if infoOk and info then
-      AppendPackedIfChanged("C_TradeSkillUI.GetTradeSkillLineInfoByID", skillLineID, prevTradeSkillLineInfo, t, tp, info)
-    end
-  end
-
-  for skillLineID in pairs(knownTradeSkillLineIds) do
-    if not seenSkillLineIds[skillLineID] then
-      local infoOk, info = SafeScalarCall(C_TradeSkillUI.GetTradeSkillLineInfoByID, skillLineID)
-      if infoOk and info then
-        AppendPackedIfChanged("C_TradeSkillUI.GetTradeSkillLineInfoByID", skillLineID, prevTradeSkillLineInfo, t, tp, info)
-      end
-    end
-  end
-end
-
---- Sample the skill window, profession, and trade-skill-line APIs.
+--- Sample the skill window and profession APIs.
 ---@param capture CaptureState
 local function SampleSkills(capture)
   if not functions then return end
@@ -427,7 +375,6 @@ local function SampleSkills(capture)
     SampleSkillLines(t, tp)
   end
   SampleProfessions(t, tp)
-  SampleTradeSkillLines(t, tp)
 end
 
 --- Sample now, or once when SAMPLE_INTERVAL has passed since the last sample.
@@ -465,10 +412,8 @@ Core.RegisterTracker({
     functions = capture.session.functions
     prevSkillLineInfo = {}
     prevProfessionInfo = {}
-    prevTradeSkillLineInfo = {}
     knownSkillLineIndices = {}
     knownProfessionIndices = {}
-    knownTradeSkillLineIds = {}
     changingSkillHeaders = false
     skillInfoApi = FindSkillInfoApi()
     lastSampleAt = nil
@@ -489,12 +434,6 @@ Core.RegisterTracker({
     end
     if type(GetProfessionInfo) == "function" then
       functions["GetProfessionInfo"] = {}
-    end
-    if type(C_TradeSkillUI) == "table"
-        and type(C_TradeSkillUI.GetAllProfessionTradeSkillLines) == "function"
-        and type(C_TradeSkillUI.GetTradeSkillLineInfoByID) == "function" then
-      functions["C_TradeSkillUI.GetAllProfessionTradeSkillLines"] = {}
-      functions["C_TradeSkillUI.GetTradeSkillLineInfoByID"] = {}
     end
 
     SampleSkills(capture)

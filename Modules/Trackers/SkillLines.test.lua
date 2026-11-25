@@ -89,27 +89,6 @@ describe("SkillLines tracker", function()
     assert.is_nil(capture.session.functions["GetNumSkillLines"])
   end)
 
-  it("should record C_TradeSkillUI trade-skill lines whenever the API exists, not only as a fallback", function()
-    env.GetNumSkillLines = function() return 0 end
-    env.C_TradeSkillUI = {
-      GetAllProfessionTradeSkillLines = function() return { 171 } end,
-      GetTradeSkillLineInfoByID = function(id)
-        if id ~= 171 then return nil end
-        return { professionName = "Alchemy", skillLevel = 150 }
-      end,
-    }
-
-    tracker = select(2, LoadSkillLinesTracker(env))
-    local capture = NewCapture()
-    tracker.Init(capture)
-
-    local lineStream = capture.session.functions["C_TradeSkillUI.GetAllProfessionTradeSkillLines"]
-    assert.are.same({ 171 }, lineStream[1].v)
-
-    local infoStream = capture.session.functions["C_TradeSkillUI.GetTradeSkillLineInfoByID"]
-    assert.are.equal("Alchemy", infoStream[171][1].v.professionName)
-  end)
-
   describe("on a client with C_SkillInfo", function()
     ---@class TestSkillHeader
     ---@field skillID number

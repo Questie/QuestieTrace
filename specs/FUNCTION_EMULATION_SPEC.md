@@ -80,8 +80,6 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetNumSkillLines()` | `functions["GetNumSkillLines"]` (only present when this legacy global exists; no synthesized fallback) |
 | `GetSkillLineInfo(index)` (legacy) | `functions["GetSkillLineInfo"][index]` (only present when `GetNumSkillLines` exists) |
 | `C_SkillInfo.GetSkillLineInfoByID(skillID)` (Forever) | `functions["C_SkillInfo.GetSkillLineInfoByID"][skillID]` (`rank`, `maxRank`, `modifier` and `tempPoints` only) |
-| `C_TradeSkillUI.GetAllProfessionTradeSkillLines()` | `functions["C_TradeSkillUI.GetAllProfessionTradeSkillLines"]` |
-| `C_TradeSkillUI.GetTradeSkillLineInfoByID(skillLineID)` | `functions["C_TradeSkillUI.GetTradeSkillLineInfoByID"][skillLineID]` |
 | `GetProfessions()` | `functions["GetProfessions"]` |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
 | `C_QuestLog.GetMaxNumQuestsCanAccept()` | `functions["C_QuestLog.GetMaxNumQuestsCanAccept"]` |
@@ -172,8 +170,8 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `C_QuestLog.IsComplete(questId)` | `functions["C_QuestLog.IsComplete"][questId]` |
 | `C_QuestLog.IsFailed(questId)` | `functions["C_QuestLog.IsFailed"][questId]` |
 | `C_QuestLog.GetLogIndexForQuestID(questId)` | `functions["C_QuestLog.GetLogIndexForQuestID"][questId]` |
-| `GetQuestLogTitle(questLogIndex)` (legacy) for active quest `questId` | `functions["GetQuestLogTitle"][questId]` (raw 17-value tuple, only present when this global exists) |
-| `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]` |
+| `GetQuestLogTitle(questLogIndex)` (legacy) for active quest `questId` | `functions["GetQuestLogTitle"][questId]` (raw 17-value tuple; left out where it is another addon's and `C_QuestLog.GetInfo` is the client's own, see TRACKER_SPEC section 8; ignore it on Forever before schema 22) |
+| `GetQuestLogIndexByID(questId)` (legacy) | `functions["GetQuestLogIndexByID"][questId]`; ignore it on Forever before schema 22 |
 | `GetQuestLogQuestText(questLogIndex)` for active quest `questId` | `functions["GetQuestLogQuestText"][questId]` |
 | Timed quest value for `questId` | `functions["GetQuestTimers"][questId]` |
 | `GetQuestIndexForTimer(timerIndex)` (legacy) | `functions["GetQuestIndexForTimer"][timerIndex]` |
@@ -191,7 +189,7 @@ Every stored function maps directly to `session.functions[key]`, `session.functi
 | `GetLootSourceInfo(slot)` | `functions["GetLootSourceInfo"][slot]` |
 | `GetLootSlotLink(slot)` | `functions["GetLootSlotLink"][slot]` |
 | `GetLootSlotType(slot)` | `functions["GetLootSlotType"][slot]` |
-| `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple, only present when the legacy global exists, independent of whether `C_Reputation.GetFactionDataByID` also exists) |
+| `GetFactionInfoByID(factionID)` (legacy) | `functions["GetFactionInfoByID"][factionID]` (raw tuple; left out where it is another addon's and `C_Reputation.GetFactionDataByID` is the client's own, see TRACKER_SPEC section 8; ignore it on Forever before schema 22) |
 | `C_Reputation.GetFactionDataByID(factionID)` | `functions["C_Reputation.GetFactionDataByID"][factionID]` (raw table) |
 | `GetProfessionInfo(index)` | `functions["GetProfessionInfo"][index]` |
 | `GetSpellBookItemName(slot)` | `functions["GetSpellBookItemName"][slot]` |
@@ -215,9 +213,9 @@ Notes:
 - `GetQuestLogRewardInfo` uses nested maps in native argument order `[rewardIndex][questId]`. Previously observed reward indices are probed again after counts shrink or quests leave the log; stored values are successful API returns, not invented inactive values.
 - Legacy gossip globals are raw packed varargs; `GetGossipAvailableQuests` is repeated 7-tuples and `GetGossipActiveQuests` is repeated 6-tuples. Quest dialog close events cancel pending delayed open/update reads and perform one observed API sample; any empty string, nil, zero, or table value in these raw streams is an API return, not a synthetic reset.
 - Loot, skill/profession, spellbook, and unit-token streams follow the same raw-observation rule. Close events or shrinking index ranges cause event-synchronous probes of the represented APIs; failed calls are skipped rather than represented by invented values.
-- `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` are two independent raw streams for the same conceptual data, not one normalized value: whichever real API the client exposes is probed and recorded under that API's own name.
+- `GetFactionInfoByID`/`C_Reputation.GetFactionDataByID` are two independent raw streams for the same conceptual data, not one normalized value: whichever of them is recorded (see TRACKER_SPEC section 8) is stored under that API's own name.
 - Only factions in `FactionOrder` (the player's reputation panel) are recorded. A faction outside it has had no reputation change yet, so answer it from a static per-faction-group table of starting values (e.g. a `C_Reputation.GetFactionDataByID` dump of a new Alliance and a new Horde character, minus their panels), answering `isWatched = false`.
-- `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries; Forever has `C_SkillInfo.GetSkillLineInfoByID` in their place. `C_SkillInfo.GetNumSkillLines()` and `GetSkillLineInfo(index)` can be built from it: one row per skill with a value, in any order, with the names and headers of the client's skill line data. `GetProfessions`/`GetProfessionInfo` and `C_TradeSkillUI.GetAllProfessionTradeSkillLines`/`C_TradeSkillUI.GetTradeSkillLineInfoByID` are tracked independently and unconditionally whenever they exist (not only as a fallback for the legacy skill-line APIs).
+- `GetNumSkillLines`/`GetSkillLineInfo` have no synthesized fallback: on clients lacking these legacy globals, those two streams simply have no entries; Forever has `C_SkillInfo.GetSkillLineInfoByID` in their place. `C_SkillInfo.GetNumSkillLines()` and `GetSkillLineInfo(index)` can be built from it: one row per skill with a value, in any order, with the names and headers of the client's skill line data. `GetProfessions`/`GetProfessionInfo` are tracked independently whenever they exist (not only as a fallback for the legacy skill-line APIs).
 
 ### Stored custom streams
 

@@ -91,7 +91,7 @@ Current categories are organizational only and are not persisted:
 - `group_world`
 - `inventory`
 
-Tracker routing is separate: `Core._trackerCallbacks[event]` controls which trackers sample for a specific event. `ADDON_LOADED` is filtered so only `QuestieTrace`'s own load event is recorded.
+Tracker routing is separate: `Core._trackerCallbacks[event]` controls which trackers sample for a specific event. `ADDON_LOADED` is filtered so only `QuestieTrace`'s own load event passes; it fires before capture start, so it is never recorded.
 
 ---
 

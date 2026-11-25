@@ -369,7 +369,6 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `C_Seasons.HasActiveSeason` | scalar (boolean) | PlayerIdentity; recorded once at t=0 on clients that have `C_Seasons` (not Forever, where addons may define a stand-in). Schema 22+ |
 | `C_Seasons.GetActiveSeason` | scalar (number/nil) | PlayerIdentity; `Enum.SeasonID`, e.g. 2 Season of Discovery, 3 hardcore. Recorded like `C_Seasons.HasActiveSeason`. Schema 22+ |
 | `GetProfessions` | tuple (n=5) | profession tab indices; nil in missing tuple slots |
-| `C_TradeSkillUI.GetAllProfessionTradeSkillLines` | object (number[]) | Tracked independently whenever the API exists |
 | `C_GossipInfo.GetAvailableQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetActiveQuests` | object (GossipQuestUIInfo[]) | UnitInteraction; sampled on gossip/dialog events |
 | `C_GossipInfo.GetNumAvailableQuests` | scalar (number) | QuestDialog; when API exists |
@@ -445,13 +444,13 @@ All tuple-returning functions MUST have `n` on every stored value.
 | `C_QuestLog.IsOnQuest` | scalar (boolean/nil) | Raw API result; probed again after quest leaves log |
 | `C_QuestLog.IsQuestFlaggedCompleted` | scalar (boolean/nil) | Raw API result; related to but not derived from `GetQuestsCompleted` |
 | `C_QuestLog.GetQuestObjectives` | object (QuestObjectiveInfo[]/nil) | Raw API result; probed again after quest leaves log |
-| `C_QuestLog.GetInfo` | object (table) | Raw `C_QuestLog.GetInfo` return, keyed by questID after resolving the current quest log index |
+| `C_QuestLog.GetInfo` | object (table) | Raw `C_QuestLog.GetInfo` return, keyed by questID after resolving the current quest log index. Before schema 22 also another addon's on clients without it (1 of 211 TBC and Mists recordings) |
 | `C_QuestLog.GetQuestTagInfo` | object (table/nil) | Raw API result |
 | `C_QuestLog.IsComplete` | scalar (boolean/nil) | Raw API result |
 | `C_QuestLog.IsFailed` | scalar (boolean/nil) | Raw API result |
 | `C_QuestLog.GetLogIndexForQuestID` | scalar (number/nil) | Raw API result; used to resolve the quest-log index for the streams above |
-| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, stored by quest ID after resolving current quest log index. Only present when this global exists -- not synthesized from `C_QuestLog.*` |
-| `GetQuestLogIndexByID` | scalar (number/nil) | Legacy global; raw API result |
+| `GetQuestLogTitle` | tuple (n=17) | Legacy global; raw tuple, stored by quest ID after resolving current quest log index. Left out where it is another addon's and `C_QuestLog.GetInfo` is the client's own (see TRACKER_SPEC section 8) -- not synthesized from `C_QuestLog.*`. Before schema 22 also another addon's on Forever |
+| `GetQuestLogIndexByID` | scalar (number/nil) | Legacy global; raw API result. Left out where it is another addon's and `C_QuestLog.GetLogIndexForQuestID` is the client's own (see TRACKER_SPEC section 8), independently of `GetQuestLogTitle`. Before schema 22 also another addon's on Forever |
 | `GetQuestLogQuestText` | tuple (n=2) | questDescription, questObjectives |
 | `GetQuestTimers` | scalar (number/nil) | *(derived compatibility)* questId-keyed seconds-left from native timer slots |
 | `GetQuestLogTimeLeft` | scalar (number/nil) | *(derived compatibility)* same seconds-left value, no selection side effects |
@@ -573,17 +572,16 @@ Only `UnitGUID` is recorded for nameplate tokens: Questie reads the GUID for the
 
 | Function key | Return type | Notes |
 |---|---|---|
-| `GetFactionInfoByID` | tuple (n=16, or n=0 for a faction the client lacks) | Legacy global; raw tuple, only present when the legacy global exists (independent of whether C_Reputation.GetFactionDataByID also exists). Same factions as below |
+| `GetFactionInfoByID` | tuple (n=16, or n=0 for a faction the client lacks) | Legacy global; raw tuple. Left out where it is another addon's and `C_Reputation.GetFactionDataByID` is the client's own (see TRACKER_SPEC section 8). Before schema 22 also another addon's on Forever (n=8). Same factions as below |
 | `C_Reputation.GetFactionDataByID` | object (table)/nil | Raw API result for every `FactionOrder` faction, i.e. the player's reputation panel. A nil answer is recorded once like any other value. The guild faction (1168), named after the player's guild, is never sampled. Factions outside the panel are not recorded and still have their starting values |
 
-### Parameterized by skill index / profession tab index / trade-skill line ID
+### Parameterized by skill index / profession tab index
 
 | Function key | Return type | Notes |
 |---|---|---|
 | `GetSkillLineInfo` | tuple (n=13) | Legacy global; keyed by visible skill-line row index after header expansion. Only present when `GetNumSkillLines` exists -- no synthesized fallback |
 | `C_SkillInfo.GetSkillLineInfoByID` | object (table) | Forever only (schema 22+); keyed by skill ID. `{ rank, maxRank, modifier, tempPoints }`, the fields that can change; no value when the skill is unlearned |
 | `GetProfessionInfo` | tuple (n=10) | keyed by profession tab index returned by `GetProfessions()` |
-| `C_TradeSkillUI.GetTradeSkillLineInfoByID` | object (table) | Raw API result, keyed by skill-line ID; tracked independently whenever the API exists |
 
 ### Delta streams (in `functionsDelta`)
 

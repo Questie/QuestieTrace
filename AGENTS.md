@@ -223,6 +223,10 @@ else
 end
 ```
 
+A function that exists is not always the client's: another addon can define one the client lacks
+(Questie's `C_Seasons`, a `GetFactionInfoByID` on Forever). Where recorded data has an old global and a
+newer function, get both with `Core.GetClientFunctions` (`specs/TRACKER_SPEC.md`, section 8).
+
 ### Functions vs Methods
 
 Prefer plain **functions** over **methods** when `self` is not needed. This avoids unnecessary method dispatch overhead and makes the code simpler to test and mock.
