@@ -65,8 +65,9 @@ for one last comparison.
 
 ## Where we start
 
-- **Rust extractor:** byte-identical to master's TypeScript extractor as of `4dec2ad`
-  (2026-11-22) on the 5% sample, 53 s against 14 min 52 s;
+- **Rust extractor:** byte-identical to master's TypeScript extractor as of `25c48ea`
+  (2026-11-24), on the 5% sample and on the 10,000 newest submissions (schemas up to 21),
+  64 s and 75 s against 17 min 30 s and 20 min;
   `tools/corrections-extractor-rs/PARITY.md` holds the parity point and how to catch up again.
   The full archive was last compared as of #129: 7 min 22 s against 101 min.
 - **Rust relations:** natural Rust, same values as Exporters' TypeScript pipeline on a 5% sample.

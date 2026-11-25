@@ -8,7 +8,7 @@ are identical.
 
 ## Parity point
 
-Master `4dec2ad` (2026-11-22). The next catch-up starts after this commit.
+Master `25c48ea` (2026-11-24). The next catch-up starts after this commit.
 
 ## 1. Scope the catch-up
 
