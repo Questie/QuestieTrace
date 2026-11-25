@@ -245,6 +245,13 @@ local function Session(runtime)
   return assert(runtime.core.GetDiagnosticSession())
 end
 
+--- Record `count` events in the running capture.
+---@param runtime TestRuntime
+---@param count number
+local function RecordEvents(runtime, count)
+  for _ = 1, count do SendEvent(runtime, "PLAYER_REGEN_DISABLED") end
+end
+
 --- Mock IsResting() for reminder tests
 ---@param runtime TestRuntime
 ---@param value boolean
@@ -552,6 +559,7 @@ local function TestExportScrubsPlayerIdentity()
     player = { { t = 0, tp = 0, v = "Player-1-000001" } },
     npc = { { t = 0, tp = 0, v = "Creature-0-1-1-1-123-000001" } },
   }
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload = runtime.core.BuildExportPayload()
@@ -606,6 +614,7 @@ local function TestExportPayloadNeverExposesSourceSessions()
   session.functions.UnitGUID = {
     player = { { t = 0, tp = 0, v = "Player-1-000001" } },
   }
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
@@ -632,6 +641,7 @@ end
 local function TestExportPayloadExcludesDeletedSessions()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
   runtime.core.StartCapture("s1")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
@@ -649,11 +659,13 @@ end
 local function TestExportPayloadIncludesOnlyNewSessionsAfterExport()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
   runtime.core.StartCapture("s1")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
   local _, firstSourceSessions = runtime.core.BuildExportPayload()
   runtime.core.DeleteReportedSessions(firstSourceSessions)
 
   runtime.core.StartCapture("s2")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
 
   local payload, sourceSessions = runtime.core.BuildExportPayload()
@@ -661,20 +673,113 @@ local function TestExportPayloadIncludesOnlyNewSessionsAfterExport()
   assert(sourceSessions[1].name == "s2", "The included session must be the new one, not the deleted one")
 end
 
+--- Save one session per entry of `eventCounts`, named s1, s2, ...
+---@param runtime TestRuntime
+---@param eventCounts number[]
+local function SaveSessionsWithEvents(runtime, eventCounts)
+  for i, eventCount in ipairs(eventCounts) do
+    runtime.core.StartCapture("s" .. i)
+    RecordEvents(runtime, eventCount)
+    runtime.core.SaveCapture()
+  end
+end
+
+---@param runtime TestRuntime
+---@return string names Names of the saved sessions, in stored order.
+local function SavedSessionNames(runtime)
+  local names = {}
+  for i, record in ipairs(runtime.env.QuestieTraceCharacter.sessions) do names[i] = record.name end
+  return table.concat(names, " ")
+end
+
 --- A pure size backstop for players who never report/export: unreported
 --- sessions must still be capped so SavedVariables can't grow forever.
-local function TestSaveCapturePrunesOldestSessionsPastCap()
+local function TestSaveCaptureDropsSessionsWithFewestEventsPastCap()
   local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 90, 80, 70, 3, 60, 50, 2, 55, 65, 75 })
+  assert(SavedSessionNames(runtime) == "s1 s2 s3 s4 s5 s6 s7 s8 s9 s10", "Up to ten sessions are kept, whatever their size")
 
-  for i = 1, 12 do
-    runtime.core.StartCapture("s" .. i)
+  runtime.core.StartCapture("s11")
+  RecordEvents(runtime, 85)
+  runtime.core.SaveCapture()
+  assert(SavedSessionNames(runtime) == "s1 s2 s3 s4 s5 s6 s8 s9 s10 s11", "The session with the fewest events is dropped")
+
+  runtime.core.StartCapture("s12")
+  RecordEvents(runtime, 40)
+  runtime.core.SaveCapture()
+  assert(SavedSessionNames(runtime) == "s1 s2 s3 s5 s6 s8 s9 s10 s11 s12", "The next one to go is the one with the fewest left")
+  assert(runtime.env.QuestieTraceCharacter.lastSavedSession == "s12", "The last saved session is the newest one kept")
+end
+
+--- The reason for the rule: a few reloads must not push out a long recording.
+local function TestSaveCaptureKeepsLongSessionsThroughReloads()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 })
+  local kept = SavedSessionNames(runtime)
+
+  for i = 1, 3 do
+    runtime.core.StartCapture("reload " .. i)
+    -- Short in events, long in time: idling next to a mailbox is not worth keeping either.
+    RecordEvents(runtime, 5)
+    runtime.now = runtime.now + 5000
     runtime.core.SaveCapture()
   end
 
-  local sessions = runtime.env.QuestieTraceCharacter.sessions
-  assert(#sessions == 10, "Sessions must be capped at 10 even though none were reported")
-  assert(sessions[1].name == "s3", "The oldest sessions must be dropped first")
-  assert(sessions[10].name == "s12", "The newest session must always be kept")
+  assert(SavedSessionNames(runtime) == kept, "Short sessions must not push out long ones")
+  assert(runtime.env.QuestieTraceCharacter.lastSavedSession == "s10", "A session that was not kept is not the last saved one")
+  assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "A session that was not kept must not linger as the live one")
+end
+
+local function TestSaveCaptureDropsOldestOfEquallyShortSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 9, 4, 9, 4, 9, 9, 9, 9, 9, 9, 4, 9 })
+  assert(SavedSessionNames(runtime) == "s1 s3 s5 s6 s7 s8 s9 s10 s11 s12",
+    "Of equally short sessions the oldest is dropped first, so the two old ones go and the newer one stays")
+end
+
+--- Older versions kept up to 20 sessions, as plain tables.
+local function TestSaveCapturePrunesMigratedPlainSessions()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua", "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  local sessions = {}
+  for i = 1, 12 do
+    local events = {}
+    for j = 1, i % 2 == 0 and 8 or 0 do events[j] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} } end
+    sessions[i] = { schemaVersion = 8, name = "old" .. i, startedAt = 0, events = events, functions = {}, functionsDelta = {} }
+  end
+  runtime.env.QuestieTraceCharacter.sessions = sessions
+  SendEvent(runtime, "PLAYER_LOGIN")
+  RecordEvents(runtime, 1)
+  runtime.core.SaveCapture()
+
+  assert(SavedSessionNames(runtime) == "old2 old4 old6 old7 old8 old9 old10 old11 old12 2024-01-01_12-00-00",
+    "Sessions without events go first, the oldest of them before the others")
+end
+
+local function TestSaveCaptureSkipsSessionWithoutEvents()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 2 })
+  runtime.core.StartCapture("empty")
+  Session(runtime).functions.GetZoneText = { { t = 0, tp = 0, v = "Dun Morogh" } }
+  local record = runtime.core.SaveCapture()
+
+  assert(record == nil and SavedSessionNames(runtime) == "s1", "A session without events must not be saved")
+  assert(runtime.env.QuestieTraceCharacter.lastSavedSession == "s1", "A session without events is not the last saved one")
+  assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "A session without events must be dropped")
+  assert(runtime.core.GetCaptureState() == "idle", "The next capture must be able to start")
+end
+
+--- The export window exports what SaveCapture returns, also when the session
+--- itself was too short to be kept.
+local function TestSaveCaptureReturnsSessionThatWasNotKept()
+  local runtime = NewRuntime({ "Modules/Export/Export.lua" })
+  SaveSessionsWithEvents(runtime, { 9, 9, 9, 9, 9, 9, 9, 9, 9, 9 })
+  runtime.core.StartCapture("short")
+  RecordEvents(runtime, 3)
+  local record = assert(runtime.core.SaveCapture(), "The encoded session must be returned")
+
+  assert(record.name == "short" and #runtime.core.DecodeExportPayload(record.encoded).events == 3,
+    "The returned session must be the one that was just captured")
 end
 
 local function TestExportPayloadLiveSessionDeletedAndRestarted()
@@ -792,6 +897,7 @@ local function TestExportSerializationRoundTrips()
   runtime.core.StartCapture("serialize test")
   local session = assert(runtime.core.GetDiagnosticSession())
   session.functions.GetZoneText = { { t = 0, tp = 0, v = "Dun Morogh" } }
+  session.events[1] = { t = 0, tp = 0, e = "TEST_EVENT", a = {} }
   runtime.core.SaveCapture()
 
   local ok, text = runtime.core.BuildExportString()
@@ -886,6 +992,7 @@ local function TestSaveCaptureSkipsSessionThatCannotBeEncoded()
   local runtime = NewRuntime({})
   runtime.core.EncodeExportPayload = function() return nil end
   runtime.core.StartCapture("unencodable")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
   assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A session that cannot be encoded must not be saved")
   assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "A session that cannot be encoded must be dropped")
@@ -901,6 +1008,7 @@ end
 local function TestSaveCaptureClearsCurrentSession()
   local runtime = NewRuntime({})
   runtime.core.StartCapture("save test")
+  RecordEvents(runtime, 1)
   runtime.core.SaveCapture()
   assert(runtime.env.QuestieTraceCharacter.currentSession == nil, "SaveCapture must clear currentSession")
   assert(runtime.env.QuestieTraceCharacter.sessions[1] ~= nil, "Session must be moved to sessions array")
@@ -974,6 +1082,21 @@ local function TestRecoverCurrentSessionOnLogin()
   local current = env.QuestieTraceCharacter.currentSession
   assert(current ~= nil and current ~= recovered, "Login must replace the recovered session with a new capture")
   assert(current.events[1].e == "PLAYER_LOGIN", "The new capture must record PLAYER_LOGIN first")
+end
+
+local function TestRecoverCurrentSessionWithoutEventsIsDropped()
+  local runtime = NewRuntime({ "Modules/Export/ExportReminder.lua" })
+  MockIsResting(runtime, false)
+  runtime.env.QuestieTraceCharacter.currentSession = {
+    schemaVersion = 21, recordingContractVersion = 1, name = "recovered", startedAt = 100, startedAtPrecise = 100,
+    events = {}, functions = {}, functionsDelta = {},
+  }
+
+  SendEvent(runtime, "PLAYER_LOGIN")
+
+  assert(#runtime.env.QuestieTraceCharacter.sessions == 0, "A recovered session without events must not be saved")
+  assert(runtime.core.GetCaptureState() == "running", "Login must start a new capture after dropping it")
+  assert(runtime.env.QuestieTraceCharacter.currentSession.events[1].e == "PLAYER_LOGIN", "The new capture must be the live one")
 end
 
 local function TestRecoverCurrentSessionDiscardedWhenConsentDeclined()
@@ -1056,6 +1179,7 @@ end
 local function SaveSessions(runtime, count)
   for i = 1, count do
     runtime.core.StartCapture("session " .. i)
+    RecordEvents(runtime, 1)
     runtime.core.SaveCapture()
   end
 end
@@ -4388,7 +4512,12 @@ local tests = {
   { name = "export payload never exposes sourceSessions", run = TestExportPayloadNeverExposesSourceSessions },
   { name = "export excludes deleted (reported) sessions", run = TestExportPayloadExcludesDeletedSessions },
   { name = "export includes only new sessions after export", run = TestExportPayloadIncludesOnlyNewSessionsAfterExport },
-  { name = "SaveCapture prunes oldest sessions past the cap", run = TestSaveCapturePrunesOldestSessionsPastCap },
+  { name = "SaveCapture drops the sessions with the fewest events past the cap", run = TestSaveCaptureDropsSessionsWithFewestEventsPastCap },
+  { name = "SaveCapture keeps long sessions through reloads", run = TestSaveCaptureKeepsLongSessionsThroughReloads },
+  { name = "SaveCapture drops the oldest of equally short sessions", run = TestSaveCaptureDropsOldestOfEquallyShortSessions },
+  { name = "SaveCapture prunes migrated plain sessions", run = TestSaveCapturePrunesMigratedPlainSessions },
+  { name = "SaveCapture skips a session without events", run = TestSaveCaptureSkipsSessionWithoutEvents },
+  { name = "SaveCapture returns a session that was not kept", run = TestSaveCaptureReturnsSessionThatWasNotKept },
   { name = "export deletes and restarts live session after report", run = TestExportPayloadLiveSessionDeletedAndRestarted },
   { name = "export serialization round-trips", run = TestExportSerializationRoundTrips },
   { name = "SaveCapture stores the session encoded", run = TestSaveCaptureStoresSessionEncoded },
@@ -4401,6 +4530,7 @@ local tests = {
   { name = "API StartCapture before login does not block auto-start", run = TestApiStartCaptureBeforeLoginDoesNotBlockAutoStart },
   { name = "fresh character login initializes SavedVariables", run = TestLoginInitializesFreshCharacter },
   { name = "recover currentSession on login before auto-start", run = TestRecoverCurrentSessionOnLogin },
+  { name = "recovered currentSession without events is dropped", run = TestRecoverCurrentSessionWithoutEventsIsDropped },
   { name = "recover currentSession discarded when consent declined", run = TestRecoverCurrentSessionDiscardedWhenConsentDeclined },
   { name = "recover currentSession discarded when consent undecided", run = TestRecoverCurrentSessionDiscardedWhenConsentUndecided },
   { name = "consent undecided shows prompt and does not auto-start", run = TestConsentUndecidedShowsPromptAndDoesNotAutoStart },

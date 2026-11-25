@@ -149,7 +149,8 @@ linked into SavedVariables as `currentSession`. On save it is encoded into an
 ### On SaveCapture
 
 1. Auto-stops if still running.
-2. Session is encoded (see `EncodedSessionRecord` in SCHEMA_SPEC) and appended to `QuestieTraceCharacter.sessions`.
+2. Session is encoded (see `EncodedSessionRecord` in SCHEMA_SPEC) and, if it has events, appended to
+   `QuestieTraceCharacter.sessions`, which is pruned to `MAX_SESSIONS` (see ARCHITECTURE_SPEC).
 3. `capture.session` is set to `nil`.
 
 ---
