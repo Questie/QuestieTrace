@@ -1,8 +1,9 @@
 //! Merging the observations of one field into one value per entity. Ports `extract/aggregate.ts`.
 //!
-//! Default (scalar) policy: highest confidence wins; ties go to the most observed value, then
-//! to the most recently observed one, then to the value seen first. Fields whose merge is not
-//! "pick one winner" keep every observation and merge them themselves.
+//! Default (scalar) policy: highest confidence wins; ties go to the most observed value, then to
+//! the one of the newest session (server time), then to the most recent time within a session,
+//! then to the value seen first. Fields whose merge is not "pick one winner" keep every
+//! observation and merge them themselves.
 
 use crate::observation::{Confidence, Localized, Observation, SessionId, Sessions};
 use indexmap::IndexMap;
@@ -301,10 +302,17 @@ fn newest_first(a: f64, b: f64) -> Ordering {
     key(b).partial_cmp(&key(a)).expect("NaN was mapped away")
 }
 
+/// Values seen in no session with a server time sort as the oldest.
+fn session_time<T>(group: &ScalarGroup<T>) -> f64 {
+    group.newest_session_time.unwrap_or(f64::NEG_INFINITY)
+}
+
 fn default_order<T>(a: &ScalarGroup<T>, b: &ScalarGroup<T>) -> Ordering {
     b.confidence
         .cmp(&a.confidence)
         .then_with(|| b.count.cmp(&a.count))
+        // `latest_t` is relative to the start of its session, so it only compares values of one session.
+        .then_with(|| newest_first(session_time(a), session_time(b)))
         .then_with(|| newest_first(a.latest_t, b.latest_t))
 }
 
@@ -416,6 +424,35 @@ mod tests {
         let newer = sessions.add(Some(400.0));
         summary.add([obs(1, "New Name", Confidence::High, 1.0, newer)], &sessions);
         assert_eq!(summary.aggregate_newest()[&1], "New Name");
+    }
+
+    /// Entity 1's values after one observation of each: (value, server time, t within its session).
+    fn seen_once(values: &[(&str, Option<f64>, f64)]) -> ScalarSummary<String> {
+        let mut sessions = Sessions::default();
+        let mut summary = ScalarSummary::default();
+        for &(value, server_time, t) in values {
+            let session = sessions.add(server_time);
+            summary.add([obs(1, value, Confidence::High, t, session)], &sessions);
+        }
+        summary
+    }
+
+    #[test]
+    fn a_tie_goes_to_the_newest_session_not_to_a_later_time_within_an_older_one() {
+        let summary = seen_once(&[("Older", Some(100.0), 3000.0), ("Newer", Some(200.0), 10.0)]);
+        assert_eq!(summary.aggregate()[&1], "Newer");
+    }
+
+    #[test]
+    fn a_tie_goes_to_a_session_with_a_server_time() {
+        let summary = seen_once(&[("Untimed", None, 3000.0), ("Timed", Some(200.0), 10.0)]);
+        assert_eq!(summary.aggregate()[&1], "Timed");
+    }
+
+    #[test]
+    fn a_tie_between_sessions_without_a_server_time_goes_to_the_later_time_within_the_session() {
+        let summary = seen_once(&[("Early", None, 10.0), ("Late", None, 20.0)]);
+        assert_eq!(summary.aggregate()[&1], "Late");
     }
 
     /// Entity 1's values, each seen in that many sessions, one session newer than the one before.
