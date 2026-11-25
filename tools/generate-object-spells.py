@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Generate Modules/ObjectSpells.lua: the spells the player casts on world objects.
 
-Usage (dbc-source.db comes from the Questie/dbc releases):
+Usage (dbc-source.db is the DBC release database):
     uv run tools/generate-object-spells.py <path to dbc-source.db>
+    uv run tools/generate-object-spells.py --check <path to dbc-source.db>
+
+--check compares the spell IDs with those in Modules/ObjectSpells.lua instead of writing it, and exits
+with 3 when they differ. Names and the build in the header are not compared: they change by themselves.
 
 A spell is included when one of its effects targets a game object, or a game object or item.
 That is what makes the target of a cast safe to record: a spell that could also target a unit
@@ -11,6 +15,8 @@ NON_UNIT_TARGETS. An unlisted one stops the generator instead of being guessed a
 selects in WoWDBDefs (meta/enums/Target.dbde) before adding it.
 """
 
+import argparse
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -86,10 +92,30 @@ Core.OBJECT_SPELLS = {{
 """
 
 
+def compare_with_list(spells: dict[int, tuple[str, set[int]]], build: str) -> int:
+    """Print what the list lacks or has too much of; returns the process's exit code."""
+    listed = {int(spell_id) for spell_id in re.findall(r"^  \[(\d+)\] = true,", OUTPUT.read_text(encoding="utf-8"), re.MULTILINE)}
+    if not listed:
+        sys.exit(f"{OUTPUT} has no spells in it")
+    missing = sorted(spells.keys() - listed)
+    extra = sorted(listed - spells.keys())
+    if not missing and not extra:
+        print(f"{OUTPUT.name} has the {len(listed)} spells of build {build}")
+        return 0
+    print(f"{OUTPUT.name} differs from build {build}:")
+    for spell_id in missing:
+        print(f"  missing {spell_id} {spells[spell_id][0]}")
+    for spell_id in extra:
+        print(f"  no longer targets an object: {spell_id}")
+    return 3
+
+
 def main() -> None:
-    if len(sys.argv) != 2:
-        sys.exit(__doc__)
-    database = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description="Generate Modules/ObjectSpells.lua")
+    parser.add_argument("database", type=Path, help="the DBC release database, dbc-source.db")
+    parser.add_argument("--check", action="store_true", help="compare the spell IDs instead of writing the list")
+    arguments = parser.parse_args()
+    database = arguments.database.resolve()
     if not database.is_file():
         sys.exit(f"{database} does not exist")
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
@@ -98,6 +124,8 @@ def main() -> None:
         sys.exit("The database has no spells with an object target")
     check_targets(spells)
     build = client_build(connection)
+    if arguments.check:
+        sys.exit(compare_with_list(spells, build))
     OUTPUT.write_text(render(spells, build), encoding="utf-8", newline="\n")
     print(f"Wrote {len(spells)} spells of build {build} to {OUTPUT}")
 
