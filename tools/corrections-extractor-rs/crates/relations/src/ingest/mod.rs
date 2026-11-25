@@ -52,8 +52,8 @@ use std::sync::mpsc;
 use std::time::Instant;
 use submission::{distill_submission, DistilledSubmission, SubmissionError};
 use titles::{resolve_greeting, GreetingStats, TitleIndex};
-use trace_data::source::{list_submissions, SubmissionFile};
 use trace_data::{Arena, Inflater};
+use trace_pack::source::{self, StoredSubmission};
 
 /// What ingest reports. The episodes themselves are already written by [`run`]: as JSON lines
 /// for people and the TS tools, and as the episode store the steps read.
@@ -76,7 +76,7 @@ fn short_hash(text: &str) -> String {
 pub fn run(config: &Config) -> Result<IngestOutput> {
     let started = Instant::now();
     let trace_data_dir = config.trace_data_dir()?;
-    let mut files = list_submissions(trace_data_dir).with_context(|| format!("listing {}/submissions", trace_data_dir.display()))?;
+    let mut files = source::list(trace_data_dir).with_context(|| format!("listing {}/submissions", trace_data_dir.display()))?;
     if files.is_empty() {
         bail!("{}/submissions has no submissions", trace_data_dir.display());
     }
@@ -89,7 +89,8 @@ pub fn run(config: &Config) -> Result<IngestOutput> {
     let mut copies = Partitions::<SpilledCopy>::create(&spill_dir.join("copies"))?;
     let mut spill_error = None;
     let require_forever = config.require_forever_version;
-    let distill = |file: &SubmissionFile, inflater: &mut Inflater, arena: &mut Arena| distill_submission(&file.path, require_forever, inflater, arena);
+    let distill =
+        |file: &StoredSubmission, inflater: &mut Inflater, arena: &mut Arena| distill_submission(file.read(inflater), require_forever, inflater, arena);
     distill_all(&files, distill, |index, submission| {
         // After a failed write the rest is only drained: the run fails below.
         if spill_error.is_none() {
@@ -157,8 +158,8 @@ const RESULTS_IN_FLIGHT: usize = 64;
 /// (the merge does not depend on that order). A submission whose `distill` panics becomes a
 /// [`SubmissionError::Crashed`] failure of its own; the run goes on.
 fn distill_all(
-    files: &[SubmissionFile],
-    distill: impl Fn(&SubmissionFile, &mut Inflater, &mut Arena) -> DistilledSubmission + Sync,
+    files: &[StoredSubmission],
+    distill: impl Fn(&StoredSubmission, &mut Inflater, &mut Arena) -> DistilledSubmission + Sync,
     mut merge: impl FnMut(usize, DistilledSubmission),
 ) {
     let (results, received) = mpsc::sync_channel(RESULTS_IN_FLIGHT);
@@ -171,7 +172,7 @@ fn distill_all(
                     let distilled = catch_unwind(AssertUnwindSafe(|| distill(file, inflater, arena))).unwrap_or_else(|_| {
                         // Nothing borrows the crashed submission's values any more.
                         arena.reset();
-                        DistilledSubmission::crashed(&file.path)
+                        DistilledSubmission::crashed(Path::new(&file.key))
                     });
                     // Only fails once the merge stopped listening, which it does by panicking.
                     let _ = results.send((index, distilled));
@@ -663,23 +664,73 @@ mod tests {
         assert_eq!(resolved(with_title(Some(LIVE), Some(70))), None);
     }
 
+    /// Packs must not be a way around what ingest leaves out. A submission read from a pack
+    /// distills to exactly what its file distills to, down to the server time that marks a
+    /// session as recorded in the beta, and everything after the read is the same code.
+    #[test]
+    fn a_submission_read_from_a_pack_distills_as_its_file_does_beta_sessions_included() {
+        use trace_pack::pack::{build_frame, PackOptions, PackWriter, Scratch};
+        use trace_pack::record::Encoding;
+        use trace_pack::values::TpPolicy;
+
+        let recorded_at = |server_time: f64| {
+            let builder = TraceBuilder::new().sample("GetServerTime", serde_json::json!(server_time));
+            builder.gossip(951, &[gossip_quest(91743)], &[]).session
+        };
+        let export = test_trace::export_string(&[recorded_at(IN_BETA), recorded_at(LIVE)]);
+        let name = "2026-10/2026-10-20_120000Z_s1.json";
+        let file = serde_json::json!({ "id": "s1", "contributor_id": "c1", "received_at": "2026-10-20T12:00:00Z", "export_string": export });
+        let file = file.to_string().into_bytes();
+
+        // The same submission as a file of a checkout and in a pack, value-encoded.
+        let dir = std::env::temp_dir().join(format!("ingest-pack-source-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (checkout, packed) = (dir.join("checkout"), dir.join("packed"));
+        std::fs::create_dir_all(checkout.join("submissions/2026-10")).unwrap();
+        std::fs::write(checkout.join("submissions").join(name), &file).unwrap();
+        let options = PackOptions {
+            tp: TpPolicy::SchemaVersions(vec![12]),
+            ..PackOptions::default()
+        };
+        let frame = build_frame(name, &file, &options, &mut Scratch::new()).unwrap();
+        assert_eq!(frame.entry.exports.iter().map(|(encoding, _)| *encoding).collect::<Vec<_>>(), [Encoding::Value]);
+        let mut writer = PackWriter::new();
+        writer.add(frame);
+        std::fs::create_dir_all(packed.join("packs/live")).unwrap();
+        std::fs::write(packed.join("packs/live/a.pack"), writer.finish(options.level).unwrap()).unwrap();
+
+        let distilled = |directory: &Path| {
+            let listed = source::list(directory).unwrap();
+            assert_eq!(listed.iter().map(|stored| stored.key.as_str()).collect::<Vec<_>>(), [name]);
+            let (mut inflater, mut arena) = (Inflater::new(), Arena::new());
+            distill_submission(listed[0].read(&mut inflater), false, &mut inflater, &mut arena)
+        };
+        let (from_file, from_pack) = (distilled(&checkout), distilled(&packed));
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(format!("{:?}", from_pack.sessions), format!("{:?}", from_file.sessions));
+        assert_eq!(
+            (&from_pack.submission_id, &from_pack.contributor_id, from_pack.exports),
+            (&from_file.submission_id, &from_file.contributor_id, 1)
+        );
+        let eras: Vec<Era> = from_pack.sessions.iter().map(|session| origin::era(session.start_server_time)).collect();
+        assert_eq!(eras, [Era::Beta, Era::Live]);
+    }
+
     #[test]
     fn a_submission_whose_reading_panics_fails_alone_and_the_run_goes_on() {
-        let files: Vec<SubmissionFile> = (0..40)
+        let files: Vec<StoredSubmission> = (0..40)
             .map(|i| {
                 let name = format!("2026-10-01_000000Z_{i:02}.json");
-                SubmissionFile {
-                    key: format!("2026-10/{name}"),
-                    path: std::path::Path::new("/nowhere").join(name),
-                }
+                StoredSubmission::file(format!("2026-10/{name}"), std::path::Path::new("/nowhere").join(name))
             })
             .collect();
-        let distill = |file: &SubmissionFile, _: &mut Inflater, _: &mut Arena| {
+        let distill = |file: &StoredSubmission, _: &mut Inflater, _: &mut Arena| {
             assert!(!file.key.ends_with("_13.json"), "a bug met reading submission 13");
             DistilledSubmission {
                 exports: 1,
                 error: None,
-                ..DistilledSubmission::crashed(&file.path)
+                ..DistilledSubmission::crashed(Path::new(&file.key))
             }
         };
         let mut results = std::collections::BTreeMap::new();

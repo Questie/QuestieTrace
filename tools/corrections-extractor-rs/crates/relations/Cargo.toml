@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 trace-data.workspace = true
+trace-pack.workspace = true
 anyhow.workspace = true
 indexmap.workspace = true
 rayon.workspace = true
@@ -25,3 +26,7 @@ serde.workspace = true
 # hands over in memory.
 serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
 sha2.workspace = true
+
+[dev-dependencies]
+# Tests that read a submission through its file or its pack deflate an export as the addon does.
+libdeflater.workspace = true

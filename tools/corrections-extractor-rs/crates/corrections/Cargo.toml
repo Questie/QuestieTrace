@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 trace-data.workspace = true
+trace-pack.workspace = true
 indexmap.workspace = true
 mimalloc.workspace = true
 libmimalloc-sys.workspace = true

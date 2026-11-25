@@ -126,6 +126,15 @@ impl Submission {
         }
     }
 
+    /// A submission that could not be read from where it is stored, with the reason. It
+    /// decodes to no trace and to that error, as a file that could not be read does.
+    pub fn unreadable(submission_id: String, error: String) -> Submission {
+        Submission {
+            error: Some(error),
+            ..Submission::unread(submission_id)
+        }
+    }
+
     /// A submission file's content; `fallback_id` is used when the file has no `id`.
     pub fn from_json(bytes: &[u8], fallback_id: String, inflater: &mut Inflater) -> Submission {
         // Read as UTF-8 like Node does: invalid bytes become U+FFFD instead of failing the file.

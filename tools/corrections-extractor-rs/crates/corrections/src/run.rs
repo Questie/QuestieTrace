@@ -16,9 +16,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
-use trace_data::source::{in_sample, list_submissions, SubmissionFile};
-use trace_data::submission::Submission;
+use trace_data::source::in_sample;
 use trace_data::{Arena, Inflater, SessionKey};
+use trace_pack::source::{self, StoredSubmission};
 
 pub struct Options {
     pub trace_data: PathBuf,
@@ -81,8 +81,8 @@ struct ObservedSession {
 
 /// Decodes and observes one submission. Sessions in `used` were folded from newer
 /// submissions: their copies here are duplicates and not observed.
-fn observe_submission(file: &SubmissionFile, inflater: &mut Inflater, arena: &mut Arena, used: &RwLock<HashSet<SessionKey>>) -> ObservedSubmission {
-    let submission = Submission::read(&file.path, inflater);
+fn observe_submission(file: &StoredSubmission, inflater: &mut Inflater, arena: &mut Arena, used: &RwLock<HashSet<SessionKey>>) -> ObservedSubmission {
+    let submission = file.read(inflater);
     let decoded = submission.decode(arena);
     // Only the first copy of a session in a submission is used.
     let mut seen = HashSet::new();
@@ -164,8 +164,7 @@ const PROGRESS_EVERY: usize = 2000;
 
 /// Runs the extraction and writes every output file; meta.json last, as the mark of a complete run.
 pub fn run(options: &Options, log: &dyn Fn(&str)) -> Result<Meta, String> {
-    let mut files =
-        list_submissions(&options.trace_data).map_err(|e| format!("{} has no readable submissions directory: {e}", options.trace_data.display()))?;
+    let mut files = source::list(&options.trace_data).map_err(|e| format!("{} has no readable submissions directory: {e}", options.trace_data.display()))?;
     if let Some(percent) = options.sample_percent {
         files.retain(|file| in_sample(&file.key, percent));
     }
@@ -336,6 +335,87 @@ mod tests {
 
     fn read(path: &Path) -> String {
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    }
+
+    /// Every file under `directory`, by its path under it. `generated_at` is when the run was
+    /// made and differs between any two runs.
+    fn output_files(directory: &Path) -> std::collections::BTreeMap<String, String> {
+        fn walk(root: &Path, directory: &Path, found: &mut std::collections::BTreeMap<String, String>) {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(root, &path, found);
+                } else {
+                    let made_at = |line: &&str| line.contains("Generated at") || line.contains("generatedAt");
+                    let content: Vec<String> = read(&path).lines().filter(|line| !made_at(line)).map(String::from).collect();
+                    found.insert(path.strip_prefix(root).unwrap().to_string_lossy().into_owned(), content.join("\n"));
+                }
+            }
+        }
+        let mut found = std::collections::BTreeMap::new();
+        walk(directory, directory, &mut found);
+        found
+    }
+
+    /// The extractor does not know whether it reads a checkout or packs: packs made from a
+    /// checkout give the output the checkout gives, file for file.
+    #[test]
+    fn an_extraction_from_packs_writes_what_the_checkout_they_were_made_from_writes() {
+        use trace_pack::pack::{build_frame, PackOptions, PackWriter, Scratch};
+
+        let checkout = Checkout::new();
+        let old = export_string(&[titled_session(100.0, 96659, "Old Title")]);
+        let new = export_string(&[titled_session(100.0, 96659, "New Title")]);
+        let keys = [
+            "2026-09/2026-09-01_000000Z_old.json",
+            "2026-10/2026-10-01_000000Z_new.json",
+            "2026-10/2026-10-02_000000Z_broken.json",
+            "2026-10/2026-10-03_000000Z_partial.json",
+        ];
+        checkout
+            .submission(keys[0], &old)
+            .submission(keys[1], &format!("{new}\n{new}"))
+            .submission(keys[2], "!QuestieTrace:1!abc$def!End:QuestieTrace:1!")
+            .submission(keys[3], &format!("{}{}", &old[..40], export_string(&[titled_session(200.0, 96660, "Other")])));
+
+        // The same four in two packs, in another order than their keys, one of them twice.
+        let packed = TempDir::new("packed");
+        let (mut scratch, options) = (Scratch::new(), PackOptions::default());
+        for (pack, held) in [("a", &[keys[3], keys[0]][..]), ("b", &[keys[2], keys[1], keys[0]][..])] {
+            let mut writer = PackWriter::new();
+            for key in held {
+                let file = std::fs::read(checkout.dir.0.join("submissions").join(key)).unwrap();
+                writer.add(build_frame(key, &file, &options, &mut scratch).unwrap());
+            }
+            let path = packed.0.join(format!("packs/live/{pack}.pack"));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, writer.finish(options.level).unwrap()).unwrap();
+        }
+
+        let (from_checkout, from_packs) = (TempDir::new("from-checkout"), TempDir::new("from-packs"));
+        let meta = checkout.run(&from_checkout.0, 2).unwrap();
+        let options = Options {
+            trace_data: packed.0.clone(),
+            output: from_packs.0.clone(),
+            sample_percent: None,
+            threads: 2,
+            stats: false,
+        };
+        let packed_meta = run(&options, &|_| {}).unwrap();
+
+        assert_eq!(
+            (
+                packed_meta.session_count,
+                packed_meta.submission_count,
+                packed_meta.export_count,
+                packed_meta.duplicate_sessions_skipped
+            ),
+            (meta.session_count, meta.submission_count, meta.export_count, meta.duplicate_sessions_skipped)
+        );
+        assert_eq!(packed_meta.skipped_files.len(), 1);
+        let (expected, written) = (output_files(&from_checkout.0), output_files(&from_packs.0));
+        assert!(expected.len() > 2, "{:?}", expected.keys());
+        assert_eq!(written, expected);
     }
 
     #[test]

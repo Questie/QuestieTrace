@@ -15,7 +15,7 @@ cargo run --release -- --trace-data ../../../trace-data
 
 | Option | Default | |
 |---|---|---|
-| `--trace-data DIR` | `$TRACE_DATA_DIR` | The trace-data checkout to read |
+| `--trace-data DIR` | `$TRACE_DATA_DIR` | The trace-data checkout to read, or a directory that holds `packs/` |
 | `--output DIR` | `output`, or `output/sample-<PERCENT>` | Where the modules go |
 | `--sample PERCENT` | `$EXTRACT_SAMPLE` | Only this percentage of submissions, the same ones every run (and the same ones as the TypeScript tool's sample) |
 | `--threads N` | one per core | Decoding threads |

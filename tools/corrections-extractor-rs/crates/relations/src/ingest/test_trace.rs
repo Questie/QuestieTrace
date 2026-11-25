@@ -32,6 +32,23 @@ pub fn distill_json(record: &Json) -> DistilledSession {
     })
 }
 
+/// An addon export holding `sessions`, encoded the way the addon does: CBOR, raw deflate, and
+/// six bits a character in its print alphabet, least significant first.
+pub fn export_string(sessions: &[Json]) -> String {
+    const ALPHABET: &[u8; 64] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789()";
+    let cbor = encode(&json!({ "sessions": sessions }));
+    let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
+    let mut deflated = vec![0; compressor.deflate_compress_bound(cbor.len())];
+    let size = compressor.deflate_compress(&cbor, &mut deflated).expect("compresses");
+    let mut out = String::from("!QuestieTrace:1!");
+    for chunk in deflated[..size].chunks(3) {
+        let bits = chunk.iter().rev().fold(0u32, |bits, &byte| (bits << 8) | byte as u32);
+        (0..(chunk.len() * 8).div_ceil(6)).for_each(|index| out.push(ALPHABET[(bits >> (6 * index) & 63) as usize] as char));
+    }
+    out.push_str("!End:QuestieTrace:1!");
+    out
+}
+
 /// CBOR as Blizzard's serializer writes it, for the JSON subset tests use.
 fn encode(value: &Json) -> Vec<u8> {
     let mut out = Vec::new();

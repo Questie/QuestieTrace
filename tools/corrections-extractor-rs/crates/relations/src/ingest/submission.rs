@@ -48,10 +48,10 @@ impl DistilledSubmission {
 /// (the corrections extractor measured the same cap as fastest and smallest).
 const ARENA_KEPT_BYTES: usize = 16 << 20;
 
-/// Reads, decodes and distills the submission at `path`. With `require_forever`, only sessions
-/// that recorded a Forever build are kept: versioned dumps never infer a missing build.
-pub fn distill_submission(path: &Path, require_forever: bool, inflater: &mut Inflater, arena: &mut Arena) -> DistilledSubmission {
-    let submission = Submission::read(path, inflater);
+/// Decodes and distills a submission that was read from a file or from a pack. With
+/// `require_forever`, only sessions that recorded a Forever build are kept: versioned dumps never
+/// infer a missing build.
+pub fn distill_submission(submission: Submission, require_forever: bool, inflater: &mut Inflater, arena: &mut Arena) -> DistilledSubmission {
     let (exports, error, sessions) = {
         let decoded = submission.decode(arena);
         let sessions = decoded

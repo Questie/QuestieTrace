@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 trace-data.workspace = true
-trace-pack = { path = "../trace-pack" }
+trace-pack.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
 serde.workspace = true

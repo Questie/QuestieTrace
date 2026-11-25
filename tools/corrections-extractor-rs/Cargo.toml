@@ -10,6 +10,7 @@ publish = false
 
 [workspace.dependencies]
 trace-data = { path = "crates/trace-data" }
+trace-pack = { path = "crates/trace-pack" }
 indexmap = { version = "2", features = ["serde"] }
 anyhow = "1"
 rayon = "1.10"

@@ -653,23 +653,29 @@ impl<'a> PackReader<'a> {
     /// fails its checksum here.
     pub fn record(&self, index: usize) -> Result<Record, String> {
         let entry = &self.entries[index];
-        let bytes = decompress(self.frame(entry), MAX_RECORD_BYTES).map_err(|message| format!("{}: {message}", entry.name))?;
-        let record = Record::decode(&bytes).map_err(|error| format!("{}: {}", entry.name, error.0))?;
-        if record.name() != entry.name {
-            return Err(format!("{}: the frame holds another submission", entry.name));
-        }
-        Ok(record)
+        record_of(self.frame(entry), &entry.name)
     }
 }
 
+/// The record a frame holds, which must be the submission `name`: the name its index entry
+/// gives it. For a reader that fetched one frame of a pack and not the pack.
+pub fn record_of(frame: &[u8], name: &str) -> Result<Record, String> {
+    let bytes = decompress(frame, MAX_RECORD_BYTES).map_err(|message| format!("{name}: {message}"))?;
+    let record = Record::decode(&bytes).map_err(|error| format!("{name}: {}", error.0))?;
+    if record.name() != name {
+        return Err(format!("{name}: the frame holds another submission"));
+    }
+    Ok(record)
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::test_support::*;
     use crate::values::Field;
 
     /// An export string as the addon builds it: print-encoded raw deflate of the CBOR.
-    fn export_string(cbor: &[u8]) -> String {
+    pub(crate) fn export_string(cbor: &[u8]) -> String {
         const ALPHABET: &[u8; 64] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789()";
         let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
         let mut deflated = vec![0; compressor.deflate_compress_bound(cbor.len())];
@@ -687,7 +693,7 @@ mod tests {
 
     const STARTED_AT: f64 = 8551.460000000001;
 
-    fn trace(tp: f64) -> Vec<u8> {
+    pub(crate) fn trace(tp: f64) -> Vec<u8> {
         let entry = map(&[
             (text("t"), float(8_559_178.0 * 0.001 - STARTED_AT)),
             (text("tp"), float(tp)),
@@ -702,18 +708,18 @@ mod tests {
         map(&[(text("sessions"), array(&[session]))])
     }
 
-    fn file(export_string: &str) -> Vec<u8> {
+    pub(crate) fn file(export_string: &str) -> Vec<u8> {
         format!(r#"{{"schema_version": 2, "id": "abc", "contributor_id": "c0ffee", "received_at": "2026-11-08T18:00:00Z", "nickname": "Thrall", "export_string": "{export_string}"}}"#).into_bytes()
     }
 
-    fn options() -> PackOptions {
+    pub(crate) fn options() -> PackOptions {
         PackOptions {
             tp: TpPolicy::SchemaVersions(vec![17]),
             ..PackOptions::default()
         }
     }
 
-    fn pack_of(files: &[(&str, Vec<u8>)], options: &PackOptions) -> (Vec<u8>, Vec<FrameReport>) {
+    pub(crate) fn pack_of(files: &[(&str, Vec<u8>)], options: &PackOptions) -> (Vec<u8>, Vec<FrameReport>) {
         let mut scratch = Scratch::new();
         let mut writer = PackWriter::new();
         let mut reports = Vec::new();
@@ -726,7 +732,7 @@ mod tests {
     }
 
     /// The traces a submission decodes to, as JSON, with its ids and its errors.
-    fn read(submission: &Submission) -> (String, String, String, Option<String>, Vec<String>, Vec<String>) {
+    pub(crate) fn read(submission: &Submission) -> (String, String, String, Option<String>, Vec<String>, Vec<String>) {
         let arena = Arena::new();
         let decoded = submission.decode(&arena);
         (

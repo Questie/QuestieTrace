@@ -2,6 +2,7 @@
 
 pub mod pack;
 pub mod record;
+pub mod source;
 pub mod values;
 pub mod verify;
 pub mod wire;

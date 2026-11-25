@@ -1,6 +1,6 @@
 # Required exporter changes for packs
 
-Status: **proposal**, written 2026-11-23. The pack reader exists and is tested (`tools/corrections-extractor-rs/crates/trace-pack`). Nothing below is done yet, and none of it starts before packs are being produced on the server: until then every tool keeps reading the JSON files.
+Status: written 2026-11-23 as a proposal. **The two Rust tools read packs since 2026-11-25**; see [Rust tools](#rust-tools). The TypeScript tools and the parity run are still as proposed below.
 
 The trace archive is moving from one JSON object per submission to **packs**: one object per hour, holding about a thousand submissions, at about a quarter of the size. The format is in [FORMAT.md](tools/corrections-extractor-rs/crates/trace-pack/FORMAT.md); the migration is planned in the `railway-forms` repository (`OVH_MIGRATION_PLAN.md`). This page lists what each tool that reads traces has to change.
 
@@ -8,7 +8,7 @@ The trace archive is moving from one JSON object per submission to **packs**: on
 
 | | Today | With packs |
 | --- | --- | --- |
-| Where traces are | `submissions/<yyyy-mm>/<stamp>_<id>.json`, one file each | `packs/.../HH-n.pack`, about 1,000 submissions each |
+| Where traces are | `submissions/<yyyy-mm>/<stamp>_<id>.json`, one file each | `packs/.../HH-<md5>.pack`, about 1,000 submissions each |
 | Listing | Every file | Each pack's index: name, ids and frame position of every submission |
 | Reading one | Parse JSON, print-decode, inflate, decode CBOR | Decompress one frame, rebuild the CBOR, decode CBOR |
 | Freshness | As soon as a trace is accepted | About 48 hours after it is accepted |
@@ -37,6 +37,15 @@ for (index, entry) in pack.entries().iter().enumerate() {
 `submission` is the same `trace_data::submission::Submission` the extractors already use.
 
 ## Rust tools
+
+**Done.** Both tools list and read through `trace_pack::source`: `list(directory)` and `StoredSubmission::read`. The directory they are given, `--trace-data` or `TRACE_DATA_DIR`, is a trace-data checkout (it has `submissions/`) or a directory of packs (it has `packs/`); one that has both is refused.
+
+- The listing has the same keys in the same order either way, newest first, and lists a submission that is in two packs once.
+- Reading gives the same `Submission` either way. A frame that cannot be read is one unreadable submission that names its pack, reported as an unreadable file is.
+- Everything a tool does after the read is the same code for both. What the relations ingest leaves out, such as sessions from the beta, is decided there, from the distilled session: a test reads a beta session from a pack and from its file and requires the same result.
+- A test of the corrections extractor runs it over a checkout and over packs made from it and requires the same output, file for file.
+
+What follows is the analysis this was built from.
 
 ### Corrections extractor (`crates/corrections`)
 
