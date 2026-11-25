@@ -68,6 +68,10 @@ local TRACKED_EVENT_CATEGORIES = {
   {
     name = "npc_interaction",
     events = {
+      -- The argument (Enum.PlayerInteractionType) tells the kind of window. HIDE alone tells when a mailbox was
+      -- closed: MAIL_CLOSED never fires.
+      "PLAYER_INTERACTION_MANAGER_FRAME_SHOW",
+      "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
       "MERCHANT_SHOW",
       "MERCHANT_CLOSED",
       "TRAINER_SHOW",
@@ -108,7 +112,9 @@ local TRACKED_EVENT_CATEGORIES = {
     events = {
       "PLAYER_LOGIN",
       "PLAYER_ENTERING_WORLD",
+      "PLAYER_DEAD",
       "PLAYER_ALIVE",
+      "PLAYER_UNGHOST",
       "PLAYER_LEVEL_UP",
       "PLAYER_XP_UPDATE",
       "UPDATE_EXHAUSTION",
@@ -248,7 +254,8 @@ local EVENT_FILTERS = {
 -- Every CHAT_MSG_* event QuestieTrace tracks shares the same argument
 -- shape, so a single shared sanitizer (Core.SanitizeChatMsgArgs) covers all
 -- of them. Applied in ProcessTrackedEvent before args are recorded to
--- session.events or dispatched to tracker callbacks.
+-- session.events or dispatched to tracker callbacks. Every tracked event is in
+-- one of the two reviewed lists in Tests/run.lua.
 
 ---@type table<string, fun(args: PackedArgs): PackedArgs>
 local EVENT_ARG_SANITIZERS = {
@@ -259,6 +266,10 @@ local EVENT_ARG_SANITIZERS = {
   CHAT_MSG_TRADESKILLS = Core.SanitizeTradeskillChatMsgArgs,
   CHAT_MSG_COMBAT_FACTION_CHANGE = Core.SanitizeChatMsgArgs,
   CHAT_MSG_COMBAT_XP_GAIN = Core.SanitizeChatMsgArgs,
+  QUEST_ACCEPT_CONFIRM = Core.SanitizeQuestAcceptConfirmArgs,
+  GROUP_JOINED = Core.SanitizeGroupArgs,
+  GROUP_LEFT = Core.SanitizeGroupArgs,
+  UI_INFO_MESSAGE = Core.SanitizeInfoMessageArgs,
 }
 
 ---------------------------------------------------------------------------
