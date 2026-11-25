@@ -1,4 +1,6 @@
 target/
+# Files set aside that nothing here uses any more.
+/scratch/
 # Relations runs (scripts/relations.sh), and the scraper databases it fetched into data/ until
 # November 2026, several GB where they are still around.
 /data/
