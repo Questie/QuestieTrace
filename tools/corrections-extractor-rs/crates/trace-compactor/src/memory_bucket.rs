@@ -47,6 +47,7 @@ struct State {
     /// How long a whole download takes, and how many were going on at once at most.
     get_delay: Duration,
     gets_now: usize,
+    gets: usize,
     most_gets: usize,
     /// The next upload to a key with this prefix is reported as stored, and is not stored as
     /// it was sent.
@@ -72,6 +73,7 @@ impl MemoryBucket {
                 put_fault: None,
                 get_delay: Duration::ZERO,
                 gets_now: 0,
+                gets: 0,
                 most_gets: 0,
             }),
         }
@@ -135,6 +137,11 @@ impl MemoryBucket {
     /// Makes every whole download take this long, so that downloads which may overlap do.
     pub fn slow_gets(&self, delay: Duration) {
         self.state.lock().unwrap().get_delay = delay;
+    }
+
+    /// How many whole downloads were asked for.
+    pub fn gets(&self) -> usize {
+        self.state.lock().unwrap().gets
     }
 
     /// The most whole downloads that were going on at one moment.
@@ -203,6 +210,7 @@ impl Bucket for MemoryBucket {
         let delay = {
             let mut state = self.state.lock().unwrap();
             state.gets_now += 1;
+            state.gets += 1;
             state.most_gets = state.most_gets.max(state.gets_now);
             state.get_delay
         };

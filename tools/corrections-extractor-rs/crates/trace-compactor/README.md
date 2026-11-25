@@ -117,6 +117,23 @@ A pack is built and uploaded from memory.
 
 The last row has no bound short of the largest export the intake accepts. A submission whose build needs more than the machine has ends the run each time, before anything of that pack is written, and has to be packed on a larger machine.
 
+## Backfill
+
+`trace-compactor backfill` packs the old archive, one JSON object per submission, into a local directory. It is a separate command with its own rules, because the old archive is in production and is only ever read:
+
+```sh
+trace-compactor backfill --out DIR [--trace-data DIR] [--only PREFIX] [--tp-schema N,N,...]
+```
+
+- **What it writes:** `DIR/packs/backfill/YYYY/MM/DD/HH-<md5>.pack`, one pack per hour the submissions were received in, or several when an hour is larger than `--pack-input-mib`. Uploading `DIR/packs` is left to a sync tool.
+- **What it reads:** a trace-data checkout (`--trace-data`), the old bucket (the `SOURCE_S3_*` variables), or both. With the bucket, the bucket says which submissions exist, and a local file saves the download only when its MD5 is the ETag the bucket lists. The bucket is reached through a type that can list and download and nothing else.
+- **It packs what is in no pack under `DIR` yet**, so it can be stopped and run again, and a later run catches up. A submission that reaches the old archive after its hour was packed, because it was accepted days after it was received, gets a pack of its own for that hour.
+- **Only hours that ended `--settle-hours` ago** are packed (48 by default), since a recent submission can still be rejected and deleted.
+- **It deletes nothing.** A submission that is in a pack and no longer in the bucket was rejected since; it is reported, and stays packed until someone decides.
+- A pack is written under another name and renamed, so a file named `.pack` is always whole. Anything else under `DIR/packs` stops the run.
+
+One real hour, 1,490 submissions and 3,130 MiB of JSON, took 57 seconds on 32 cores and peaked at 12.7 GiB of memory with `--build-input-mib 256`: every thread keeps the buffers of the largest submission it has built, on top of what the table above gives.
+
 ## Tests
 
 ```sh
@@ -143,6 +160,5 @@ They passed against OVHcloud's London region on 2026-11-24.
 
 ## Not built
 
-- **The backfill**, which packs the old bucket's submissions under the writer name `backfill`.
 - **Alerts.** A failed run shows only in the service's log. The intake alerts on a removal request that stays unanswered.
 - **A cache of pack indexes.** A run with an open removal request reads every pack's index: three requests a pack, in each of the two runs a removal takes.

@@ -4,6 +4,7 @@
 //! A request that got no answer, or a server error for one, is sent again: every request the
 //! compactor makes can be repeated.
 
+use crate::backfill::ReadBucket;
 use crate::bucket::{Bucket, Listed};
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -172,6 +173,28 @@ impl S3Bucket {
                 _ => Err(self.unexpected("upload", key, response)),
             }
         })
+    }
+}
+
+/// A bucket that is only read. The old archive is in production: wrapped in this, there is
+/// no way to upload to it or delete from it.
+pub struct ReadOnlyS3(S3Bucket);
+
+impl ReadOnlyS3 {
+    /// See [`S3Bucket::new`].
+    pub fn new(endpoint: &str, region: &str, name: &str, access_key: &str, secret_key: &str) -> Result<Self> {
+        S3Bucket::new(endpoint, region, name, access_key, secret_key).map(ReadOnlyS3)
+    }
+}
+
+impl ReadBucket for ReadOnlyS3 {
+    fn list(&self, prefix: &str) -> Result<Vec<(String, u64, String)>> {
+        let listed = Bucket::list(&self.0, prefix)?;
+        Ok(listed.into_iter().map(|object| (object.key, object.size, object.etag)).collect())
+    }
+
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        Bucket::get(&self.0, key)
     }
 }
 

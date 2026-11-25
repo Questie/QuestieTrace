@@ -97,20 +97,20 @@ fn select(bucket: &dyn Bucket, config: &Config, now: Timestamp, requested: &BTre
 /// Limits how much loose JSON is being turned into frames at once. That is what a run's
 /// memory follows: building one submission's frame takes about 22 times the size of its
 /// file, measured on real traces, and every core builds one.
-struct BuildBudget {
+pub(crate) struct BuildBudget {
     limit: u64,
     in_use: Mutex<u64>,
     released: Condvar,
 }
 
 /// A share of the budget, given back when dropped.
-struct Share<'a> {
+pub(crate) struct Share<'a> {
     budget: &'a BuildBudget,
     bytes: u64,
 }
 
 impl BuildBudget {
-    fn new(limit: u64) -> Self {
+    pub(crate) fn new(limit: u64) -> Self {
         BuildBudget {
             limit: limit.max(1),
             in_use: Mutex::new(0),
@@ -120,7 +120,7 @@ impl BuildBudget {
 
     /// Waits until `bytes` fit. An object larger than the whole budget takes all of it, so it
     /// is built alone; nothing can be done about what it needs by itself.
-    fn take(&self, bytes: u64) -> Share<'_> {
+    pub(crate) fn take(&self, bytes: u64) -> Share<'_> {
         let bytes = bytes.clamp(1, self.limit);
         let mut in_use = self.in_use.lock().expect("no holder panics");
         while *in_use + bytes > self.limit {

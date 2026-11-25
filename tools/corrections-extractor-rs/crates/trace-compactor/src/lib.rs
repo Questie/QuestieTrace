@@ -5,6 +5,7 @@
 //! so a run that stops anywhere is finished by the next one. How this fits the intake is in
 //! the `railway-forms` repository: `OVH_MIGRATION_PLAN.md` and `docs/storage.md`.
 
+pub mod backfill;
 pub mod bucket;
 pub mod packing;
 pub mod removal;
