@@ -13,7 +13,13 @@
 #   RCLONE_CONF          an rclone config with one S3 remote, whose key may read the old bucket
 #   BUCKET               the old bucket (default trace-intake-ovh)
 #   MB_PER_SECOND        download limit in megabytes a second (default 40)
-#   CPUS                 the CPUs the run may use, as taskset takes them (default: 8 cores)
+#   CPUS                 the CPUs the run may use, as taskset takes them (default: 8 cores). This is
+#                        what bounds its load, whatever THREADS is
+#   THREADS              how many submissions are downloaded and built at once (default 8). More than
+#                        CPUS is of use: one thread downloads about 1.5 MB/s of small objects, and
+#                        waits while it does
+#   BUILD_INPUT_MIB      the most JSON being downloaded and built at once (default 64): memory
+#                        follows it, at about 22 times as much
 #   TP_SCHEMA            schemaVersions whose tp is rounded: those a parity run has covered
 #   MIN_FREE_GIB         stops when OUT's disk has less free (default 25)
 #   MIN_MEMORY_GIB       waits when less memory is available (default 6)
@@ -29,7 +35,8 @@ cpus="${CPUS:-0,2,4,6,8,10,12,14}"
 tp_schema="${TP_SCHEMA:-9,10,11,12,13,14,15,16,17,18}"
 min_free_gib="${MIN_FREE_GIB:-25}"
 min_memory_gib="${MIN_MEMORY_GIB:-6}"
-threads=8
+threads="${THREADS:-8}"
+build_input_mib="${BUILD_INPUT_MIB:-64}"
 attempts=5
 
 # One at a time on this machine, held on a Linux file system: OUT may be a Windows drive.
@@ -71,7 +78,7 @@ pack_day() {
     : > "$last_attempt"
     taskset -c "$cpus" nice -n 19 ionice -c 3 "$BIN" backfill --out "$OUT" --also-packed "$ALSO_PACKED" \
       --only "${day:0:7}/$day" --tp-schema "$tp_schema" --download-mb-per-second "$mb_per_second" \
-      --threads "$threads" --build-input-mib 64 --pack-input-mib 2048 2>&1 | tee -a "$log" "$last_attempt" > /dev/null
+      --threads "$threads" --build-input-mib "$build_input_mib" --pack-input-mib 2048 2>&1 | tee -a "$log" "$last_attempt" > /dev/null
     status="${PIPESTATUS[0]}"
     [ "$status" -eq 0 ] && return 0
     # Submissions that could not be packed: trying again finds the same.
