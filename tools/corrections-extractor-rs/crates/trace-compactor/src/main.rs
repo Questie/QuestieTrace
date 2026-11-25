@@ -6,6 +6,7 @@ use jiff::{SignedDuration, Timestamp};
 use std::fs::File;
 use std::path::PathBuf;
 use trace_compactor::backfill;
+use trace_compactor::rate_limit::RateLimit;
 use trace_compactor::s3::{ReadOnlyS3, S3Bucket};
 use trace_compactor::Config;
 use trace_pack::pack::PackOptions;
@@ -16,7 +17,8 @@ usage:
   trace-compactor run [--writer NAME] [--settle-hours N] [--pack-input-mib N]
                       [--build-input-mib N] [--threads N] [--level N] [--exact]
                       [--tp-schema N,N,...] [--lock FILE]
-  trace-compactor backfill --out DIR [--trace-data DIR] [--only PREFIX] [--settle-hours N]
+  trace-compactor backfill --out DIR [--also-packed DIR]... [--trace-data DIR]
+                      [--only PREFIX] [--download-mb-per-second N] [--settle-hours N]
                       [--pack-input-mib N] [--build-input-mib N] [--threads N] [--level N]
                       [--exact] [--tp-schema N,N,...]
 
@@ -54,14 +56,20 @@ backfill  packs the old archive, one JSON object per submission, into a local di
         in no pack under DIR yet, so it can be stopped and run again, and it writes nothing
         to where it reads from.
         --out DIR           where the packs go
-        --trace-data DIR    a trace-data checkout, DIR/submissions/<yyyy-mm>/*.json. Without
+        --also-packed DIR   what is in a pack under DIR/packs is not packed again either. May
+                            be given more than once. Only read
+        --trace-data DIR   a trace-data checkout, DIR/submissions/<yyyy-mm>/*.json. Without
                             the old bucket it is all that is packed. With it, a file here
                             saves the download when it is the object the bucket lists.
         --only PREFIX       only submissions whose name starts with it, such as
                             2026-11/2026-11-08
+        --download-mb-per-second N
+                            the most all threads together download, in megabytes (millions
+                            of bytes) a second. Default: no limit
         --settle-hours N    an hour is packed once it ended this long ago. Default: 48
         --pack-input-mib N  the most JSON one pack is built from; an hour with more gets
-                            several packs. Default: 8192
+                            several packs. A removal rewrites a pack in memory on the
+                            server, so this also bounds what that needs. Default: 2048
         The other options are those of run, with the same memory needs.
 
         The old bucket is read when SOURCE_S3_ENDPOINT (host only), SOURCE_S3_REGION,
@@ -202,6 +210,7 @@ struct BackfillArguments {
     config: backfill::Config,
     trace_data: Option<PathBuf>,
     threads: Option<usize>,
+    download_limit: Option<RateLimit>,
 }
 
 impl BackfillArguments {
@@ -210,20 +219,27 @@ impl BackfillArguments {
         let mut parsed = BackfillArguments {
             config: backfill::Config {
                 out: PathBuf::new(),
+                also_packed: Vec::new(),
                 settle: SignedDuration::from_hours(48),
-                pack_input_bytes: 8192 << 20,
+                pack_input_bytes: 2048 << 20,
                 build_input_bytes: 64 << 20,
                 only: None,
                 options: PackOptions::default(),
             },
             trace_data: None,
             threads: None,
+            download_limit: None,
         };
         let mut rest = arguments.iter();
         while let Some(flag) = rest.next() {
             let mut value = || rest.next().with_context(|| format!("{flag} needs a value\n{USAGE}"));
             match flag.as_str() {
                 "--out" => out = Some(PathBuf::from(value()?)),
+                "--also-packed" => parsed.config.also_packed.push(value()?.into()),
+                "--download-mb-per-second" => {
+                    let megabytes: u64 = value()?.parse().context("--download-mb-per-second")?;
+                    parsed.download_limit = Some(RateLimit::new(megabytes * 1_000_000));
+                }
                 "--trace-data" => parsed.trace_data = Some(value()?.into()),
                 "--only" => parsed.config.only = Some(value()?.clone()),
                 "--settle-hours" => parsed.config.settle = SignedDuration::from_hours(value()?.parse::<u32>().context("--settle-hours")?.into()),
@@ -249,7 +265,12 @@ impl BackfillArguments {
 }
 
 fn backfill(arguments: BackfillArguments) -> Result<()> {
-    let BackfillArguments { config, trace_data, threads } = arguments;
+    let BackfillArguments {
+        config,
+        trace_data,
+        threads,
+        download_limit,
+    } = arguments;
 
     // Two runs into one directory would each pack what the other is packing.
     std::fs::create_dir_all(&config.out).with_context(|| format!("creating {}", config.out.display()))?;
@@ -262,7 +283,7 @@ fn backfill(arguments: BackfillArguments) -> Result<()> {
         rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().context("--threads")?;
     }
 
-    let bucket = source_bucket_from_environment()?;
+    let bucket = source_bucket_from_environment(download_limit)?;
     let source = backfill::Source {
         bucket: bucket.as_ref().map(|bucket| bucket as &dyn backfill::ReadBucket),
         local: trace_data,
@@ -309,7 +330,7 @@ fn backfill(arguments: BackfillArguments) -> Result<()> {
 }
 
 /// The old bucket, when the environment names one. All five variables or none.
-fn source_bucket_from_environment() -> Result<Option<ReadOnlyS3>> {
+fn source_bucket_from_environment(download_limit: Option<RateLimit>) -> Result<Option<ReadOnlyS3>> {
     const NAMES: [&str; 5] = [
         "SOURCE_S3_ENDPOINT",
         "SOURCE_S3_REGION",
@@ -327,7 +348,7 @@ fn source_bucket_from_environment() -> Result<Option<ReadOnlyS3>> {
             if endpoint.contains('/') {
                 bail!("SOURCE_S3_ENDPOINT is a host name, without https:// or a path");
             }
-            ReadOnlyS3::new(&format!("https://{endpoint}"), region, bucket, access_key, secret_key).map(Some)
+            ReadOnlyS3::new(&format!("https://{endpoint}"), region, bucket, access_key, secret_key, download_limit).map(Some)
         }
         _ => bail!("set all of {} or none", NAMES.join(", ")),
     }

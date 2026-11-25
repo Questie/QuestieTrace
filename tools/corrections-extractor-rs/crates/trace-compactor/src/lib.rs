@@ -8,6 +8,7 @@
 pub mod backfill;
 pub mod bucket;
 pub mod packing;
+pub mod rate_limit;
 pub mod removal;
 pub mod s3;
 

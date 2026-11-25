@@ -6,12 +6,14 @@
 
 use crate::backfill::ReadBucket;
 use crate::bucket::{Bucket, Listed};
+use crate::rate_limit::RateLimit;
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use md5::{Digest, Md5};
 use rusty_s3::actions::ListObjectsV2;
 use rusty_s3::{Credentials, S3Action, UrlStyle};
+use std::io::Read;
 use std::ops::Range;
 use std::time::Duration;
 use ureq::http::Response;
@@ -36,6 +38,8 @@ pub struct S3Bucket {
     agent: ureq::Agent,
     /// Between two attempts at one request, times the number of attempts made.
     pause: Duration,
+    /// How fast whole objects and listings may be downloaded. None for no limit.
+    download_limit: Option<RateLimit>,
 }
 
 /// Why one attempt at a request failed.
@@ -97,7 +101,30 @@ impl S3Bucket {
             credentials: Credentials::new(access_key, secret_key),
             agent,
             pause: Duration::from_secs(2),
+            download_limit: None,
         })
+    }
+
+    /// Holds the download of this body to the limit, when there is one, by reading it in small
+    /// parts and waiting after each.
+    fn read_limited(&self, response: &mut Response<Body>) -> std::io::Result<Vec<u8>> {
+        let expected = response.body().content_length().unwrap_or(0).min(LARGEST_OBJECT);
+        let mut reader = response.body_mut().with_config().limit(LARGEST_OBJECT).reader();
+        let mut body = Vec::with_capacity(expected as usize);
+        let mut part = vec![0; 64 << 10];
+        loop {
+            match reader.read(&mut part) {
+                Ok(0) => return Ok(body),
+                Ok(read) => {
+                    body.extend_from_slice(&part[..read]);
+                    if let Some(limit) = &self.download_limit {
+                        limit.took(read as u64);
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     /// A request that ended without the provider's answer.
@@ -138,6 +165,10 @@ impl S3Bucket {
             }
             let text = response.body_mut().with_config().limit(64 << 20).read_to_string();
             let text = text.map_err(|error| self.unanswered("listing", prefix, error))?;
+            // A page is small; it is paid for before the next request, not while it arrives.
+            if let Some(limit) = &self.download_limit {
+                limit.took(text.len() as u64);
+            }
 
             // A page that cannot be read whole is no page: a listing is all of the objects or
             // an error.
@@ -181,9 +212,10 @@ impl S3Bucket {
 pub struct ReadOnlyS3(S3Bucket);
 
 impl ReadOnlyS3 {
-    /// See [`S3Bucket::new`].
-    pub fn new(endpoint: &str, region: &str, name: &str, access_key: &str, secret_key: &str) -> Result<Self> {
-        S3Bucket::new(endpoint, region, name, access_key, secret_key).map(ReadOnlyS3)
+    /// See [`S3Bucket::new`]. `download_limit` holds every thread's downloads together.
+    pub fn new(endpoint: &str, region: &str, name: &str, access_key: &str, secret_key: &str, download_limit: Option<RateLimit>) -> Result<Self> {
+        let bucket = S3Bucket::new(endpoint, region, name, access_key, secret_key)?;
+        Ok(ReadOnlyS3(S3Bucket { download_limit, ..bucket }))
     }
 }
 
@@ -234,8 +266,8 @@ impl Bucket for S3Bucket {
             let mut response = self.agent.get(url.as_str()).call().map_err(|error| self.unanswered("download", key, error))?;
             match response.status().as_u16() {
                 200 => {
-                    let body = response.body_mut().with_config().limit(LARGEST_OBJECT).read_to_vec();
-                    body.map(Some).map_err(|error| self.unanswered("download", key, error))
+                    let body = self.read_limited(&mut response);
+                    body.map(Some).map_err(|error| self.unanswered("download", key, error.into()))
                 }
                 404 => Ok(None),
                 _ => Err(self.unexpected("download", key, response)),
@@ -343,6 +375,65 @@ mod tests {
         let quoting = "http: bad uri https://s3.example/b/k?X-Amz-Credential=AKIA&X-Amz-Signature=abc".to_owned();
         assert_eq!(without_signature(quoting), "the request failed");
         assert_eq!(without_signature("io: connection reset".into()), "io: connection reset");
+    }
+
+    /// A server on this machine that answers every request with `body`, announcing
+    /// `announced` bytes. It answers as often as it is asked, on connections of its own.
+    fn serve(body: Vec<u8>, announced: usize) -> String {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                let (mut connection, body) = (connection.unwrap(), body.clone());
+                std::thread::spawn(move || {
+                    let mut lines = BufReader::new(connection.try_clone().unwrap()).lines();
+                    while lines.next().is_some_and(|line| line.is_ok_and(|line| !line.is_empty())) {}
+                    let head = format!("HTTP/1.1 200 OK\r\ncontent-length: {announced}\r\nconnection: close\r\n\r\n");
+                    let _ = connection.write_all(head.as_bytes()).and_then(|_| connection.write_all(&body));
+                });
+            }
+        });
+        address
+    }
+
+    fn read_only(address: &str, download_limit: Option<RateLimit>) -> ReadOnlyS3 {
+        let mut bucket = ReadOnlyS3::new(address, "us-east-1", "bucket", "key", "secret", download_limit).unwrap();
+        bucket.0.pause = Duration::ZERO;
+        bucket
+    }
+
+    /// Two threads download 300,000 bytes each. Together they may have 1,000,000 a second, so
+    /// that takes at least 0.6 s; each thread alone would be done in half of that.
+    #[test]
+    fn downloads_of_several_threads_are_held_to_one_limit() {
+        let body: Vec<u8> = (0..300_000u32).map(|index| index as u8).collect();
+        let address = serve(body.clone(), body.len());
+        let timed = |limit: Option<RateLimit>| {
+            let bucket = read_only(&address, limit);
+            let started = std::time::Instant::now();
+            std::thread::scope(|scope| {
+                for _ in 0..2 {
+                    scope.spawn(|| assert_eq!(ReadBucket::get(&bucket, "a.json").unwrap().as_ref(), Some(&body)));
+                }
+            });
+            started.elapsed()
+        };
+
+        let limited = timed(Some(RateLimit::new(1_000_000)));
+        assert!(limited >= Duration::from_millis(600), "{limited:?}");
+        // Without a limit it is quicker, so the time above was the limit's doing.
+        let unlimited = timed(None);
+        assert!(unlimited < limited, "{unlimited:?} against {limited:?}");
+    }
+
+    /// A download that ends early must not pass for the object.
+    #[test]
+    fn a_body_shorter_than_announced_is_an_error() {
+        let address = serve(vec![7; 1000], 1001);
+        let bucket = read_only(&address, None);
+        let error = format!("{:#}", ReadBucket::get(&bucket, "a.json").unwrap_err());
+        assert!(error.contains("download of a.json"), "{error}");
     }
 
     // ---- Against a server ----

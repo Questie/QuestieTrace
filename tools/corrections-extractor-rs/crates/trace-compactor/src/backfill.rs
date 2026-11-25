@@ -36,6 +36,9 @@ const PACKS: &str = "packs/backfill";
 pub struct Config {
     /// The directory the packs go to. Uploading `<out>/packs` is another tool's job.
     pub out: PathBuf,
+    /// Further directories whose packs count as packed, for an archive that is on more than
+    /// one disk. They are only read.
+    pub also_packed: Vec<PathBuf>,
     /// An hour is packed once it ended this long ago. Submissions of a recent hour can still
     /// be accepted, or rejected and deleted from the source.
     pub settle: SignedDuration,
@@ -78,9 +81,11 @@ struct Stored {
 }
 
 impl Source<'_> {
-    fn list(&self) -> Result<Vec<Stored>> {
+    /// The submissions whose names start with `only`. A bucket is asked for no others: it
+    /// holds several hundred thousand.
+    fn list(&self, only: &str) -> Result<Vec<Stored>> {
         if let Some(bucket) = self.bucket {
-            let listed = bucket.list(SUBMISSIONS)?;
+            let listed = bucket.list(&format!("{SUBMISSIONS}{only}"))?;
             return Ok(listed
                 .into_iter()
                 .filter_map(|(key, size, etag)| {
@@ -100,6 +105,7 @@ impl Source<'_> {
         let files = list_submissions(local).with_context(|| format!("listing {}/submissions", local.display()))?;
         files
             .into_iter()
+            .filter(|file| file.key.starts_with(only))
             .map(|file| {
                 let size = std::fs::metadata(&file.path).with_context(|| file.key.clone())?.len();
                 Ok(Stored {
@@ -156,8 +162,8 @@ pub struct Report {
 /// whole archive takes hours.
 pub fn run(source: &Source, config: &Config, now: Timestamp, on_pack: &dyn Fn(&PackReport)) -> Result<Report> {
     let mut report = Report::default();
-    let packed = packed_names(&config.out)?;
-    let stored = source.list()?;
+    let packed = packed_names(&config.out, &config.also_packed)?;
+    let stored = source.list(config.only.as_deref().unwrap_or_default())?;
 
     // What is in a pack and no longer in the source.
     if source.bucket.is_some() && config.only.is_none() {
@@ -169,9 +175,6 @@ pub fn run(source: &Source, config: &Config, now: Timestamp, on_pack: &dyn Fn(&P
     // What is still to pack, by the hour it was received.
     let mut hours: BTreeMap<String, Vec<Stored>> = BTreeMap::new();
     for stored in stored {
-        if config.only.as_ref().is_some_and(|prefix| !stored.name.starts_with(prefix.as_str())) {
-            continue;
-        }
         if packed.contains(&stored.name) {
             report.already_packed += 1;
             continue;
@@ -308,13 +311,18 @@ fn write_whole(path: &Path, bytes: &[u8]) -> Result<()> {
     write().with_context(|| format!("writing {}", path.display()))
 }
 
-/// The name of every submission in every pack under `<out>/packs`, of every writer. A pack
-/// that cannot be read is an error: without it nothing can be said about what is packed.
-fn packed_names(out: &Path) -> Result<HashSet<String>> {
+/// The name of every submission in every pack under `<out>/packs` and `packs/` of each further
+/// directory, of every writer. A pack that cannot be read is an error: without it nothing can
+/// be said about what is packed. So is a further directory that has no `packs/`, which `out`
+/// need not have yet: a mistyped one would have everything packed again.
+fn packed_names(out: &Path, also_packed: &[PathBuf]) -> Result<HashSet<String>> {
     let mut packs = Vec::new();
     let root = out.join("packs");
     if root.exists() {
         pack_files(&root, &mut packs)?;
+    }
+    for directory in also_packed {
+        pack_files(&directory.join("packs"), &mut packs)?;
     }
     let names = packs
         .par_iter()
@@ -436,6 +444,7 @@ mod tests {
     fn config(out: PathBuf) -> Config {
         Config {
             out,
+            also_packed: Vec::new(),
             settle: SignedDuration::from_hours(48),
             pack_input_bytes: u64::MAX,
             build_input_bytes: u64::MAX,
@@ -587,6 +596,70 @@ mod tests {
         assert_eq!(report.left, [] as [String; 0]);
         // Two downloads: the one that was not on disk and the one that differed.
         assert_eq!(bucket.gets(), 2);
+    }
+
+    /// The old bucket is in production and holds several hundred thousand objects: a run over
+    /// one day must not list all of it.
+    #[test]
+    fn a_narrowed_run_asks_the_bucket_for_that_part_only() {
+        let scratch = Scratchpad::new("narrowed");
+        let files = [received(18, 1, "aa"), received(19, 1, "bb")];
+        let bucket = MemoryBucket::new(now());
+        for (name, file) in &files {
+            bucket.store(&format!("{SUBMISSIONS}{name}"), file, now());
+        }
+        struct OnlyHour18<'a>(&'a MemoryBucket);
+        impl ReadBucket for OnlyHour18<'_> {
+            fn list(&self, prefix: &str) -> Result<Vec<(String, u64, String)>> {
+                assert_eq!(prefix, "submissions/2026-11/2026-11-08_18");
+                ReadBucket::list(self.0, prefix)
+            }
+            fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+                ReadBucket::get(self.0, key)
+            }
+        }
+        let source = Source {
+            bucket: Some(&OnlyHour18(&bucket)),
+            local: None,
+        };
+        let narrowed = Config {
+            only: Some("2026-11/2026-11-08_18".into()),
+            ..config(scratch.out())
+        };
+
+        let report = run(&source, &narrowed, now(), &|_| {}).unwrap();
+
+        assert_eq!(scratch.packs(&files).into_values().collect::<Vec<_>>(), [vec![files[0].0.clone()]]);
+        // What was not looked at is not reported as gone.
+        assert_eq!(report.gone_from_source, [] as [String; 0]);
+    }
+
+    /// An archive on two disks: what is packed on one is not packed again on the other.
+    #[test]
+    fn packs_in_a_further_directory_count_as_packed_and_a_directory_without_packs_is_an_error() {
+        let scratch = Scratchpad::new("two-disks");
+        let files = [received(18, 1, "aa"), received(18, 2, "bb"), received(19, 1, "cc")];
+        let first_disk = scratch.0.join("first-disk");
+        run(&local(scratch.checkout(&files[..2])), &config(first_disk.clone()), now(), &|_| {}).unwrap();
+        let before = std::fs::read_dir(first_disk.join("packs/backfill/2026/11/08")).unwrap().count();
+        let second_disk = Config {
+            also_packed: vec![first_disk.clone()],
+            ..config(scratch.out())
+        };
+
+        let report = run(&local(scratch.checkout(&files)), &second_disk, now(), &|_| {}).unwrap();
+
+        assert_eq!((report.already_packed, report.packs.len()), (2, 1));
+        assert_eq!(scratch.packs(&files).into_values().collect::<Vec<_>>(), [vec![files[2].0.clone()]]);
+        assert_eq!(std::fs::read_dir(first_disk.join("packs/backfill/2026/11/08")).unwrap().count(), before);
+
+        // A mistyped directory holds no packs. Taking that for "nothing is packed" would pack
+        // the whole archive again.
+        let mistyped = Config {
+            also_packed: vec![scratch.0.join("frist-disk")],
+            ..config(scratch.out())
+        };
+        run(&local(scratch.checkout(&files)), &mistyped, now(), &|_| {}).unwrap_err();
     }
 
     #[test]
