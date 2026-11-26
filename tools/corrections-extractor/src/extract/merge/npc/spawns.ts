@@ -197,6 +197,8 @@ function coverClusters(points: WeightedPoint[], radius: number): Cluster[] {
     for (const i of members) alive[i] = 0;
     uncovered -= members.length;
     clusters.push({ x, y, members });
+    // Refinement may have left points near the original candidate uncovered: rescore it
+    push([exact, candidate]);
   }
   return clusters;
 }
