@@ -83,9 +83,6 @@ pub struct SessionCounts {
     pub seen_under_several_contributors: usize,
     pub kept: usize,
     pub skipped: Skipped,
-    /// The characters `skipped.other_server` counts the sessions of.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub other_servers: Vec<OtherServerCharacter>,
 }
 
 impl SessionCounts {
@@ -98,27 +95,7 @@ impl SessionCounts {
         if let Some(undated) = self.skipped.undated {
             eprintln!("ingest: WARNING: left out {undated} sessions without a server time, which tells the beta from the live game");
         }
-        for OtherServerCharacter {
-            character_key,
-            server_id,
-            sessions,
-        } in &self.other_servers
-        {
-            eprintln!(
-                "ingest: WARNING: left out {sessions} sessions of character {character_key}: recorded on server {server_id}, which is not one of Blizzard's"
-            );
-        }
     }
-}
-
-/// A character recorded on a server that is not Blizzard's, with how many of its sessions did not
-/// become episodes: all but those met on one of Blizzard's servers.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OtherServerCharacter {
-    pub character_key: String,
-    pub server_id: u32,
-    pub sessions: usize,
 }
 
 /// Unique sessions left out of the episodes; a reason only appears once it was counted.
@@ -134,9 +111,6 @@ pub struct Skipped {
     /// Without a server time, which tells the beta from the live game.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub undated: Option<usize>,
-    /// Sessions of characters met on a server that is not Blizzard's.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub other_server: Option<usize>,
 }
 
 #[derive(Default, Serialize)]
@@ -202,9 +176,8 @@ pub struct Tally {
     pub unique: usize,
     pub seen_under_several_contributors: usize,
     pub skipped: Skipped,
-    pub other_servers: Vec<OtherServerCharacter>,
     pub greetings: GreetingStats,
-    /// Summed over the live sessions, those of characters met on another server included.
+    /// Summed over the kept sessions.
     pub distill: DistillStats,
 }
 
@@ -326,7 +299,6 @@ impl IngestReport {
                 seen_under_several_contributors: tally.seen_under_several_contributors,
                 kept: episodes,
                 skipped: tally.skipped,
-                other_servers: tally.other_servers,
             },
             episodes: EpisodeCounts {
                 builds,
