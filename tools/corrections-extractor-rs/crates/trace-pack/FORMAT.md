@@ -110,7 +110,7 @@ For `t`, the session must also have a finite number as its `startedAt`. An integ
 
 **`tp`**, all of a session's float `tp` values or none. They are converted when all of these hold:
 
-1. The session's `schemaVersion` is one the writer was told to round. This is how rounding stays limited to trace versions an extractor parity run has covered.
+1. The writer rounds every session, which is its default, or the session's `schemaVersion` is one of those it was told to round.
 2. Every map in the session with a numeric `t` also has a numeric `tp`, and every float `tp` is in such a map.
 3. Every `tp` is finite, its integer is at most 2^53 in size, and none is negative with an integer of zero: that one would come back as positive zero.
 4. Take every numeric `tp` in the session, integers included, and the session's `durationPrecise` when it is a number, which must then be finite. After rounding the float `tp` values, every pair compares as it did before: less stays less, equal stays equal.

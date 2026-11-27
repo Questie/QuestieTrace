@@ -20,7 +20,8 @@
 #                        waits while it does
 #   BUILD_INPUT_MIB      the most JSON being downloaded and built at once (default 64): memory
 #                        follows it, at about 22 times as much
-#   TP_SCHEMA            schemaVersions whose tp is rounded: those a parity run has covered
+#   TP_SCHEMA            round tp only in sessions of these schemaVersions, such as 9,10,11
+#                        (default: every session, which is the backfill's own default)
 #   MIN_FREE_GIB         stops when OUT's disk has less free (default 25)
 #   MIN_MEMORY_GIB       waits when less memory is available (default 6)
 #   RETRY_SECONDS        the pause before a failed day is tried again (default 300)
@@ -32,7 +33,8 @@ last="${2:?LAST_DAY}"
 bucket="${BUCKET:-trace-intake-ovh}"
 mb_per_second="${MB_PER_SECOND:-40}"
 cpus="${CPUS:-0,2,4,6,8,10,12,14}"
-tp_schema="${TP_SCHEMA:-9,10,11,12,13,14,15,16,17,18}"
+tp_options=()
+[ -n "${TP_SCHEMA:-}" ] && tp_options=(--tp-schema "$TP_SCHEMA")
 min_free_gib="${MIN_FREE_GIB:-25}"
 min_memory_gib="${MIN_MEMORY_GIB:-6}"
 threads="${THREADS:-8}"
@@ -77,7 +79,7 @@ pack_day() {
     note "day $day, attempt $attempt, $(free_gib) GiB free"
     : > "$last_attempt"
     taskset -c "$cpus" nice -n 19 ionice -c 3 "$BIN" backfill --out "$OUT" --also-packed "$ALSO_PACKED" \
-      --only "${day:0:7}/$day" --tp-schema "$tp_schema" --download-mb-per-second "$mb_per_second" \
+      --only "${day:0:7}/$day" "${tp_options[@]}" --download-mb-per-second "$mb_per_second" \
       --threads "$threads" --build-input-mib "$build_input_mib" --pack-input-mib 2048 2>&1 | tee -a "$log" "$last_attempt" > /dev/null
     status="${PIPESTATUS[0]}"
     [ "$status" -eq 0 ] && return 0

@@ -96,12 +96,12 @@ An export that failed its check under the value encoding and was stored exact is
 ```text
 trace-compactor run [--writer NAME] [--settle-hours N] [--pack-input-mib N]
                     [--build-input-mib N] [--threads N] [--level N] [--exact]
-                    [--tp-schema N,N,...] [--lock FILE]
+                    [--exact-tp | --tp-schema N,N,...] [--lock FILE]
 ```
 
 The bucket comes from the environment, under the names the intake uses: `ARCHIVE_S3_ENDPOINT` (host only), `ARCHIVE_S3_REGION`, `ARCHIVE_S3_BUCKET`, `ARCHIVE_S3_ACCESS_KEY_ID`, `ARCHIVE_S3_SECRET_ACCESS_KEY`. The key must be allowed to read, write and delete in that bucket. It needs nothing in the intake bucket.
 
-`tp` is stored rounded only for the `schemaVersion` values given with `--tp-schema`, which is for versions an extractor parity run has covered. Without it every `tp` stays a float.
+`tp` is stored rounded to whole microseconds in every session where that changes no comparison between the session's `tp` values, whatever its `schemaVersion`; see [FORMAT.md](../trace-pack/FORMAT.md). `--exact-tp` keeps every `tp` as recorded, and `--tp-schema` limits rounding to the versions it names. Rounding every version was decided on 2026-11-27: the old bucket keeps the originals until it is retired, and parity is checked against it before that.
 
 ### Memory
 
@@ -125,7 +125,7 @@ Measured on 2026-11-25 on one real hour, 1,307 submissions and 3,075 MiB of JSON
 
 ```sh
 trace-compactor backfill --out DIR [--also-packed DIR]... [--trace-data DIR] [--only PREFIX]
-                         [--download-mb-per-second N] [--tp-schema N,N,...]
+                         [--download-mb-per-second N] [--exact-tp | --tp-schema N,N,...]
 ```
 
 `scripts/backfill-days.sh` runs it one day received at a time, for a run that is left alone for hours.

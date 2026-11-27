@@ -16,11 +16,11 @@ const USAGE: &str = "\
 usage:
   trace-compactor run [--writer NAME] [--settle-hours N] [--pack-input-mib N]
                       [--build-input-mib N] [--threads N] [--level N] [--exact]
-                      [--tp-schema N,N,...] [--lock FILE]
+                      [--exact-tp | --tp-schema N,N,...] [--lock FILE]
   trace-compactor backfill --out DIR [--also-packed DIR]... [--trace-data DIR]
                       [--only PREFIX] [--download-mb-per-second N] [--settle-hours N]
                       [--pack-input-mib N] [--build-input-mib N] [--threads N] [--level N]
-                      [--exact] [--tp-schema N,N,...]
+                      [--exact] [--exact-tp | --tp-schema N,N,...]
 
 run     works on the intake's removal requests, then packs every loose submission the
         archive bucket stored more than the settle window ago and deletes what it packed. A
@@ -35,8 +35,11 @@ run     works on the intake's removal requests, then packs every loose submissio
                             Default: one per core
         --level N           zstd level. Default: 9
         --exact             no value encoding: every export stored as inflated
-        --tp-schema ...     round tp to microseconds in sessions of these schemaVersions
-        --lock FILE         held while running, so that two runs on this machine cannot
+        --exact-tp          keep every tp as it was recorded. By default tp is rounded to
+                            whole microseconds in every session where that changes no
+                            comparison between its tp values
+        --tp-schema ...     round tp only in sessions of these schemaVersions
+        --lock FILE        held while running, so that two runs on this machine cannot
                             overlap. Default: trace-compactor.lock in the temporary
                             directory. A container has a temporary directory of its own:
                             there, whatever starts the containers has to keep runs apart.
@@ -115,6 +118,7 @@ impl Arguments {
                 "--threads" => parsed.threads = Some(value()?.parse().context("--threads")?),
                 "--level" => parsed.config.options.level = value()?.parse().context("--level")?,
                 "--exact" => parsed.config.options.value_encoding = false,
+                "--exact-tp" => parsed.config.options.tp = TpPolicy::Off,
                 "--tp-schema" => {
                     let versions = value()?
                         .split(',')
@@ -248,6 +252,7 @@ impl BackfillArguments {
                 "--threads" => parsed.threads = Some(value()?.parse().context("--threads")?),
                 "--level" => parsed.config.options.level = value()?.parse().context("--level")?,
                 "--exact" => parsed.config.options.value_encoding = false,
+                "--exact-tp" => parsed.config.options.tp = TpPolicy::Off,
                 "--tp-schema" => {
                     let versions = value()?
                         .split(',')

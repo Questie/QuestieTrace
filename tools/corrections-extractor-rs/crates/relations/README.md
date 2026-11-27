@@ -30,7 +30,7 @@ longer grows with the archive, only the time does.
 The binary itself takes everything from the environment:
 
 ```sh
-export TRACE_DATA_DIR=...                # trace-data checkout (submissions/<yyyy-mm>/*.json)
+export TRACE_DATA_DIR=...                # trace-data checkout (submissions/<yyyy-mm>/*.json), or packs (packs/)
 export QUESTIEDB_DIR=...                 # QuestieDB checkout (its Lua loader builds the catalog)
 export RELATIONS_TRACE_MODULES_DIR=...   # optional: a dump's own forever*Traces.lua
 export RELATIONS_REQUIRE_FOREVER_VERSION=1

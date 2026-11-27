@@ -18,8 +18,8 @@ use trace_pack::values::{EncodeStats, TpPolicy};
 const USAGE: &str = "\
 usage:
   trace-pack build  --trace-data DIR --out DIR [--only PREFIX] [--limit N] [--level N]
-                    [--exact] [--tp-schema N,N,...]
-  trace-pack verify --trace-data DIR --packs DIR [--only PREFIX] [--tp-schema N,N,...]
+                    [--exact] [--exact-tp | --tp-schema N,N,...]
+  trace-pack verify --trace-data DIR --packs DIR [--only PREFIX] [--exact-tp | --tp-schema N,N,...]
   trace-pack list   PACK
 
 build   writes DIR/packs/backfill/YYYY/MM/DD/HH-1.pack, one per hour received. It never
@@ -27,11 +27,13 @@ build   writes DIR/packs/backfill/YYYY/MM/DD/HH-1.pack, one per hour received. I
         --only PREFIX    only submissions whose key starts with it, such as 2026-11/2026-11-08_18
         --limit N        at most N submissions, the newest first
         --exact          no value encoding: every export stored as inflated
-        --tp-schema ...  round tp to microseconds in sessions of these schemaVersions
+        --exact-tp       keep every tp as recorded. By default tp is rounded to whole
+                         microseconds in every session where that changes no comparison
+        --tp-schema ...  round tp only in sessions of these schemaVersions
         With --only or --limit a pack can hold part of its hour: for trying things out only.
 verify  compares every submission in the packs under DIR with its file, and requires every
         submission of the checkout (or of --only) to be in exactly one pack.
-        --tp-schema ...  the versions the packs were built with; tp rounded elsewhere fails
+        --exact-tp, --tp-schema ...  what the packs were built with; tp rounded elsewhere fails
 list    prints a pack's index.";
 
 fn main() -> Result<()> {
@@ -68,6 +70,7 @@ impl Arguments {
                 "--limit" => parsed.limit = Some(value()?.parse().context("--limit")?),
                 "--level" => parsed.options.level = value()?.parse().context("--level")?,
                 "--exact" => parsed.options.value_encoding = false,
+                "--exact-tp" => parsed.options.tp = TpPolicy::Off,
                 "--tp-schema" => {
                     let versions = value()?
                         .split(',')

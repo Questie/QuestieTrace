@@ -73,7 +73,8 @@ impl Default for PackOptions {
         PackOptions {
             level: 9,
             value_encoding: true,
-            tp: TpPolicy::Off,
+            // Decided on 2026-11-27: every version, while the old bucket keeps the originals.
+            tp: TpPolicy::All,
         }
     }
 }

@@ -1,6 +1,8 @@
 # corrections-extractor-rs
 
-A Rust port of [corrections-extractor](../corrections-extractor/README.md): it reads every submission of a local [trace-data](https://github.com/Questie/trace-data) checkout and writes the same Questie correction and translation modules. See [DESIGN.md](DESIGN.md) for how it is built and what has to match the TypeScript tool.
+A Rust port of [corrections-extractor](../corrections-extractor/README.md): it reads every submission of a local [trace-data](https://github.com/Questie/trace-data) checkout, or a directory of packs, and writes the same Questie correction and translation modules. See [DESIGN.md](DESIGN.md) for how it is built and what has to match the TypeScript tool.
+
+Every tool for packs, the backfill and the compactor among them, is listed with its command in [PACKS.md](PACKS.md).
 
 ## Requirements
 

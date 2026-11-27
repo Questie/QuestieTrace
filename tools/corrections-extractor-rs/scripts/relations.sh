@@ -30,11 +30,20 @@ fail() {
 note() { echo "relations: $*" >&2; }
 
 # --- trace-data -------------------------------------------------------------------------------
+# A checkout (submissions/<yyyy-mm>/*.json) or a directory of packs (packs/, at any depth,
+# links followed). The pipeline reads both alike.
 trace_data="$(realpath -m "${TRACE_DATA_DIR:-$tool/../../../trace-data}")"
-[ -d "$trace_data/submissions" ] || fail "no submissions/ in $trace_data (set TRACE_DATA_DIR)"
-submissions="$(find -L "$trace_data/submissions" -mindepth 2 -maxdepth 2 -name '*.json' | wc -l)"
-[ "$submissions" -gt 0 ] || fail "no submissions in $trace_data/submissions"
-note "trace-data: $submissions submissions in $trace_data"
+if [ -d "$trace_data/packs" ]; then
+  [ -d "$trace_data/submissions" ] && fail "$trace_data holds both submissions/ and packs/: point TRACE_DATA_DIR at one of them"
+  packs="$(find -L "$trace_data/packs" -name '*.pack' | wc -l)"
+  [ "$packs" -gt 0 ] || fail "no packs in $trace_data/packs"
+  note "trace-data: $packs packs in $trace_data"
+else
+  [ -d "$trace_data/submissions" ] || fail "no submissions/ or packs/ in $trace_data (set TRACE_DATA_DIR)"
+  submissions="$(find -L "$trace_data/submissions" -mindepth 2 -maxdepth 2 -name '*.json' | wc -l)"
+  [ "$submissions" -gt 0 ] || fail "no submissions in $trace_data/submissions"
+  note "trace-data: $submissions submissions in $trace_data"
+fi
 
 # --- QuestieDB --------------------------------------------------------------------------------
 [ -n "${QUESTIEDB_DIR:-}" ] || fail "set QUESTIEDB_DIR to a QuestieDB checkout (master's layout)"

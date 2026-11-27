@@ -1,6 +1,6 @@
 # Required exporter changes for packs
 
-Status: written 2026-11-23 as a proposal. **The two Rust tools read packs since 2026-11-25**; see [Rust tools](#rust-tools). The TypeScript tools and the parity run are still as proposed below.
+Status: written 2026-11-23 as a proposal. **The two Rust tools read packs since 2026-11-25**, and both gave the same output from packs as from the files; see [Rust tools](#rust-tools) and [Parity run](#parity-run). The TypeScript tools are still as proposed below. How to run each tool is in [tools/corrections-extractor-rs/PACKS.md](tools/corrections-extractor-rs/PACKS.md).
 
 The trace archive is moving from one JSON object per submission to **packs**: one object per hour, holding about a thousand submissions, at about a quarter of the size. The format is in [FORMAT.md](tools/corrections-extractor-rs/crates/trace-pack/FORMAT.md); the migration is planned in the `railway-forms` repository (`OVH_MIGRATION_PLAN.md`). This page lists what each tool that reads traces has to change.
 
@@ -76,17 +76,11 @@ It is also the tool most sensitive to `tp`:
 - In `candidates/cooccurrence.json`, one candidate of quest 98252 lists two of its examples in the other order. Its score and counts are the same.
 - In `reports/handoff-timing.json`, two delays fall on the other side of a histogram's limit (0.1 s and 1 s), of 2.3 and 2.9 million. The report is for choosing windows by eye; nothing reads it.
 
-The last two are what was expected of values that lie within a microsecond of a limit, and are for the owner to accept.
+The owner accepted both on 2026-11-26.
 
-It covers the `schemaVersion`s of that checkout, 9 to 18. Versions 19 to 22, recorded since 2026-11-19, are in no parity run yet and keep exact `tp`.
+**`tp` is rounded in every version since 2026-11-27**, by the owner's decision. The addon bumps its `schemaVersion` every few days, while every version records `tp` the same way (`GetTimePreciseSec() - startedAtPrecise`), so a parity run per version would never keep up. Each session is still held to the format's rules: its `tp` values are rounded only if no comparison between them changes. The old bucket keeps every original until it is retired, and the extractors are compared against it once more before that.
 
-What was planned:
-
-Before any trace is stored with rounded `tp`, both tools are run twice over the local checkout: from the JSON files and from packs built from them.
-
-- It passes when every final output is identical and intermediate `tp`-derived times differ by at most one microsecond.
-- `scripts/parity.sh` and `scripts/relations-compare.sh` compare outputs today; the second needs a tolerance for `episodes.jsonl`.
-- The run tells the pack writer which `schemaVersion`s may have `tp` rounded (`trace-pack build --tp-schema ...`). A version it did not cover keeps exact `tp`.
+The packs made on the night of 2026-11-25, of submissions received from 2026-11-13 to 2026-11-23, were built with `--tp-schema 9,…,18`: their sessions of versions 19 to 22 keep exact `tp`. They are complete and readable as they are; packing those days again would only make them smaller.
 
 ## TypeScript tools
 

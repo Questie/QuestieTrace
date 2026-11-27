@@ -60,8 +60,10 @@ pub enum TpPolicy {
     /// `tp` stays a float everywhere.
     #[default]
     Off,
-    /// Only sessions recorded with one of these `schemaVersion`s: the versions an extractor
-    /// parity run has covered.
+    /// Every session, whatever its `schemaVersion`. The other rules still decide, session by
+    /// session, whether rounding is safe.
+    All,
+    /// Only sessions recorded with one of these `schemaVersion`s.
     SchemaVersions(Vec<u32>),
 }
 
@@ -69,6 +71,7 @@ impl TpPolicy {
     /// Whether `tp` may be rounded in a session recorded with this `schemaVersion`.
     pub fn allows(&self, schema_version: Option<f64>) -> bool {
         match (self, schema_version) {
+            (TpPolicy::All, _) => true,
             (TpPolicy::SchemaVersions(versions), Some(version)) => versions.iter().any(|&allowed| allowed as f64 == version),
             _ => false,
         }
@@ -768,6 +771,15 @@ mod tests {
         assert_eq!(tp_stats(&cbor, &TpPolicy::Off), (0, [1, 0, 0, 0]));
         assert_eq!(tp_stats(&cbor, &TpPolicy::SchemaVersions(vec![ANY_VERSION + 1])), (0, [1, 0, 0, 0]));
         assert_eq!(tp_stats(&cbor, &policy()), (1, [0; 4]));
+        // Rounding every session takes any version, and a session that names none.
+        assert_eq!(tp_stats(&cbor, &TpPolicy::All), (1, [0; 4]));
+        let unversioned = map(&[
+            (text("startedAt"), float(STARTED_AT)),
+            (text("events"), array(&[entry(game_t(8_559_178, STARTED_AT), 7.370140500001071)])),
+        ]);
+        let unversioned = export(&[unversioned]);
+        assert_eq!(tp_stats(&unversioned, &TpPolicy::All), (1, [0; 4]));
+        assert_eq!(tp_stats(&unversioned, &policy()), (0, [1, 0, 0, 0]));
         // t is still converted when tp is not.
         let (encoded, _) = encode(&cbor, &TpPolicy::Off).unwrap();
         assert_eq!((encoded.streams[Field::T as usize].len(), encoded.streams[Field::Tp as usize].len()), (1, 0));
