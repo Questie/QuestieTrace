@@ -1,0 +1,22 @@
+[package]
+name = "trace-pack"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Packs QuestieTrace submissions: many submissions in one compressed, indexed object"
+
+[[bin]]
+name = "trace-pack"
+path = "src/main.rs"
+
+[dependencies]
+trace-data.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+libdeflater.workspace = true

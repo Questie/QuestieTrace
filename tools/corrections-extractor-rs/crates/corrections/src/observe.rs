@@ -1,0 +1,249 @@
+//! Which observers run on a session, and the observations they stage for the fold. Ports
+//! `extract/observe.ts` and `extract/observe-lookups.ts`.
+
+use crate::aggregate::{Num, SessionScalars};
+use crate::js::{self, format_number};
+use crate::observation::{Localized, Observation};
+use crate::observers::item::{npc_drops::NpcDrop, object_drops::ObjectDrop};
+use crate::observers::npc::friendly_to_faction::FactionReactionValue;
+use crate::observers::quest::finished_by::FinishedByFinisher;
+use crate::observers::quest::objectives::ObjectiveSlot;
+use crate::observers::quest::objectives_text::QuestObjectivesTextValue;
+use crate::observers::quest::quest_xp::QuestXpValue;
+use crate::observers::quest::reputation_reward::ReputationTurnInValue;
+use crate::observers::quest::started_by::StartedByStarter;
+use crate::observers::quest::trigger_end::QuestTriggerEndValue;
+use crate::observers::quest::turn_in_poi::TurnInPoiValue;
+use crate::observers::spawn::SpawnObservation;
+use crate::observers::{item, npc, object, quest};
+use crate::probes::{session_server_time, Faction};
+use std::hash::Hash;
+use trace_data::{Session, Value};
+
+/// The highest ids Classic knows per entity. The corrections only export ids above them, so npc,
+/// item and object observations at or below them are dropped right away. Quest XP and the
+/// lookups are exported for every id.
+#[derive(Clone, Copy, Debug)]
+pub struct MaxIds {
+    pub npc: i64,
+    pub quest: i64,
+    pub item: i64,
+    pub object: i64,
+}
+
+pub const MAX_IDS: MaxIds = MaxIds {
+    npc: 18199,
+    quest: 9665,
+    item: 25818,
+    object: 300_142,
+};
+
+/// GetBuildInfo's interface version, as PlayerIdentity.lua records it:
+/// `functions.GetBuildInfo.player[0].v`.
+fn interface_version(session: &Session) -> Option<f64> {
+    let build_info = session.function("GetBuildInfo").filter(|v| v.as_object().is_some())?;
+    let first = build_info.get("player")?.as_array()?.first()?;
+    first.is_table().then(|| first.get("v")?.as_num()).flatten()
+}
+
+/// The interface version in the session's top-level buildInfo (`buildInfo["4"]`, schema 15+);
+/// None when absent, not a number or string, or not a positive integer.
+fn top_level_interface_version(session: &Session) -> Option<f64> {
+    let raw = session.field("buildInfo")?.get("4")?;
+    let version = match raw.resolved() {
+        Value::Num(n) => *n,
+        Value::Str(s) => js::number(s),
+        _ => return None,
+    };
+    (version.fract() == 0.0 && version > 0.0).then_some(version)
+}
+
+/// Sessions from WoW Forever builds (interface 16xxx) are observed. The GetBuildInfo stream is
+/// read first, then the top-level buildInfo, which covers sessions where the stream is missing.
+/// Sessions with neither are included: they may be early Forever traces.
+pub fn is_forever_session(session: &Session) -> bool {
+    interface_version(session)
+        .or_else(|| top_level_interface_version(session))
+        .is_none_or(|version| format_number(version).starts_with("16"))
+}
+
+/// One session's observations, ready for the fold. Scalar fields are merged by the default
+/// policy (only a per-value summary is kept, so they are pre-merged here, on the observing
+/// thread); the others keep every observation.
+#[derive(Default)]
+pub struct StagedSession {
+    pub server_time: Option<f64>,
+
+    // Scalar fields.
+    pub zone_or_sort: SessionScalars<Num>,
+    pub quest_name: SessionScalars<String>,
+    pub quest_level: SessionScalars<Num>,
+    pub objectives_text: SessionScalars<QuestObjectivesTextValue>,
+    pub objective_count: SessionScalars<Num>,
+    pub npc_name: SessionScalars<String>,
+    pub npc_sub_name: SessionScalars<String>,
+    pub item_name: SessionScalars<String>,
+    pub object_name: SessionScalars<String>,
+
+    // Fields with a custom merge.
+    pub required_level: Vec<Observation<f64>>,
+    pub objectives: Vec<Observation<Vec<ObjectiveSlot>>>,
+    pub trigger_end: Vec<Observation<QuestTriggerEndValue>>,
+    pub started_by: Vec<Observation<StartedByStarter>>,
+    pub finished_by: Vec<Observation<FinishedByFinisher>>,
+    pub reputation_reward: Vec<Observation<ReputationTurnInValue>>,
+    pub quest_xp: Vec<Observation<QuestXpValue>>,
+    pub quest_factions: Vec<Observation<Faction>>,
+    pub turn_in_poi: Vec<Observation<TurnInPoiValue>>,
+    pub npc_spawns: Vec<Observation<SpawnObservation>>,
+    pub npc_level: Vec<Observation<f64>>,
+    pub npc_friendly_to_faction: Vec<Observation<FactionReactionValue>>,
+    pub npc_rank: Vec<Observation<i64>>,
+    pub npc_drops: Vec<Observation<NpcDrop>>,
+    pub object_drops: Vec<Observation<ObjectDrop>>,
+    pub object_spawns: Vec<Observation<SpawnObservation>>,
+
+    // Translations: every locale but enUS, whose names already go into the corrections.
+    pub lookups: StagedLookups,
+}
+
+/// Translation observations of one session (`observe-lookups.ts`), enUS left out.
+#[derive(Default)]
+pub struct StagedLookups {
+    pub npc_name: SessionScalars<Localized<String>>,
+    pub npc_sub_name: SessionScalars<Localized<String>>,
+    pub quest_name: SessionScalars<Localized<String>>,
+    pub objectives_text: SessionScalars<Localized<QuestObjectivesTextValue>>,
+    pub item_name: SessionScalars<Localized<String>>,
+    pub object_name: SessionScalars<Localized<String>>,
+}
+
+/// Lookups are translations: enUS names already go into forever*Traces.lua.
+pub const SKIPPED_LOCALE: &str = "enUS";
+
+/// Entities at or below `max_id` are never exported: their observations are dropped right away.
+fn above<T>(observations: Vec<Observation<T>>, max_id: i64) -> Vec<Observation<T>> {
+    observations.into_iter().filter(|obs| obs.entity_id > max_id).collect()
+}
+
+fn translations<T: Clone + Eq + Hash>(observations: Vec<Observation<Localized<T>>>) -> SessionScalars<Localized<T>> {
+    SessionScalars::new(observations.into_iter().filter(|obs| obs.value.locale != SKIPPED_LOCALE).collect())
+}
+
+/// Runs every observer over one session; None for sessions that are not observed (not Forever).
+/// npcFriendlyToFaction is kept for every NPC: Classic NPCs start Forever quests, and their
+/// reactions decide those quests' requiredRaces. questXp is kept for every quest: Forever's XP can
+/// differ from Classic's, so the XP of known quests is exported too.
+pub fn observe_session(session: &Session) -> Option<StagedSession> {
+    let max_ids = MAX_IDS;
+    if !is_forever_session(session) {
+        return None;
+    }
+    Some(StagedSession {
+        server_time: session_server_time(session),
+        zone_or_sort: SessionScalars::new(quest::zone_or_sort::observe(session)),
+        quest_name: SessionScalars::new(quest::name::observe(session)),
+        quest_level: SessionScalars::new(quest::quest_level::observe(session)),
+        objectives_text: SessionScalars::new(quest::objectives_text::observe(session)),
+        objective_count: SessionScalars::new(quest::objective_count::observe(session)),
+        npc_name: SessionScalars::new(npc::name::observe(session)),
+        npc_sub_name: SessionScalars::new(npc::sub_name::observe(session)),
+        item_name: SessionScalars::new(item::name::observe(session)),
+        object_name: SessionScalars::new(object::name::observe(session)),
+        required_level: quest::required_level::observe(session),
+        objectives: quest::objectives::per_session(quest::objectives::observe(session)),
+        trigger_end: quest::trigger_end::observe(session),
+        started_by: quest::started_by::observe(session),
+        finished_by: quest::finished_by::observe(session),
+        reputation_reward: quest::reputation_reward::observe(session),
+        quest_xp: quest::quest_xp::observe(session),
+        quest_factions: quest::required_races::observe_quest_factions(session),
+        turn_in_poi: quest::turn_in_poi::observe(session),
+        npc_spawns: above(npc::spawns::observe(session), max_ids.npc),
+        npc_level: above(npc::level::observe(session), max_ids.npc),
+        npc_friendly_to_faction: npc::friendly_to_faction::observe(session),
+        npc_rank: above(npc::rank::observe(session), max_ids.npc),
+        npc_drops: above(item::npc_drops::observe(session), max_ids.item),
+        object_drops: above(item::object_drops::observe(session), max_ids.item),
+        object_spawns: above(object::spawns::observe(session), max_ids.object),
+        lookups: StagedLookups {
+            npc_name: translations(npc::name::observe_localized(session)),
+            npc_sub_name: translations(npc::sub_name::observe_localized(session)),
+            quest_name: translations(quest::name::observe_localized(session)),
+            objectives_text: translations(quest::objectives_text::observe_localized(session)),
+            item_name: translations(item::name::observe_localized(session)),
+            object_name: translations(object::name::observe_localized(session)),
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{session_json, stream, with_session};
+    use serde_json::{json, Value as Json};
+
+    fn with_build_info(functions: Json, version: Json) -> Json {
+        let mut session = session_json(functions, vec![]);
+        session["buildInfo"] = json!({ "4": version, "n": 4 });
+        session
+    }
+
+    #[test]
+    fn rejects_a_classic_session_known_only_from_its_top_level_build_info() {
+        let session = with_build_info(json!({}), json!(11508));
+        assert!(!with_session(&session, is_forever_session));
+    }
+
+    #[test]
+    fn accepts_a_forever_session_known_only_from_its_top_level_build_info() {
+        let session = with_build_info(json!({}), json!(16001));
+        assert!(with_session(&session, is_forever_session));
+        let as_text = with_build_info(json!({}), json!("11508"));
+        assert!(!with_session(&as_text, is_forever_session));
+    }
+
+    #[test]
+    fn prefers_the_get_build_info_stream_over_the_top_level_build_info() {
+        let session = with_build_info(json!({ "GetBuildInfo": { "player": stream([(0.0, json!(16001))]) } }), json!(11508));
+        assert!(with_session(&session, is_forever_session));
+    }
+
+    #[test]
+    fn treats_a_top_level_version_that_is_not_a_number_or_string_as_unavailable() {
+        for version in [json!(true), json!(null), json!([]), json!({})] {
+            let session = with_build_info(json!({}), version.clone());
+            assert!(with_session(&session, is_forever_session), "{version}");
+        }
+    }
+
+    #[test]
+    fn treats_a_top_level_version_that_is_no_positive_integer_as_unavailable() {
+        for version in [json!(0), json!(-11508), json!(11508.5), json!(""), json!("abc")] {
+            let session = with_build_info(json!({}), version.clone());
+            assert!(with_session(&session, is_forever_session), "{version}");
+        }
+    }
+
+    #[test]
+    fn keeps_the_quest_xp_of_classic_quests() {
+        // Quest 312 is a Classic quest (at or below 9665); its Forever XP is still exported.
+        let sample = |t: f64, v: f64| json!({ "t": t, "tp": t, "v": v });
+        let session = session_json(
+            json!({
+                "GetQuestID": [sample(0.0, 0.0), sample(10.0, 312.0)],
+                "GetRewardXP": [sample(0.0, 0.0), sample(10.0, 900.0)],
+                "UnitLevel": { "player": [sample(0.0, 9.0)] },
+            }),
+            vec![],
+        );
+        let staged = with_session(&session, observe_session).expect("a Forever session");
+        let quest_ids: Vec<i64> = staged.quest_xp.iter().map(|obs| obs.entity_id).collect();
+        assert_eq!(quest_ids, [312]);
+    }
+
+    #[test]
+    fn accepts_a_session_that_has_no_version_information() {
+        assert!(with_session(&session_json(json!({}), vec![]), is_forever_session));
+    }
+}

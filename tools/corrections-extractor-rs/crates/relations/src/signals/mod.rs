@@ -1,0 +1,234 @@
+//! Signals: each reads every episode and the catalog and claims relationship edges with its own
+//! evidence. They never read the ground truth (that is for scoring and combine only), and they
+//! are independent of each other, so their order does not matter.
+//!
+//! Adding a signal: write a module with a type implementing [`Signal`], and list it in
+//! [`registry`]. The pipeline runs it, writes `candidates/<name>.json` and its reports, and
+//! combine picks its candidates up like any other signal's. A signal returns only what it found
+//! ([`Findings`]); [`run_one`] adds what every candidates file shares (its name, the run's time).
+//!
+//! One place outside the module goes by signal name and may need a line: `combine/assumptions.rs`
+//! (`phrase`), how the Lua module's `-- Assumption:` comment words the signal's evidence, per field.
+//! Without an entry the comment just says `<name> signal`.
+
+use crate::config::Config;
+use crate::eligibility::is_forever_interface;
+use crate::episode_store::Episodes;
+use crate::io;
+use crate::model::{CandidateFile, QuestCatalog, QuestEpisode, QuestId, RelationCandidate};
+use anyhow::{bail, Result};
+
+mod absence;
+mod breadcrumbs;
+mod cooccurrence;
+mod handoff;
+mod offer_set;
+
+/// What every signal reads.
+pub struct SignalInput<'a> {
+    /// Every episode, one bucket of whole characters at a time; signals look at the
+    /// `forever_episodes` only.
+    pub episodes: &'a dyn Episodes,
+    pub catalog: &'a QuestCatalog,
+    /// The run's start time, for `generatedAt`.
+    pub generated_at: &'a str,
+}
+
+/// What a signal found: its own part of `candidates/<name>.json`, and reports for people tuning it.
+pub struct Findings {
+    /// Episodes the signal looked at.
+    pub input_count: usize,
+    /// The tunables the signal ran with, for reproducibility: its params struct (plus any notes on
+    /// what the counts mean) through `to_json`, so a new tunable cannot go missing from the file.
+    pub params: serde_json::Value,
+    /// Every quest the signal could judge, with or without a candidate: recall depends on it.
+    pub covered_quest_ids: Vec<QuestId>,
+    pub candidates: Vec<RelationCandidate>,
+    /// Written to `reports/<name>.json`, e.g. ("handoff-timing", {...}).
+    pub reports: Vec<(&'static str, serde_json::Value)>,
+}
+
+/// A signal's files: its candidates file and its reports.
+pub struct SignalOutput {
+    pub candidates: CandidateFile,
+    pub reports: Vec<(&'static str, serde_json::Value)>,
+}
+
+impl SignalOutput {
+    pub fn write(&self, config: &Config) -> Result<()> {
+        io::write_json(&config.candidates(&self.candidates.signal), &self.candidates)?;
+        for (name, report) in &self.reports {
+            io::write_json(&config.report(name), report)?;
+        }
+        Ok(())
+    }
+}
+
+pub trait Signal: Sync {
+    /// The candidates file name, `candidates/<name>.json`, and the `signal:<name>` command.
+    fn name(&self) -> &'static str;
+    /// One line for the command list.
+    fn describe(&self) -> &'static str;
+    /// What the signal found; [`run_one`] makes its files of it. Fails when the episodes cannot
+    /// be read.
+    fn run(&self, input: &SignalInput) -> Result<Findings>;
+}
+
+/// Every signal, in the order the pipeline lists them.
+pub fn registry() -> Vec<&'static dyn Signal> {
+    vec![
+        &handoff::Handoff,
+        &offer_set::OfferSet,
+        &absence::Absence,
+        &cooccurrence::Cooccurrence,
+        &breadcrumbs::Breadcrumbs,
+    ]
+}
+
+/// The episodes signals read: Forever builds, and old traces that recorded no build (see
+/// [`is_forever_interface`]). Combine counts these too, as the episodes behind the relations.
+pub(crate) fn forever_episodes(episodes: &[QuestEpisode]) -> Vec<&QuestEpisode> {
+    episodes.iter().filter(|episode| is_forever_interface(episode.interface_version)).collect()
+}
+
+/// A character, by the id [`CharacterIds`] gives its pseudonymous `QuestEpisode::character_key`.
+/// What a signal keeps across buckets names characters this way: it cannot borrow the key from an
+/// episode whose bucket is gone, and copies of the key would cost far more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CharacterId(u32);
+
+#[cfg(test)]
+impl CharacterId {
+    /// Any id, for tests that feed tallies directly.
+    pub fn new(id: u32) -> CharacterId {
+        CharacterId(id)
+    }
+}
+
+/// Every character met so far, by key: one id per `character_key` across buckets and passes.
+#[derive(Default)]
+pub(crate) struct CharacterIds(rustc_hash::FxHashMap<String, CharacterId>);
+
+impl CharacterIds {
+    /// The character's id, new when the key is first met.
+    pub fn id(&mut self, character_key: &str) -> CharacterId {
+        if let Some(&id) = self.0.get(character_key) {
+            return id;
+        }
+        let id = CharacterId(u32::try_from(self.0.len()).expect("fewer than 2^32 characters"));
+        self.0.insert(character_key.to_owned(), id);
+        id
+    }
+}
+
+/// Params and reports as JSON. They are plain data (numbers, strings, lists, maps keyed by strings
+/// or integers), which always serializes.
+pub(crate) fn to_json(value: &impl serde::Serialize) -> serde_json::Value {
+    serde_json::to_value(value).expect("signal params and reports are JSON-representable")
+}
+
+/// Runs one signal and fills in what every candidates file shares: its name and the run's time.
+/// Fails when a candidate's score is not a number in [0, 1]: combine would take it at face value.
+pub fn run_one(signal: &dyn Signal, input: &SignalInput) -> Result<SignalOutput> {
+    let Findings {
+        input_count,
+        params,
+        covered_quest_ids,
+        candidates,
+        reports,
+    } = signal.run(input)?;
+    if let Some(bad) = candidates.iter().find(|candidate| !(0.0..=1.0).contains(&candidate.score)) {
+        bail!(
+            "signal {} scored {} {} {} as {}, not a number in [0, 1]",
+            signal.name(),
+            bad.quest_id,
+            bad.field,
+            bad.target,
+            bad.score
+        );
+    }
+    Ok(SignalOutput {
+        candidates: CandidateFile {
+            signal: signal.name().to_owned(),
+            generated_at: input.generated_at.to_owned(),
+            input_count,
+            params,
+            covered_quest_ids,
+            candidates,
+        },
+        reports,
+    })
+}
+
+/// Runs every signal, one after another (each uses every core itself), and hands each result to
+/// `on_output` as soon as it is done. Side by side, their working sets added up: on the full
+/// archive that is more memory than the episodes themselves several times over.
+pub fn run_all(input: &SignalInput, mut on_output: impl FnMut(SignalOutput) -> Result<()>) -> Result<()> {
+    for signal in registry() {
+        let started = std::time::Instant::now();
+        on_output(run_one(signal, input)?)?;
+        // Everything the signal built is dropped by now; the next one starts from a small process.
+        crate::release_freed_memory();
+        eprintln!("== signal:{} done in {:.1}s", signal.name(), started.elapsed().as_secs_f64());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::episode_store::InMemory;
+    use crate::model::RelationField;
+    use crate::test_support::catalog;
+
+    /// Claims one edge with a fixed score.
+    struct Scoring(f64);
+
+    impl Signal for Scoring {
+        fn name(&self) -> &'static str {
+            "scoring"
+        }
+
+        fn describe(&self) -> &'static str {
+            "test signal"
+        }
+
+        fn run(&self, _: &SignalInput) -> Result<Findings> {
+            Ok(Findings {
+                input_count: 0,
+                params: serde_json::Value::Null,
+                covered_quest_ids: vec![10],
+                candidates: vec![RelationCandidate {
+                    quest_id: 10,
+                    field: RelationField::PreQuestSingle,
+                    target: 9,
+                    score: self.0,
+                    support: 1,
+                    contradict: 0,
+                    evidence: vec![],
+                    note: None,
+                }],
+                reports: vec![],
+            })
+        }
+    }
+
+    #[test]
+    fn a_candidates_file_carries_the_signal_name_and_rejects_scores_outside_0_to_1() {
+        let catalog = catalog([]);
+        let input = SignalInput {
+            episodes: &InMemory(&[]),
+            catalog: &catalog,
+            generated_at: "2026-11-12T00:00:00.000Z",
+        };
+        let output = run_one(&Scoring(0.5), &input).expect("a score in [0, 1]");
+        assert_eq!(
+            (output.candidates.signal.as_str(), output.candidates.generated_at.as_str()),
+            ("scoring", "2026-11-12T00:00:00.000Z")
+        );
+        for bad in [f64::NAN, -0.1, 1.5] {
+            let error = run_one(&Scoring(bad), &input).err().expect("rejected").to_string();
+            assert!(error.contains("signal scoring scored 10 preQuestSingle 9"), "{error}");
+        }
+    }
+}
