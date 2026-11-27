@@ -4,9 +4,9 @@ Infers Questie quest relationship fields for WoW Forever (`preQuestSingle`, `pre
 `exclusiveTo`, `nextQuestInChain`, breadcrumbs, ...) from QuestieTrace recordings. It is a Rust
 version of the Exporters pipeline in `tools/corrections-extractor/src/relations` (see the README
 there for the reasoning behind each signal): the same inputs, steps, files and deliverables. Its
-outputs matched it by value until November 24, 2026. Since then ingest leaves out beta sessions and
-servers that are not Blizzard's (RELATIONS.md, "Beta and other servers"), and the Wowhead source is
-gone: its claims were context for reviewers and decided nothing.
+outputs matched it by value until November 24, 2026. Since then ingest leaves out beta sessions
+(RELATIONS.md, "The beta"), and the Wowhead source is gone: its claims were context for reviewers
+and decided nothing.
 
 A wrong relationship hides quests from players, and a wrong breadcrumb can make Questie
 auto-abandon a quest, so precision beats recall. The output is a reviewable candidate set, never an
@@ -90,8 +90,7 @@ QuestieDB --catalog--> catalog ---+--signals--> candidates --combine--> Lua, rev
   by session key. Each partition then merges the copies of a session and resolves legacy greeting
   titles, spilling the sessions kept to a partition by contributor; each of those, in order, is
   grouped into characters and streamed to the episode store (see `ingest/spill.rs`). Sessions
-  from the beta, and characters met on a server that is not Blizzard's, are left out and logged
-  (`ingest/origin.rs`).
+  from the beta are left out and logged (`ingest/origin.rs`).
 - Signals never read the ground truth; combine uses it to calibrate a logistic model per relation
   kind and to measure itself. It reads the recordings once (`combine/recordings.rs`), to list those that
   contradict QuestieDB's prerequisites for a person. Wowhead's claims must not be added as evidence: Questie's own

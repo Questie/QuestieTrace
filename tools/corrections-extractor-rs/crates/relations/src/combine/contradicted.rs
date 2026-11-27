@@ -2,9 +2,8 @@
 //! does not let a character skip a prerequisite, so those few were recorded somewhere else (a test
 //! realm, a private server), or the game changed while traces were recorded, or QuestieDB is wrong
 //! and the prerequisite is optional. The first two hide relations, as the signals drop a
-//! prerequisite one character lacked, so a person has to look: this is what the beta and the other
-//! servers looked like before ingest left them out (see [`crate::ingest`] and RELATIONS.md, "Beta
-//! and other servers").
+//! prerequisite one character lacked, so a person has to look: this is what the beta looked like
+//! before ingest left it out (see [`crate::ingest`] and RELATIONS.md, "The beta").
 
 use super::edges::Truth;
 use crate::model::{QuestEpisode, QuestEventKind, QuestId, RelationField, SessionTime};

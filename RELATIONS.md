@@ -126,9 +126,10 @@ OR-list entries nobody turned in (mostly copies that complete together). Combine
 
 1. **Recordings that are not from the live game** contradict correct prerequisites, and one
    contradiction is enough for the signals to drop one. "Rascally Rodents" (91743) got "Nibbled-On
-   Book" (91741), one step too early, because one character on another server got it before "Book
-   Inventory" (92124). Fixed in ingest, see "Beta and other servers". The guess that signals prefer
-   a prerequisite turned in at the quest's own giver was wrong for it.
+   Book" (91741), one step too early, because one character got it before "Book Inventory"
+   (92124). Ingest left that character out as one on another server until November 27, see "The
+   beta". The guess that signals prefer a prerequisite turned in at the quest's own giver was wrong
+   for it.
 2. **Versions of a quest that complete together.** Turning in one flags all of them (Alliance and
    Horde, per race, per level bracket), so the traces claim versions the quest's characters never
    did: "The Fate of Zephras" (93836, 94369), "The Great Cat Spirit", "Call of Earth". The
@@ -193,17 +194,13 @@ accepted, turned in or completed what. The runs and scripts are gitignored in
 `relations-output-live/` (the same episodes without the beta and the other servers) and
 `relations-output-clean/` (a full run with the filter).
 
-## Beta and other servers (2026-11-23/24)
+## The beta (2026-11-23/24)
 
 Ingest leaves out sessions that are not from the live game (`ingest/origin.rs`):
 - **Beta sessions**, by GetServerTime: before 2026-11-04. The archive's last beta session is from
   October 23, the first one on the live realms from November 4, 23:05 UTC. 24,849 sessions of the
   November 23 archive's 998,061 (the full run with this filter keeps 973,119).
 - **Sessions without a server time** (48), which tells the beta from the live game.
-- **Characters met on a server that is not Blizzard's**, by the server id in their NPC GUIDs
-  (`Creature-0-<server>-...`): 1 and 70, where Blizzard's had four digits. Six characters, 45
-  sessions. Their sessions that met no NPC, and so do not show their server, go too; one on a
-  server of Blizzard's stays, since grouping can put two characters together.
 
 Why: a signal drops a prerequisite when one character lacked it, so a handful of such sessions
 hides relations that thousands of characters confirm. Checked on 2026-11-23: of the hand-written
@@ -213,8 +210,8 @@ beta only). A tolerance ("0.1% of the characters may contradict") was measured a
 the clean data it would let 263 more pairs through, none of them a prerequisite QuestieDB has, and
 it would hide the next case of bad recordings.
 
-Every run logs what it left out, as a WARNING where somebody should look (another server, no server
-time), and `reports/ingest.json` has the counts (`sessions.skipped`, `sessions.otherServers`).
+Every run logs what it left out, as a WARNING where somebody should look (no server time), and
+`reports/ingest.json` has the counts (`sessions.skipped`).
 
 What it changed on the full archive (accepted relations, before -> after): prerequisites 2,839 ->
 2,905 (the same as QuestieDB 2,795 -> 2,839, different 27 -> 41), chains 1,456 -> 1,474, breadcrumbs
@@ -225,12 +222,23 @@ below the acceptance score. The maintainer has since confirmed
 those pairs, and the model no longer counts them as wrong ("Versions of a quest that complete
 together" above): 1,732 pairs, none lost.
 
-The date and the server id only catch what is known today. For the rest, combine compares the
-recordings with QuestieDB (`combine/contradicted.rs`): it lists every prerequisite QuestieDB has
-that a few characters (at most 2%) could get or had the quest without, and which characters, under
-"Recordings to check" in `relations-review.md`, and logs a WARNING with the count. Repeatable quests
-and quests a signal sees as an optional lead-in are not checked. On the archive with the beta and
-the other servers in it lists 15, naming five of the six characters; without them none.
+**Other servers, taken out again on 2026-11-27.** Until then ingest also left out every character
+met on a server whose id in NPC GUIDs (`Creature-0-<server>-...`) was below 1000: Blizzard's had
+4389 to 7122 in the November 23 archive, and six characters (45 sessions) had 1 and 70. The
+measurements above left them out too. The packs up to November 23 (2,415,852 episodes) showed the
+rule wrong. It left out 18,349 sessions of 3,689 characters, on 971 ids spread evenly from 0 to 999,
+and 3,667 of those characters also had sessions on ids of 1000 and up (122,039 of them). Those are
+most likely Blizzard's servers too: layers move characters between servers, and every region has its
+own. The id cannot tell another game apart, so the rule is gone. The three prerequisites only the
+server-70 character contradicted (91743, 91724, 99129) can be hidden again; combine lists such
+cases, see below.
+
+The date only catches what is known today. For the rest, combine compares the recordings with
+QuestieDB (`combine/contradicted.rs`): it lists every prerequisite QuestieDB has that a few
+characters (at most 2%) could get or had the quest without, and which characters, under "Recordings
+to check" in `relations-review.md`, and logs a WARNING with the count. Repeatable quests and quests
+a signal sees as an optional lead-in are not checked. On the archive with the beta and the other
+servers in it lists 15, naming five of the six characters; without them none.
 
 ## Reading the episodes one bucket at a time (2026-11-22/23)
 

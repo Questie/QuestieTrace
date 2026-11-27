@@ -120,7 +120,6 @@ mod tests {
             event_count,
             saved,
             start_server_time: None,
-            server_id: None,
             episode: EpisodeDraft {
                 session_name: saved.then(|| "2026-10-01_12-00-00".into()),
                 interface_version: None,

@@ -5,7 +5,6 @@
 //! everything in one frame, so it cannot order a turn-in before the follow-up detail it causes.
 //! See [`super::streams`] for how samples are matched to the event that caused them.
 
-use super::origin;
 use super::short_hash;
 use super::streams::{
     as_integer, as_positive_int, entries_between, entry_time, event_arg, event_time, finite_entry_time, finite_event_time, last_index_before, packed,
@@ -222,8 +221,6 @@ pub struct DistilledSession {
     /// GetServerTime at capture start (epoch seconds). Orders a contributor's sessions; never
     /// written to episodes.
     pub start_server_time: Option<f64>,
-    /// The server's id, when the session met an NPC (see [`super::origin`]).
-    pub server_id: Option<u32>,
     pub episode: EpisodeDraft,
     pub pending_greetings: Vec<PendingGreeting>,
     pub titles: Vec<TitleObservation>,
@@ -1475,7 +1472,6 @@ pub fn distill_session(session: &Session, key: String) -> DistilledSession {
         event_count: reader.events.len(),
         saved: name.is_some(),
         start_server_time,
-        server_id: origin::server_of(session),
         episode,
         pending_greetings,
         titles: titles.seen.into_iter().collect(),
