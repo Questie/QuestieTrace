@@ -1,6 +1,6 @@
 ## Interface: 16001
-## Title: QuestieTrace|cFF00FF00 v1.14.0|r
-## Version: 1.14.0
+## Title: QuestieTrace|cFF00FF00 v1.15.0|r
+## Version: 1.15.0
 ## Author: Logon/TheCrux(BreakBB)
 ## Notes: Data collection addon for Questie
 ## Notes-deDE: Datensammlungs-Addon für Questie
